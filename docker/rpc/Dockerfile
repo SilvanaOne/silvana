@@ -12,24 +12,29 @@ ENV PATH="/root/.cargo/bin:$PATH"
 # Explicitly set target for ARM64 compilation
 RUN rustup target add aarch64-unknown-linux-gnu
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=gcc
+
 # Set working directory
 WORKDIR /app
 
-# Copy Cargo.toml and Cargo.lock first for better layer caching
-COPY ../../crates/rpc/Cargo.toml  ./
+# Limited number of crates
+COPY docker/rpc/Cargo.toml ./
 
-# Copy proto files
+# Copy dependency lock file
+COPY Cargo.lock ./
+
+# Copy proto files (needed by proto crate build script)
 COPY proto/ ./proto/
 
-# Copy source code
-COPY ./crates/rpc/src/ ./src/
+# Copy all required crates
+COPY crates/proto/ ./crates/proto/
+COPY crates/tidb/ ./crates/tidb/
+COPY crates/rpc/ ./crates/rpc/
+COPY crates/monitoring/ ./crates/monitoring/
+COPY crates/buffer/ ./crates/buffer/
+COPY crates/nats/ ./crates/nats/
 
-# Copy build.rs if it exists
-
-COPY ./crates/rpc/build.rs ./build.rs
-
-# Build in release mode for ARM64
-RUN cargo build --release --target aarch64-unknown-linux-gnu
+# Build the RPC server in release mode for ARM64
+RUN cargo build --release --target aarch64-unknown-linux-gnu -p rpc
 
 # Create build directory and copy contents
 RUN mkdir -p /app/rpc
@@ -40,12 +45,10 @@ RUN cp target/aarch64-unknown-linux-gnu/release/rpc /app/rpc/
 RUN file /app/rpc/rpc && echo "✅ Binary architecture verified"
 RUN ls -lh /app/rpc/
 
-
 # Create tar archive
 RUN cd /app && tar -czf rpc.tar.gz -C /app rpc
 
 # Upload to S3 
-
 RUN --mount=type=secret,id=aws \
     export AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws && \
     echo $AWS_SHARED_CREDENTIALS_FILE && \

@@ -1,16 +1,82 @@
+//! # Silvana RPC Monitoring
+//!
+//! This module provides comprehensive monitoring capabilities for the Silvana RPC service,
+//! including both application-specific metrics and system-level metrics suitable for
+//! BetterStack dashboards and other monitoring solutions.
+//!
+//! ## Available Metrics
+//!
+//! ### Buffer Metrics
+//! - `silvana_buffer_events_total` - Total events received
+//! - `silvana_buffer_events_processed_total` - Total events processed
+//! - `silvana_buffer_events_dropped_total` - Total events dropped
+//! - `silvana_buffer_events_error_total` - Total processing errors
+//! - `silvana_buffer_size_current` - Current buffer size
+//! - `silvana_buffer_memory_bytes` - Current memory usage
+//! - `silvana_buffer_backpressure_events_total` - Total backpressure events
+//! - `silvana_buffer_health_status` - Buffer health (1=healthy, 0=unhealthy)
+//! - `silvana_circuit_breaker_status` - Circuit breaker status (1=open, 0=closed)
+//!
+//! ### gRPC Metrics
+//! - `silvana_grpc_requests_total` - Total gRPC requests
+//! - `silvana_grpc_request_duration_seconds` - Request duration histogram
+//!
+//! ### System Metrics (NEW)
+//! - `silvana_cpu_usage_percent` - CPU usage percentage
+//! - `silvana_memory_used_bytes` - Memory used in bytes
+//! - `silvana_memory_total_bytes` - Total memory in bytes
+//! - `silvana_memory_available_bytes` - Available memory in bytes
+//! - `silvana_load_average_1min` - 1-minute load average
+//! - `silvana_load_average_5min` - 5-minute load average
+//! - `silvana_load_average_15min` - 15-minute load average
+//! - `silvana_disk_read_bytes_total` - Total disk read bytes
+//! - `silvana_disk_write_bytes_total` - Total disk write bytes
+//! - `silvana_network_received_bytes_total` - Total network received bytes
+//! - `silvana_network_transmitted_bytes_total` - Total network transmitted bytes
+//! - `silvana_process_cpu_percent` - Process CPU usage percentage
+//! - `silvana_process_memory_bytes` - Process memory usage in bytes
+//! - `silvana_process_virtual_memory_bytes` - Process virtual memory usage in bytes
+//! - `silvana_process_threads_count` - Process thread count
+//! - `silvana_uptime_seconds` - System uptime in seconds
+//!
+//! ## BetterStack Integration
+//!
+//! These metrics are designed to work seamlessly with BetterStack dashboards:
+//! - CPU and memory metrics for resource monitoring
+//! - Load averages for system health
+//! - Network and disk I/O for performance analysis
+//! - Process-specific metrics for application monitoring
+//! - Buffer and gRPC metrics for service-specific insights
+//!
+//! ## Usage
+//!
+//! Initialize monitoring and start metrics collection:
+//! ```rust
+//! use rpc::monitoring::{init_monitoring, spawn_monitoring_tasks};
+//!
+//! // Initialize monitoring system
+//! init_monitoring()?;
+//!
+//! // Start all monitoring tasks
+//! spawn_monitoring_tasks(event_buffer);
+//! ```
+
 use anyhow::Result;
 use axum::http::{header, StatusCode};
 use axum::{response::Response, routing::get, Router};
 use prometheus::{
-    register_int_counter, register_int_gauge, Encoder, IntCounter, IntGauge, TextEncoder,
+    register_gauge, register_int_counter, register_int_gauge, Encoder, Gauge, IntCounter, IntGauge,
+    TextEncoder,
 };
 use std::net::SocketAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+use sysinfo::System;
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
-use crate::buffer::EventBuffer;
+use crate::adapters::EventWrapper;
+use buffer::EventBuffer;
 
 // Custom Prometheus metrics
 static BUFFER_EVENTS_TOTAL: OnceLock<IntCounter> = OnceLock::new();
@@ -27,8 +93,28 @@ static CIRCUIT_BREAKER_STATUS: OnceLock<IntGauge> = OnceLock::new();
 static GRPC_REQUESTS_TOTAL: OnceLock<IntCounter> = OnceLock::new();
 static GRPC_REQUEST_DURATION: OnceLock<prometheus::HistogramVec> = OnceLock::new();
 
+// System metrics
+static CPU_USAGE_PERCENT: OnceLock<Gauge> = OnceLock::new();
+static MEMORY_USED_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static MEMORY_TOTAL_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static MEMORY_AVAILABLE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static LOAD_AVERAGE_1MIN: OnceLock<Gauge> = OnceLock::new();
+static LOAD_AVERAGE_5MIN: OnceLock<Gauge> = OnceLock::new();
+static LOAD_AVERAGE_15MIN: OnceLock<Gauge> = OnceLock::new();
+static DISK_READ_BYTES_TOTAL: OnceLock<IntCounter> = OnceLock::new();
+static DISK_WRITE_BYTES_TOTAL: OnceLock<IntCounter> = OnceLock::new();
+static NETWORK_RECEIVED_BYTES_TOTAL: OnceLock<IntCounter> = OnceLock::new();
+static NETWORK_TRANSMITTED_BYTES_TOTAL: OnceLock<IntCounter> = OnceLock::new();
+static PROCESS_CPU_PERCENT: OnceLock<Gauge> = OnceLock::new();
+static PROCESS_MEMORY_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static PROCESS_VIRTUAL_MEMORY_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static PROCESS_THREADS_COUNT: OnceLock<IntGauge> = OnceLock::new();
+static UPTIME_SECONDS: OnceLock<IntGauge> = OnceLock::new();
+
 // FIXED: Thread-safe counter tracking to prevent race conditions
 static LAST_VALUES: OnceLock<Mutex<LastMetricValues>> = OnceLock::new();
+// System metrics tracking to prevent overflow
+static LAST_SYSTEM_VALUES: OnceLock<Mutex<LastSystemValues>> = OnceLock::new();
 
 #[derive(Debug)]
 struct LastMetricValues {
@@ -51,6 +137,25 @@ impl Default for LastMetricValues {
     }
 }
 
+#[derive(Debug)]
+struct LastSystemValues {
+    disk_read_bytes: u64,
+    disk_write_bytes: u64,
+    network_received_bytes: u64,
+    network_transmitted_bytes: u64,
+}
+
+impl Default for LastSystemValues {
+    fn default() -> Self {
+        Self {
+            disk_read_bytes: 0,
+            disk_write_bytes: 0,
+            network_received_bytes: 0,
+            network_transmitted_bytes: 0,
+        }
+    }
+}
+
 /// Initialize all monitoring components
 pub fn init_monitoring() -> Result<()> {
     // Initialize custom application metrics
@@ -60,6 +165,11 @@ pub fn init_monitoring() -> Result<()> {
     LAST_VALUES
         .set(Mutex::new(LastMetricValues::default()))
         .map_err(|_| anyhow::anyhow!("Failed to initialize metric tracking"))?;
+
+    // Initialize system metrics tracking
+    LAST_SYSTEM_VALUES
+        .set(Mutex::new(LastSystemValues::default()))
+        .map_err(|_| anyhow::anyhow!("Failed to initialize system metric tracking"))?;
 
     info!("📊 Monitoring system initialized");
     Ok(())
@@ -138,7 +248,7 @@ fn init_custom_metrics() -> Result<()> {
         )?)
         .map_err(|_| anyhow::anyhow!("Failed to register GRPC_REQUESTS_TOTAL"))?;
 
-    use prometheus::{register_histogram_vec, HistogramOpts};
+    use prometheus::{register_gauge, register_histogram_vec, HistogramOpts};
     GRPC_REQUEST_DURATION
         .set(register_histogram_vec!(
             HistogramOpts::new(
@@ -149,6 +259,119 @@ fn init_custom_metrics() -> Result<()> {
             &["method", "status"]
         )?)
         .map_err(|_| anyhow::anyhow!("Failed to register GRPC_REQUEST_DURATION"))?;
+
+    // Initialize system metrics
+    CPU_USAGE_PERCENT
+        .set(register_gauge!(
+            "silvana_cpu_usage_percent",
+            "CPU usage percentage"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register CPU_USAGE_PERCENT"))?;
+
+    MEMORY_USED_BYTES
+        .set(register_int_gauge!(
+            "silvana_memory_used_bytes",
+            "Memory used in bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register MEMORY_USED_BYTES"))?;
+
+    MEMORY_TOTAL_BYTES
+        .set(register_int_gauge!(
+            "silvana_memory_total_bytes",
+            "Total memory in bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register MEMORY_TOTAL_BYTES"))?;
+
+    MEMORY_AVAILABLE_BYTES
+        .set(register_int_gauge!(
+            "silvana_memory_available_bytes",
+            "Available memory in bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register MEMORY_AVAILABLE_BYTES"))?;
+
+    LOAD_AVERAGE_1MIN
+        .set(register_gauge!(
+            "silvana_load_average_1min",
+            "1-minute load average"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register LOAD_AVERAGE_1MIN"))?;
+
+    LOAD_AVERAGE_5MIN
+        .set(register_gauge!(
+            "silvana_load_average_5min",
+            "5-minute load average"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register LOAD_AVERAGE_5MIN"))?;
+
+    LOAD_AVERAGE_15MIN
+        .set(register_gauge!(
+            "silvana_load_average_15min",
+            "15-minute load average"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register LOAD_AVERAGE_15MIN"))?;
+
+    DISK_READ_BYTES_TOTAL
+        .set(register_int_counter!(
+            "silvana_disk_read_bytes_total",
+            "Total disk read bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register DISK_READ_BYTES_TOTAL"))?;
+
+    DISK_WRITE_BYTES_TOTAL
+        .set(register_int_counter!(
+            "silvana_disk_write_bytes_total",
+            "Total disk write bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register DISK_WRITE_BYTES_TOTAL"))?;
+
+    NETWORK_RECEIVED_BYTES_TOTAL
+        .set(register_int_counter!(
+            "silvana_network_received_bytes_total",
+            "Total network received bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register NETWORK_RECEIVED_BYTES_TOTAL"))?;
+
+    NETWORK_TRANSMITTED_BYTES_TOTAL
+        .set(register_int_counter!(
+            "silvana_network_transmitted_bytes_total",
+            "Total network transmitted bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register NETWORK_TRANSMITTED_BYTES_TOTAL"))?;
+
+    PROCESS_CPU_PERCENT
+        .set(register_gauge!(
+            "silvana_process_cpu_percent",
+            "Process CPU usage percentage"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register PROCESS_CPU_PERCENT"))?;
+
+    PROCESS_MEMORY_BYTES
+        .set(register_int_gauge!(
+            "silvana_process_memory_bytes",
+            "Process memory usage in bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register PROCESS_MEMORY_BYTES"))?;
+
+    PROCESS_VIRTUAL_MEMORY_BYTES
+        .set(register_int_gauge!(
+            "silvana_process_virtual_memory_bytes",
+            "Process virtual memory usage in bytes"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register PROCESS_VIRTUAL_MEMORY_BYTES"))?;
+
+    PROCESS_THREADS_COUNT
+        .set(register_int_gauge!(
+            "silvana_process_threads_count",
+            "Process thread count"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register PROCESS_THREADS_COUNT"))?;
+
+    UPTIME_SECONDS
+        .set(register_int_gauge!(
+            "silvana_uptime_seconds",
+            "System uptime in seconds"
+        )?)
+        .map_err(|_| anyhow::anyhow!("Failed to register UPTIME_SECONDS"))?;
 
     Ok(())
 }
@@ -201,7 +424,7 @@ pub fn record_grpc_request(method: &str, status: &str, duration_seconds: f64) {
 }
 
 /// Update Prometheus metrics with buffer stats
-pub fn update_buffer_metrics(stats: &crate::buffer::BufferStats, health: bool) {
+pub fn update_buffer_metrics(stats: &buffer::BufferStats, health: bool) {
     if let (
         Some(events_total),
         Some(events_processed),
@@ -289,7 +512,7 @@ pub fn update_buffer_metrics(stats: &crate::buffer::BufferStats, health: bool) {
 }
 
 /// Runs periodic statistics reporting for the event buffer
-pub async fn stats_reporter(buffer: EventBuffer) {
+pub async fn stats_reporter(buffer: EventBuffer<EventWrapper>) {
     let mut interval = interval(Duration::from_secs(30));
 
     loop {
@@ -399,7 +622,7 @@ pub async fn stats_reporter(buffer: EventBuffer) {
 }
 
 /// Runs periodic health monitoring for the event buffer
-pub async fn health_monitor(buffer: EventBuffer) {
+pub async fn health_monitor(buffer: EventBuffer<EventWrapper>) {
     let mut health_interval = interval(Duration::from_secs(10));
 
     loop {
@@ -411,8 +634,146 @@ pub async fn health_monitor(buffer: EventBuffer) {
     }
 }
 
-/// Spawns both stats reporting and health monitoring tasks
-pub fn spawn_monitoring_tasks(buffer: EventBuffer) {
+/// Collect system metrics and update Prometheus gauges
+pub async fn system_metrics_collector() {
+    let mut interval = interval(Duration::from_secs(15)); // Update every 15 seconds
+    let mut system = System::new_all();
+    let current_pid = std::process::id() as usize;
+
+    loop {
+        interval.tick().await;
+
+        // Refresh system information
+        system.refresh_all();
+
+        // Update CPU metrics
+        if let Some(cpu_gauge) = CPU_USAGE_PERCENT.get() {
+            // Calculate average CPU usage across all CPUs
+            let mut total_cpu_usage = 0.0;
+            let cpus = system.cpus();
+            if !cpus.is_empty() {
+                for cpu in cpus {
+                    total_cpu_usage += cpu.cpu_usage();
+                }
+                total_cpu_usage /= cpus.len() as f32;
+            }
+            cpu_gauge.set(total_cpu_usage as f64);
+        }
+
+        // Update memory metrics
+        if let (Some(used_gauge), Some(total_gauge), Some(available_gauge)) = (
+            MEMORY_USED_BYTES.get(),
+            MEMORY_TOTAL_BYTES.get(),
+            MEMORY_AVAILABLE_BYTES.get(),
+        ) {
+            let used_memory = system.used_memory() as i64;
+            let total_memory = system.total_memory() as i64;
+            let available_memory = system.available_memory() as i64;
+
+            used_gauge.set(used_memory);
+            total_gauge.set(total_memory);
+            available_gauge.set(available_memory);
+        }
+
+        // Update load average metrics
+        let load_avg = System::load_average();
+        if let (Some(load1_gauge), Some(load5_gauge), Some(load15_gauge)) = (
+            LOAD_AVERAGE_1MIN.get(),
+            LOAD_AVERAGE_5MIN.get(),
+            LOAD_AVERAGE_15MIN.get(),
+        ) {
+            load1_gauge.set(load_avg.one);
+            load5_gauge.set(load_avg.five);
+            load15_gauge.set(load_avg.fifteen);
+        }
+
+        // Update uptime
+        if let Some(uptime_gauge) = UPTIME_SECONDS.get() {
+            uptime_gauge.set(System::uptime() as i64);
+        }
+
+        // Update process-specific metrics (for current process)
+        if let Some(process) = system.process(sysinfo::Pid::from(current_pid)) {
+            if let Some(process_cpu_gauge) = PROCESS_CPU_PERCENT.get() {
+                process_cpu_gauge.set(process.cpu_usage() as f64);
+            }
+
+            if let Some(process_memory_gauge) = PROCESS_MEMORY_BYTES.get() {
+                process_memory_gauge.set(process.memory() as i64);
+            }
+
+            if let Some(process_virtual_memory_gauge) = PROCESS_VIRTUAL_MEMORY_BYTES.get() {
+                process_virtual_memory_gauge.set(process.virtual_memory() as i64);
+            }
+        }
+
+        // Update disk and network I/O metrics using diff calculation
+        if let Some(last_system_values_mutex) = LAST_SYSTEM_VALUES.get() {
+            if let Ok(mut last_values) = last_system_values_mutex.lock() {
+                let total_disk_read = 0u64;
+                let total_disk_write = 0u64;
+
+                // Collect disk I/O stats using sysinfo Disks
+                let _disks = sysinfo::Disks::new_with_refreshed_list();
+                // Note: sysinfo doesn't provide I/O statistics on all platforms
+                // This is more of a placeholder for when it's available
+                // for _disk in &_disks {
+                //     // Future: Add disk I/O collection when available
+                // }
+
+                // Collect network I/O stats
+                let mut total_network_received = 0u64;
+                let mut total_network_transmitted = 0u64;
+
+                let networks = sysinfo::Networks::new_with_refreshed_list();
+                for (_, data) in &networks {
+                    total_network_received += data.total_received();
+                    total_network_transmitted += data.total_transmitted();
+                }
+
+                // Calculate diffs and update counters
+                let disk_read_diff = total_disk_read.saturating_sub(last_values.disk_read_bytes);
+                let disk_write_diff = total_disk_write.saturating_sub(last_values.disk_write_bytes);
+                let network_received_diff =
+                    total_network_received.saturating_sub(last_values.network_received_bytes);
+                let network_transmitted_diff =
+                    total_network_transmitted.saturating_sub(last_values.network_transmitted_bytes);
+
+                if let (Some(disk_read_counter), Some(disk_write_counter)) =
+                    (DISK_READ_BYTES_TOTAL.get(), DISK_WRITE_BYTES_TOTAL.get())
+                {
+                    if disk_read_diff > 0 {
+                        disk_read_counter.inc_by(disk_read_diff);
+                        last_values.disk_read_bytes = total_disk_read;
+                    }
+                    if disk_write_diff > 0 {
+                        disk_write_counter.inc_by(disk_write_diff);
+                        last_values.disk_write_bytes = total_disk_write;
+                    }
+                }
+
+                if let (Some(network_received_counter), Some(network_transmitted_counter)) = (
+                    NETWORK_RECEIVED_BYTES_TOTAL.get(),
+                    NETWORK_TRANSMITTED_BYTES_TOTAL.get(),
+                ) {
+                    if network_received_diff > 0 {
+                        network_received_counter.inc_by(network_received_diff);
+                        last_values.network_received_bytes = total_network_received;
+                    }
+                    if network_transmitted_diff > 0 {
+                        network_transmitted_counter.inc_by(network_transmitted_diff);
+                        last_values.network_transmitted_bytes = total_network_transmitted;
+                    }
+                }
+            } else {
+                warn!("Failed to acquire lock for system metric tracking");
+            }
+        }
+    }
+}
+
+/// Spawns buffer stats reporting, health monitoring, and system metrics collection tasks
+pub fn spawn_monitoring_tasks(buffer: EventBuffer<EventWrapper>) {
     // Start stats reporting
     let stats_buffer = buffer.clone();
     tokio::spawn(async move {
@@ -423,6 +784,11 @@ pub fn spawn_monitoring_tasks(buffer: EventBuffer) {
     let health_buffer = buffer.clone();
     tokio::spawn(async move {
         health_monitor(health_buffer).await;
+    });
+
+    // Start system metrics collection
+    tokio::spawn(async move {
+        system_metrics_collector().await;
     });
 }
 

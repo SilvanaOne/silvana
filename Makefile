@@ -6,7 +6,7 @@
 PROTO_FILES := proto/events.proto
 SQL_DIR := proto/sql
 MIGR_DIR := infra/tidb/migration/sql
-ENTITY_DIR := crates/rpc/src/entity
+ENTITY_DIR := crates/tidb/src/entity
 
 # Function to load DATABASE_URL from .env file
 define load_database_url

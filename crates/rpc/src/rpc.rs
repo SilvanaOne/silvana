@@ -3,9 +3,11 @@ use std::time::Instant;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, warn};
 
-use crate::buffer::EventBuffer;
+use crate::adapters::EventWrapper;
 use crate::database::EventDatabase;
-use crate::events::{
+use crate::monitoring::record_grpc_request;
+use buffer::EventBuffer;
+use proto::{
     silvana_events_service_server::SilvanaEventsService, AgentMessageEventWithId,
     AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance, Event,
     GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
@@ -13,15 +15,14 @@ use crate::events::{
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
     SubmitEventsRequest, SubmitEventsResponse,
 };
-use crate::monitoring::record_grpc_request;
 
 pub struct SilvanaEventsServiceImpl {
-    event_buffer: EventBuffer,
+    event_buffer: EventBuffer<EventWrapper>,
     database: Arc<EventDatabase>,
 }
 
 impl SilvanaEventsServiceImpl {
-    pub fn new(event_buffer: EventBuffer, database: Arc<EventDatabase>) -> Self {
+    pub fn new(event_buffer: EventBuffer<EventWrapper>, database: Arc<EventDatabase>) -> Self {
         Self {
             event_buffer,
             database,
@@ -46,7 +47,7 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
         let mut first_error: Option<String> = None;
 
         for event in events {
-            match self.event_buffer.add_event(event).await {
+            match self.event_buffer.add_event(event.into()).await {
                 Ok(()) => processed_count += 1,
                 Err(e) => {
                     if first_error.is_none() {
@@ -104,7 +105,7 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
 
         debug!("Received single event");
 
-        match self.event_buffer.add_event(event).await {
+        match self.event_buffer.add_event(event.into()).await {
             Ok(()) => Ok(Response::new(SubmitEventsResponse {
                 success: true,
                 message: "Event queued successfully".to_string(),

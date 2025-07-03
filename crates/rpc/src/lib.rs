@@ -1,13 +1,25 @@
-// Application modules
-pub mod buffer;
+// Application modules - explicitly public for external access
+pub mod adapters;
 pub mod database;
-#[path = "entity/mod.rs"]
-pub mod entities;
+pub mod log;
+
+// Service implementations
+pub mod monitoring;
+pub mod rpc;
+
+pub use rpc::SilvanaEventsServiceImpl;
 
 // Re-export common types
 pub use database::EventDatabase;
 
-// Include the generated protobuf code
-pub mod events {
-    tonic::include_proto!("silvana.events");
-}
+// Re-export proto types from the proto crate
+pub use proto;
+
+// Re-export database entities from the tidb crate
+pub use tidb as entities;
+
+// Re-export buffer functionality
+pub use buffer;
+
+// Re-export adapter functionality for binary target
+pub use adapters::{create_event_buffer, EventWrapper};
