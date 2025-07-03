@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+duct = "0.13"             
+dotenvy = "0.15"
+anyhow = "1.0.98"

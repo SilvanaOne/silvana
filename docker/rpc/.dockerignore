@@ -1,0 +1,36 @@
+# Build artifacts
+target/
+# Note: build/ is needed for the Docker build process, so we don't exclude it
+
+# Environment files
+.env
+certs/
+
+# Development files
+.DS_Store
+ssh/
+grafana/
+
+# Git and IDE files
+.git/
+.gitignore
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Images and documentation
+*.png
+*.jpg
+*.jpeg
+README.md
+
+# Pulumi infrastructure
+pulumi/
+
+# Test artifacts
+tests/ 

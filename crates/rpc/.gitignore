@@ -1,0 +1,8 @@
+target/
+ssh/
+.env.backup
+certs/
+.env.rpc
+.env
+.env.build
+logs/

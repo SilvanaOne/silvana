@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package silvana.options;
+
+option go_package = "github.com/SilvanaOne/zk-tests/packages/avs/rpc/proto;options";
+
+// Custom field options for Silvana events
+extend google.protobuf.FieldOptions {
+  bool sequences = 55550;
+  bool search = 55551;
+} 

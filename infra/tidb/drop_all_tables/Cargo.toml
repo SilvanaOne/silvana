@@ -1,0 +1,12 @@
+[package]
+name = "drop_all_tables"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+anyhow = "1.0"
+dotenvy = "0.15"
+sqlx = { version = "0.8", features = ["mysql", "runtime-tokio-rustls"] }
+tokio = { version = "1.45", features = ["macros", "rt-multi-thread"] } 

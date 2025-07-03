@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rpc",
+    "crates/coordinator",
+    "crates/tidb",
+    "crates/monitoring",
+    "crates/buffer",
+    "crates/proto",
+    "xtask",
+]

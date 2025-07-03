@@ -1,0 +1,7 @@
+target/
+**/target
+
+.env
+
+# OSX
+.DS_Store
