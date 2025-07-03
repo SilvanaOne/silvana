@@ -1,0 +1,33 @@
+[package]
+name = "nats"
+version = "0.1.0"
+edition = "2024"
+authors = ["DFST"]
+license = "Apache-2.0"
+
+[dependencies]
+# Core async runtime
+tokio = { version = "1.45", features = ["macros", "rt-multi-thread", "time"] }
+async-trait = "0.1"
+
+# NATS messaging
+async-nats = "0.36"
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# Buffer integration
+buffer = { path = "../buffer" }
+
+# Serialization for message publishing
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Random number generation for retry jitter
+fastrand = "2.0"
+
+# Async utilities
+futures = "0.3" 

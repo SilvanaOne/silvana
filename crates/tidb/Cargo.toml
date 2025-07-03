@@ -2,5 +2,24 @@
 name = "tidb"
 version = "0.1.0"
 edition = "2024"
+authors = ["DFST"]
+license = "Apache-2.0"
 
 [dependencies]
+# Buffer integration
+buffer = { path = "../buffer" }
+
+# Async traits and error handling
+async-trait = "0.1"
+anyhow = "1.0"
+
+# Sea-ORM and Database
+sea-orm = { version = "1.1", features = ["sqlx-mysql", "runtime-tokio-rustls", "macros", "with-chrono", "with-json", "with-uuid"] }
+sqlx = { version = "0.8", features = ["mysql", "runtime-tokio-rustls", "chrono", "uuid"] }
+
+# Time and UUID for entity fields
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.17", features = ["v4", "serde"] }
+
+# Serialization for entity fields
+serde = { version = "1.0", features = ["derive"] }

@@ -7,6 +7,15 @@ license = "Apache-2.0"
 default-run = "rpc"
 
 [dependencies]
+# Proto definitions
+proto = { path = "../proto" }
+# Database entities
+tidb = { path = "../tidb" }
+# Event buffering
+buffer = { path = "../buffer" }
+# NATS messaging (optional backend)
+nats = { path = "../nats" }
+
 tonic = { version = "0.10", features = ["tls", "tls-webpki-roots"] }
 tonic-web = "0.10"
 prost = "0.12"
@@ -20,6 +29,7 @@ tower-http = { version = "0.4", features = ["cors"] }
 # Monitoring dependencies
 prometheus = "0.14"
 axum = "0.7"
+sysinfo = "0.30"
 # OpenTelemetry
 opentelemetry = "0.21"
 opentelemetry_sdk = "0.21"
@@ -56,11 +66,4 @@ fastrand = "2.0"
 # For integration tests
 tokio-test = "0.4"
 
-[build-dependencies]
-tonic-build = "0.10"
-prost-build = "0.12"
-# For custom code generation
-syn = { version = "2.0", features = ["full", "parsing"] }
-quote = "1.0"
-proc-macro2 = "1.0"
-prettyplease = "0.2"
+

@@ -6,17 +6,12 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout, Duration};
 use tonic::Request;
 
-// Import the generated protobuf code
-mod events {
-    tonic::include_proto!("silvana.events");
-}
-
-use events::silvana_events_service_client::SilvanaEventsServiceClient;
-use events::*;
+use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::*;
 
 // Configuration - easily changeable parameters
 const NUM_EVENTS: usize = 10000;
-const SERVER_ADDR: &str = "https://rpc-dev.silvana.dev"; // "http://18.194.39.156:50051";
+const SERVER_ADDR: &str = "https://rpc-dev.silvana.dev"; // "http://127.0.0.1:50051"; //"http://18.194.39.156:50051";
 const COORDINATOR_ID: &str = "test-coordinator-001";
 const NATS_URL: &str = "nats://rpc-dev.silvana.dev:4222";
 const NATS_STREAM_NAME: &str = "silvana-events";

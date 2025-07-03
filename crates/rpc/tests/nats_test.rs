@@ -3,13 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep, timeout, Duration};
 use tonic::Request;
 
-// Import the generated protobuf code
-mod events {
-    tonic::include_proto!("silvana.events");
-}
-
-use events::silvana_events_service_client::SilvanaEventsServiceClient;
-use events::*;
+use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::*;
 
 // Test configuration
 const SERVER_ADDR: &str = "https://rpc-dev.silvana.dev";

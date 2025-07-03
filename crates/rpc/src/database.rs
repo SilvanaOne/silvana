@@ -1,8 +1,8 @@
-use crate::entities;
-use crate::events::Event;
 use anyhow::Result;
+use proto::Event;
 use sea_orm::{Database, DatabaseConnection, EntityTrait, TransactionTrait};
 use std::time::Instant;
+use tidb as entities;
 use tracing::{debug, error, info, warn};
 
 // Result structs for query responses
@@ -99,9 +99,9 @@ impl EventDatabase {
         for event in events {
             if let Some(event_type) = &event.event_type {
                 match event_type {
-                    crate::events::event::EventType::Coordinator(coordinator_event) => {
+                    proto::events::event::EventType::Coordinator(coordinator_event) => {
                         if let Some(coord_event) = &coordinator_event.event {
-                            use crate::events::coordinator_event::Event as CoordEvent;
+                            use proto::events::coordinator_event::Event as CoordEvent;
                             match coord_event {
                                 CoordEvent::CoordinatorStarted(event) => {
                                     coordinator_started_events
@@ -130,9 +130,9 @@ impl EventDatabase {
                             }
                         }
                     }
-                    crate::events::event::EventType::Agent(agent_event) => {
+                    proto::events::event::EventType::Agent(agent_event) => {
                         if let Some(agent_event_type) = &agent_event.event {
-                            use crate::events::agent_event::Event as AgentEventType;
+                            use proto::events::agent_event::Event as AgentEventType;
                             match agent_event_type {
                                 AgentEventType::Message(event) => {
                                     let (main_event, sequences) =
@@ -1092,7 +1092,7 @@ impl EventDatabase {
 // Conversion functions from protobuf messages to Sea-ORM entities
 
 fn convert_coordinator_started_event(
-    event: &crate::events::CoordinatorStartedEvent,
+    event: &proto::events::CoordinatorStartedEvent,
 ) -> entities::coordinator_started_event::ActiveModel {
     use entities::coordinator_started_event::*;
     use sea_orm::ActiveValue;
@@ -1117,7 +1117,7 @@ fn convert_coordinator_started_event(
 }
 
 fn convert_agent_started_job_event(
-    event: &crate::events::AgentStartedJobEvent,
+    event: &proto::events::AgentStartedJobEvent,
 ) -> entities::agent_started_job_event::ActiveModel {
     use entities::agent_started_job_event::*;
     use sea_orm::ActiveValue;
@@ -1136,7 +1136,7 @@ fn convert_agent_started_job_event(
 }
 
 fn convert_agent_finished_job_event(
-    event: &crate::events::AgentFinishedJobEvent,
+    event: &proto::events::AgentFinishedJobEvent,
 ) -> entities::agent_finished_job_event::ActiveModel {
     use entities::agent_finished_job_event::*;
     use sea_orm::ActiveValue;
@@ -1172,7 +1172,7 @@ fn convert_agent_finished_job_event(
 }
 
 fn convert_coordination_tx_event(
-    event: &crate::events::CoordinationTxEvent,
+    event: &proto::events::CoordinationTxEvent,
 ) -> entities::coordination_tx_event::ActiveModel {
     use entities::coordination_tx_event::*;
     use sea_orm::ActiveValue;
@@ -1201,7 +1201,7 @@ fn convert_coordination_tx_event(
 }
 
 fn convert_coordinator_message_event(
-    event: &crate::events::CoordinatorMessageEvent,
+    event: &proto::events::CoordinatorMessageEvent,
 ) -> entities::coordinator_message_event::ActiveModel {
     use entities::coordinator_message_event::*;
     use sea_orm::ActiveValue;
@@ -1226,7 +1226,7 @@ fn convert_coordinator_message_event(
 }
 
 fn convert_client_transaction_event(
-    event: &crate::events::ClientTransactionEvent,
+    event: &proto::events::ClientTransactionEvent,
 ) -> entities::client_transaction_event::ActiveModel {
     use entities::client_transaction_event::*;
     use sea_orm::ActiveValue;
@@ -1265,7 +1265,7 @@ fn convert_client_transaction_event(
 }
 
 fn convert_agent_message_event(
-    event: &crate::events::AgentMessageEvent,
+    event: &proto::events::AgentMessageEvent,
 ) -> (entities::agent_message_event::ActiveModel, Vec<u64>) {
     use entities::agent_message_event::*;
     use sea_orm::ActiveValue;
@@ -1298,7 +1298,7 @@ fn convert_agent_message_event(
 }
 
 fn convert_agent_transaction_event(
-    event: &crate::events::AgentTransactionEvent,
+    event: &proto::events::AgentTransactionEvent,
 ) -> (entities::agent_transaction_event::ActiveModel, Vec<u64>) {
     use entities::agent_transaction_event::*;
     use sea_orm::ActiveValue;

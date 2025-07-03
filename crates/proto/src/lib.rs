@@ -1,14 +1,11 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+//! Proto definitions for Silvana
+//!
+//! This crate contains all the protobuf definitions and generated types
+//! that are shared across different Silvana components.
+
+pub mod events {
+    tonic::include_proto!("silvana.events");
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// Re-export commonly used types for convenience
+pub use events::*;

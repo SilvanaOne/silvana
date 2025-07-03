@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # AWS EC2 User Data Script for Silvana RPC Server
 # This script performs initial system setup and then calls start.sh from the S3 bucket
 

@@ -4,13 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tonic::transport::{Channel, ClientTlsConfig};
 use tonic::Request;
 
-// Import the generated protobuf code
-mod events {
-    tonic::include_proto!("silvana.events");
-}
-
-use events::silvana_events_service_client::SilvanaEventsServiceClient;
-use events::*;
+use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::*;
 
 // Test configuration
 const TOTAL_EVENTS: usize = 1000;
