@@ -117,9 +117,6 @@ async fn test_nats_roundtrip_latency() {
     //     }
     // };
 
-    // Give subscription time to be established
-    sleep(Duration::from_millis(100)).await;
-
     // Step 4: Create a unique test event
     println!(
         "📝 Creating test event with coordinator_id: {}",

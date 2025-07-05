@@ -1,16 +1,22 @@
 use std::collections::HashMap;
-use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tonic::Request;
-use tonic::transport::{Channel, ClientTlsConfig};
 
 use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::*;
 
 // Test configuration
-const TOTAL_EVENTS: usize = 1;
-const SEQUENCE_COUNT: usize = 1;
-const SERVER_ADDR: &str = "http://127.0.0.1:50051"; //"https://rpc.silvana.dev"; //"https://rpc.silvana.dev"; //"https://rpc.silvana.dev:443";
+const TOTAL_EVENTS: usize = 100;
+const SEQUENCE_COUNT: usize = 10;
+
+fn get_server_addr() -> String {
+    // Load .env file if it exists
+    dotenvy::dotenv().ok();
+
+    // Get TEST_SERVER from environment, fallback to default if not set
+    std::env::var("TEST_SERVER").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string())
+}
+
 // Generate a unique coordinator ID for each test run to avoid data contamination
 fn get_unique_coordinator_id() -> String {
     format!("seq-test-{}", get_current_timestamp())
@@ -18,101 +24,30 @@ fn get_unique_coordinator_id() -> String {
 
 #[tokio::test]
 async fn test_sequence_events_round_trip() {
+    let server_addr = get_server_addr();
+
     println!("🧪 Starting sequence round-trip test...");
     println!(
         "📊 Configuration: {} events across {} sequences",
         TOTAL_EVENTS, SEQUENCE_COUNT
     );
-    println!("🎯 Server address: {}", SERVER_ADDR);
+    println!("🎯 Server address: {}", server_addr);
 
-    // Connect to the gRPC server with conditional TLS based on URL scheme
-    println!("🔗 Attempting to connect to: {}", SERVER_ADDR);
+    // Connect to the gRPC server (tonic handles TLS automatically for https:// URLs)
+    println!("🔗 Attempting to connect to: {}", server_addr);
 
-    let use_tls = SERVER_ADDR.starts_with("https://");
-    println!("🔍 Connection details:");
-    if use_tls {
-        println!("  - Protocol: gRPC over TLS/HTTPS");
-        println!("  - TLS enabled for secure connection");
-    } else {
-        println!("  - Protocol: gRPC over plain HTTP");
-        println!("  - TLS disabled for local development");
-    }
-
-    let channel = if use_tls {
-        // HTTPS connection with TLS
-        let server_domain = if SERVER_ADDR.contains("rpc.silvana.dev") {
-            "rpc.silvana.dev"
-        } else {
-            "localhost" // fallback for other HTTPS addresses
-        };
-
-        println!("  - Configuring TLS for domain: {}", server_domain);
-
-        // TLS configuration with webpki-roots for Let's Encrypt certificate verification
-        let tls_config = ClientTlsConfig::new().domain_name(server_domain);
-
-        let endpoint = match Channel::from_static(SERVER_ADDR).tls_config(tls_config) {
-            Ok(endpoint) => endpoint,
-            Err(e) => {
-                println!("❌ Failed to configure TLS endpoint:");
-                println!("  - Error: {:?}", e);
-                panic!("TLS endpoint configuration failed");
-            }
-        };
-
-        match endpoint.connect().await {
-            Ok(channel) => {
-                println!("✅ TLS channel established successfully");
-                channel
-            }
-            Err(e) => {
-                println!("❌ Failed to establish TLS channel:");
-                println!("  - Server address: {}", SERVER_ADDR);
-                println!("  - Server domain: {}", server_domain);
-                println!("  - Error type: {:?}", e);
-                println!("  - Error message: {}", e);
-                println!("  - Error source: {:?}", e.source());
-
-                if let Some(source) = e.source() {
-                    println!("  - Root cause: {}", source);
-                    if let Some(deeper_source) = source.source() {
-                        println!("  - Deeper cause: {}", deeper_source);
-                    }
-                }
-
-                panic!("TLS channel establishment failed - see detailed error information above");
-            }
+    let mut client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+        Ok(client) => {
+            println!("✅ Connected to RPC server successfully");
+            client
         }
-    } else {
-        // Plain HTTP connection without TLS
-        println!("  - Using plain HTTP connection");
-
-        match Channel::from_static(SERVER_ADDR).connect().await {
-            Ok(channel) => {
-                println!("✅ HTTP channel established successfully");
-                channel
-            }
-            Err(e) => {
-                println!("❌ Failed to establish HTTP channel:");
-                println!("  - Server address: {}", SERVER_ADDR);
-                println!("  - Error type: {:?}", e);
-                println!("  - Error message: {}", e);
-                println!("  - Error source: {:?}", e.source());
-
-                if let Some(source) = e.source() {
-                    println!("  - Root cause: {}", source);
-                    if let Some(deeper_source) = source.source() {
-                        println!("  - Deeper cause: {}", deeper_source);
-                    }
-                }
-
-                panic!("HTTP channel establishment failed - see detailed error information above");
-            }
+        Err(e) => {
+            panic!(
+                "❌ Failed to connect to RPC server at {}: {}\nMake sure the server is running and accessible",
+                server_addr, e
+            );
         }
     };
-
-    let mut client = SilvanaEventsServiceClient::new(channel);
-    println!("✅ gRPC client created successfully");
 
     // Step 1: Create events grouped by sequence
     let coordinator_id = get_unique_coordinator_id();
@@ -194,8 +129,6 @@ async fn test_sequence_events_round_trip() {
             send_start.elapsed().as_millis()
         );
 
-        // Wait 5 seconds to allow for processing
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         // Immediately start polling for this sequence
         let timeout = std::time::Duration::from_secs(5);
         let poll_start = std::time::Instant::now();
@@ -230,10 +163,6 @@ async fn test_sequence_events_round_trip() {
                     continue;
                 }
             };
-            println!(
-                "✅ Successfully queried message events{:?}",
-                message_response
-            );
 
             // Query AgentTransactionEvents by sequence
             let tx_request = Request::new(GetAgentTransactionEventsBySequenceRequest {
