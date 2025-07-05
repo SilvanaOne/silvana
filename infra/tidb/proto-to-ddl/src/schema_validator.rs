@@ -1,20 +1,19 @@
 use anyhow::{Context, Result};
 use inflector::Inflector;
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use tracing::info;
 
-use crate::parser::{parse_proto_file, proto_type_to_mysql};
+use crate::parser::{parse_proto_file, proto_type_to_mysql_with_options};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)] //, Serialize, Deserialize
 pub struct TableInfo {
     pub table_name: String,
     pub columns: Vec<ColumnInfo>,
     pub indexes: Vec<IndexInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)] // , Serialize, Deserialize
 pub struct ColumnInfo {
     pub name: String,
     pub data_type: String,
@@ -24,7 +23,7 @@ pub struct ColumnInfo {
     pub character_maximum_length: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)] //, Serialize, Deserialize
 pub struct IndexInfo {
     pub name: String,
     pub column_name: String,
@@ -32,14 +31,14 @@ pub struct IndexInfo {
     pub is_primary: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)] //, Serialize, Deserialize
 pub struct SchemaValidationResult {
     pub table_name: String,
     pub discrepancies: Vec<SchemaDiscrepancy>,
     pub is_valid: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)] //, Serialize, Deserialize
 pub enum SchemaDiscrepancy {
     MissingTable,
     ExtraTable,
@@ -319,7 +318,12 @@ impl SchemaValidator {
             for field in message.fields {
                 columns.push(ExpectedColumn {
                     name: field.name.to_snake_case(),
-                    data_type: proto_type_to_mysql(&field.field_type, field.is_repeated),
+                    data_type: proto_type_to_mysql_with_options(
+                        &field.field_type,
+                        field.is_repeated,
+                        field.has_search_option,
+                        field.name.contains("metadata") || field.name.contains("message"),
+                    ),
                     is_nullable: field.is_optional || field.is_repeated,
                 });
             }
@@ -512,7 +516,10 @@ impl SchemaValidator {
                             expected,
                             actual,
                         } => {
-                            println!("   🔄 Nullability mismatch in {}: expected nullable={}, got nullable={}", column, expected, actual);
+                            println!(
+                                "   🔄 Nullability mismatch in {}: expected nullable={}, got nullable={}",
+                                column, expected, actual
+                            );
                         }
                         SchemaDiscrepancy::MissingIndex { index } => {
                             println!("   🚫 Missing index: {}", index);

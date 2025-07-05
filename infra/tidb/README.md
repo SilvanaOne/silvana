@@ -89,35 +89,14 @@ Our custom `proto-to-ddl` tool generates Sea-ORM entities directly from proto de
 - One entity per proto Event message
 - Type-safe column definitions matching proto fields
 - Proper handling of optional/repeated fields
-- Serde serialization support
 - Maintains proto file as single source of truth
-
-## 📁 Directory Structure
-
-```
-rpc/
-├── proto/
-│   └── events.proto              # Proto definitions (source of truth)
-├── tidb/                         # TiDB-related tools and data
-│   ├── sql/
-│   │   └── events.sql            # Generated DDL
-│   ├── migration/
-│   │   └── sql/
-│   │       └── *_proto_diff.sql  # Migration diffs
-│   ├── proto-to-ddl/             # Custom Rust DDL generator
-│   ├── proto_regen.sh           # Shell script alternative
-│   └── drop_all_tables/         # Development utility
-├── src/
-│   └── entity/                   # Generated Sea-ORM entities
-└── Makefile                      # Build automation
-```
 
 ## 🛠️ Development Workflow
 
 ### Making Schema Changes
 
 1. **Edit proto file**: Modify `proto/events.proto`
-2. **Regenerate**: Run `make regen` or `./proto_regen.sh regen`
+2. **Regenerate**: Run `make regen`
 3. **Review changes**: Check generated entities in `src/entity/`
 4. **Test**: Run your application with new schema
 

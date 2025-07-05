@@ -4,3 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Monitoring system (reusable across services)
+monitoring = { path = "../monitoring" }
+# Buffer system for events
+buffer = { path = "../buffer" }
+# Async runtime
+tokio = { version = "1.46", features = ["full"] }
+# Logging
+tracing = "0.1"
+# Error handling
+anyhow = "1.0"
+
+# Async trait
+async-trait = "0.1"
+# Logging subscriber
+# Date/time
+chrono = { version = "0.4" }

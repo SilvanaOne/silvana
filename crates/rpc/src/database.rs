@@ -57,7 +57,7 @@ pub struct EventDatabase {
 
 impl EventDatabase {
     pub async fn new(database_url: &str) -> Result<Self> {
-        info!("Connecting to TiDB at: {}", database_url);
+        info!("Connecting to TiDB...");
 
         let connection = Database::connect(database_url).await?;
 
@@ -79,7 +79,7 @@ impl EventDatabase {
         );
 
         let txn = self.connection.begin().await?;
-        let mut total_inserted = 0;
+        //let mut total_inserted = 0;
 
         // Group events by type for batch insertion
         let mut coordinator_started_events = Vec::new();
@@ -154,8 +154,8 @@ impl EventDatabase {
         }
 
         // Phase 1: Run all independent main table insertions in parallel
-        debug!("Phase 1: Running main table insertions in parallel");
-        let independent_results = tokio::try_join!(
+        //debug!("Phase 1: Running main table insertions in parallel");
+        let _independent_results = tokio::try_join!(
             self.insert_coordinator_started_events(&txn, coordinator_started_events),
             self.insert_agent_started_job_events(&txn, agent_started_job_events),
             self.insert_agent_finished_job_events(&txn, agent_finished_job_events),
@@ -165,16 +165,16 @@ impl EventDatabase {
         )?;
 
         // Sum up results from independent insertions
-        total_inserted += independent_results.0
-            + independent_results.1
-            + independent_results.2
-            + independent_results.3
-            + independent_results.4
-            + independent_results.5;
+        // total_inserted += independent_results.0
+        //     + independent_results.1
+        //     + independent_results.2
+        //     + independent_results.3
+        //     + independent_results.4
+        //     + independent_results.5;
 
         // Phase 2: Handle parent-child relationships for events with sequences
-        debug!("Phase 2: Running parent-child table insertions");
-        let parent_child_results = tokio::try_join!(
+        //debug!("Phase 2: Running parent-child table insertions");
+        let _parent_child_results = tokio::try_join!(
             self.insert_agent_message_events_with_sequences(
                 &txn,
                 agent_message_events,
@@ -187,7 +187,7 @@ impl EventDatabase {
             ),
         )?;
 
-        total_inserted += parent_child_results.0 + parent_child_results.1;
+        //total_inserted += parent_child_results.0 + parent_child_results.1;
 
         txn.commit().await?;
 
@@ -196,8 +196,7 @@ impl EventDatabase {
         let events_per_second = events.len() as f64 / duration.as_secs_f64();
 
         debug!(
-            "Successfully parallel batch inserted {} records for {} events in {}ms ({:.2}s) - {:.0} events/second",
-            total_inserted,
+            "Successfully parallel batch inserted  {} events in {}ms ({:.2}s) - {:.0} events/second",
             events.len(),
             duration_ms,
             duration.as_secs_f64(),
@@ -703,11 +702,7 @@ impl EventDatabase {
                         "Count value {} out of u32 range, clamping to u32::MAX",
                         count_i64
                     );
-                    if count_i64 < 0 {
-                        0
-                    } else {
-                        u32::MAX
-                    }
+                    if count_i64 < 0 { 0 } else { u32::MAX }
                 }
             })
             .unwrap_or(0);
@@ -865,11 +860,7 @@ impl EventDatabase {
                         "Count value {} out of u32 range, clamping to u32::MAX",
                         count_i64
                     );
-                    if count_i64 < 0 {
-                        0
-                    } else {
-                        u32::MAX
-                    }
+                    if count_i64 < 0 { 0 } else { u32::MAX }
                 }
             })
             .unwrap_or(0);
@@ -1017,11 +1008,7 @@ impl EventDatabase {
                         "Count value {} out of u32 range, clamping to u32::MAX",
                         count_i64
                     );
-                    if count_i64 < 0 {
-                        0
-                    } else {
-                        u32::MAX
-                    }
+                    if count_i64 < 0 { 0 } else { u32::MAX }
                 }
             })
             .unwrap_or(0);
@@ -1361,11 +1348,7 @@ mod tests {
         let safe_count = if negative_count >= 0 && negative_count <= u32::MAX as i64 {
             negative_count as u32
         } else {
-            if negative_count < 0 {
-                0
-            } else {
-                u32::MAX
-            }
+            if negative_count < 0 { 0 } else { u32::MAX }
         };
         assert_eq!(safe_count, 0);
 
@@ -1406,11 +1389,7 @@ mod tests {
         let safe_count = if large_count >= 0 && large_count <= u32::MAX as i64 {
             large_count as u32
         } else {
-            if large_count < 0 {
-                0
-            } else {
-                u32::MAX
-            }
+            if large_count < 0 { 0 } else { u32::MAX }
         };
         assert_eq!(safe_count, u32::MAX);
     }

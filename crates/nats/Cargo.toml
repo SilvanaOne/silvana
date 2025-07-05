@@ -6,12 +6,14 @@ authors = ["DFST"]
 license = "Apache-2.0"
 
 [dependencies]
+# Proto definitions
+
 # Core async runtime
-tokio = { version = "1.45", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.46", features = ["macros", "rt-multi-thread", "time"] }
 async-trait = "0.1"
 
 # NATS messaging
-async-nats = "0.36"
+async-nats = "0.42"
 
 # Error handling
 anyhow = "1.0"
@@ -23,11 +25,9 @@ tracing = "0.1"
 buffer = { path = "../buffer" }
 
 # Serialization for message publishing
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+prost = "0.13"
 
 # Random number generation for retry jitter
-fastrand = "2.0"
 
 # Async utilities
 futures = "0.3" 

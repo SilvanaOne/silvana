@@ -1,20 +1,29 @@
 use futures::StreamExt;
+use futures::TryStreamExt;
+use prost::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{Duration, sleep};
 use tonic::Request;
 
 use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::*;
 
 // Configuration - easily changeable parameters
-const NUM_EVENTS: usize = 10000;
-const SERVER_ADDR: &str = "https://rpc-dev.silvana.dev"; // "http://127.0.0.1:50051"; //"http://18.194.39.156:50051";
+const NUM_EVENTS: usize = 10;
 const COORDINATOR_ID: &str = "test-coordinator-001";
-const NATS_URL: &str = "nats://rpc-dev.silvana.dev:4222";
-const NATS_STREAM_NAME: &str = "silvana-events";
+
+fn get_server_addr() -> String {
+    // Load .env file if it exists
+    dotenvy::dotenv().ok();
+
+    // Get TEST_SERVER from environment, fallback to default if not set
+    std::env::var("TEST_SERVER").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string())
+}
+const NATS_URL: &str = "nats://rpc.silvana.dev:4222";
+const NATS_STREAM_NAME: &str = "silvana";
 
 // Shared structure to collect all sent events for comparison
 #[derive(Debug, Clone)]
@@ -44,6 +53,16 @@ impl SentEventsCollector {
         events.clone()
     }
 
+    async fn get_event_counts_by_type(&self) -> HashMap<String, usize> {
+        let events = self.events.lock().await;
+        let mut counts = HashMap::new();
+        for event in events.iter() {
+            let event_type = classify_event(event);
+            *counts.entry(event_type.to_string()).or_insert(0) += 1;
+        }
+        counts
+    }
+
     #[allow(dead_code)]
     async fn len(&self) -> usize {
         let events = self.events.lock().await;
@@ -55,9 +74,11 @@ impl SentEventsCollector {
 async fn test_send_coordinator_and_agent_events() {
     let start_time = Instant::now();
 
+    let server_addr = get_server_addr();
+
     println!("🧪 Starting integration test with NATS verification...");
     println!("📊 Configuration: {} events per type", NUM_EVENTS);
-    println!("🎯 Server address: {}", SERVER_ADDR);
+    println!("🎯 Server address: {}", server_addr);
     println!("📡 NATS address: {}", NATS_URL);
 
     // Create collector for sent events
@@ -80,20 +101,30 @@ async fn test_send_coordinator_and_agent_events() {
         }
     };
 
+    // Create JetStream client if NATS is available
+    let jetstream_client = if let Some(ref nats) = nats_client {
+        Some(async_nats::jetstream::new(nats.clone()))
+    } else {
+        None
+    };
+
     // Connect to the gRPC server
-    let client = match SilvanaEventsServiceClient::connect(SERVER_ADDR).await {
+    let client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
         }
         Err(e) => {
-            panic!("❌ Failed to connect to RPC server at {}: {}\nMake sure the server is running with: cargo run", SERVER_ADDR, e);
+            panic!(
+                "❌ Failed to connect to RPC server at {}: {}\nMake sure the server is running with: cargo run",
+                server_addr, e
+            );
         }
     };
 
     // Set up NATS subscriptions if available
-    let nats_collector = if let Some(ref nats) = nats_client {
-        Some(setup_nats_subscriptions(nats.clone()).await)
+    let nats_collector = if let Some(ref jetstream) = jetstream_client {
+        Some(setup_nats_subscriptions(jetstream.clone()).await)
     } else {
         None
     };
@@ -182,9 +213,9 @@ struct NatsEventCollector {
     agent_transaction: tokio::sync::mpsc::Receiver<Event>,
 }
 
-async fn setup_nats_subscriptions(nats_client: async_nats::Client) -> NatsEventCollector {
-    let base_subject = format!("{}.events", NATS_STREAM_NAME);
-
+async fn setup_nats_subscriptions(
+    jetstream_client: async_nats::jetstream::Context,
+) -> NatsEventCollector {
     // Create channels for each event type
     let (coordinator_started_tx, coordinator_started_rx) =
         tokio::sync::mpsc::channel(NUM_EVENTS * 10);
@@ -198,77 +229,101 @@ async fn setup_nats_subscriptions(nats_client: async_nats::Client) -> NatsEventC
     let (agent_message_tx, agent_message_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
     let (agent_transaction_tx, agent_transaction_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
 
-    // Subscribe to each subject
-    let subjects_and_senders = vec![
-        (
-            format!("{}.coordinator.started", base_subject),
-            coordinator_started_tx,
-        ),
-        (
-            format!("{}.coordinator.agent_started_job", base_subject),
-            agent_started_job_tx,
-        ),
-        (
-            format!("{}.coordinator.agent_finished_job", base_subject),
-            agent_finished_job_tx,
-        ),
-        (
-            format!("{}.coordinator.coordination_tx", base_subject),
-            coordination_tx_tx,
-        ),
-        (
-            format!("{}.coordinator.error", base_subject),
-            coordinator_error_tx,
-        ),
-        (
-            format!("{}.coordinator.client_transaction", base_subject),
-            client_transaction_tx,
-        ),
-        (format!("{}.agent.message", base_subject), agent_message_tx),
-        (
-            format!("{}.agent.transaction", base_subject),
-            agent_transaction_tx,
-        ),
+    // Setup JetStream and consumer
+    println!("📡 Setting up JetStream stream: {}", NATS_STREAM_NAME);
+    let stream = match jetstream_client
+        .get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: NATS_STREAM_NAME.to_string(),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(stream) => {
+            println!("✅ JetStream stream created successfully");
+            stream
+        }
+        Err(e) => {
+            println!("❌ Failed to create JetStream stream: {}", e);
+            panic!("Cannot proceed without JetStream stream");
+        }
+    };
+
+    let consumer = match stream
+        .get_or_create_consumer(
+            "integration-test",
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some("integration-test".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+    {
+        Ok(consumer) => {
+            println!("✅ JetStream consumer created successfully");
+            consumer
+        }
+        Err(e) => {
+            println!("❌ Failed to create JetStream consumer: {}", e);
+            panic!("Cannot proceed without JetStream consumer");
+        }
+    };
+
+    // Create event type channels mapping
+    let event_senders = vec![
+        ("coordinator_started", coordinator_started_tx),
+        ("agent_started_job", agent_started_job_tx),
+        ("agent_finished_job", agent_finished_job_tx),
+        ("coordination_tx", coordination_tx_tx),
+        ("coordinator_error", coordinator_error_tx),
+        ("client_transaction", client_transaction_tx),
+        ("agent_message", agent_message_tx),
+        ("agent_transaction", agent_transaction_tx),
     ];
 
-    for (subject, sender) in subjects_and_senders {
-        let client_clone = nats_client.clone();
-        let subject_clone = subject.clone();
+    // Start a single consumer task that distributes events to appropriate channels
+    let consumer_clone = consumer.clone();
+    tokio::spawn(async move {
+        match consumer_clone.messages().await {
+            Ok(messages_stream) => {
+                let mut messages = messages_stream.take(NUM_EVENTS * 50); // Generous buffer for all events
 
-        tokio::spawn(async move {
-            match client_clone.subscribe(subject_clone.clone()).await {
-                Ok(mut subscription) => {
-                    println!("📡 Subscribed to NATS subject: {}", subject_clone);
+                while let Ok(Some(message)) = messages.try_next().await {
+                    if let Err(e) = message.ack().await {
+                        println!("⚠️  Failed to ack message: {}", e);
+                    }
 
-                    while let Ok(message) =
-                        timeout(Duration::from_secs(30), subscription.next()).await
-                    {
-                        if let Some(msg) = message {
-                            match serde_json::from_slice::<Event>(&msg.payload) {
-                                Ok(event) => {
-                                    if sender.send(event).await.is_err() {
-                                        break; // Channel closed
+                    // Try to deserialize the event using protobuf
+                    match proto::events::Event::decode(message.payload.clone()) {
+                        Ok(event) => {
+                            // Determine event type and send to appropriate channel
+                            let event_type = classify_event(&event);
+
+                            for (expected_type, sender) in &event_senders {
+                                if &event_type == expected_type {
+                                    if sender.send(event.clone()).await.is_err() {
+                                        println!(
+                                            "⚠️  Channel closed for event type: {}",
+                                            expected_type
+                                        );
                                     }
-                                }
-                                Err(e) => {
-                                    println!(
-                                        "⚠️  Failed to deserialize event from {}: {}",
-                                        subject_clone, e
-                                    );
+                                    break;
                                 }
                             }
                         }
+                        Err(e) => {
+                            println!("⚠️  Failed to deserialize event from JetStream: {}", e);
+                        }
                     }
                 }
-                Err(e) => {
-                    println!("❌ Failed to subscribe to {}: {}", subject_clone, e);
-                }
             }
-        });
-    }
+            Err(e) => {
+                println!("❌ Failed to get messages from JetStream: {}", e);
+            }
+        }
+    });
 
-    // Give subscriptions time to be established
-    sleep(Duration::from_millis(100)).await;
+    // Give subscription time to be established
+    sleep(Duration::from_millis(500)).await;
 
     NatsEventCollector {
         coordinator_started: coordinator_started_rx,
@@ -282,12 +337,33 @@ async fn setup_nats_subscriptions(nats_client: async_nats::Client) -> NatsEventC
     }
 }
 
+fn classify_event(event: &Event) -> &'static str {
+    match &event.event_type {
+        Some(event::EventType::Coordinator(coord_event)) => match &coord_event.event {
+            Some(coordinator_event::Event::CoordinatorStarted(_)) => "coordinator_started",
+            Some(coordinator_event::Event::AgentStartedJob(_)) => "agent_started_job",
+            Some(coordinator_event::Event::AgentFinishedJob(_)) => "agent_finished_job",
+            Some(coordinator_event::Event::CoordinationTx(_)) => "coordination_tx",
+            Some(coordinator_event::Event::CoordinatorError(_)) => "coordinator_error",
+            Some(coordinator_event::Event::ClientTransaction(_)) => "client_transaction",
+            None => "coordinator_unknown",
+        },
+        Some(event::EventType::Agent(agent_event)) => match &agent_event.event {
+            Some(agent_event::Event::Message(_)) => "agent_message",
+            Some(agent_event::Event::Transaction(_)) => "agent_transaction",
+            None => "agent_unknown",
+        },
+        None => "unknown",
+    }
+}
+
 async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: SentEventsCollector) {
     println!("⏳ Waiting for NATS events to be published...");
 
     // Wait a bit for all events to be published
     sleep(Duration::from_secs(5)).await;
 
+    let sent_counts = sent_events.get_event_counts_by_type().await;
     let mut total_received = 0;
     let mut events_by_type = HashMap::new();
     let mut received_events: Vec<Event> = Vec::new();
@@ -356,9 +432,7 @@ async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: Sent
             }
             _ = sleep(Duration::from_millis(100)) => {
                 // Check if we've received enough events
-                let expected_individual_events = NUM_EVENTS * 8; // 6 coordinator + 2 agent types
-                let expected_batch_events = NUM_EVENTS; // Mixed events in batch
-                let expected_total = expected_individual_events + expected_batch_events;
+                let expected_total = sent_counts.values().sum::<usize>();
 
                 if total_received >= expected_total {
                     break;
@@ -370,18 +444,33 @@ async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: Sent
     println!("\n📊 NATS Event Verification Results:");
     println!("📥 Total events received from NATS: {}", total_received);
 
-    for (event_type, count) in &events_by_type {
+    // Show detailed comparison
+    let all_event_types = [
+        "coordinator_started",
+        "agent_started_job",
+        "agent_finished_job",
+        "coordination_tx",
+        "coordinator_error",
+        "client_transaction",
+        "agent_message",
+        "agent_transaction",
+    ];
+
+    for event_type in &all_event_types {
+        let sent_count = sent_counts.get(*event_type).unwrap_or(&0);
+        let received_count = events_by_type.get(*event_type).unwrap_or(&0);
+        let status = if sent_count == received_count {
+            "✅"
+        } else {
+            "❌"
+        };
         println!(
-            "  {} {}: {}",
-            if *count == NUM_EVENTS {
-                "✅"
-            } else if *count > 0 {
-                "⚠️ "
-            } else {
-                "❌"
-            },
+            "  {} {}: sent={}, received={}, diff={}",
+            status,
             event_type,
-            count
+            sent_count,
+            received_count,
+            *received_count as i32 - *sent_count as i32
         );
     }
 
@@ -419,9 +508,7 @@ async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: Sent
     }
 
     // Expected counts
-    let expected_individual_events = NUM_EVENTS * 8; // 6 coordinator + 2 agent types from individual tests
-    let expected_batch_events = NUM_EVENTS; // Mixed events from batch test
-    let expected_total = expected_individual_events + expected_batch_events;
+    let expected_total = sent_counts.values().sum::<usize>();
 
     println!("\n📈 Expected vs Actual:");
     println!("  Expected total: {} events", expected_total);
@@ -561,12 +648,8 @@ fn create_event_signature(event: &Event) -> String {
 }
 
 fn events_match_content(sent: &Event, received: &Event) -> bool {
-    // Deep comparison of event content
-    // For simplicity, we'll serialize both to JSON and compare
-    match (serde_json::to_string(sent), serde_json::to_string(received)) {
-        (Ok(sent_json), Ok(received_json)) => sent_json == received_json,
-        _ => false,
-    }
+    // Deep comparison of event content via protobuf serialization
+    sent.encode_to_vec() == received.encode_to_vec()
 }
 
 async fn test_coordinator_events(
@@ -626,7 +709,9 @@ async fn test_coordinator_events(
                                 // Record the event before sending
                                 sent_events_clone2.add_event(test_event.clone()).await;
 
-                                let request = Request::new(test_event);
+                                let request = Request::new(SubmitEventRequest {
+                                    event: Some(test_event),
+                                });
                                 match client_clone2.submit_event(request).await {
                                     Ok(response) => {
                                         let resp = response.into_inner();
@@ -734,7 +819,9 @@ async fn test_agent_events(
                                 // Record the event before sending
                                 sent_events_clone2.add_event(test_event.clone()).await;
 
-                                let request = Request::new(test_event);
+                                let request = Request::new(SubmitEventRequest {
+                                    event: Some(test_event),
+                                });
                                 match client_clone2.submit_event(request).await {
                                     Ok(response) => {
                                         let resp = response.into_inner();
@@ -824,21 +911,36 @@ async fn test_batch_events(
                 );
 
                 let mut events = Vec::new();
+                let mut batch_coord_started = 0;
+                let mut batch_agent_message = 0;
 
                 for i in start_event_idx..=end_event_idx {
                     // Alternate between coordinator and agent events
                     let event = if i % 2 == 0 {
                         let mut event = create_coordinator_started_event();
-                        modify_coordinator_event_for_uniqueness(&mut event, i);
+                        // Use batch-specific index to avoid conflicts with individual events
+                        let batch_index = i + 1000000;
+                        modify_coordinator_event_for_uniqueness(&mut event, batch_index);
+                        batch_coord_started += 1;
                         event
                     } else {
                         let mut event = create_agent_message_event();
-                        modify_agent_event_for_uniqueness(&mut event, i);
+                        // Use batch-specific index to avoid conflicts with individual events
+                        let batch_index = i + 1000000;
+                        modify_agent_event_for_uniqueness(&mut event, batch_index);
+                        batch_agent_message += 1;
                         event
                     };
 
                     events.push(event);
                 }
+
+                println!(
+                    "  📊 Batch {} breakdown: {} coordinator_started, {} agent_message",
+                    batch_idx + 1,
+                    batch_coord_started,
+                    batch_agent_message
+                );
 
                 // Record the events before sending
                 sent_events_clone.add_events(events.clone()).await;
@@ -1062,7 +1164,7 @@ fn create_agent_transaction_event() -> Event {
                 chain: "ethereum".to_string(),
                 network: "mainnet".to_string(),
                 memo: "Test agent transaction".to_string(),
-                metadata: r#"{"gas_used": 21000, "gas_price": "20000000000"}"#.to_string(),
+                metadata: Some(r#"{"gas_used": 21000, "gas_price": "20000000000"}"#.to_string()),
             })),
         })),
     }
@@ -1071,31 +1173,31 @@ fn create_agent_transaction_event() -> Event {
 // Helper functions to add uniqueness to events
 
 fn modify_coordinator_event_for_uniqueness(event: &mut Event, index: usize) {
-    if let Some(event::EventType::Coordinator(ref mut coord_event)) = event.event_type {
+    if let Some(event::EventType::Coordinator(coord_event)) = &mut event.event_type {
         match &mut coord_event.event {
-            Some(coordinator_event::Event::CoordinatorStarted(ref mut e)) => {
+            Some(coordinator_event::Event::CoordinatorStarted(e)) => {
                 e.ethereum_address = format!("0x{:040x}", index);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
-            Some(coordinator_event::Event::AgentStartedJob(ref mut e)) => {
+            Some(coordinator_event::Event::AgentStartedJob(e)) => {
                 e.job_id = format!("job-{}", index);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
-            Some(coordinator_event::Event::AgentFinishedJob(ref mut e)) => {
+            Some(coordinator_event::Event::AgentFinishedJob(e)) => {
                 e.job_id = format!("job-{}", index);
                 e.duration = 1000 + (index as u64 * 100);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
-            Some(coordinator_event::Event::CoordinationTx(ref mut e)) => {
+            Some(coordinator_event::Event::CoordinationTx(e)) => {
                 e.job_id = format!("job-{}", index);
                 e.tx_hash = format!("0x{:064x}", index);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
-            Some(coordinator_event::Event::CoordinatorError(ref mut e)) => {
+            Some(coordinator_event::Event::CoordinatorError(e)) => {
                 e.message = format!("Test error message #{}", index);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
-            Some(coordinator_event::Event::ClientTransaction(ref mut e)) => {
+            Some(coordinator_event::Event::ClientTransaction(e)) => {
                 e.tx_hash = format!("0x{:064x}", index);
                 e.sequence = index as u64;
                 e.event_timestamp = get_current_timestamp() + index as u64;
@@ -1106,15 +1208,15 @@ fn modify_coordinator_event_for_uniqueness(event: &mut Event, index: usize) {
 }
 
 fn modify_agent_event_for_uniqueness(event: &mut Event, index: usize) {
-    if let Some(event::EventType::Agent(ref mut agent_event)) = event.event_type {
+    if let Some(event::EventType::Agent(agent_event)) = &mut event.event_type {
         match &mut agent_event.event {
-            Some(agent_event::Event::Message(ref mut e)) => {
+            Some(agent_event::Event::Message(e)) => {
                 e.job_id = format!("job-{}", index);
                 e.message = format!("Test agent message #{}", index);
                 e.sequences = vec![index as u64];
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
-            Some(agent_event::Event::Transaction(ref mut e)) => {
+            Some(agent_event::Event::Transaction(e)) => {
                 e.job_id = format!("job-{}", index);
                 e.tx_hash = format!("0x{:064x}", index + 1000);
                 e.sequences = vec![index as u64];

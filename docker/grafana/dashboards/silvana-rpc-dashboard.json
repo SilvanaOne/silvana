@@ -109,7 +109,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_circuit_breaker_status",
+          "expr": "node_circuit_breaker_status",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -179,7 +179,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_buffer_health_status",
+          "expr": "node_buffer_health_status",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -255,25 +255,25 @@
       },
       "targets": [
         {
-          "expr": "rate(silvana_buffer_events_total[5m])",
+          "expr": "rate(node_buffer_events_total[5m])",
           "interval": "",
           "legendFormat": "Events Received/sec",
           "refId": "A"
         },
         {
-          "expr": "rate(silvana_buffer_events_processed_total[5m])",
+          "expr": "rate(node_buffer_events_processed_total[5m])",
           "interval": "",
           "legendFormat": "Events Processed/sec",
           "refId": "B"
         },
         {
-          "expr": "rate(silvana_buffer_events_dropped_total[5m])",
+          "expr": "rate(node_buffer_events_dropped_total[5m])",
           "interval": "",
           "legendFormat": "Events Dropped/sec",
           "refId": "C"
         },
         {
-          "expr": "rate(silvana_buffer_events_error_total[5m])",
+          "expr": "rate(node_buffer_events_error_total[5m])",
           "interval": "",
           "legendFormat": "Events Failed/sec",
           "refId": "D"
@@ -330,7 +330,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_buffer_size_current",
+          "expr": "node_buffer_size_current",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -387,7 +387,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_buffer_memory_bytes",
+          "expr": "node_buffer_memory_bytes",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -463,7 +463,7 @@
       },
       "targets": [
         {
-          "expr": "rate(silvana_grpc_requests_total[5m])",
+          "expr": "rate(node_grpc_requests_total[5m])",
           "interval": "",
           "legendFormat": "gRPC Requests/sec",
           "refId": "A"
@@ -539,19 +539,19 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(silvana_grpc_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, rate(node_grpc_request_duration_seconds_bucket[5m]))",
           "interval": "",
           "legendFormat": "50th percentile",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, rate(silvana_grpc_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(node_grpc_request_duration_seconds_bucket[5m]))",
           "interval": "",
           "legendFormat": "95th percentile",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, rate(silvana_grpc_request_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.99, rate(node_grpc_request_duration_seconds_bucket[5m]))",
           "interval": "",
           "legendFormat": "99th percentile",
           "refId": "C"
@@ -608,7 +608,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_cpu_usage_percent",
+          "expr": "node_cpu_seconds_total",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -665,7 +665,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "(silvana_memory_used_bytes / silvana_memory_total_bytes) * 100",
+          "expr": "(node_memory_MemUsed_bytes / node_memory_MemTotal_bytes) * 100",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -722,7 +722,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_load_average_1min",
+          "expr": "node_load1",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -771,7 +771,7 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_uptime_seconds",
+          "expr": "node_boot_time_seconds",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
@@ -847,22 +847,34 @@
       },
       "targets": [
         {
-          "expr": "silvana_memory_used_bytes",
+          "expr": "node_memory_MemUsed_bytes",
           "interval": "",
           "legendFormat": "Used Memory",
           "refId": "A"
         },
         {
-          "expr": "silvana_memory_total_bytes",
+          "expr": "node_memory_MemTotal_bytes",
           "interval": "",
           "legendFormat": "Total Memory",
           "refId": "B"
         },
         {
-          "expr": "silvana_memory_available_bytes",
+          "expr": "node_memory_MemAvailable_bytes",
           "interval": "",
           "legendFormat": "Available Memory",
           "refId": "C"
+        },
+        {
+          "expr": "node_memory_MemFree_bytes",
+          "interval": "",
+          "legendFormat": "Free Memory",
+          "refId": "D"
+        },
+        {
+          "expr": "node_memory_Cached_bytes",
+          "interval": "",
+          "legendFormat": "Cached Memory",
+          "refId": "E"
         }
       ],
       "title": "Memory Details",
@@ -935,19 +947,19 @@
       },
       "targets": [
         {
-          "expr": "silvana_load_average_1min",
+          "expr": "node_load1",
           "interval": "",
           "legendFormat": "1 minute",
           "refId": "A"
         },
         {
-          "expr": "silvana_load_average_5min",
+          "expr": "node_load5",
           "interval": "",
           "legendFormat": "5 minutes",
           "refId": "B"
         },
         {
-          "expr": "silvana_load_average_15min",
+          "expr": "node_load15",
           "interval": "",
           "legendFormat": "15 minutes",
           "refId": "C"
@@ -1023,7 +1035,7 @@
       },
       "targets": [
         {
-          "expr": "silvana_process_cpu_percent",
+          "expr": "node_process_cpu_percent",
           "interval": "",
           "legendFormat": "Process CPU %",
           "refId": "A"
@@ -1099,13 +1111,13 @@
       },
       "targets": [
         {
-          "expr": "silvana_process_memory_bytes",
+          "expr": "node_process_memory_bytes",
           "interval": "",
           "legendFormat": "Process Memory",
           "refId": "A"
         },
         {
-          "expr": "silvana_process_virtual_memory_bytes",
+          "expr": "node_process_virtual_memory_bytes",
           "interval": "",
           "legendFormat": "Process Virtual Memory",
           "refId": "B"
@@ -1181,13 +1193,13 @@
       },
       "targets": [
         {
-          "expr": "rate(silvana_network_received_bytes_total[5m])",
+          "expr": "rate(node_network_receive_bytes_total[5m])",
           "interval": "",
           "legendFormat": "Network Received",
           "refId": "A"
         },
         {
-          "expr": "rate(silvana_network_transmitted_bytes_total[5m])",
+          "expr": "rate(node_network_transmit_bytes_total[5m])",
           "interval": "",
           "legendFormat": "Network Transmitted",
           "refId": "B"
@@ -1263,13 +1275,13 @@
       },
       "targets": [
         {
-          "expr": "rate(silvana_disk_read_bytes_total[5m])",
+          "expr": "rate(node_disk_read_bytes_total[5m])",
           "interval": "",
           "legendFormat": "Disk Read",
           "refId": "A"
         },
         {
-          "expr": "rate(silvana_disk_write_bytes_total[5m])",
+          "expr": "rate(node_disk_written_bytes_total[5m])",
           "interval": "",
           "legendFormat": "Disk Write",
           "refId": "B"
@@ -1345,7 +1357,7 @@
       },
       "targets": [
         {
-          "expr": "rate(silvana_buffer_backpressure_events_total[5m])",
+          "expr": "rate(node_buffer_backpressure_events_total[5m])",
           "interval": "",
           "legendFormat": "Backpressure Events/sec",
           "refId": "A"
@@ -1402,13 +1414,127 @@
       "pluginVersion": "8.0.0",
       "targets": [
         {
-          "expr": "silvana_process_threads_count",
+          "expr": "node_processes_threads",
           "interval": "",
           "legendFormat": "",
           "refId": "A"
         }
       ],
       "title": "Process Threads",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 500
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 52
+      },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "fields": "",
+          "values": false,
+          "calcs": ["lastNotNull"]
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "8.0.0",
+      "targets": [
+        {
+          "expr": "node_processes_pids",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Processes",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 52
+      },
+      "id": 21,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "fields": "",
+          "values": false,
+          "calcs": ["lastNotNull"]
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "8.0.0",
+      "targets": [
+        {
+          "expr": "node_procs_blocked",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Blocked Processes",
       "type": "stat"
     }
   ],

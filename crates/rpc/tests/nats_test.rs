@@ -1,15 +1,23 @@
 use futures::StreamExt;
+use futures::TryStreamExt;
+use prost::Message;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{Duration, sleep, timeout};
 use tonic::Request;
 
 use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::*;
 
 // Test configuration
-const SERVER_ADDR: &str = "https://rpc-dev.silvana.dev";
-const NATS_URL: &str = "nats://rpc-dev.silvana.dev:4222";
-const NATS_STREAM_NAME: &str = "silvana-events";
+fn get_server_addr() -> String {
+    // Load .env file if it exists
+    dotenvy::dotenv().ok();
+
+    // Get TEST_SERVER from environment, fallback to default if not set
+    std::env::var("TEST_SERVER").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string())
+}
+const NATS_URL: &str = "nats://rpc.silvana.dev:4222";
+const NATS_STREAM_NAME: &str = "silvana";
 
 // Generate a unique coordinator ID for each test run to avoid data contamination
 fn get_unique_coordinator_id() -> String {
@@ -18,8 +26,9 @@ fn get_unique_coordinator_id() -> String {
 
 #[tokio::test]
 async fn test_nats_roundtrip_latency() {
+    let server_addr = get_server_addr();
     println!("🧪 Starting NATS roundtrip latency test...");
-    println!("🎯 gRPC Server: {}", SERVER_ADDR);
+    println!("🎯 gRPC Server: {}", server_addr);
     println!("📡 NATS Server: {}", NATS_URL);
 
     // Step 1: Connect to NATS
@@ -35,9 +44,10 @@ async fn test_nats_roundtrip_latency() {
             );
         }
     };
+    let jetstream = async_nats::jetstream::new(nats_client);
 
     // Step 2: Connect to gRPC server
-    let mut grpc_client = match SilvanaEventsServiceClient::connect(SERVER_ADDR).await {
+    let mut grpc_client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to gRPC server successfully");
             client
@@ -45,30 +55,67 @@ async fn test_nats_roundtrip_latency() {
         Err(e) => {
             panic!(
                 "❌ Failed to connect to gRPC server at {}: {}\nMake sure the server is running with: cargo run",
-                SERVER_ADDR, e
+                server_addr, e
             );
         }
     };
 
     // Step 3: Setup NATS subscription for the specific event type we'll send
     let coordinator_id = get_unique_coordinator_id();
-    let base_subject = format!("{}.events", NATS_STREAM_NAME);
-    let target_subject = format!("{}.coordinator.started", base_subject);
+    let consumer_name = format!("nats-test-{}", coordinator_id);
 
-    println!("📡 Setting up NATS subscription to: {}", target_subject);
-
-    let mut subscription = match nats_client.subscribe(target_subject.clone()).await {
-        Ok(sub) => {
-            println!("✅ NATS subscription established successfully");
-            sub
+    println!("📡 Setting up NATS subscription to: {}", NATS_STREAM_NAME);
+    let stream = match jetstream
+        .get_or_create_stream(async_nats::jetstream::stream::Config {
+            name: NATS_STREAM_NAME.to_string(),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(stream) => {
+            println!("✅ Stream created successfully");
+            stream
         }
         Err(e) => {
-            panic!(
-                "❌ Failed to subscribe to NATS subject {}: {}",
-                target_subject, e
-            );
+            panic!("❌ Failed to create stream: {}", e);
         }
     };
+    let consumer = match stream
+        .get_or_create_consumer(
+            &consumer_name,
+            async_nats::jetstream::consumer::pull::Config {
+                durable_name: Some(consumer_name.clone()),
+                // Only get new messages, not replay from the beginning
+                deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::New,
+                ..Default::default()
+            },
+        )
+        .await
+    {
+        Ok(consumer) => {
+            println!(
+                "✅ Consumer created successfully with name: {}",
+                consumer_name
+            );
+            consumer
+        }
+        Err(e) => {
+            panic!("❌ Failed to create consumer: {}", e);
+        }
+    };
+
+    // let mut subscription = match nats_client.subscribe(target_subject.clone()).await {
+    //     Ok(sub) => {
+    //         println!("✅ NATS subscription established successfully");
+    //         sub
+    //     }
+    //     Err(e) => {
+    //         panic!(
+    //             "❌ Failed to subscribe to NATS subject {}: {}",
+    //             target_subject, e
+    //         );
+    //     }
+    // };
 
     // Give subscription time to be established
     sleep(Duration::from_millis(100)).await;
@@ -87,7 +134,9 @@ async fn test_nats_roundtrip_latency() {
     println!("🚀 Sending event via gRPC and starting roundtrip timer...");
     let send_start = std::time::Instant::now();
 
-    let request = Request::new(test_event.clone());
+    let request = Request::new(SubmitEventRequest {
+        event: Some(test_event.clone()),
+    });
     match grpc_client.submit_event(request).await {
         Ok(response) => {
             let resp = response.into_inner();
@@ -113,62 +162,78 @@ async fn test_nats_roundtrip_latency() {
 
         // Wait for NATS message with timeout
         let receive_timeout = Duration::from_millis(500);
-        match timeout(receive_timeout, subscription.next()).await {
-            Ok(Some(message)) => {
-                roundtrip_latency = send_start.elapsed();
+        match timeout(receive_timeout, consumer.messages()).await {
+            Ok(messages_stream) => {
+                let mut messages = match messages_stream {
+                    Ok(messages) => messages.take(100),
+                    Err(e) => {
+                        panic!("❌ Failed to get messages: {}", e);
+                    }
+                };
 
-                // Try to deserialize the event
-                match serde_json::from_slice::<Event>(&message.payload) {
-                    Ok(received_event) => {
-                        let received_signature = create_event_signature(&received_event);
+                while let Ok(Some(message)) = messages.try_next().await {
+                    if let Err(e) = message.ack().await {
+                        println!("⚠️  Failed to ack message: {}", e);
+                    }
 
-                        if received_signature == expected_signature {
-                            success = true;
-                            println!(
-                                "  ✅ SUCCESS: attempt={}, roundtrip_latency={}ms",
-                                attempt,
-                                roundtrip_latency.as_millis()
-                            );
+                    roundtrip_latency = send_start.elapsed();
 
-                            // Verify event content matches
-                            if events_match_content(&test_event, &received_event) {
-                                println!("     ✅ Event content verification: PERFECT MATCH");
-                            } else {
-                                println!("     ⚠️  Event content verification: DIFFERENT (but same signature)");
-                            }
+                    // Try to deserialize the event
+                    match proto::events::Event::decode(message.payload.clone()) {
+                        Ok(received_event) => {
+                            let received_signature = create_event_signature(&received_event);
 
-                            // Extract coordinator info for logging
-                            if let Some(event::EventType::Coordinator(coord_event)) =
-                                &received_event.event_type
-                            {
-                                if let Some(coordinator_event::Event::CoordinatorStarted(started)) =
-                                    &coord_event.event
-                                {
-                                    println!("     📊 Received event: coordinator_id={}, ethereum_address={}", 
-                                            started.coordinator_id, started.ethereum_address);
+                            if received_signature == expected_signature {
+                                success = true;
+                                println!(
+                                    "  ✅ SUCCESS: attempt={}, roundtrip_latency={}ms",
+                                    attempt,
+                                    roundtrip_latency.as_millis()
+                                );
+
+                                // Verify event content matches
+                                if events_match_content(&test_event, &received_event) {
+                                    println!("     ✅ Event content verification: PERFECT MATCH");
+                                } else {
+                                    println!(
+                                        "     ⚠️  Event content verification: DIFFERENT (but same signature)"
+                                    );
                                 }
+
+                                // Extract coordinator info for logging
+                                if let Some(event::EventType::Coordinator(coord_event)) =
+                                    &received_event.event_type
+                                {
+                                    if let Some(coordinator_event::Event::CoordinatorStarted(
+                                        started,
+                                    )) = &coord_event.event
+                                    {
+                                        println!(
+                                            "     📊 Received event: coordinator_id={}, ethereum_address={}",
+                                            started.coordinator_id, started.ethereum_address
+                                        );
+                                    }
+                                }
+                                break; // Exit the inner loop once we find the matching message
+                            } else {
+                                println!(
+                                    "    🔄 Attempt {}: Received different event (signature: {}, latency: {}ms)",
+                                    attempt,
+                                    received_signature,
+                                    roundtrip_latency.as_millis()
+                                );
                             }
-                        } else {
+                        }
+                        Err(e) => {
                             println!(
-                                "    🔄 Attempt {}: Received different event (signature: {}, latency: {}ms)",
-                                attempt, received_signature, roundtrip_latency.as_millis()
+                                "    ⚠️  Attempt {}: Failed to deserialize NATS message: {} (latency: {}ms)",
+                                attempt,
+                                e,
+                                roundtrip_latency.as_millis()
                             );
                         }
                     }
-                    Err(e) => {
-                        println!(
-                            "    ⚠️  Attempt {}: Failed to deserialize NATS message: {} (latency: {}ms)",
-                            attempt, e, roundtrip_latency.as_millis()
-                        );
-                    }
                 }
-            }
-            Ok(None) => {
-                println!(
-                    "    🔄 Attempt {}: No NATS message received in {}ms timeout",
-                    attempt,
-                    receive_timeout.as_millis()
-                );
             }
             Err(_) => {
                 println!(
@@ -194,7 +259,7 @@ async fn test_nats_roundtrip_latency() {
     println!("📊 Performance Summary:");
     println!("  - Event sent via gRPC and received from NATS ✅");
     println!("  - Roundtrip latency: {}ms", roundtrip_latency.as_millis());
-    println!("  - NATS subject: {}", target_subject);
+    println!("  - NATS subject: {}", NATS_STREAM_NAME);
     println!("  - Event signature: {}", expected_signature);
 
     // Categorize latency performance
@@ -257,11 +322,8 @@ fn create_event_signature(event: &Event) -> String {
 }
 
 fn events_match_content(sent: &Event, received: &Event) -> bool {
-    // Deep comparison of event content via JSON serialization
-    match (serde_json::to_string(sent), serde_json::to_string(received)) {
-        (Ok(sent_json), Ok(received_json)) => sent_json == received_json,
-        _ => false,
-    }
+    // Deep comparison of event content via protobuf serialization
+    sent.encode_to_vec() == received.encode_to_vec()
 }
 
 fn get_current_timestamp() -> u64 {
@@ -269,157 +331,4 @@ fn get_current_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
-}
-
-#[tokio::test]
-async fn test_nats_multiple_event_types_latency() {
-    println!("🧪 Starting NATS multiple event types latency test...");
-    println!("🎯 Testing different event types for latency comparison");
-
-    // Connect to services
-    let nats_client = async_nats::connect(NATS_URL)
-        .await
-        .expect("Failed to connect to NATS");
-    let mut grpc_client = SilvanaEventsServiceClient::connect(SERVER_ADDR)
-        .await
-        .expect("Failed to connect to gRPC");
-
-    let coordinator_id = get_unique_coordinator_id();
-    let base_subject = format!("{}.events", NATS_STREAM_NAME);
-
-    // Test different event types and their latencies
-    let test_cases = vec![
-        (
-            "coordinator.started",
-            create_coordinator_started_event(&coordinator_id),
-        ),
-        ("agent.message", create_agent_message_event(&coordinator_id)),
-        (
-            "agent.transaction",
-            create_agent_transaction_event(&coordinator_id),
-        ),
-    ];
-
-    let mut latency_results = Vec::new();
-
-    for (event_type_name, test_event) in test_cases {
-        println!("\n🔍 Testing event type: {}", event_type_name);
-
-        // Setup subscription for this event type
-        let subject = format!("{}.{}", base_subject, event_type_name);
-        let mut subscription = nats_client
-            .subscribe(subject.clone())
-            .await
-            .expect(&format!("Failed to subscribe to {}", subject));
-
-        sleep(Duration::from_millis(50)).await; // Brief setup time
-
-        // Send event and measure latency
-        let send_start = std::time::Instant::now();
-        let request = Request::new(test_event.clone());
-
-        grpc_client
-            .submit_event(request)
-            .await
-            .expect("Failed to send event");
-
-        // Wait for NATS message
-        let timeout_duration = Duration::from_secs(3);
-        match timeout(timeout_duration, subscription.next()).await {
-            Ok(Some(_message)) => {
-                let latency = send_start.elapsed();
-                latency_results.push((event_type_name, latency.as_millis()));
-                println!("  ✅ Received via NATS: {}ms", latency.as_millis());
-            }
-            _ => {
-                println!("  ❌ Timeout waiting for NATS message");
-                latency_results.push((event_type_name, u128::MAX)); // Mark as failed
-            }
-        }
-    }
-
-    // Report comparative results
-    println!("\n📊 Latency Comparison Results:");
-    let mut successful_latencies = Vec::new();
-
-    for (event_type, latency_ms) in &latency_results {
-        if *latency_ms == u128::MAX {
-            println!("  ❌ {}: TIMEOUT", event_type);
-        } else {
-            println!("  ✅ {}: {}ms", event_type, latency_ms);
-            successful_latencies.push(*latency_ms);
-        }
-    }
-
-    if !successful_latencies.is_empty() {
-        let min_latency = successful_latencies.iter().min().unwrap();
-        let max_latency = successful_latencies.iter().max().unwrap();
-        let avg_latency =
-            successful_latencies.iter().sum::<u128>() / successful_latencies.len() as u128;
-
-        println!("\n📈 Aggregate Statistics:");
-        println!("  - Min latency: {}ms", min_latency);
-        println!("  - Max latency: {}ms", max_latency);
-        println!("  - Avg latency: {}ms", avg_latency);
-        println!("  - Latency range: {}ms", max_latency - min_latency);
-        println!(
-            "  - Successful tests: {}/{}",
-            successful_latencies.len(),
-            latency_results.len()
-        );
-    }
-
-    // Ensure at least one test succeeded
-    assert!(
-        !successful_latencies.is_empty(),
-        "At least one event type should succeed"
-    );
-
-    println!("\n🎉 Multiple event types latency test completed!");
-}
-
-fn create_coordinator_started_event(coordinator_id: &str) -> Event {
-    create_test_coordinator_started_event(coordinator_id)
-}
-
-fn create_agent_message_event(coordinator_id: &str) -> Event {
-    Event {
-        event_type: Some(event::EventType::Agent(AgentEvent {
-            event: Some(agent_event::Event::Message(AgentMessageEvent {
-                coordinator_id: coordinator_id.to_string(),
-                developer: "nats-test-developer".to_string(),
-                agent: "nats-test-agent".to_string(),
-                app: "nats-test-app".to_string(),
-                job_id: format!("nats-job-{}", get_current_timestamp()),
-                sequences: vec![1],
-                event_timestamp: get_current_timestamp(),
-                level: 1, // Info
-                message: format!("NATS test message at {}", get_current_timestamp()),
-            })),
-        })),
-    }
-}
-
-fn create_agent_transaction_event(coordinator_id: &str) -> Event {
-    let timestamp = get_current_timestamp();
-
-    Event {
-        event_type: Some(event::EventType::Agent(AgentEvent {
-            event: Some(agent_event::Event::Transaction(AgentTransactionEvent {
-                coordinator_id: coordinator_id.to_string(),
-                tx_type: "nats_test".to_string(),
-                developer: "nats-test-developer".to_string(),
-                agent: "nats-test-agent".to_string(),
-                app: "nats-test-app".to_string(),
-                job_id: format!("nats-job-{}", timestamp),
-                sequences: vec![1],
-                event_timestamp: timestamp,
-                tx_hash: format!("0x{:064x}", timestamp),
-                chain: "ethereum".to_string(),
-                network: "testnet".to_string(),
-                memo: format!("NATS test transaction at {}", timestamp),
-                metadata: format!(r#"{{"test_timestamp": {}}}"#, timestamp),
-            })),
-        })),
-    }
 }

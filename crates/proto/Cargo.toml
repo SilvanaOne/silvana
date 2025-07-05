@@ -6,11 +6,10 @@ authors = ["DFST"]
 license = "Apache-2.0"
 
 [dependencies]
-tonic = { version = "0.10", features = ["tls", "tls-webpki-roots"] }
-prost = "0.12"
-prost-types = "0.12"
-serde = { version = "1.0", features = ["derive"] }
+tonic = { version = "0.13", features = ["tls-webpki-roots"] }
+prost = "0.13"
+prost-types = "0.13"
 
 [build-dependencies]
-tonic-build = "0.10"
-prost-build = "0.12"
+tonic-build = "0.13"
+prost-build = "0.13"

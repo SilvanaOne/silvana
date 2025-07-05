@@ -1,0 +1,1086 @@
+{
+  "refresh_interval": 15,
+  "date_range_from": "now-3h",
+  "date_range_to": "now",
+  "preset": {
+    "id": 822984,
+    "name": null,
+    "preset_type": "implicit",
+    "preset_variables": [
+      {
+        "name": "source",
+        "variable_type": "source",
+        "values": [
+          "1369255"
+        ]
+      },
+      {
+        "name": "start_time",
+        "variable_type": "datetime",
+        "values": [
+          "now-3h"
+        ]
+      },
+      {
+        "name": "end_time",
+        "variable_type": "datetime",
+        "values": [
+          "now"
+        ]
+      }
+    ]
+  },
+  "charts": [
+    {
+      "chart_type": "line_chart",
+      "name": "Disk IO",
+      "description": null,
+      "x": 8,
+      "y": 24,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(68, 145)*(1000*1000), series: 'read' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(168,256)*(1000*1000), series: 'written' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "B_si",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "WITH \n-- average rate for each series\ngrouped_rate AS (\n  SELECT\n    {{time}} AS time, \n    name,\n    avgMerge(rate_avg) AS avg_rate\n  FROM {{source}}\n  WHERE name IN ('node_disk_written_bytes_total', 'node_disk_read_bytes_total')\n     AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name\n)\n-- AVG all series to get total rate\nSELECT \n  time, \n  CASE\n    WHEN name = 'node_disk_written_bytes_total' THEN 'Written'\n    WHEN name = 'node_disk_read_bytes_total' THEN 'Read'\n    ELSE name\n  END AS series, \n  AVG(avg_rate/1000) as value\nFROM grouped_rate\nGROUP BY time, series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Load 5m",
+      "description": null,
+      "x": 8,
+      "y": 1,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(72,82), series: 'Load 5m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": null,
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "query_builder",
+          "sql_query": "WITH grouped_rate AS (\n  \n  SELECT\n    {{time}} AS time,\n    name,\n    avgMerge(value_avg) AS inner_value,\n    NULL AS inner_series\n  FROM {{source}}\n  WHERE\n    name IN ('node_load5')\n    AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name, inner_series, series_id\n  \n),\narrayJoin([\n  ('avg(node_load5)', avgIf(inner_value, name = 'node_load5'))\n]) AS arrayJoinValues\nSELECT\n  time,\n  arrayJoinValues.1 AS series,\n  arrayJoinValues.2 AS value\nFROM grouped_rate\nGROUP BY time, inner_series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": [
+            {
+              "type": "float",
+              "value": "node_load5",
+              "measure": "avg",
+              "value_type": "value"
+            }
+          ],
+          "filters": [
+
+          ],
+          "static_text": null,
+          "default_group_by": "nothing"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Total threads",
+      "description": null,
+      "x": 4,
+      "y": 1,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomIntFromInterval(145,280) })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "-- find max value for each unique series within the time interval\nWITH grouped_values AS (\n  SELECT\n    {{time}} AS time, \n    maxMerge(value_max) AS grouped_value \n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}}\n    AND name = 'node_processes_threads'\n  GROUP BY time, series_id\n)\n-- AVG all series to get the total value\nSELECT \n  time,\n  AVG(grouped_value) as value\nFROM grouped_values\nGROUP BY time\nORDER BY time\n\n",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Blocked processes",
+      "description": null,
+      "x": 8,
+      "y": 5,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomIntFromInterval(0,5) })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "-- find max value for each unique series within the time interval\nWITH grouped_values AS (\n  SELECT\n    {{time}} AS time, \n    maxMerge(value_max) as grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}} \n    AND name = 'node_procs_blocked'\n  GROUP BY time, series_id\n)\n-- SUM all series to get the total value\nSELECT time, SUM(grouped_value) as value\nFROM grouped_values\nGROUP BY time\n",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Total processes",
+      "description": null,
+      "x": 6,
+      "y": 5,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomIntFromInterval(105,230) })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "-- find max value for each unique series within the time interval\nWITH grouped_values AS (\n  SELECT\n    {{time}} AS time, \n    maxMerge(value_max) as grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}} \n    AND name = 'node_processes_pids'\n  GROUP BY time, series_id\n)\n-- SUM all series to get the total value\nSELECT time, SUM(grouped_value) as value\nFROM grouped_values\nGROUP BY time\n",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "Load 1m",
+      "description": null,
+      "x": 0,
+      "y": 10,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(67,89)/100, series: 'Load 1m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "percent",
+        "label": "shown_below",
+        "legend": "hidden",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_colors": {
+          "Load 1m": "#009fe3"
+        },
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected",
+        "guessed_series_colors": {
+          "Load 1m": "#009fe3"
+        }
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "-- find average value for each unique series within the time interval\nWITH grouped_values AS (\n  SELECT\n    {{time}} AS time, \n    avgMerge(value_avg) as grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}} \n    AND name = 'node_load1'\n  GROUP BY time, series_id\n)\n-- AVG all series to get the total value\nSELECT time, 'Load 1m' as series, AVG(grouped_value/100) as value\nFROM grouped_values\nGROUP BY time",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "Load 5m",
+      "description": null,
+      "x": 4,
+      "y": 10,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(72,82)/100, series: 'Load 5m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "percent",
+        "label": "shown_below",
+        "legend": "hidden",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_colors": {
+          "Load 5m": "#009fe3"
+        },
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected",
+        "guessed_series_colors": {
+          "Load 5m": "#009fe3"
+        }
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "-- find average value for each unique series within the time interval\nWITH grouped_values AS (\n  SELECT\n    {{time}} AS time, \n    avgMerge(value_avg) as grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}} \n    AND name = 'node_load5'\n  GROUP BY time, series_id\n)\n-- AVG all series to get the total value\nSELECT time, 'Load 5m' as series, AVG(grouped_value/100) as value\nFROM grouped_values\nGROUP BY time",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "Load 15m",
+      "description": null,
+      "x": 8,
+      "y": 10,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(75, 79)/100, series: 'Load 15m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "percent",
+        "label": "shown_below",
+        "legend": "hidden",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_colors": {
+          "Load 15m": "#009fe3"
+        },
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected",
+        "guessed_series_colors": {
+          "Load 15m": "#009fe3"
+        }
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "-- find average value for each unique series within the time interval\nWITH grouped_values AS (\n  SELECT\n    {{time}} AS time, \n    avgMerge(value_avg) as grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}} \n    AND name = 'node_load15'\n  GROUP BY time, series_id\n)\n-- AVG all series to get the total value\nSELECT time, 'Load 15m' as series, AVG(grouped_value/100) as value\nFROM grouped_values\nGROUP BY time",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "Memory",
+      "description": null,
+      "x": 4,
+      "y": 17,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(8,8)*(1000*1000*1000), series: 'total' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(6.35, 6.42)*(1000*1000*1000), series: 'available' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(2.1, 2.65)*(1000*1000*1000), series: 'free' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "B_si",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "WITH grouped_values AS (\n  -- find max value for each unique series within the time interval\n  SELECT\n    {{time}} AS time, \n    name,\n    maxMerge(value_max) as grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}}\n    AND name IN ('node_memory_MemTotal_bytes', 'node_memory_MemAvailable_bytes', 'node_memory_MemFree_bytes', 'node_memory_Cached_bytes')\n  GROUP BY time, name, series_id\n)\n-- SUM all series to get the total value\nSELECT \n  time,\n  CASE\n    WHEN name = 'node_memory_MemTotal_bytes' THEN 'Total'\n    WHEN name = 'node_memory_MemAvailable_bytes' THEN 'Available'\n    WHEN name = 'node_memory_MemFree_bytes' THEN 'Free'\n    WHEN name = 'node_memory_Cached_bytes' THEN 'Cached'\n    ELSE name\n  END AS series,\n  SUM(grouped_value) as value\nFROM grouped_values\nGROUP BY time, series\nORDER BY time, series\n",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "CPU usage",
+      "description": null,
+      "x": 0,
+      "y": 17,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(15,23)/100, series: 'idle' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(92,68)/100, series: 'user' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(1,3)/100, series: 'system' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "percent",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "WITH \n-- average rate for each series\ngrouped_rate AS (\n  SELECT\n    {{time}} AS time, \n    metricTag('mode') AS series,\n    avgMerge(rate_avg) AS avg_rate\n  FROM {{source}}\n  WHERE name = 'node_cpu_seconds_total' \n     AND time BETWEEN {{start_time}} AND {{end_time}}\n     AND series IN ('user', 'system', 'iowait')\n  GROUP BY time, series, series_id\n)\n-- AVG all series to get total rate\nSELECT time, series, AVG(avg_rate) as value\nFROM grouped_rate\nGROUP BY time, series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "Processes",
+      "description": null,
+      "x": 0,
+      "y": 24,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(53,72), series: 'Idle' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(105,230), series: 'Running' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(0,5), series: 'Sleeping' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(0,2), series: 'Zombie' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "WITH grouped_values AS (\n  -- find max value for each unique series within the time interval\n  SELECT\n    {{time}} AS time, \n    metricTag('state') AS state,\n    maxMerge(value_max) AS grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}}\n    AND name IN ('node_processes_state')\n  GROUP BY time, state, series_id\n)\n-- SUM all series to get the total value\nSELECT \n  time,\n  CASE\n    WHEN state = 'I' THEN 'Idle'\n    WHEN state = 'R' THEN 'Running'\n    WHEN state = 'S' THEN 'Sleeping'\n    WHEN state = 'B' THEN 'Blocked'\n    WHEN state = 'Z' THEN 'Zombie'\n    WHEN state = 'D' THEN 'Uninterruptible sleeping'\n    WHEN state = 'T' THEN 'Traced'\n    ELSE state\n  END AS series,\n  SUM(grouped_value) as value\nFROM grouped_values\nGROUP BY time, series\nORDER BY time, series\n\n",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "Network traffic",
+      "description": null,
+      "x": 8,
+      "y": 17,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(150, 456)*(1000*1000), series: 'received' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(168,256)*(1000*1000), series: 'sent' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "B_si",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "WITH \n-- average rate for each series\ngrouped_rate AS (\n  SELECT\n    {{time}} AS time, \n    name,\n    avgMerge(rate_avg) AS avg_rate\n  FROM {{source}}\n  WHERE name IN ('node_network_receive_bytes_total', 'node_network_transmit_bytes_total')\n     AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name\n)\n-- AVG all series to get total rate\nSELECT \n  time, \n  CASE\n    WHEN name = 'node_network_receive_bytes_total' THEN 'Received'\n    WHEN name = 'node_network_transmit_bytes_total' THEN 'Sent'\n    ELSE name\n  END AS series, \n  AVG(avg_rate/1000) as value\nFROM grouped_rate\nGROUP BY time, series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "line_chart",
+      "name": "Disk usage",
+      "description": null,
+      "x": 4,
+      "y": 24,
+      "w": 4,
+      "h": 7,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(67, 76)/100, series: 'dev/sda1' })\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(15,23)/100, series: 'dev/sda2' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "percent",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "WITH grouped_values AS (\n  -- find average value for each unique series within the time interval\n  SELECT\n    {{time}} AS time, \n    metricTag('device') AS series,\n    (1.0 - avgMergeIf(value_avg, name = 'node_filesystem_free_bytes') / avgMergeIf(value_avg, name = 'node_filesystem_size_bytes')) as grouped_value\n  FROM {{source}}\n  WHERE \n    time BETWEEN {{start_time}} AND {{end_time}}\n    AND series LIKE '/dev/sda%'\n  GROUP BY time, series_id, series\n)\n-- SUM all series to get the total value\nSELECT \n  time,\n  series,\n  SUM(grouped_value) as value\nFROM grouped_values\nGROUP BY time, series\nORDER BY time, series\n",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Total memory",
+      "description": null,
+      "x": 0,
+      "y": 5,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(8, 8), series: 'Load 15m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "B_iec",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": null,
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "query_builder",
+          "sql_query": "WITH grouped_rate AS (\n  \n  SELECT\n    {{time}} AS time,\n    name,\n    avgMerge(value_avg) AS inner_value,\n    NULL AS inner_series\n  FROM {{source}}\n  WHERE\n    name IN ('node_memory_MemTotal_bytes')\n    AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name, inner_series, series_id\n  \n),\narrayJoin([\n  ('avg(node_memory_MemTotal_bytes)', avgIf(inner_value, name = 'node_memory_MemTotal_bytes'))\n]) AS arrayJoinValues\nSELECT\n  time,\n  arrayJoinValues.1 AS series,\n  arrayJoinValues.2 AS value\nFROM grouped_rate\nGROUP BY time, inner_series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": [
+            {
+              "type": "float",
+              "value": "node_memory_MemTotal_bytes",
+              "measure": "avg",
+              "value_type": "value"
+            }
+          ],
+          "filters": [
+
+          ],
+          "static_text": null,
+          "default_group_by": "nothing"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Free memory",
+      "description": null,
+      "x": 4,
+      "y": 5,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(2.1, 2.65), series: 'Load 15m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "B_iec",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": null,
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "query_builder",
+          "sql_query": "WITH grouped_rate AS (\n  \n  SELECT\n    {{time}} AS time,\n    name,\n    avgMerge(value_avg) AS inner_value,\n    NULL AS inner_series\n  FROM {{source}}\n  WHERE\n    name IN ('node_memory_MemFree_bytes')\n    AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name, inner_series, series_id\n  \n),\narrayJoin([\n  ('avg(node_memory_MemFree_bytes)', avgIf(inner_value, name = 'node_memory_MemFree_bytes'))\n]) AS arrayJoinValues\nSELECT\n  time,\n  arrayJoinValues.1 AS series,\n  arrayJoinValues.2 AS value\nFROM grouped_rate\nGROUP BY time, inner_series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": [
+            {
+              "type": "float",
+              "value": "node_memory_MemFree_bytes",
+              "measure": "avg",
+              "value_type": "value"
+            }
+          ],
+          "filters": [
+
+          ],
+          "static_text": null,
+          "default_group_by": "nothing"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Zombie processes",
+      "description": null,
+      "x": 10,
+      "y": 5,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomIntFromInterval(0,0) })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "time_column": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "SELECT\n  {{time}} AS time,\n  maxMerge(value_max) AS value\nFROM\n  {{source}}\nWHERE\n  time BETWEEN {{start_time}} AND {{end_time}}\n  AND name = 'node_processes_threads_state'\n  AND metricTag('thread_state') = 'Z'\nGROUP BY time\nORDER BY time",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Load 1m",
+      "description": null,
+      "x": 6,
+      "y": 1,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(67,89), series: 'Load 1m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": null,
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "query_builder",
+          "sql_query": "WITH grouped_rate AS (\n  \n  SELECT\n    {{time}} AS time,\n    name,\n    avgMerge(value_avg) AS inner_value,\n    NULL AS inner_series\n  FROM {{source}}\n  WHERE\n    name IN ('node_load1')\n    AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name, inner_series, series_id\n  \n),\narrayJoin([\n  ('avg(node_load1)', avgIf(inner_value, name = 'node_load1'))\n]) AS arrayJoinValues\nSELECT\n  time,\n  arrayJoinValues.1 AS series,\n  arrayJoinValues.2 AS value\nFROM grouped_rate\nGROUP BY time, inner_series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": [
+            {
+              "type": "float",
+              "value": "node_load1",
+              "measure": "avg",
+              "value_type": "value"
+            }
+          ],
+          "filters": [
+
+          ],
+          "static_text": null,
+          "default_group_by": "nothing"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Load 15m",
+      "description": null,
+      "x": 10,
+      "y": 1,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(75, 79), series: 'Load 15m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "auto",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": null,
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "query_builder",
+          "sql_query": "WITH grouped_rate AS (\n  \n  SELECT\n    {{time}} AS time,\n    name,\n    avgMerge(value_avg) AS inner_value,\n    NULL AS inner_series\n  FROM {{source}}\n  WHERE\n    name IN ('node_load15')\n    AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name, inner_series, series_id\n  \n),\narrayJoin([\n  ('avg(node_load15)', avgIf(inner_value, name = 'node_load15'))\n]) AS arrayJoinValues\nSELECT\n  time,\n  arrayJoinValues.1 AS series,\n  arrayJoinValues.2 AS value\nFROM grouped_rate\nGROUP BY time, inner_series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": [
+            {
+              "type": "float",
+              "value": "node_load15",
+              "measure": "avg",
+              "value_type": "value"
+            }
+          ],
+          "filters": [
+
+          ],
+          "static_text": null,
+          "default_group_by": "nothing"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Available memory",
+      "description": null,
+      "x": 2,
+      "y": 5,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  const from = new Date(fromString)\n  const to = new Date(toString)\n\n  function addSeconds(date, seconds) {\n    return new Date(date.getTime() + seconds*1000)\n  }\n\n  function randomIntFromInterval(min, max) { // min and max included\n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\nfunction randomFloatFromInterval(min, max) {\n let cal = (Math.random() * (max - min) + min);\n return parseFloat(cal);\n}\n\n  let data = []\n\n  let time = from\n\n  do {\n    data.push({ time: time.toISOString(), value: randomFloatFromInterval(6.35, 6.42), series: 'Load 15m' })\n\n    time = addSeconds(time, 3600)\n  } while (time.getTime() <= to.getTime())\n\n  return { 0: data }\n}",
+      "settings": {
+        "unit": "B_iec",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "lat",
+        "lng_column": "lng",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": null,
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "query_builder",
+          "sql_query": "WITH grouped_rate AS (\n  \n  SELECT\n    {{time}} AS time,\n    name,\n    avgMerge(value_avg) AS inner_value,\n    NULL AS inner_series\n  FROM {{source}}\n  WHERE\n    name IN ('node_memory_MemAvailable_bytes')\n    AND time BETWEEN {{start_time}} AND {{end_time}}\n  GROUP BY time, name, inner_series, series_id\n  \n),\narrayJoin([\n  ('avg(node_memory_MemAvailable_bytes)', avgIf(inner_value, name = 'node_memory_MemAvailable_bytes'))\n]) AS arrayJoinValues\nSELECT\n  time,\n  arrayJoinValues.1 AS series,\n  arrayJoinValues.2 AS value\nFROM grouped_rate\nGROUP BY time, inner_series",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": [
+            {
+              "type": "float",
+              "value": "node_memory_MemAvailable_bytes",
+              "measure": "avg",
+              "value_type": "value"
+            }
+          ],
+          "filters": [
+
+          ],
+          "static_text": null,
+          "default_group_by": "nothing"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "CPUs",
+      "description": null,
+      "x": 2,
+      "y": 1,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  function randomIntFromInterval(min, max) { // min and max included \n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\n  return [ {value: '4'} ]\n}\n",
+      "settings": {
+        "text": "",
+        "unit": "auto",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "latitude",
+        "lng_column": "longitude",
+        "table_width": null,
+        "time_column": "time",
+        "x_axis_type": "time",
+        "column_units": {
+        },
+        "y_axis_scale": "linear",
+        "column_widths": {
+        },
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": "size",
+        "treat_missing_values": "connected",
+        "percentage_highlight_columns": [
+
+        ]
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "SELECT\n  COUNT(DISTINCT metricTag('cpu')) as value\nFROM {{source}}\nWHERE name = 'node_cpu_seconds_total'\n  AND dt BETWEEN {{start_time}} AND {{end_time}}\nGROUP BY dt\nORDER BY dt DESC\nLIMIT 1\n",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    },
+    {
+      "chart_type": "number_chart",
+      "name": "Uptime",
+      "description": null,
+      "x": 0,
+      "y": 1,
+      "w": 2,
+      "h": 4,
+      "transform_with": "// Transform chart data before rendering.\n// Following function is called when new data arrives, and again with `completed = true` after all data arrives.\n// You can transform the data here arbitrarily.\n// Most chart types expect columns 'time', 'value' and optionally 'series' by default.\nasync (existingDataByQuery, newDataByQuery, completed) => {\n  return Object.keys(newDataByQuery).reduce((result, queryIndex) => {\n    result[queryIndex] = result[queryIndex].concat(newDataByQuery[queryIndex]);\n    return result;\n  }, existingDataByQuery);\n}\n",
+      "finalize_with": null,
+      "fake_with": "async (fromString, toString) => {\n  function randomIntFromInterval(min, max) { // min and max included \n    return Math.floor(Math.random() * (max - min + 1) + min)\n  }\n\n  return [ {value: '4d 15h 23m'} ]\n}\n",
+      "settings": {
+        "unit": "auto",
+        "label": "shown_below",
+        "legend": "shown_below",
+        "ttl_cache": "auto",
+        "lat_column": "latitude",
+        "lng_column": "longitude",
+        "time_column": "time",
+        "x_axis_type": "time",
+        "y_axis_scale": "linear",
+        "series_column": "series",
+        "value_columns": [
+          "value"
+        ],
+        "decimal_places": 2,
+        "selected_series": null,
+        "point_size_column": "size",
+        "treat_missing_values": "connected"
+      },
+      "chart_queries": [
+        {
+          "query_type": "sql_expression",
+          "sql_query": "WITH elapsed_time_calc AS (\n  SELECT\n    dt AS last_update,\n    replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(replaceRegexpAll(\n      formatReadableTimeDelta(now() - toDateTime(maxMerge(value_max)), 'days'), \n    '\\sdays?', 'd'), '\\shours?', 'h'), '\\sminutes?', 'm'), '\\sseconds?', 's'), 'and|,', '') AS result\n  FROM {{source}}\n  WHERE name = 'node_boot_time_seconds'\n  GROUP BY dt\n  ORDER BY dt DESC\n  LIMIT 1\n)\nSELECT\n  if(\n    last_update < now() - INTERVAL 6 MINUTES,\n    'Down',\n    result\n  ) as value\nFROM elapsed_time_calc\n\nUNION ALL\n\nSELECT 'Down' AS value\nWHERE NOT EXISTS (\n  SELECT 1 FROM {{source}} \n  WHERE name = 'node_boot_time_seconds'\n  ORDER BY dt DESC\n  LIMIT 1\n)",
+          "group_by": [
+
+          ],
+          "where_condition": "AND",
+          "y_axis": null,
+          "filters": null,
+          "static_text": null,
+          "default_group_by": "everything"
+        }
+      ],
+      "chart_alerts": [
+
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "name": "Overview",
+      "collapsed": false,
+      "y": 0
+    },
+    {
+      "name": "System",
+      "collapsed": false,
+      "y": 9
+    }
+  ]
+}

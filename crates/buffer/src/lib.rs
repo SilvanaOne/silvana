@@ -534,13 +534,58 @@ impl<T: BufferableEvent> BatchProcessor<T> {
             .sum::<usize>();
 
         // Process backend and event publishing in parallel (if event publisher is enabled)
+        let start_time = Instant::now();
         let (backend_result, publish_result) =
             if let Some(ref event_publisher) = self.event_publisher {
-                let backend_future = self.process_with_retry(&events_to_process);
-                let publish_future = event_publisher.publish_batch(&events_to_process);
-                tokio::join!(backend_future, publish_future)
+                let backend_start = Instant::now();
+                let publish_start = Instant::now();
+
+                let backend_future = async {
+                    let result = self.process_with_retry(&events_to_process).await;
+                    let backend_duration = backend_start.elapsed();
+                    debug!(
+                        "⏱️ Backend processing completed in {:?} for {} events ({})",
+                        backend_duration,
+                        event_count,
+                        self.backend.backend_name()
+                    );
+                    (result, backend_duration)
+                };
+
+                let publish_future = async {
+                    let result = event_publisher.publish_batch(&events_to_process).await;
+                    let publish_duration = publish_start.elapsed();
+                    debug!(
+                        "⏱️ Event publishing completed in {:?} for {} events",
+                        publish_duration, event_count
+                    );
+                    (result, publish_duration)
+                };
+
+                let ((backend_result, backend_duration), (publish_result, publish_duration)) =
+                    tokio::join!(backend_future, publish_future);
+                let total_duration = start_time.elapsed();
+
+                debug!(
+                    "⏱️ Parallel processing summary: Backend={:?}, Publish={:?}, Total={:?}",
+                    backend_duration, publish_duration, total_duration,
+                );
+
+                (backend_result, publish_result)
             } else {
+                let backend_start = Instant::now();
                 let backend_result = self.process_with_retry(&events_to_process).await;
+                let backend_duration = backend_start.elapsed();
+                let total_duration = start_time.elapsed();
+
+                debug!(
+                    "⏱️ Backend-only processing completed in {:?} for {} events ({})",
+                    backend_duration,
+                    event_count,
+                    self.backend.backend_name()
+                );
+                debug!("⏱️ Total processing time: {:?}", total_duration,);
+
                 (backend_result, Ok((0, 0))) // No event publishing
             };
 

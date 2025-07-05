@@ -2,9 +2,7 @@
 //! Generated from proto definition: AgentStartedJobEvent
 
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "agent_started_job_event")]
 pub struct Model {
     #[sea_orm(primary_key)]

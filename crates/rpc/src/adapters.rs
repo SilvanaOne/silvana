@@ -7,18 +7,50 @@ use crate::database::EventDatabase as RpcEventDatabase;
 use anyhow::Result;
 use async_trait::async_trait;
 use buffer::BufferableEvent;
+use prost::bytes::{Buf, BufMut};
+use prost::{DecodeError, Message};
 use proto::Event;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tidb::{EventDatabase, TidbBackend};
 
 /// Wrapper type for proto Event to implement BufferableEvent and Serialize for NATS publishing
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct EventWrapper(pub Event);
 
 impl From<Event> for EventWrapper {
     fn from(event: Event) -> Self {
         EventWrapper(event)
+    }
+}
+
+/// Implementation of prost::Message for EventWrapper to enable protobuf encoding
+impl Message for EventWrapper {
+    fn encode_raw(&self, buf: &mut impl BufMut)
+    where
+        Self: Sized,
+    {
+        self.0.encode_raw(buf)
+    }
+
+    fn merge_field(
+        &mut self,
+        tag: u32,
+        wire_type: prost::encoding::WireType,
+        buf: &mut impl Buf,
+        ctx: prost::encoding::DecodeContext,
+    ) -> Result<(), DecodeError>
+    where
+        Self: Sized,
+    {
+        self.0.merge_field(tag, wire_type, buf, ctx)
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.0.encoded_len()
+    }
+
+    fn clear(&mut self) {
+        self.0.clear()
     }
 }
 
@@ -211,7 +243,11 @@ fn estimate_agent_event_size(agent_event: &proto::events::AgentEvent) -> usize {
                     + e.chain.len()
                     + e.network.len()
                     + e.memo.len()
-                    + e.metadata.len()
+                    + if let Some(metadata) = e.metadata.as_ref() {
+                        metadata.len()
+                    } else {
+                        0
+                    }
                     + 128;
 
                 // Add memory for child table records

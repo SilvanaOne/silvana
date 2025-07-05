@@ -12,9 +12,9 @@ sudo setcap 'cap_net_bind_service=+ep' target/release/rpc
 target/release/rpc
 ````
 
-🔒 NATS (TLS): nats://rpc-dev.silvana.dev:4222
-🔒 NATS-WS (TLS): wss://rpc-dev.silvana.dev:8080/ws
-📊 NATS monitoring: http://rpc-dev.silvana.dev:8222
+🔒 NATS (TLS): nats://rpc.silvana.dev:4222
+🔒 NATS-WS (TLS): wss://rpc.silvana.dev:8080/ws
+📊 NATS monitoring: http://rpc.silvana.dev:8222
 
 copy image to s3 and back:
 

@@ -4,3 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0"
+axum = { version = "0.8", features = ["http1", "json", "query"] }
+prometheus = { version = "0.14", features = ["process"] }
+sysinfo = "0.35"
+tokio = { version = "1.46", features = ["full"] }
+tracing = "0.1"
+buffer = { path = "../buffer" }
+
+
+# Logging dependencies
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# OpenTelemetry dependencies for BetterStack integration
+opentelemetry = "0.30"
+opentelemetry_sdk = { version = "0.30", features = ["rt-tokio", "logs", "metrics"] }
+opentelemetry-otlp = { version = "0.30", features = ["logs", "metrics", "grpc-tonic", "tls"] }
+tonic = { version = "0.13", features = ["tls-webpki-roots"] }

@@ -97,9 +97,10 @@ fn parse_message_fields(message_body: &str) -> Result<Vec<ProtoField>> {
 
             if let Some(options_match) = captures.get(4) {
                 let options_str = options_match.as_str();
-                has_search_option = options_str.contains("(silvana.options.search) = true")
+                has_search_option = options_str.contains("(silvana.options.v1.search) = true")
                     || options_str.contains("(search) = true");
-                has_sequences_option = options_str.contains("(silvana.options.sequences) = true")
+                has_sequences_option = options_str
+                    .contains("(silvana.options.v1.sequences) = true")
                     || options_str.contains("(sequences) = true");
             }
 
@@ -176,6 +177,7 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                 &field.field_type,
                 field.is_repeated,
                 field.has_search_option,
+                field.name.contains("metadata") || field.name.contains("message"),
             );
             let nullable = if field.is_optional || field.is_repeated {
                 "NULL"
@@ -252,7 +254,12 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
             let parent_fk = format!("{}_id", table_name); // e.g. agent_message_event_id
             let value_col = field.name.to_singular().to_snake_case(); // e.g. sequences -> sequence
 
-            let mysql_type = proto_type_to_mysql(&field.field_type, /* is_repeated = */ false);
+            let mysql_type = proto_type_to_mysql_with_options(
+                &field.field_type,
+                /* is_repeated = */ false,
+                false,
+                field.name.contains("metadata") || field.name.contains("message"),
+            );
 
             ddl.push_str(&format!(
                 "-- Child table for repeated field `{}`\n",
@@ -383,11 +390,11 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
 
     // Imports
     content.push_str("use sea_orm::entity::prelude::*;\n");
-    content.push_str("use serde::{Deserialize, Serialize};\n\n");
+    //content.push_str("use serde::{Deserialize, Serialize};\n\n");
 
     // Model struct
     content.push_str(
-        "#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]\n",
+        "#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]\n", //, Serialize, Deserialize
     );
     content.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", table_name));
     content.push_str("pub struct Model {\n");
@@ -450,11 +457,11 @@ fn generate_child_entity_file(
         field.name, parent.name, module_name
     ));
     content.push_str("use sea_orm::entity::prelude::*;\n");
-    content.push_str("use serde::{Deserialize, Serialize};\n\n");
+    //content.push_str("use serde::{Deserialize, Serialize};\n\n");
 
     // Model struct
     content.push_str(
-        "#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]\n",
+        "#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]\n", //, Serialize, Deserialize
     );
     content.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", table_name));
     content.push_str("pub struct Model {\n");
@@ -476,14 +483,11 @@ fn generate_child_entity_file(
     Ok(())
 }
 
-pub fn proto_type_to_mysql(proto_type: &str, is_repeated: bool) -> String {
-    proto_type_to_mysql_with_options(proto_type, is_repeated, false)
-}
-
 pub fn proto_type_to_mysql_with_options(
     proto_type: &str,
     is_repeated: bool,
     has_search_option: bool,
+    long_text: bool,
 ) -> String {
     if is_repeated {
         return "JSON".to_string();
@@ -492,7 +496,11 @@ pub fn proto_type_to_mysql_with_options(
     match proto_type {
         "string" => {
             if has_search_option {
-                "VARCHAR(255)".to_string() // Use VARCHAR for searchable fields - supports both regular and FULLTEXT indexes
+                if long_text {
+                    "TEXT".to_string()
+                } else {
+                    "VARCHAR(255)".to_string()
+                } // Use VARCHAR for searchable fields - supports both regular and FULLTEXT indexes
             } else {
                 "VARCHAR(255)".to_string()
             }
@@ -516,29 +524,20 @@ pub fn proto_type_to_mysql_with_options(
 }
 
 pub fn proto_type_to_rust(proto_type: &str, is_repeated: bool, is_optional: bool) -> String {
-    let base_type = if is_repeated {
-        return "Option<serde_json::Value>".to_string(); // JSON fields are nullable
-    } else {
-        match proto_type {
-            "string" => "String".to_string(),
-            "bytes" => "Vec<u8>".to_string(),
-            "int32" | "sint32" | "sfixed32" => "i32".to_string(),
-            "int64" | "sint64" | "sfixed64" => "i64".to_string(),
-            "uint32" | "fixed32" => "u32".to_string(),
-            "uint64" | "fixed64" => "i64".to_string(), // Use i64 for compatibility
-            "float" => "f32".to_string(),
-            "double" => "f64".to_string(),
-            "bool" => "bool".to_string(),
+    let base_type = match proto_type {
+        "string" => "String".to_string(),
+        "bytes" => "Vec<u8>".to_string(),
+        "int32" | "sint32" | "sfixed32" => "i32".to_string(),
+        "int64" | "sint64" | "sfixed64" => "i64".to_string(),
+        "uint32" | "fixed32" => "u32".to_string(),
+        "uint64" | "fixed64" => "i64".to_string(), // Use i64 for compatibility
+        "float" => "f32".to_string(),
+        "double" => "f64".to_string(),
+        "bool" => "bool".to_string(),
 
-            // Handle known enum types
-            "LogLevel" => "i32".to_string(), // Protobuf enums are typically i32
-
-            // Handle custom message types as JSON
-            _ if proto_type.chars().next().unwrap().is_uppercase() => {
-                "serde_json::Value".to_string()
-            }
-            _ => "String".to_string(),
-        }
+        // Handle known enum types
+        "LogLevel" => "i32".to_string(), // Protobuf enums are typically i32
+        _ => "String".to_string(),
     };
 
     if is_optional {
@@ -554,12 +553,30 @@ mod tests {
 
     #[test]
     fn test_proto_type_conversion() {
-        assert_eq!(proto_type_to_mysql("string", false), "VARCHAR(255)");
-        assert_eq!(proto_type_to_mysql("int64", false), "BIGINT");
-        assert_eq!(proto_type_to_mysql("uint64", false), "BIGINT");
-        assert_eq!(proto_type_to_mysql("bool", false), "BOOLEAN");
-        assert_eq!(proto_type_to_mysql("bytes", false), "BLOB");
-        assert_eq!(proto_type_to_mysql("string", true), "JSON");
+        assert_eq!(
+            proto_type_to_mysql_with_options("string", false, false, false),
+            "VARCHAR(255)"
+        );
+        assert_eq!(
+            proto_type_to_mysql_with_options("int64", false, false, false),
+            "BIGINT"
+        );
+        assert_eq!(
+            proto_type_to_mysql_with_options("uint64", false, false, false),
+            "BIGINT"
+        );
+        assert_eq!(
+            proto_type_to_mysql_with_options("bool", false, false, false),
+            "BOOLEAN"
+        );
+        assert_eq!(
+            proto_type_to_mysql_with_options("bytes", false, false, false),
+            "BLOB"
+        );
+        assert_eq!(
+            proto_type_to_mysql_with_options("string", true, false, false),
+            "JSON"
+        );
     }
 
     #[test]
@@ -567,18 +584,15 @@ mod tests {
         assert_eq!(proto_type_to_rust("string", false, false), "String");
         assert_eq!(proto_type_to_rust("string", false, true), "Option<String>");
         assert_eq!(proto_type_to_rust("uint64", false, false), "i64");
-        assert_eq!(
-            proto_type_to_rust("string", true, false),
-            "Option<serde_json::Value>"
-        );
+        assert_eq!(proto_type_to_rust("string", true, false), "Option<String>");
     }
 
     #[test]
     fn test_field_parsing() {
         let message_body = r#"
-            string coordinator_id = 1 [ (silvana.options.search) = true];
+            string coordinator_id = 1 [ (silvana.options.v1.search) = true];
             uint64 timestamp = 2;
-            repeated uint64 sequences = 3 [ (silvana.options.sequences) = true];
+            repeated uint64 sequences = 3 [ (silvana.options.v1.sequences) = true];
             optional string description = 4;
         "#;
 

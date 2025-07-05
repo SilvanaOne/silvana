@@ -9,11 +9,10 @@ use tonic_web::GrpcWebLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 
+use monitoring::{init_monitoring, spawn_monitoring_tasks, start_metrics_server};
 use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
-use rpc::database::EventDatabase;
-use rpc::log;
-use rpc::monitoring::{init_monitoring, spawn_monitoring_tasks, start_metrics_server};
 use rpc::SilvanaEventsServiceImpl;
+use rpc::database::EventDatabase;
 
 // Import buffer directly
 use buffer::EventBuffer;
@@ -28,9 +27,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 Starting Silvana RPC server");
     // Load environment variables from .env file
 
-    // Initialize logging
-    log::init_logging().await?;
+    // Initialize logging (now from monitoring crate)
+    monitoring::init_logging().await?;
     info!("✅ Logging initialized");
+
+    // Initialize OpenTelemetry for BetterStack export
+    if let Err(e) = monitoring::init_opentelemetry().await {
+        warn!("⚠️  Failed to initialize OpenTelemetry: {}", e);
+        warn!("   Continuing without OpenTelemetry exports");
+    } else {
+        info!("✅ OpenTelemetry initialized");
+
+        // Test the integration
+        if let Err(e) = monitoring::opentelemetry::test_integration().await {
+            warn!("⚠️  OpenTelemetry integration test failed: {}", e);
+        }
+    }
 
     // Initialize monitoring system
     init_monitoring()?;

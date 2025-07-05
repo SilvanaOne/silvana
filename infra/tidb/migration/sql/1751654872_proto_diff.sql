@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS coordinator_message_event (
     `coordinator_id` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `level` TINYINT NOT NULL,
-    `message` VARCHAR(255) NOT NULL,
+    `message` TEXT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS agent_message_event (
     `job_id` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `level` TINYINT NOT NULL,
-    `message` VARCHAR(255) NOT NULL,
+    `message` TEXT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS agent_message_event (
     FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_app (`app`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD,
+    FULLTEXT INDEX ft_idx_message (`message`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS agent_message_event_sequences (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -162,7 +163,7 @@ CREATE TABLE IF NOT EXISTS agent_transaction_event (
     `chain` VARCHAR(255) NOT NULL,
     `network` VARCHAR(255) NOT NULL,
     `memo` VARCHAR(255) NOT NULL,
-    `metadata` VARCHAR(255) NOT NULL,
+    `metadata` TEXT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),

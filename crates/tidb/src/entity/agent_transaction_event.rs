@@ -2,9 +2,7 @@
 //! Generated from proto definition: AgentTransactionEvent
 
 use sea_orm::entity::prelude::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "agent_transaction_event")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -20,7 +18,7 @@ pub struct Model {
     pub chain: String,
     pub network: String,
     pub memo: String,
-    pub metadata: String,
+    pub metadata: Option<String>,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,
 }

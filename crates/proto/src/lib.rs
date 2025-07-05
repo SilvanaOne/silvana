@@ -4,7 +4,7 @@
 //! that are shared across different Silvana components.
 
 pub mod events {
-    tonic::include_proto!("silvana.events");
+    tonic::include_proto!("silvana.events.v1");
 }
 
 // Re-export commonly used types for convenience

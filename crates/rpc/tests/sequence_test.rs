@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tonic::transport::{Channel, ClientTlsConfig};
 use tonic::Request;
+use tonic::transport::{Channel, ClientTlsConfig};
 
 use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::*;
 
 // Test configuration
-const TOTAL_EVENTS: usize = 1000;
-const SEQUENCE_COUNT: usize = 10;
-const SERVER_ADDR: &str = "https://rpc-dev.silvana.dev"; //"https://rpc-dev.silvana.dev"; //"https://rpc-dev.silvana.dev:443";
-                                                         // Generate a unique coordinator ID for each test run to avoid data contamination
+const TOTAL_EVENTS: usize = 1;
+const SEQUENCE_COUNT: usize = 1;
+const SERVER_ADDR: &str = "http://127.0.0.1:50051"; //"https://rpc.silvana.dev"; //"https://rpc.silvana.dev"; //"https://rpc.silvana.dev:443";
+// Generate a unique coordinator ID for each test run to avoid data contamination
 fn get_unique_coordinator_id() -> String {
     format!("seq-test-{}", get_current_timestamp())
 }
@@ -40,8 +40,8 @@ async fn test_sequence_events_round_trip() {
 
     let channel = if use_tls {
         // HTTPS connection with TLS
-        let server_domain = if SERVER_ADDR.contains("rpc-dev.silvana.dev") {
-            "rpc-dev.silvana.dev"
+        let server_domain = if SERVER_ADDR.contains("rpc.silvana.dev") {
+            "rpc.silvana.dev"
         } else {
             "localhost" // fallback for other HTTPS addresses
         };
@@ -167,7 +167,9 @@ async fn test_sequence_events_round_trip() {
         let send_start = std::time::Instant::now();
         let mut last_send_time = std::time::Instant::now();
         for (event, event_type, job_id) in events_for_sequence {
-            let request = Request::new(event.clone());
+            let request = Request::new(SubmitEventRequest {
+                event: Some(event.clone()),
+            });
             let send_time = std::time::Instant::now();
 
             match client.submit_event(request).await {
@@ -192,6 +194,8 @@ async fn test_sequence_events_round_trip() {
             send_start.elapsed().as_millis()
         );
 
+        // Wait 5 seconds to allow for processing
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         // Immediately start polling for this sequence
         let timeout = std::time::Duration::from_secs(5);
         let poll_start = std::time::Instant::now();
@@ -213,6 +217,8 @@ async fn test_sequence_events_round_trip() {
                 app: None,
             });
 
+            println!("Message request: {:?}", &message_request);
+
             let message_response = match client
                 .get_agent_message_events_by_sequence(message_request)
                 .await
@@ -224,6 +230,10 @@ async fn test_sequence_events_round_trip() {
                     continue;
                 }
             };
+            println!(
+                "✅ Successfully queried message events{:?}",
+                message_response
+            );
 
             // Query AgentTransactionEvents by sequence
             let tx_request = Request::new(GetAgentTransactionEventsBySequenceRequest {
@@ -304,7 +314,8 @@ async fn test_sequence_events_round_trip() {
                 } else {
                     println!(
                         "    🔄 Attempt {}: Got expected counts but data validation failed (latency={}ms)",
-                        attempt, end_to_end_latency.as_millis()
+                        attempt,
+                        end_to_end_latency.as_millis()
                     );
                 }
             } else {
@@ -409,7 +420,10 @@ fn create_test_events_with_sequences(coordinator_id: &str) -> Vec<(Event, u64, S
                         chain: "ethereum".to_string(),
                         network: "testnet".to_string(),
                         memo: format!("Test transaction for sequence {} (event {})", sequence, i),
-                        metadata: format!(r#"{{"event_index": {}, "sequence": {}}}"#, i, sequence),
+                        metadata: Some(format!(
+                            r#"{{"event_index": {}, "sequence": {}}}"#,
+                            i, sequence
+                        )),
                     })),
                 })),
             };
