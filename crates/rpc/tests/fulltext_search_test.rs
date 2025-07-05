@@ -5,7 +5,13 @@ use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::*;
 
 // Test configuration
-const SERVER_ADDR: &str = "https://rpc-dev.silvana.dev";
+fn get_server_addr() -> String {
+    // Load .env file if it exists
+    dotenvy::dotenv().ok();
+
+    // Get TEST_SERVER from environment, fallback to default if not set
+    std::env::var("TEST_SERVER").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string())
+}
 
 // Generate a unique coordinator ID for each test run to avoid data contamination
 fn get_unique_coordinator_id() -> String {
@@ -15,16 +21,20 @@ fn get_unique_coordinator_id() -> String {
 #[tokio::test]
 async fn test_fulltext_search_coordinator_messages() {
     println!("🧪 Starting full-text search test...");
-    println!("🎯 Server address: {}", SERVER_ADDR);
+    let server_addr = get_server_addr();
+    println!("🎯 Server address: {}", server_addr);
 
     // Connect to the gRPC server
-    let mut client = match SilvanaEventsServiceClient::connect(SERVER_ADDR).await {
+    let mut client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
         }
         Err(e) => {
-            panic!("❌ Failed to connect to RPC server at {}: {}\nMake sure the server is running with: cargo run", SERVER_ADDR, e);
+            panic!(
+                "❌ Failed to connect to RPC server at {}: {}\nMake sure the server is running with: cargo run",
+                server_addr, e
+            );
         }
     };
 
@@ -40,7 +50,9 @@ async fn test_fulltext_search_coordinator_messages() {
     let mut last_send_time = std::time::Instant::now();
 
     for (event, description) in &test_events {
-        let request = Request::new(event.clone());
+        let request = Request::new(SubmitEventRequest {
+            event: Some(event.clone()),
+        });
         let send_time = std::time::Instant::now();
 
         match client.submit_event(request).await {

@@ -8,26 +8,18 @@ license = "Apache-2.0"
 [dependencies]
 # Core dependencies
 anyhow = "1.0"
-tokio = { version = "1.45", features = ["macros", "rt-multi-thread", "time", "sync"] }
-tokio-stream = "0.1"
+tokio = { version = "1.46", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tracing = "0.1"
 
 # Async utilities
 async-trait = "0.1"
-futures = "0.3"
 
-# Serialization for NATS
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 
 # Random number generation for retry jitter
-fastrand = "2.0"
+fastrand = "2.3"
 
 # NATS (optional for publishing)
-async-nats = "0.36"
 
 # Environment variables
-dotenvy = "0.15"
 
 [dev-dependencies]
-tokio-test = "0.4"

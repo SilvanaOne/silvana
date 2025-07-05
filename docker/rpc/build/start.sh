@@ -12,7 +12,7 @@ exec 2>&1
 echo "Starting Silvana RPC setup script at $(date)"
 
 # Configuration
-DOMAIN_NAME="rpc-dev.silvana.dev"
+DOMAIN_NAME="rpc.silvana.dev"
 EMAIL="dev@silvana.one"
 NATS_VERSION="2.11.6"
 NATS_CLI_VERSION="0.2.3"
@@ -333,16 +333,28 @@ echo "Setting up certificate access for NATS..."
 sudo groupadd ssl-cert 2>/dev/null || true
 sudo usermod -a -G ssl-cert nats
 
+# Verify nats user is in ssl-cert group
+echo "Verifying nats user group membership..."
+if sudo groups nats | grep -q ssl-cert; then
+    echo "✅ nats user is in ssl-cert group"
+else
+    echo "❌ Failed to add nats user to ssl-cert group"
+    exit 1
+fi
+
 # Create renewal hooks directory
 sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 
 # Create certificate permission script for renewals
 cat <<CERT_SCRIPT | sudo tee /etc/letsencrypt/renewal-hooks/deploy/nats-cert-permissions.sh
 #!/bin/bash
-chgrp ssl-cert /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem
-chgrp ssl-cert /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem
-chmod 640 /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem
-chmod 640 /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem
+# Apply permissions to actual certificate files, not symlinks
+if [ -d "/etc/letsencrypt/archive/${DOMAIN_NAME}" ]; then
+    chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
+    chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
+    chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
+    chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
+fi
 systemctl reload-or-restart nats-server
 systemctl restart silvana-rpc 2>/dev/null || echo "RPC service not yet available"
 CERT_SCRIPT
@@ -352,10 +364,42 @@ sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/nats-cert-permissions.sh
 # Configure and start NATS
 if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
     echo "Setting certificate permissions for NATS..."
-    sudo chgrp ssl-cert /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem
-    sudo chgrp ssl-cert /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem
-    sudo chmod 640 /etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem
-    sudo chmod 640 /etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem
+    # Apply permissions to actual certificate files in archive directory, not symlinks
+    echo "Applying permissions to certificate files in archive directory..."
+    sudo chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
+    sudo chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
+    sudo chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
+    sudo chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
+    
+    # Verify permissions were applied correctly
+    echo "Verifying certificate file permissions..."
+    
+    # Check both fullchain and privkey files separately for better debugging
+    fullchain_ok=false
+    privkey_ok=false
+    
+    if sudo ls -la /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem | grep -q "ssl-cert"; then
+        echo "✅ fullchain certificate permissions OK"
+        fullchain_ok=true
+    else
+        echo "❌ fullchain certificate permissions incorrect"
+    fi
+    
+    if sudo ls -la /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem | grep -q "ssl-cert"; then
+        echo "✅ privkey certificate permissions OK"
+        privkey_ok=true
+    else
+        echo "❌ privkey certificate permissions incorrect"
+    fi
+    
+    if [ "$fullchain_ok" = true ] && [ "$privkey_ok" = true ]; then
+        echo "✅ All certificate permissions set correctly"
+    else
+        echo "❌ Certificate permission verification failed"
+        echo "📋 Current certificate file permissions:"
+        sudo ls -la /etc/letsencrypt/archive/${DOMAIN_NAME}/
+        exit 1
+    fi
 
     echo "Creating NATS configuration with TLS..."
     cat <<EOF | sudo tee /etc/nats/nats-server.conf

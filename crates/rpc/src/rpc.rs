@@ -5,15 +5,15 @@ use tracing::{debug, error, warn};
 
 use crate::adapters::EventWrapper;
 use crate::database::EventDatabase;
-use crate::monitoring::record_grpc_request;
 use buffer::EventBuffer;
+use monitoring::record_grpc_request;
 use proto::{
-    silvana_events_service_server::SilvanaEventsService, AgentMessageEventWithId,
-    AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance, Event,
+    AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
     GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
-    SubmitEventsRequest, SubmitEventsResponse,
+    SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
+    silvana_events_service_server::SilvanaEventsService,
 };
 
 pub struct SilvanaEventsServiceImpl {
@@ -99,14 +99,18 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
 
     async fn submit_event(
         &self,
-        request: Request<Event>,
-    ) -> Result<Response<SubmitEventsResponse>, Status> {
-        let event = request.into_inner();
+        request: Request<SubmitEventRequest>,
+    ) -> Result<Response<SubmitEventResponse>, Status> {
+        let event_request = request.into_inner();
+        let event = match event_request.event {
+            Some(event) => event,
+            None => return Err(Status::invalid_argument("Event cannot be empty")),
+        };
 
         debug!("Received single event");
 
         match self.event_buffer.add_event(event.into()).await {
-            Ok(()) => Ok(Response::new(SubmitEventsResponse {
+            Ok(()) => Ok(Response::new(SubmitEventResponse {
                 success: true,
                 message: "Event queued successfully".to_string(),
                 processed_count: 1,
@@ -223,8 +227,8 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
         let req = request.into_inner();
 
         debug!(
-            "Querying agent message events by sequence: {}",
-            req.sequence
+            "Querying agent message events by sequence: {} {:?}",
+            req.sequence, req
         );
 
         match self

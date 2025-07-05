@@ -1,0 +1,40 @@
+{
+  "name": "silvana-grpc-node-examples",
+  "version": "0.1.0",
+  "description": "Node.js TypeScript examples for Silvana gRPC and gRPC-Web with NATS",
+  "type": "module",
+  "author": "DFST",
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "node dist/index.js",
+    "test": "NODE_NO_WARNINGS=1 node -r ./log.cjs --loader=ts-node/esm --enable-source-maps -r dotenv/config --require dotenv/config --env-file=../../.env --test",
+    "test:template": "npm run test test/template.test.ts",
+    "example1": "npm run test test/example1-grpc-agent-message.test.ts",
+    "example2": "npm run test test/example2-grpc-web-agent-message.test.ts",
+    "example3": "npm run test test/example3-grpc-search-coordinator.test.ts",
+    "example4": "npm run test test/example4-grpc-web-search-coordinator.test.ts",
+    "build": "npm run proto:generate && tsc",
+    "proto:generate": "cd ../../ && buf lint && buf generate"
+  },
+  "keywords": [
+    "grpc",
+    "grpc-web",
+    "nats",
+    "typescript",
+    "silvana"
+  ],
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.6.0",
+    "@connectrpc/connect": "^2.0.2",
+    "@nats-io/jetstream": "^3.0.2",
+    "@nats-io/transport-node": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "@types/node-fetch": "^2.6.12",
+    "dotenv": "^17.0.1",
+    "log-timestamp": "^0.3.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  }
+}

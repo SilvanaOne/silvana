@@ -1,10 +1,8 @@
 // Application modules - explicitly public for external access
 pub mod adapters;
 pub mod database;
-pub mod log;
 
 // Service implementations
-pub mod monitoring;
 pub mod rpc;
 
 pub use rpc::SilvanaEventsServiceImpl;
@@ -22,4 +20,4 @@ pub use tidb as entities;
 pub use buffer;
 
 // Re-export adapter functionality for binary target
-pub use adapters::{create_event_buffer, EventWrapper};
+pub use adapters::{EventWrapper, create_event_buffer};

@@ -3,7 +3,7 @@
 # This Makefile implements the workflow where proto files are the single source of truth
 
 # Configuration
-PROTO_FILES := proto/events.proto
+PROTO_FILE := proto/silvana/events/v1/events.proto
 SQL_DIR := proto/sql
 MIGR_DIR := infra/tidb/migration/sql
 ENTITY_DIR := crates/tidb/src/entity
@@ -133,7 +133,7 @@ proto2sql: check-database-url ## Generate DDL from proto files and apply to data
 	@echo "🔄 Generating DDL from proto files..."
 	@mkdir -p $(SQL_DIR)
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- generate \
-		--proto-file $(PROTO_FILES) \
+		--proto-file $(PROTO_FILE) \
 		--output $(SQL_DIR)/events.sql
 	@echo "✅ DDL generated in $(SQL_DIR)/events.sql"
 	@echo ""
@@ -164,7 +164,7 @@ proto2entities: ## Generate both DDL and entities from proto files (combined)
 	@mkdir -p $(SQL_DIR)
 	@rm -rf $(ENTITY_DIR)/*
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- generate \
-		--proto-file $(PROTO_FILES) \
+		--proto-file $(PROTO_FILE) \
 		--output $(SQL_DIR)/events.sql \
 		--entities \
 		--entity-dir $(ENTITY_DIR)
@@ -198,7 +198,7 @@ entities: ## Generate Sea-ORM entities from proto file
 	@echo "🔄 Generating Sea-ORM entities from proto file..."
 	@rm -rf $(ENTITY_DIR)/*
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- generate \
-		--proto-file $(PROTO_FILES) \
+		--proto-file $(PROTO_FILE) \
 		--output /dev/null \
 		--entities \
 		--entity-dir $(ENTITY_DIR)
@@ -255,7 +255,7 @@ validate-schema: check-database-url check-tools ## Validate that database schema
 	@echo "🔍 Validating schema consistency..."
 	@DB_URL="$(call load_database_url)"; \
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- validate \
-		--proto-file $(PROTO_FILES) \
+		--proto-file $(PROTO_FILE) \
 		--database-url "$$DB_URL"
 
 check-schema: check-database-url check-tools ## Quick schema validation check

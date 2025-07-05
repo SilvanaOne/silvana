@@ -130,8 +130,8 @@ The service will start:
 3. **Test**
 
 ```sh
-cargo test --release --test integration_test -- --nocapture
-cargo test --release --test sequence_test -- --nocapture
-cargo test --release --test fulltext_search_test -- --nocapture
-cargo test --release --test nats_test -- --nocapture
+cargo test --release -p rpc --test integration_test -- --nocapture
+cargo test --release -p rpc --test sequence_test -- --nocapture
+cargo test --release -p rpc --test fulltext_search_test -- --nocapture
+cargo test --release -p rpc --test nats_test -- --nocapture
 ```

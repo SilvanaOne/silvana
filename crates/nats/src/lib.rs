@@ -4,16 +4,18 @@
 //! for real-time event distribution.
 
 use anyhow::Result;
+use async_nats::jetstream::Context;
 use async_trait::async_trait;
 use buffer::{BufferableEvent, EventPublisher};
-use serde::Serialize;
+use futures::future::try_join_all;
+use prost::Message;
 use std::env;
 use tokio::time::{Duration, timeout};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info};
 
 /// NATS publisher for publishing events to NATS JetStream
 pub struct EventNatsPublisher {
-    client: async_nats::Client,
+    jetstream: Context,
     stream_name: String,
 }
 
@@ -21,17 +23,66 @@ impl EventNatsPublisher {
     /// Create a new NATS publisher
     pub async fn new() -> Result<Self> {
         let nats_url = env::var("NATS_URL")?;
-        let stream_name =
-            env::var("NATS_STREAM_NAME").unwrap_or_else(|_| "silvana-events".to_string());
+        let stream_name = env::var("NATS_SUBJECT").unwrap_or_else(|_| "silvana".to_string());
+        let subject = format!("{}.events.>", stream_name);
 
         info!("🔄 Connecting to NATS server at: {}", nats_url);
 
         let client = timeout(Duration::from_secs(5), async_nats::connect(&nats_url)).await??;
-
+        let jetstream = async_nats::jetstream::new(client);
         info!("✅ Connected to NATS server successfully");
 
+        let stream_config = async_nats::jetstream::stream::Config {
+            name: stream_name.clone(),
+            subjects: vec![subject.clone()],
+            max_messages: 10_000,
+            max_age: Duration::from_secs(60 * 60), // 1 hour
+            ..Default::default()
+        };
+
+        // Try to get existing stream first
+        match jetstream.get_stream(&stream_name).await {
+            Ok(mut existing_stream) => {
+                // Check if the existing stream has the correct subject pattern
+                let existing_info = existing_stream.info().await?;
+                if existing_info.config.subjects != vec![subject.clone()] {
+                    info!(
+                        "🔄 Updating NATS stream {} with new subject pattern",
+                        stream_name
+                    );
+                    // Update the existing stream with new configuration
+                    match jetstream.update_stream(stream_config).await {
+                        Ok(_) => {
+                            info!("✅ Updated NATS stream {} successfully", stream_name);
+                        }
+                        Err(e) => {
+                            error!("❌ Failed to update NATS stream {} : {:?}", stream_name, e);
+                            return Err(anyhow::anyhow!("Failed to update NATS stream"));
+                        }
+                    }
+                } else {
+                    info!(
+                        "✅ NATS stream {} already has correct configuration",
+                        stream_name
+                    );
+                }
+            }
+            Err(_) => {
+                // Stream doesn't exist, create it
+                match jetstream.create_stream(stream_config).await {
+                    Ok(_) => {
+                        info!("✅ Created NATS stream {} successfully", stream_name);
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to create NATS stream {} : {:?}", stream_name, e);
+                        return Err(anyhow::anyhow!("Failed to create NATS stream"));
+                    }
+                }
+            }
+        };
+
         Ok(Self {
-            client,
+            jetstream,
             stream_name,
         })
     }
@@ -45,7 +96,7 @@ impl EventNatsPublisher {
 #[async_trait]
 impl<T> EventPublisher<T> for EventNatsPublisher
 where
-    T: BufferableEvent + Serialize,
+    T: BufferableEvent + Message,
 {
     async fn publish_batch(&self, events: &[T]) -> Result<(usize, usize)> {
         if events.is_empty() {
@@ -58,75 +109,56 @@ where
             self.stream_name
         );
 
-        let mut successful_publishes = 0;
-        let mut failed_publishes = 0;
+        // Gather ack futures
+        let mut ack_futures = Vec::with_capacity(events.len());
+        let mut failed_sends = 0usize;
 
         for event in events {
-            // Serialize event to JSON for NATS publishing
-            match serde_json::to_vec(event) {
-                Ok(payload) => {
-                    let subject = self.create_subject(event);
+            let subject = self.create_subject(event);
+            let payload = event.encode_to_vec();
 
-                    // Publish to NATS with timeout
-                    match timeout(
-                        Duration::from_secs(5),
-                        self.client.publish(subject.clone(), payload.into()),
-                    )
-                    .await
-                    {
-                        Ok(Ok(_)) => {
-                            successful_publishes += 1;
-                            debug!(
-                                "✅ Published {} event to NATS subject: {}",
-                                event.event_type_name(),
-                                subject
-                            );
-                        }
-                        Ok(Err(e)) => {
-                            failed_publishes += 1;
-                            debug!(
-                                "❌ Failed to publish {} event to NATS subject {}: {}",
-                                event.event_type_name(),
-                                subject,
-                                e
-                            );
-                        }
-                        Err(_) => {
-                            failed_publishes += 1;
-                            debug!(
-                                "⏰ Timeout publishing {} event to NATS subject: {}",
-                                event.event_type_name(),
-                                subject
-                            );
-                        }
-                    }
+            match self
+                .jetstream
+                .publish(subject.clone(), payload.into())
+                .await
+            {
+                Ok(ack) => {
+                    debug!("✅ NATS publish success for subject {}", subject);
+                    ack_futures.push(ack.into_future());
                 }
                 Err(e) => {
-                    failed_publishes += 1;
-                    debug!(
-                        "🔥 Failed to serialize {} event for NATS publishing: {}",
-                        event.event_type_name(),
-                        e
-                    );
+                    error!("❌ NATS publish error for subject {}: {:?}", subject, e);
+                    failed_sends += 1;
                 }
             }
         }
-
-        if successful_publishes > 0 {
-            debug!(
-                "📤 Successfully published {}/{} events to NATS",
-                successful_publishes,
-                successful_publishes + failed_publishes
-            );
-        }
-        if failed_publishes > 0 {
-            warn!(
-                "⚠️ Failed to publish {}/{} events to NATS",
-                failed_publishes,
-                successful_publishes + failed_publishes
-            );
+        if failed_sends > 0 {
+            error!("❌ NATS publish failed for {} events", failed_sends);
         }
 
-        Ok((successful_publishes, failed_publishes))
+        // Wait for all acks concurrently (30‑second overall timeout)
+        let ack_result = timeout(Duration::from_secs(30), try_join_all(ack_futures)).await;
+
+        let successful_acks = match ack_result {
+            Ok(Ok(acks)) => acks.len(),
+            Ok(Err(e)) => {
+                error!("❌ NATS ack error: {}", e);
+                0
+            }
+            Err(_) => {
+                error!("⏰ timeout waiting for acks");
+                0
+            }
+        };
+
+        let total_success = successful_acks;
+        let total_fail = events.len() - total_success;
+
+        debug!(
+            "NATS publish batch result: ✅ {} ok, ❌ {} fail",
+            total_success, total_fail
+        );
+
+        Ok((total_success, total_fail))
     }
 }
