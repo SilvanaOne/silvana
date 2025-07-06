@@ -9,6 +9,8 @@ use async_trait::async_trait;
 use buffer::{BufferableEvent, EventPublisher};
 use futures::future::try_join_all;
 use prost::Message;
+use prost_reflect::ReflectMessage;
+use proto::get_protobuf_full_name_from_instance;
 use std::env;
 use tokio::time::{Duration, timeout};
 use tracing::{debug, error, info};
@@ -17,14 +19,16 @@ use tracing::{debug, error, info};
 pub struct EventNatsPublisher {
     jetstream: Context,
     stream_name: String,
+    stream_prefix: String,
 }
 
 impl EventNatsPublisher {
     /// Create a new NATS publisher
     pub async fn new() -> Result<Self> {
         let nats_url = env::var("NATS_URL")?;
-        let stream_name = env::var("NATS_SUBJECT").unwrap_or_else(|_| "silvana".to_string());
-        let subject = format!("{}.events.>", stream_name);
+        let stream_name = "silvana".to_string();
+        let stream_prefix = format!("{}.events.v1.", stream_name);
+        let subject = format!("{}>", stream_prefix);
 
         info!("🔄 Connecting to NATS server at: {}", nats_url);
 
@@ -84,19 +88,29 @@ impl EventNatsPublisher {
         Ok(Self {
             jetstream,
             stream_name,
+            stream_prefix,
         })
     }
 
     /// Create NATS subject based on event type for better routing
-    fn create_subject<T: BufferableEvent>(&self, event: &T) -> String {
-        format!("{}.events.{}", self.stream_name, event.event_type_name())
+    fn create_subject<T: BufferableEvent + ReflectMessage>(&self, event: &T) -> Result<String> {
+        //format!("{}.events.{}", self.stream_name, event.event_type_name())
+        let full_name = get_protobuf_full_name_from_instance(event);
+        match full_name.starts_with(&self.stream_prefix) {
+            true => Ok(full_name),
+            false => Err(anyhow::anyhow!(
+                "Event type name does not start with stream prefix, stream_prefix: {}, full_name: {}",
+                self.stream_prefix,
+                full_name
+            )),
+        }
     }
 }
 
 #[async_trait]
 impl<T> EventPublisher<T> for EventNatsPublisher
 where
-    T: BufferableEvent + Message,
+    T: BufferableEvent + Message + ReflectMessage,
 {
     async fn publish_batch(&self, events: &[T]) -> Result<(usize, usize)> {
         if events.is_empty() {
@@ -114,7 +128,15 @@ where
         let mut failed_sends = 0usize;
 
         for event in events {
-            let subject = self.create_subject(event);
+            let subject = match self.create_subject(event) {
+                Ok(subject) => subject,
+                Err(e) => {
+                    error!("❌ Failed to create subject for event: {:?}", e);
+                    failed_sends += 1;
+                    continue;
+                }
+            };
+
             let payload = event.encode_to_vec();
 
             match self

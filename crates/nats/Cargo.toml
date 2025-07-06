@@ -25,7 +25,9 @@ tracing = "0.1"
 buffer = { path = "../buffer" }
 
 # Serialization for message publishing
+proto = { path = "../proto" }
 prost = "0.13"
+prost-reflect ={ version = "0.15.3", features = ["derive"] }
 
 # Random number generation for retry jitter
 

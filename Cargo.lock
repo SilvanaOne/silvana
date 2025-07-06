@@ -1496,6 +1496,7 @@ dependencies = [
  "anyhow",
  "axum",
  "buffer",
+ "chrono",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -1524,6 +1525,8 @@ dependencies = [
  "buffer",
  "futures",
  "prost",
+ "prost-reflect",
+ "proto",
  "tokio",
  "tracing",
 ]
@@ -2103,6 +2106,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-reflect"
+version = "0.15.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37587d5a8a1b3dc9863403d084fc2254b91ab75a702207098837950767e2260b"
+dependencies = [
+ "prost",
+ "prost-reflect-derive",
+ "prost-types",
+]
+
+[[package]]
+name = "prost-reflect-build"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad8db7191445b1dbee19df4f6b6294e5123aef52620b344a630bb845d302622a"
+dependencies = [
+ "prost-build",
+ "prost-reflect",
+]
+
+[[package]]
+name = "prost-reflect-derive"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab076798900edeaf1499ed1c30097db86e6697c5d02660a63d72fe4ebdcfefd2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "prost-types"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2115,11 +2150,16 @@ dependencies = [
 name = "proto"
 version = "0.1.0"
 dependencies = [
+ "buffer",
+ "once_cell",
  "prost",
  "prost-build",
+ "prost-reflect",
+ "prost-reflect-build",
  "prost-types",
  "tonic",
  "tonic-build",
+ "tonic-reflection",
 ]
 
 [[package]]
@@ -2395,11 +2435,13 @@ dependencies = [
  "monitoring",
  "nats",
  "prost",
+ "prost-reflect",
  "proto",
  "sea-orm",
  "tidb",
  "tokio",
  "tonic",
+ "tonic-reflection",
  "tonic-web",
  "tower-http",
  "tracing",
@@ -3515,6 +3557,19 @@ dependencies = [
  "prost-types",
  "quote",
  "syn 2.0.104",
+]
+
+[[package]]
+name = "tonic-reflection"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9687bd5bfeafebdded2356950f278bba8226f0b32109537c4253406e09aafe1"
+dependencies = [
+ "prost",
+ "prost-types",
+ "tokio",
+ "tokio-stream",
+ "tonic",
 ]
 
 [[package]]

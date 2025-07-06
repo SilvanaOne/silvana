@@ -3,13 +3,12 @@ use std::time::Instant;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, warn};
 
-use crate::adapters::EventWrapper;
 use crate::database::EventDatabase;
 use buffer::EventBuffer;
 use monitoring::record_grpc_request;
 use proto::{
     AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
-    GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
+    Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
     SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
@@ -17,12 +16,12 @@ use proto::{
 };
 
 pub struct SilvanaEventsServiceImpl {
-    event_buffer: EventBuffer<EventWrapper>,
+    event_buffer: EventBuffer<Event>,
     database: Arc<EventDatabase>,
 }
 
 impl SilvanaEventsServiceImpl {
-    pub fn new(event_buffer: EventBuffer<EventWrapper>, database: Arc<EventDatabase>) -> Self {
+    pub fn new(event_buffer: EventBuffer<Event>, database: Arc<EventDatabase>) -> Self {
         Self {
             event_buffer,
             database,

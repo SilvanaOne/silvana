@@ -12,7 +12,7 @@ use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::*;
 
 // Configuration - easily changeable parameters
-const NUM_EVENTS: usize = 10;
+const NUM_EVENTS: usize = 1000;
 const COORDINATOR_ID: &str = "test-coordinator-001";
 
 fn get_server_addr() -> String {

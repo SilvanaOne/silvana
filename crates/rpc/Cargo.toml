@@ -9,6 +9,7 @@ default-run = "rpc"
 [dependencies]
 # Proto definitions
 proto = { path = "../proto" }
+prost-reflect ={ version = "0.15.3", features = ["derive"] }
 # Database entities
 tidb = { path = "../tidb" }
 # Event buffering
@@ -20,6 +21,7 @@ nats = { path = "../nats" }
 
 tonic = { version = "0.13", features = [ "tls-webpki-roots"] }
 tonic-web = "0.13"
+tonic-reflection = "0.13"
 prost = "0.13"
 tokio = { version = "1.46", features = ["macros", "rt-multi-thread", "time"] }
 tower-http = { version = "0.6", features = ["cors"] }

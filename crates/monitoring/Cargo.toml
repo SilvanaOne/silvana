@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["http1", "json", "query"] }
+chrono = "0.4"
 prometheus = { version = "0.14", features = ["process"] }
 sysinfo = "0.35"
 tokio = { version = "1.46", features = ["full"] }

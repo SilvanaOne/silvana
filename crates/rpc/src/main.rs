@@ -5,11 +5,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic_reflection::server::Builder as ReflectionBuilder;
 use tonic_web::GrpcWebLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 
 use monitoring::{init_monitoring, spawn_monitoring_tasks, start_metrics_server};
+use proto::Event;
 use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
 use rpc::SilvanaEventsServiceImpl;
 use rpc::database::EventDatabase;
@@ -110,8 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(nats_url) => {
             info!("🔄 Attempting to connect to NATS server at: {}", nats_url);
             match nats::EventNatsPublisher::new().await {
-                Ok(publisher) => Some(Arc::new(publisher)
-                    as Arc<dyn buffer::EventPublisher<::rpc::adapters::EventWrapper>>),
+                Ok(publisher) => {
+                    Some(Arc::new(publisher) as Arc<dyn buffer::EventPublisher<Event>>)
+                }
                 Err(e) => {
                     warn!(
                         "⚠️  Failed to connect to NATS server at {}: {}. Continuing without NATS.",
@@ -146,7 +149,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let events_service = SilvanaEventsServiceImpl::new(event_buffer, Arc::clone(&database));
     let grpc_service = SilvanaEventsServiceServer::new(events_service);
 
+    // Create reflection service
+    let reflection_service = ReflectionBuilder::configure()
+        .register_encoded_file_descriptor_set(proto::events::FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .map_err(|e| anyhow::anyhow!("Failed to build reflection service: {}", e))?;
+
     info!("🎯 Starting gRPC and gRPC-Web server on {}", server_address);
+    info!("🔍 gRPC reflection v1 enabled for service discovery");
 
     // Configure CORS for gRPC-Web
     let cors = CorsLayer::new()
@@ -180,6 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start both servers concurrently
     let grpc_server = server_builder
         .add_service(grpc_service)
+        .add_service(reflection_service)
         .serve(server_address);
 
     let metrics_server = start_metrics_server(metrics_addr);

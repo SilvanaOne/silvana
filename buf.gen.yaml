@@ -1,5 +1,12 @@
 version: v2
+
 plugins:
+  # ─────── Node ──────────────────────────────────────────────
   - remote: buf.build/bufbuild/es
     out: clients/grpc-node/src/proto
+    opt: target=ts
+
+  # ─────── Browser ───────────────────────────────────────────
+  - remote: buf.build/bufbuild/es
+    out: clients/grpc-web/src/proto
     opt: target=ts

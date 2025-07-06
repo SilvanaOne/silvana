@@ -3,6 +3,9 @@
 ````
 ssh -i "RPC2.pem" ec2-user@18.194.39.156
 sudo less /var/log/cloud-init-output.log
+grpcurl rpc.silvana.dev:443 list
+grpcurl rpc.silvana.dev:443 describe silvana.events.v1.SilvanaEventsService
+grpcurl rpc.silvana.dev:443 describe silvana.events.v1.Event
 
 ```sh
 git clone https://github.com/SilvanaOne/zk-tests

@@ -523,7 +523,7 @@ pub fn proto_type_to_mysql_with_options(
     }
 }
 
-pub fn proto_type_to_rust(proto_type: &str, is_repeated: bool, is_optional: bool) -> String {
+pub fn proto_type_to_rust(proto_type: &str, _is_repeated: bool, is_optional: bool) -> String {
     let base_type = match proto_type {
         "string" => "String".to_string(),
         "bytes" => "Vec<u8>".to_string(),

@@ -102,7 +102,7 @@ setup: ## Create necessary directories
 	@mkdir -p $(ENTITY_DIR)
 	@echo "✅ Directories created"
 
-build: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3 (optional .env.build with AWS credentials)
+build: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
 	@echo "🐳 Building RPC and creating deployment archive for Amazon Linux 2023 ARM64..."
 	@mkdir -p build
 	@echo "🔨 Building Docker image for ARM64 (Graviton), compiling RPC, and creating tar archive..."

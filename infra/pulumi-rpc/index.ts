@@ -115,7 +115,7 @@ export = async () => {
   pulumi
     .all([s3UploaderAccessKey.id, s3UploaderAccessKey.secret])
     .apply(([accessKeyId, secretAccessKey]) => {
-      const envFilePath = path.resolve(__dirname, "../.env.build");
+      const envFilePath = path.resolve(__dirname, "../../docker/rpc/.env");
       fs.writeFileSync(
         envFilePath,
         `[default]\naws_access_key_id     = ${accessKeyId}\naws_secret_access_key = ${secretAccessKey}\n`,
