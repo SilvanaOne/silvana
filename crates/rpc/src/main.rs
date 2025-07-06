@@ -11,6 +11,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 
 use monitoring::{init_monitoring, spawn_monitoring_tasks, start_metrics_server};
+use proto::Event;
 use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
 use rpc::SilvanaEventsServiceImpl;
 use rpc::database::EventDatabase;
@@ -111,8 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(nats_url) => {
             info!("🔄 Attempting to connect to NATS server at: {}", nats_url);
             match nats::EventNatsPublisher::new().await {
-                Ok(publisher) => Some(Arc::new(publisher)
-                    as Arc<dyn buffer::EventPublisher<::rpc::adapters::EventWrapper>>),
+                Ok(publisher) => {
+                    Some(Arc::new(publisher) as Arc<dyn buffer::EventPublisher<Event>>)
+                }
                 Err(e) => {
                     warn!(
                         "⚠️  Failed to connect to NATS server at {}: {}. Continuing without NATS.",

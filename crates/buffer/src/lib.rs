@@ -38,7 +38,7 @@ pub trait BufferableEvent: Send + Sync + Clone + 'static {
     fn estimate_size(&self) -> usize;
 
     /// Get a string identifier for this event type (for logging/debugging)
-    fn event_type_name(&self) -> &'static str;
+    fn event_type_name(&self) -> String;
 }
 
 /// Backend trait for processing batches of events
@@ -745,8 +745,8 @@ mod tests {
             self.data.len() + std::mem::size_of::<Self>()
         }
 
-        fn event_type_name(&self) -> &'static str {
-            "TestEvent"
+        fn event_type_name(&self) -> String {
+            "TestEvent".to_string()
         }
     }
 

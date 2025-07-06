@@ -9,6 +9,7 @@ default-run = "rpc"
 [dependencies]
 # Proto definitions
 proto = { path = "../proto" }
+prost-reflect ={ version = "0.15.3", features = ["derive"] }
 # Database entities
 tidb = { path = "../tidb" }
 # Event buffering

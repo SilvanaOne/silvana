@@ -3,10 +3,6 @@ use proto::{
 };
 
 fn main() {
-    println!("=== Using Proto Utility Functions ===");
-
-    // Method 1: Get full name using proto structs
-    println!("\nMethod 1 - Using proto structs:");
     let coordinator_event = CoordinatorStartedEvent::default();
     let full_name = get_protobuf_full_name_from_instance(&coordinator_event);
     println!("CoordinatorStartedEvent: {}", full_name);
@@ -17,5 +13,8 @@ fn main() {
 
     let event_wrapper = Event::default();
     let event_full_name = get_protobuf_full_name_from_instance(&event_wrapper);
-    println!("Event: {}", event_full_name);
+    println!("Event name: {}", event_full_name);
+    println!("Event: {:?}", event_wrapper);
+    let event_type = event_wrapper.event_type;
+    println!("Event type: {:?}", event_type);
 }

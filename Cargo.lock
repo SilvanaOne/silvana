@@ -1496,6 +1496,7 @@ dependencies = [
  "anyhow",
  "axum",
  "buffer",
+ "chrono",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
@@ -1524,6 +1525,8 @@ dependencies = [
  "buffer",
  "futures",
  "prost",
+ "prost-reflect",
+ "proto",
  "tokio",
  "tracing",
 ]
@@ -2147,6 +2150,7 @@ dependencies = [
 name = "proto"
 version = "0.1.0"
 dependencies = [
+ "buffer",
  "once_cell",
  "prost",
  "prost-build",
@@ -2431,6 +2435,7 @@ dependencies = [
  "monitoring",
  "nats",
  "prost",
+ "prost-reflect",
  "proto",
  "sea-orm",
  "tidb",

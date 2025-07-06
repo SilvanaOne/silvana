@@ -18,6 +18,9 @@ pub mod events {
 pub static DESCRIPTOR_POOL: Lazy<DescriptorPool> =
     Lazy::new(|| DescriptorPool::decode(events::FILE_DESCRIPTOR_SET.as_ref()).unwrap());
 
+// Include the buffer module
+pub mod buffer;
+
 // Re-export commonly used types for convenience
 pub use events::*;
 

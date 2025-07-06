@@ -2,7 +2,7 @@ use futures::StreamExt;
 use futures::TryStreamExt;
 use prost::Message;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::time::{Duration, sleep, timeout};
+use tokio::time::{Duration, timeout};
 use tonic::Request;
 
 use proto::silvana_events_service_client::SilvanaEventsServiceClient;

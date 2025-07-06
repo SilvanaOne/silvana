@@ -20,4 +20,4 @@ pub use tidb as entities;
 pub use buffer;
 
 // Re-export adapter functionality for binary target
-pub use adapters::{EventWrapper, create_event_buffer};
+pub use adapters::create_event_buffer;
