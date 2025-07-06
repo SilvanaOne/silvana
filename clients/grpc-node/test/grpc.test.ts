@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { grpc } from "../src/clients/grpc.js";
 import {
   LogLevel,
   AgentMessageEvent,
@@ -11,7 +10,23 @@ import {
 } from "../src/proto/silvana/events/v1/events_pb.js";
 import { fromBinary } from "@bufbuild/protobuf";
 import { connect } from "@nats-io/transport-node";
-import { jetstream, jetstreamManager } from "@nats-io/jetstream";
+import { DeliverPolicy, jetstream, jetstreamManager } from "@nats-io/jetstream";
+import { createClient } from "@connectrpc/connect";
+import { createGrpcTransport } from "@connectrpc/connect-node";
+import { SilvanaEventsService } from "../src/proto/silvana/events/v1/events_pb.js";
+
+const testServer = process.env.TEST_SERVER;
+
+if (!testServer) {
+  throw new Error("TEST_SERVER is not set");
+}
+
+const transport = createGrpcTransport({
+  baseUrl: testServer,
+  ...{ tls: true },
+});
+
+const grpc = createClient(SilvanaEventsService, transport);
 
 describe("Example 1: gRPC AgentMessageEvent with NATS (Buf-based)", async () => {
   it("should send AgentMessageEvent to gRPC, read it from gRPC and NATS using modern Buf types", async () => {
@@ -28,12 +43,15 @@ describe("Example 1: gRPC AgentMessageEvent with NATS (Buf-based)", async () => 
       timeout: 1000,
     });
 
-    const stream = "silvana-events-agent-message";
+    const stream = "silvana";
     const js = jetstream(nc, { timeout: 2_000 });
     const jsm = await jetstreamManager(nc);
     await jsm.streams.get(stream);
+    const consumerName = crypto.randomUUID();
     const consumer = await jsm.consumers.add(stream, {
-      name: "consumer",
+      name: consumerName,
+      deliver_policy: DeliverPolicy.StartTime,
+      opt_start_time: new Date().toISOString(),
     });
 
     try {
