@@ -17,8 +17,8 @@ import {
 } from "@nats-io/jetstream";
 import { fromBinary } from "@bufbuild/protobuf";
 import { serialize } from "@/lib/serialize";
-
-const stream = "silvana";
+import { AnimatedBackground } from "@/components/AnimatedBackground";
+import { NavBar } from "@/components/NavBar";
 
 export default function Home() {
   const [eventResponseLog, setEventResponseLog] = useState<string[]>([]);
@@ -56,8 +56,7 @@ export default function Home() {
         });
         const grpc = createClient(SilvanaEventsService, transport);
 
-        const coordinatorId = `coord-browser-${crypto.randomUUID()}`;
-        let testQueryResponse = await grpc.getAgentMessageEventsBySequence({
+        const testQueryResponse = await grpc.getAgentMessageEventsBySequence({
           sequence: 1002n,
           coordinatorId: "test-coordinator",
         });
@@ -72,7 +71,7 @@ export default function Home() {
           );
           setGrpcConnection("error");
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         setError(error instanceof Error ? error.message : "Unknown error");
       }
     };
@@ -115,7 +114,7 @@ export default function Home() {
         setNats(js);
         setNatsConsumer(consumer);
         setNatsConnection("connected");
-      } catch (error: any) {
+      } catch (error: unknown) {
         setError(error instanceof Error ? error.message : "Unknown NATS error");
         setNatsConnection("error");
       }
@@ -123,6 +122,31 @@ export default function Home() {
 
     initializeNats();
   }, []);
+
+  // Update connection status dots
+  useEffect(() => {
+    const grpcDot = document.getElementById("grpc-dot");
+    if (grpcDot) {
+      grpcDot.style.backgroundColor =
+        grpcConnection === "connected"
+          ? "#00FFA3" // brand-teal
+          : grpcConnection === "connecting"
+          ? "#facc15" // yellow-400
+          : "#ef4444"; // red-500
+    }
+  }, [grpcConnection]);
+
+  useEffect(() => {
+    const natsDot = document.getElementById("nats-dot");
+    if (natsDot) {
+      natsDot.style.backgroundColor =
+        natsConnection === "connected"
+          ? "#00FFA3" // brand-teal
+          : natsConnection === "connecting"
+          ? "#facc15" // yellow-400
+          : "#ef4444"; // red-500
+    }
+  }, [natsConnection]);
 
   async function processNatsMessages(params: {
     coordinatorId: string;
@@ -159,15 +183,23 @@ export default function Home() {
               return;
             }
           }
-        } catch (error: any) {
-          console.log(`decode failed: ${error.message}`);
+        } catch (error: unknown) {
+          console.log(
+            `decode failed: ${
+              error instanceof Error ? error.message : "Unknown error"
+            }`
+          );
         }
         message = await natsConsumer.next({
           expires: 1000,
         });
       }
-    } catch (error: any) {
-      console.log(`consume failed: ${error.message}`);
+    } catch (error: unknown) {
+      console.log(
+        `consume failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
       setError(error instanceof Error ? error.message : "Unknown NATS error");
       setNatsConnection("error");
       return;
@@ -209,7 +241,7 @@ export default function Home() {
       console.log("gRPC Query Response:", queryResponse);
       setQueryResponseLog([serialize(queryResponse)]);
       setQueryRoundtripDelay(durationQuery);
-    } catch (error: any) {
+    } catch (error: unknown) {
       setError(
         error instanceof Error ? error.message : "Unknown GPRC-Web error"
       );
@@ -247,11 +279,8 @@ export default function Home() {
         start: startRequest,
       });
 
-      const [endNats, endQuery] = await Promise.all([
-        endNatsPromise,
-        endQueryPromise,
-      ]);
-    } catch (error: any) {
+      await Promise.all([endNatsPromise, endQueryPromise]);
+    } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setIsLoading(false);
@@ -259,200 +288,274 @@ export default function Home() {
   };
 
   return (
-    <div className="grid grid-rows-[1fr] items-start justify-items-center min-h-screen p-4 pt-8 pb-20 gap-8 sm:p-8 sm:pt-12 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[24px] items-center sm:items-start w-full max-w-6xl">
-        <p className="text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)] tracking-[-.01em]">
-          This is a simple example of a gRPC-Web and NATS application using
-          Silvana RPC.
-        </p>
-        {/* Error Display */}
-        {/* Connection Status */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-4xl">
-          <div className="bg-gray-50 dark:bg-gray-900/20 rounded-lg p-4 border border-gray-200 dark:border-gray-800">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              gRPC-Web Status
-            </h4>
-            <div
-              className={`text-sm font-mono flex items-center gap-2 ${
-                grpcConnection === "connected"
-                  ? "text-green-700 dark:text-green-300"
-                  : grpcConnection === "connecting"
-                  ? "text-yellow-700 dark:text-yellow-300"
-                  : "text-red-700 dark:text-red-300"
-              }`}
-            >
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  grpcConnection === "connected"
-                    ? "bg-green-500"
-                    : grpcConnection === "connecting"
-                    ? "bg-yellow-500"
-                    : "bg-red-500"
-                }`}
-              ></div>
-              {grpcConnection === "connected"
-                ? "Connected"
-                : grpcConnection === "connecting"
-                ? "Connecting..."
-                : "Error"}
-            </div>
-          </div>
-          <div className="bg-gray-50 dark:bg-gray-900/20 rounded-lg p-4 border border-gray-200 dark:border-gray-800">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              NATS Status
-            </h4>
-            <div
-              className={`text-sm font-mono flex items-center gap-2 ${
-                natsConnection === "connected"
-                  ? "text-green-700 dark:text-green-300"
-                  : natsConnection === "connecting"
-                  ? "text-yellow-700 dark:text-yellow-300"
-                  : "text-red-700 dark:text-red-300"
-              }`}
-            >
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  natsConnection === "connected"
-                    ? "bg-green-500"
-                    : natsConnection === "connecting"
-                    ? "bg-yellow-500"
-                    : "bg-red-500"
-                }`}
-              ></div>
-              {natsConnection === "connected"
-                ? "Connected"
-                : natsConnection === "connecting"
-                ? "Connecting..."
-                : "Error"}
-            </div>
-          </div>
+    <>
+      <NavBar
+        isLoading={isLoading}
+        grpc={grpc !== null}
+        onSendEvent={handleSendGrpcRequest}
+      />
+      <div className="min-h-screen p-10 relative bg-x-gradient overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute -left-20 -top-20 w-[500px] h-[500px] rotate-45 bg-gradient-to-br from-brand-purple/20 to-brand-blue/10" />
+          <div className="absolute right-[-250px] top-1/3 w-[700px] h-[700px] -rotate-45 bg-gradient-to-bl from-brand-purple/10 to-brand-pink/10" />
         </div>
-        {error && (
-          <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 w-full max-w-4xl border border-red-200 dark:border-red-800">
-            <h4 className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">
-              Error
-            </h4>
-            <div className="text-sm text-red-900 dark:text-red-100 font-mono">
-              {error}
-            </div>
-          </div>
-        )}
-
-        {/* Statistics */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-4xl">
-          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 text-center border border-blue-200 dark:border-blue-800">
-            <h4 className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">
-              Send Request Processed
-            </h4>
-            <div className="text-2xl font-bold text-blue-900 dark:text-blue-100">
-              {sendRequestProcessed} ms
-            </div>
-          </div>
-          <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 text-center border border-green-200 dark:border-green-800">
-            <h4 className="text-sm font-medium text-green-700 dark:text-green-300 mb-1">
-              Query Roundtrip Delay
-            </h4>
-            <div className="text-2xl font-bold text-green-900 dark:text-green-100">
-              {queryRoundtripDelay} ms
-            </div>
-          </div>
-          <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4 text-center border border-purple-200 dark:border-purple-800">
-            <h4 className="text-sm font-medium text-purple-700 dark:text-purple-300 mb-1">
-              NATS Roundtrip Delay
-            </h4>
-            <div className="text-2xl font-bold text-purple-900 dark:text-purple-100">
-              {natsRoundtripDelay} ms
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <button
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[316px] disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={handleSendGrpcRequest}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <div className="flex items-center gap-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-gray-600"></div>
-                <span>Sending...</span>
-              </div>
-            ) : (
-              "Send Event"
-            )}
-          </button>
-        </div>
-
-        {/* Log Windows */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 w-full mt-8">
-          {/* gRPC-Web Request Log */}
-          <div className="flex flex-col">
-            <h3 className="text-lg font-semibold mb-2 text-center">
-              gRPC-Web Event Response
-            </h3>
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 h-64 overflow-y-auto border border-gray-200 dark:border-gray-700">
-              <div className="font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {eventResponseLog.length > 0 ? (
-                  eventResponseLog.map((log, index) => (
-                    <div key={index} className="mb-1">
-                      {log}
+        <AnimatedBackground />
+        <main className="pt-12">
+          <div className="max-w-8xl mx-auto">
+            {/* System Status & Performance */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+              {/* Connection Status */}
+              <section className="glass-card p-4 lg:col-span-1">
+                <h3 className="text-lg lg:text-xl font-bold text-white mb-4">
+                  Connection Status
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        grpcConnection === "connected"
+                          ? "bg-brand-green animate-pulse-success"
+                          : grpcConnection === "connecting"
+                          ? "bg-brand-yellow animate-pulse-warning"
+                          : "bg-red-500 animate-pulse-error"
+                      }`}
+                    ></div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">
+                        gRPC-Web
+                      </div>
+                      <div className="text-sm text-white/60">
+                        {grpcConnection === "connected"
+                          ? "Connected to Silvana RPC"
+                          : grpcConnection === "connecting"
+                          ? "Establishing connection..."
+                          : "Connection failed"}
+                      </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-gray-500 dark:text-gray-400 italic">
-                    No response yet...
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
 
-          {/* gRPC-Web Response Log */}
-          <div className="flex flex-col">
-            <h3 className="text-lg font-semibold mb-2 text-center">
-              gRPC-Web Query Response
-            </h3>
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 h-64 overflow-y-auto border border-gray-200 dark:border-gray-700">
-              <div className="font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {queryResponseLog.length > 0 ? (
-                  queryResponseLog.map((log, index) => (
-                    <div key={index} className="mb-1">
-                      {log}
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        natsConnection === "connected"
+                          ? "bg-brand-green animate-pulse-success"
+                          : natsConnection === "connecting"
+                          ? "bg-brand-yellow animate-pulse-warning"
+                          : "bg-red-500 animate-pulse-error"
+                      }`}
+                    ></div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">
+                        NATS JetStream
+                      </div>
+                      <div className="text-sm text-white/60">
+                        {natsConnection === "connected"
+                          ? "Connected to message stream"
+                          : natsConnection === "connecting"
+                          ? "Establishing connection..."
+                          : "Connection failed"}
+                      </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-gray-500 dark:text-gray-400 italic">
-                    No response yet...
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
+                </div>
+              </section>
 
-          {/* NATS Message Log */}
-          <div className="flex flex-col">
-            <h3 className="text-lg font-semibold mb-2 text-center">
-              NATS Message
-            </h3>
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 h-64 overflow-y-auto border border-gray-200 dark:border-gray-700">
-              <div className="font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                {natsMessageLog.length > 0 ? (
-                  natsMessageLog.map((log, index) => (
-                    <div key={index} className="mb-1">
-                      {log}
+              {/* Performance Metrics */}
+              <section className="glass-card p-4 lg:col-span-1">
+                <h3 className="text-lg lg:text-xl font-bold text-white mb-4">
+                  Performance Metrics
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 bg-brand-purple rounded-full"></div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">Send</div>
+                      <div className="text-sm text-white/60">
+                        {sendRequestProcessed !== null
+                          ? `${sendRequestProcessed}ms`
+                          : "No data"}
+                      </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-gray-500 dark:text-gray-400 italic">
-                    No messages yet...
                   </div>
-                )}
-              </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 bg-brand-green rounded-full"></div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">
+                        Query
+                      </div>
+                      <div className="text-sm text-white/60">
+                        {queryRoundtripDelay !== null
+                          ? `${queryRoundtripDelay}ms`
+                          : "No data"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 bg-brand-blue rounded-full"></div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">NATS</div>
+                      <div className="text-sm text-white/60">
+                        {natsRoundtripDelay !== null
+                          ? `${natsRoundtripDelay}ms`
+                          : "No data"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Error Status */}
+              <section className="glass-card p-4 lg:col-span-1">
+                <h3 className="text-lg lg:text-xl font-bold text-white mb-4">
+                  Error Status
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        error ? "bg-red-500" : "bg-brand-green"
+                      }`}
+                    ></div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">
+                        System Status
+                      </div>
+                      <div className="text-sm text-white/60">
+                        {error ? "Error detected" : "Running normally"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {error && (
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 bg-red-500 rounded-full"></div>
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-white">
+                          Last Error
+                        </div>
+                        <div className="text-sm text-white/60 truncate">
+                          {error}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-2.5 h-2.5 rounded-full ${
+                        grpcConnection === "connected" &&
+                        natsConnection === "connected"
+                          ? "bg-brand-green"
+                          : "bg-brand-yellow"
+                      }`}
+                    ></div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white">
+                        Connections
+                      </div>
+                      <div className="text-sm text-white/60">
+                        {grpcConnection === "connected" &&
+                        natsConnection === "connected"
+                          ? "All connected"
+                          : "Some disconnected"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            {/* Log Windows */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              {/* gRPC-Web Event Response Log */}
+              <section className="glass-card p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-2.5 h-2.5 bg-brand-purple rounded-full"></div>
+                  <h3 className="text-lg lg:text-xl font-bold text-white">
+                    gRPC-Web Event Response
+                  </h3>
+                </div>
+                <div className="h-[40rem] overflow-y-auto bg-black/20 rounded-lg p-4 border border-white/10">
+                  <div className="font-mono text-xs text-white/90 whitespace-pre-wrap">
+                    {eventResponseLog.length > 0 ? (
+                      eventResponseLog.map((log, index) => (
+                        <div
+                          key={index}
+                          className="mb-2 p-2 bg-white/5 rounded border-l-2 border-brand-purple"
+                        >
+                          {log}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-white/50 italic text-center py-8">
+                        No event response yet...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* gRPC-Web Query Response Log */}
+              <section className="glass-card p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-2.5 h-2.5 bg-brand-green rounded-full"></div>
+                  <h3 className="text-lg lg:text-xl font-bold text-white">
+                    gRPC-Web Query Response
+                  </h3>
+                </div>
+                <div className="h-[40rem] overflow-y-auto bg-black/20 rounded-lg p-4 border border-white/10">
+                  <div className="font-mono text-xs text-white/90 whitespace-pre-wrap">
+                    {queryResponseLog.length > 0 ? (
+                      queryResponseLog.map((log, index) => (
+                        <div
+                          key={index}
+                          className="mb-2 p-2 bg-white/5 rounded border-l-2 border-brand-green"
+                        >
+                          {log}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-white/50 italic text-center py-8">
+                        No query response yet...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* NATS Message Log */}
+              <section className="glass-card p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-2.5 h-2.5 bg-brand-blue rounded-full"></div>
+                  <h3 className="text-lg lg:text-xl font-bold text-white">
+                    NATS Message Stream
+                  </h3>
+                </div>
+                <div className="h-[40rem] overflow-y-auto bg-black/20 rounded-lg p-4 border border-white/10">
+                  <div className="font-mono text-xs text-white/90 whitespace-pre-wrap">
+                    {natsMessageLog.length > 0 ? (
+                      natsMessageLog.map((log, index) => (
+                        <div
+                          key={index}
+                          className="mb-2 p-2 bg-white/5 rounded border-l-2 border-brand-blue"
+                        >
+                          {log}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-white/50 italic text-center py-8">
+                        No NATS messages yet...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center"></footer>
-    </div>
+        </main>
+      </div>
+    </>
   );
 }

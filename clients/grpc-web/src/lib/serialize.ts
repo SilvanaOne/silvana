@@ -1,6 +1,6 @@
 "use client";
 
-export function serialize(value: any): string {
+export function serialize(value: unknown): string {
   return JSON.stringify(
     value,
     (_, value) => (typeof value === "bigint" ? value.toString() : value),
