@@ -85,6 +85,12 @@ impl BufferableEvent for EventWrapper {
         match &self.0.event_type {
             Some(event_type) => match event_type {
                 proto::events::event::EventType::Coordinator(coord_event) => {
+                    // let id = coord_event
+                    //     .event
+                    //     .unwrap()
+                    //     .named_layer()
+                    //     .type_id()
+                    //     .to_string();
                     match &coord_event.event {
                         Some(event) => match event {
                             proto::events::coordinator_event::Event::CoordinatorStarted(_) => {
