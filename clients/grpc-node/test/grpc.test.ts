@@ -23,14 +23,13 @@ if (!testServer) {
 
 const transport = createGrpcTransport({
   baseUrl: testServer,
-  ...{ tls: true },
 });
 
 const grpc = createClient(SilvanaEventsService, transport);
 
-describe("Example 1: gRPC AgentMessageEvent with NATS (Buf-based)", async () => {
-  it("should send AgentMessageEvent to gRPC, read it from gRPC and NATS using modern Buf types", async () => {
-    console.log("🚀 Starting Example 1: gRPC AgentMessageEvent with NATS");
+describe("Example 1: gRPC AgentMessageEvent with NATS", async () => {
+  it("should send AgentMessageEvent to gRPC, read it from gRPC and NATS", async () => {
+    console.log("🚀 Starting node gRPC AgentMessageEvent with NATS");
 
     const natsUrl = process.env.NATS_URL;
     if (!natsUrl) {
@@ -108,7 +107,6 @@ describe("Example 1: gRPC AgentMessageEvent with NATS (Buf-based)", async () => 
       console.log("gRPC Query Response:", queryResponse);
       assert.ok(queryResponse, "Query should return a response");
 
-      // 5. Wait a bit to see NATS messages
       console.log("\n⏳ Looking for NATS messages...");
       let receivedMessage = false;
       const start = Date.now();

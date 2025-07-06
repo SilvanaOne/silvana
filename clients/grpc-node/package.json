@@ -10,9 +10,7 @@
     "test": "NODE_NO_WARNINGS=1 node -r ./log.cjs --loader=ts-node/esm --enable-source-maps -r dotenv/config --require dotenv/config --env-file=../../.env --test",
     "test:template": "npm run test test/template.test.ts",
     "grpc": "npm run test test/grpc.test.ts",
-    "example2": "npm run test test/example2-grpc-web-agent-message.test.ts",
-    "example3": "npm run test test/example3-grpc-search-coordinator.test.ts",
-    "example4": "npm run test test/example4-grpc-web-search-coordinator.test.ts",
+    "grpc:web": "npm run test test/grpc-web.test.ts",
     "build": "npm run proto:generate && tsc",
     "proto:generate": "cd ../../ && buf lint && buf generate"
   },
