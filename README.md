@@ -36,7 +36,7 @@ Can run on t4g.nano ($3 per month)
 make build
 ```
 
-#### Run pulumi script to:
+#### Run [pulumi](infra/pulumi-rpc/index.ts) script to:
 
 - Create AWS Stack, including EC2 instance
 - Install certificates, NATS, Silvana RPC
@@ -48,10 +48,10 @@ pulumi up
 
 ### Protobuf workflow
 
-- Create proto definitions
-- Compile with `make regen` for Rust and `buf lint && buf generate` for TypeScript - definitions will be compiled to SQL, SQL migrations, Rust interfaces with reflection and server/client, TypeScript interfaces and client, sea-orm interfaces for TiDB
+- Create [proto definitions](proto)
+- Compile with `make regen` for Rust and `buf lint && buf generate` for TypeScript - definitions will be compiled to [SQL](proto/sql/events.sql), [SQL migrations](migrations), Rust [interfaces](crates/proto) with reflection and server/client, TypeScript [interfaces](clients/grpc-node/src/proto) and client, [sea-orm interfaces for TiDB](crates/tidb/src/entity)
 
-## Examples of clients
+### Examples of clients
 
-- node example
-- web example - https://grpc-web.silvana.dev
+- [node example](clients/grpc-node)
+- [web example](clients/grpc-web) - https://grpc-web.silvana.dev
