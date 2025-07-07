@@ -155,11 +155,10 @@ export DATABASE_URL="mysql://root:@tcp(127.0.0.1:4000)/test"
 
 ### Type Mappings
 
-| Proto Type   | TiDB Type         | Notes                 |
-| ------------ | ----------------- | --------------------- |
-| `string`     | `VARCHAR(255)`    | Default string length |
-| `uint64`     | `BIGINT UNSIGNED` | Large integers        |
-| `uint32`     | `INT UNSIGNED`    | Standard integers     |
-| `bytes`      | `BLOB`            | Binary data           |
-| `repeated T` | `JSON`            | Arrays as JSON        |
-| `bool`       | `BOOLEAN`         | Boolean values        |
+| Proto Type | TiDB Type         | Notes                 |
+| ---------- | ----------------- | --------------------- |
+| `string`   | `VARCHAR(255)`    | Default string length |
+| `uint64`   | `BIGINT UNSIGNED` | Large integers        |
+| `uint32`   | `INT UNSIGNED`    | Standard integers     |
+| `bytes`    | `BLOB`            | Binary data           |
+| `bool`     | `BOOLEAN`         | Boolean values        |

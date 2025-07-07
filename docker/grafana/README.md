@@ -116,4 +116,8 @@ Edit the dashboard JSON: `"refresh": "5s"` (default is 5 seconds)
 
 Add configuration files to `provisioning/datasources/`
 
-Happy monitoring! 🚀📊
+### BetterStack
+
+- Create a source and configure it in .env
+- Create empty dashboard
+- Import file dashboars/better-stack.json to empty dashboard
