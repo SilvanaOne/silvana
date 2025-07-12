@@ -25,29 +25,29 @@ fun get_r(): Element<Scalar> {
 }
 
 /// inner: digest one struct
-public fun digest_struct(fields: vector<Element<Scalar>>): Element<Scalar> {
+public fun digest_struct(fields: &vector<Element<Scalar>>): Element<Scalar> {
     let mut d = scalar_zero();
     let mut i = 0;
     let s = get_s();
-    while (i < vector::length(&fields)) {
-        d = scalar_add(&scalar_mul(&d, &s), vector::borrow(&fields, i));
+    while (i < vector::length(fields)) {
+        d = scalar_add(&scalar_mul(&d, &s), vector::borrow(fields, i));
         i = i + 1;
     };
     d
 }
 
 /// outer: commit whole table
-public fun commit(table: vector<Element<Scalar>>): Element<Scalar> {
+public fun commit(table: &vector<Element<Scalar>>): Element<Scalar> {
     // table[i] already holds c_i = digest_struct(...)
     let mut acc = scalar_zero();
     let r = get_r();
-    let len = vector::length(&table);
+    let len = vector::length(table);
     let mut i = len;
 
     // Iterate in reverse order so that table[i] gets coefficient r^i
     while (i > 0) {
         i = i - 1;
-        acc = scalar_add(&scalar_mul(&acc, &r), vector::borrow(&table, i));
+        acc = scalar_add(&scalar_mul(&acc, &r), vector::borrow(table, i));
     };
     acc
 }
@@ -75,6 +75,10 @@ public fun update(
 const MINA_PRIME: u256 =
     0x40000000000000000000000000000000224698FC094CF91B992D30ED00000001;
 
+public fun get_mina_prime(): u256 {
+    MINA_PRIME
+}
+
 /// Convert a u256 into a BLS scalar *iff* it is < MINA_PRIME
 public fun scalar_from_u256(n: u256): Element<Scalar> {
     // abort 1 if out of range
@@ -95,4 +99,15 @@ public fun scalar_from_u256(n: u256): Element<Scalar> {
     };
 
     scalar_from_bytes(&bytes)
+}
+
+public fun digest_fields(fields: &vector<u256>): Element<Scalar> {
+    let mut data: vector<Element<Scalar>> = vector::empty();
+    let mut i = 0;
+    while (i < fields.length()) {
+        data.push_back(scalar_from_u256(fields[i]));
+        i = i + 1;
+    };
+
+    digest_struct(&data)
 }
