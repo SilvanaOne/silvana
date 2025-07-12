@@ -2,14 +2,13 @@
 
 [move]
 version = 3
-manifest_digest = "E126631754504395DB16C508AF0ACBD008A6034B83CAC3E7619DA5A72B0BA5A6"
-deps_digest = "397E6A9F7A624706DBDFEE056CE88391A15876868FD18A88504DA74EB458D697"
+manifest_digest = "E73176F7A227E9E1248C9BB441A57E1FB150B115BDB3A92D3B7DCA13AEA20D78"
+deps_digest = "F9B494B64F0615AED0E98FC12A85B85ECD2BC5185C22D30E7F67786BB52E507C"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
   { id = "MoveStdlib", name = "MoveStdlib" },
   { id = "Sui", name = "Sui" },
   { id = "SuiSystem", name = "SuiSystem" },
-  { id = "commitment", name = "commitment" },
 ]
 
 [[move.package]]
@@ -41,17 +40,6 @@ source = { git = "https://github.com/MystenLabs/sui.git", rev = "2c930c25f8d3", 
 dependencies = [
   { id = "MoveStdlib", name = "MoveStdlib" },
   { id = "Sui", name = "Sui" },
-]
-
-[[move.package]]
-id = "commitment"
-source = { local = "../commitment" }
-
-dependencies = [
-  { id = "Bridge", name = "Bridge" },
-  { id = "MoveStdlib", name = "MoveStdlib" },
-  { id = "Sui", name = "Sui" },
-  { id = "SuiSystem", name = "SuiSystem" },
 ]
 
 [move.toolchain-version]

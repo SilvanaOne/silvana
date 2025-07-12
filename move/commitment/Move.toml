@@ -1,15 +1,14 @@
 [package]
-name = "coordination"
+name = "commitment"
 version = "0.1.0"
 edition = "2024.beta" 
 license = "Apache 2.0"        
 authors = ["DFST"]      
 
 [dependencies]
-commitment = { local = "../commitment" }
 
 [addresses]
-coordination = "0x0"
+commitment = "0x0"
 
 [dev-dependencies]
 
