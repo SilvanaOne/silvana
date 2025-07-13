@@ -1,7 +1,9 @@
 module coordination::registry;
 
 use coordination::agent::Agent;
+use coordination::app_instance::AppMethod;
 use coordination::developer::{Developer, DeveloperNames};
+use coordination::silvana_app::{SilvanaApp, AppNames};
 use std::string::String;
 use sui::clock::Clock;
 use sui::display;
@@ -9,13 +11,15 @@ use sui::event;
 use sui::object_table::{Self, remove};
 use sui::package;
 
-public struct AgentRegistry has key, store {
+public struct SilvanaRegistry has key, store {
     id: UID,
     name: String,
     version: u32,
     admin: address,
     developers: object_table::ObjectTable<String, Developer>,
     developers_index: object_table::ObjectTable<address, DeveloperNames>,
+    apps: object_table::ObjectTable<String, SilvanaApp>,
+    apps_index: object_table::ObjectTable<address, AppNames>,
 }
 
 public struct RegistryCreatedEvent has copy, drop {
@@ -110,13 +114,15 @@ fun init(otw: REGISTRY, ctx: &mut TxContext) {
 }
 
 public fun create_registry(name: String, ctx: &mut TxContext) {
-    let registry = AgentRegistry {
+    let registry = SilvanaRegistry {
         id: object::new(ctx),
         name,
         version: 1,
         admin: ctx.sender(),
         developers: object_table::new(ctx),
         developers_index: object_table::new(ctx),
+        apps: object_table::new(ctx),
+        apps_index: object_table::new(ctx),
     };
     event::emit(RegistryCreatedEvent {
         id: registry.id.to_address(),
@@ -127,7 +133,7 @@ public fun create_registry(name: String, ctx: &mut TxContext) {
 }
 
 public fun add_developer(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     name: String,
     github: String,
     image: Option<String>,
@@ -168,7 +174,7 @@ public fun add_developer(
 }
 
 public fun update_developer(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     name: String,
     github: String,
     image: Option<String>,
@@ -190,7 +196,7 @@ public fun update_developer(
 }
 
 public fun remove_developer(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     name: String,
     agent_names: vector<String>,
     clock: &Clock,
@@ -229,7 +235,7 @@ public fun remove_developer(
 }
 
 public fun add_agent(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     name: String,
     image: Option<String>,
@@ -263,7 +269,7 @@ public fun add_agent(
 }
 
 public fun update_agent(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     name: String,
     image: Option<String>,
@@ -287,7 +293,7 @@ public fun update_agent(
 }
 
 public fun remove_agent(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     name: String,
     clock: &Clock,
@@ -307,7 +313,7 @@ public fun remove_agent(
 }
 
 public fun add_method(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     agent_name: String,
     method_name: String,
@@ -335,7 +341,7 @@ public fun add_method(
 }
 
 public fun update_method(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     agent_name: String,
     method_name: String,
@@ -363,7 +369,7 @@ public fun update_method(
 }
 
 public fun remove_method(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     agent_name: String,
     method_name: String,
@@ -381,7 +387,7 @@ public fun remove_method(
 }
 
 public fun set_default_method(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     agent_name: String,
     method_name: String,
@@ -399,7 +405,7 @@ public fun set_default_method(
 }
 
 public fun remove_default_method(
-    registry: &mut AgentRegistry,
+    registry: &mut SilvanaRegistry,
     developer: String,
     agent_name: String,
     clock: &Clock,
@@ -415,7 +421,7 @@ public fun remove_default_method(
 }
 
 public fun get_agent(
-    registry: &AgentRegistry,
+    registry: &SilvanaRegistry,
     developer: String,
     agent: String,
 ): (&Developer, &Agent) {
@@ -427,4 +433,163 @@ public fun get_agent(
             agent,
         ),
     )
+}
+
+public fun add_app(
+    registry: &mut SilvanaRegistry,
+    name: String,
+    description: Option<String>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let app = coordination::silvana_app::create_app(
+        name,
+        description,
+        clock,
+        ctx,
+    );
+
+    registry.apps.add(name, app);
+
+    if (registry.apps_index.contains(ctx.sender())) {
+        let app_names = registry.apps_index.borrow_mut(ctx.sender());
+        coordination::silvana_app::add_name_to_app_names(
+            app_names,
+            name,
+            ctx,
+        );
+    } else {
+        let app_names = coordination::silvana_app::create_app_names(
+            ctx.sender(),
+            vector[name],
+            ctx,
+        );
+        registry.apps_index.add(ctx.sender(), app_names);
+    }
+}
+
+public fun update_app(
+    registry: &mut SilvanaRegistry,
+    name: String,
+    description: Option<String>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let app = registry.apps.borrow_mut(name);
+    coordination::silvana_app::update_app(
+        app,
+        description,
+        clock,
+        ctx,
+    );
+}
+
+public fun remove_app(
+    registry: &mut SilvanaRegistry,
+    name: String,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(registry.admin == ctx.sender(), ENotAdmin);
+    let app = registry.apps.remove(name);
+    let app_owner = coordination::silvana_app::app_owner(&app);
+
+    if (registry.apps_index.contains(app_owner)) {
+        let app_names = registry.apps_index.borrow_mut(app_owner);
+        coordination::silvana_app::admin_remove_name_from_app_names(
+            app_names,
+            name,
+        );
+
+        if (coordination::silvana_app::app_names_is_empty(app_names)) {
+            let app_names = registry.apps_index.remove(app_owner);
+            coordination::silvana_app::admin_delete_app_names(
+                app_names,
+            );
+        };
+    };
+
+    coordination::silvana_app::admin_delete_app(
+        app,
+        clock,
+    );
+}
+
+public fun get_app(registry: &SilvanaRegistry, name: String): &SilvanaApp {
+    registry.apps.borrow(name)
+}
+
+public fun add_method_to_app(
+    registry: &mut SilvanaRegistry,
+    app_name: String,
+    method_name: String,
+    method: AppMethod,
+    ctx: &mut TxContext,
+) {
+    let app = registry.apps.borrow_mut(app_name);
+    coordination::silvana_app::add_method_to_app(
+        app,
+        method_name,
+        method,
+        ctx,
+    );
+}
+
+public fun remove_method_from_app(
+    registry: &mut SilvanaRegistry,
+    app_name: String,
+    method_name: String,
+    ctx: &mut TxContext,
+): AppMethod {
+    let app = registry.apps.borrow_mut(app_name);
+    coordination::silvana_app::remove_method_from_app(
+        app,
+        method_name,
+        ctx,
+    )
+}
+
+public fun add_instance_to_app(
+    registry: &mut SilvanaRegistry,
+    app_name: String,
+    instance_owner: address,
+    ctx: &mut TxContext,
+) {
+    let app = registry.apps.borrow_mut(app_name);
+    coordination::silvana_app::add_instance_to_app(
+        app,
+        instance_owner,
+        ctx,
+    );
+}
+
+public fun remove_instance_from_app(
+    registry: &mut SilvanaRegistry,
+    app_name: String,
+    instance_owner: address,
+    ctx: &mut TxContext,
+) {
+    let app = registry.apps.borrow_mut(app_name);
+    coordination::silvana_app::remove_instance_from_app(
+        app,
+        instance_owner,
+        ctx,
+    );
+}
+
+public fun has_instance_in_app(
+    registry: &SilvanaRegistry,
+    app_name: String,
+    instance_owner: address,
+): bool {
+    let app = registry.apps.borrow(app_name);
+    coordination::silvana_app::has_instance_in_app(app, instance_owner)
+}
+
+public fun get_app_instance_owners(
+    registry: &SilvanaRegistry,
+    app_name: String,
+): vector<address> {
+    let app = registry.apps.borrow(app_name);
+    coordination::silvana_app::get_instance_owners(app)
 }

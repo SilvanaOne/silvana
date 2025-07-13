@@ -1,0 +1,535 @@
+module coordination::app_instance;
+
+use commitment::state::{AppState, get_state_commitment, create_app_state};
+use coordination::block::{Self, Block};
+use coordination::prover::{Self, ProofCalculation};
+use std::string::String;
+use sui::bls12381::{Scalar, scalar_zero};
+use sui::clock::{timestamp_ms, Clock};
+use sui::display;
+use sui::event;
+use sui::group_ops::Element;
+use sui::object_table::{Self, ObjectTable, add, borrow_mut, borrow};
+use sui::package;
+use sui::vec_map::{Self, VecMap};
+
+public struct AppMethod has copy, drop, store {
+    description: Option<String>,
+    developer: String,
+    agent: String,
+    agent_method: String,
+}
+
+public struct AppMethodAddedEvent has copy, drop {
+    app_instance_address: address,
+    method_name: String,
+    method_description: Option<String>,
+    method_developer: String,
+    method_agent: String,
+    method_agent_method: String,
+}
+
+public struct AppInstance has key, store {
+    id: UID,
+    silvana_app_name: String,
+    description: Option<String>,
+    metadata: Option<String>,
+    methods: VecMap<String, AppMethod>,
+    state: AppState,
+    blocks: ObjectTable<u64, Block>,
+    proof_calculations: ObjectTable<u64, ProofCalculation>,
+    sequence: u64,
+    admin: address,
+    block_number: u64,
+    previous_block_timestamp: u64,
+    previous_block_last_sequence: u64,
+    previous_block_actions_state: Element<Scalar>,
+    last_proved_block_number: u64,
+    last_proved_sequence: u64,
+    isPaused: bool,
+    created_at: u64,
+    updated_at: u64,
+}
+
+public struct AppInstanceCreatedEvent has copy, drop {
+    app_instance_address: address,
+    admin: address,
+    created_at: u64,
+}
+
+public struct APP_INSTANCE has drop {}
+
+fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
+    let publisher = package::claim(otw, ctx);
+
+    let app_instance_keys = vector[b"name".to_string()];
+
+    let app_instance_values = vector[b"Silvana App Instance".to_string()];
+    let mut display_app_instance = display::new_with_fields<AppInstance>(
+        &publisher,
+        app_instance_keys,
+        app_instance_values,
+        ctx,
+    );
+
+    display_app_instance.update_version();
+    transfer::public_transfer(publisher, ctx.sender());
+    transfer::public_transfer(display_app_instance, ctx.sender());
+}
+
+public fun create_app_instance(
+    silvana_app_name: String,
+    description: Option<String>,
+    metadata: Option<String>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let timestamp = clock.timestamp_ms();
+
+    let blocks = object_table::new<u64, Block>(ctx);
+
+    let (proof_calculation_block_1, _) = prover::create_block_proof_calculation(
+        1u64,
+        1u64,
+        option::none(),
+        clock,
+        ctx,
+    );
+    let mut proof_calculations = object_table::new<
+        u64,
+        prover::ProofCalculation,
+    >(ctx);
+    proof_calculations.add(1u64, proof_calculation_block_1);
+
+    let state = create_app_state(ctx);
+
+    let mut app_instance: AppInstance = AppInstance {
+        id: object::new(ctx),
+        silvana_app_name: silvana_app_name,
+        description,
+        metadata,
+        methods: vec_map::empty<String, AppMethod>(),
+        state,
+        blocks,
+        proof_calculations,
+        sequence: 1u64,
+        admin: ctx.sender(),
+        block_number: 1u64,
+        previous_block_timestamp: timestamp,
+        previous_block_last_sequence: 0u64,
+        previous_block_actions_state: scalar_zero(),
+        last_proved_block_number: 0u64,
+        last_proved_sequence: 0u64,
+        isPaused: false,
+        created_at: timestamp,
+        updated_at: timestamp,
+    };
+
+    let (_block_timestamp, block_0) = create_block_internal(
+        &app_instance,
+        0u64,
+        0u64,
+        0u64,
+        scalar_zero(),
+        scalar_zero(),
+        option::none(),
+        clock,
+        ctx,
+    );
+    app_instance.blocks.add(0u64, block_0);
+
+    event::emit(AppInstanceCreatedEvent {
+        app_instance_address: app_instance.id.to_address(),
+        admin: app_instance.admin,
+        created_at: timestamp,
+    });
+
+    transfer::share_object(app_instance);
+}
+
+public fun add_method(
+    app_instance: &mut AppInstance,
+    method_name: String,
+    method_description: Option<String>,
+    method_developer: String,
+    method_agent: String,
+    method_agent_method: String,
+) {
+    let method = AppMethod {
+        description: method_description,
+        developer: method_developer,
+        agent: method_agent,
+        agent_method: method_agent_method,
+    };
+    vec_map::insert(&mut app_instance.methods, method_name, method);
+    event::emit(AppMethodAddedEvent {
+        app_instance_address: app_instance.id.to_address(),
+        method_name,
+        method_description,
+        method_developer,
+        method_agent,
+        method_agent_method,
+    });
+}
+
+// Error codes
+#[error]
+const ENotAuthorized: vector<u8> = b"Not authorized";
+
+public(package) fun only_admin(app_instance: &AppInstance, ctx: &TxContext) {
+    assert!(app_instance.admin == ctx.sender(), ENotAuthorized);
+}
+
+#[error]
+const EAppInstancePaused: vector<u8> = b"App instance is paused";
+
+public(package) fun not_paused(app_instance: &AppInstance) {
+    assert!(app_instance.isPaused == false, EAppInstancePaused);
+}
+
+#[error]
+const ENoTransactions: vector<u8> = b"No new transactions";
+
+#[error]
+const ETooShortTimeSinceLastBlock: vector<u8> =
+    b"The minimum time between blocks is 30 seconds";
+
+const MIN_TIME_BETWEEN_BLOCKS: u64 = 30_000;
+
+public fun create_block(
+    app_instance: &mut AppInstance,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    assert!(
+        (app_instance.previous_block_last_sequence + 1) != app_instance.sequence,
+        ENoTransactions,
+    );
+    let current_time = clock.timestamp_ms();
+    assert!(
+        current_time - app_instance.previous_block_timestamp > MIN_TIME_BETWEEN_BLOCKS,
+        ETooShortTimeSinceLastBlock,
+    );
+    let mut block_number = app_instance.block_number;
+    let start_sequence = app_instance.previous_block_last_sequence + 1;
+    let end_sequence = app_instance.sequence - 1;
+    let proof_calculation = borrow_mut(
+        &mut app_instance.proof_calculations,
+        block_number,
+    );
+    let finished = prover::set_end_sequence(
+        proof_calculation,
+        end_sequence,
+        clock,
+        ctx,
+    );
+    if (finished) {
+        if (app_instance.last_proved_block_number == block_number - 1) {
+            app_instance.last_proved_block_number = block_number;
+        };
+    };
+
+    let (timestamp, block) = create_block_internal(
+        app_instance,
+        block_number,
+        start_sequence,
+        end_sequence,
+        get_state_commitment(&app_instance.state),
+        app_instance.previous_block_actions_state,
+        option::some(app_instance.previous_block_timestamp),
+        clock,
+        ctx,
+    );
+    add(
+        &mut app_instance.blocks,
+        block_number,
+        block,
+    );
+    block_number = block_number + 1;
+    let (new_proof_calculation, _) = prover::create_block_proof_calculation(
+        block_number,
+        app_instance.sequence,
+        option::none(),
+        clock,
+        ctx,
+    );
+    app_instance.block_number = block_number;
+    app_instance.previous_block_timestamp = timestamp;
+    app_instance.previous_block_actions_state =
+        get_state_commitment(&app_instance.state);
+    app_instance.previous_block_last_sequence = end_sequence;
+    add(
+        &mut app_instance.proof_calculations,
+        block_number,
+        new_proof_calculation,
+    );
+}
+
+public fun start_proving(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    sequences: vector<u64>, // should be sorted
+    merged_sequences_1: Option<vector<u64>>,
+    merged_sequences_2: Option<vector<u64>>,
+    job_id: String,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let proof_calculation = borrow_mut(
+        &mut app_instance.proof_calculations,
+        block_number,
+    );
+    prover::start_proving(
+        proof_calculation,
+        sequences,
+        merged_sequences_1,
+        merged_sequences_2,
+        job_id,
+        clock,
+        ctx,
+    );
+}
+
+public fun submit_proof(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    sequences: vector<u64>, // should be sorted
+    merged_sequences_1: Option<vector<u64>>,
+    merged_sequences_2: Option<vector<u64>>,
+    job_id: String,
+    da_hash: String,
+    cpu_cores: u8,
+    prover_architecture: String,
+    prover_memory: u64,
+    cpu_time: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let proof_calculation = borrow_mut(
+        &mut app_instance.proof_calculations,
+        block_number,
+    );
+    let finished = prover::submit_proof(
+        proof_calculation,
+        sequences,
+        merged_sequences_1,
+        merged_sequences_2,
+        job_id,
+        da_hash,
+        cpu_cores,
+        prover_architecture,
+        prover_memory,
+        cpu_time,
+        clock,
+        ctx,
+    );
+    if (finished) {
+        let mut i = app_instance.last_proved_block_number + 1;
+        while (i < app_instance.block_number) {
+            let proof_calculation = borrow(
+                &app_instance.proof_calculations,
+                i,
+            );
+            if (prover::is_finished(proof_calculation)) {
+                app_instance.last_proved_block_number = i;
+                let end_sequence = prover::get_proof_calculation_end_sequence(
+                    proof_calculation,
+                );
+                app_instance.last_proved_sequence = *end_sequence.borrow();
+            } else return;
+            i = i + 1;
+        };
+    };
+}
+
+public fun reject_proof(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    sequences: vector<u64>, // should be sorted
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let proof_calculation = borrow_mut(
+        &mut app_instance.proof_calculations,
+        block_number,
+    );
+    prover::reject_proof(
+        proof_calculation,
+        sequences,
+        clock,
+        ctx,
+    );
+}
+
+#[allow(lint(self_transfer))]
+public(package) fun create_block_internal(
+    app_instance: &AppInstance,
+    block_number: u64,
+    start_sequence: u64,
+    end_sequence: u64,
+    actions_commitment: Element<Scalar>,
+    previous_block_actions_commitment: Element<Scalar>,
+    previous_block_timestamp: Option<u64>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): (u64, Block) {
+    let timestamp = clock.timestamp_ms();
+    let mut name: String = b"Silvana App Instance Block ".to_string();
+    name.append(block_number.to_string());
+    let mut block_state_name: String = b"Silvana App InstanceBlock ".to_string();
+    block_state_name.append(block_number.to_string());
+    block_state_name.append(b" State".to_string());
+
+    // let block_commitment = create_block_commitment(
+    //     id: object::new(ctx),
+    //     name: block_state_name,
+    //     block_number: block_number,
+    //     sequence: end_sequence,
+    //     users: *addresses,
+    //     state,
+    // };
+
+    let time_since_last_block = if (previous_block_timestamp.is_some()) {
+        timestamp - *previous_block_timestamp.borrow()
+    } else {
+        0u64
+    };
+    let state_commitment = get_state_commitment(&app_instance.state);
+
+    let block = block::create_block(
+        block_number,
+        name,
+        start_sequence,
+        end_sequence,
+        actions_commitment,
+        state_commitment,
+        time_since_last_block,
+        end_sequence - start_sequence + 1,
+        previous_block_actions_commitment,
+        actions_commitment,
+        option::none(),
+        option::none(),
+        option::none(),
+        false,
+        timestamp,
+        option::none(),
+        option::none(),
+        option::none(),
+        option::none(),
+        ctx,
+    );
+
+    (timestamp, block)
+}
+
+public fun update_block_state_data_availability(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    state_data_availability: String,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    only_admin(app_instance, ctx);
+    let timestamp = clock.timestamp_ms();
+    let block = borrow_mut(
+        &mut app_instance.blocks,
+        block_number,
+    );
+    block::set_data_availability(
+        block,
+        option::some(state_data_availability),
+        option::none(),
+        option::some(timestamp),
+        option::none(),
+    );
+}
+
+public fun update_block_proof_data_availability(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    proof_data_availability: String,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    only_admin(app_instance, ctx);
+    let timestamp = clock.timestamp_ms();
+    let block = borrow_mut(
+        &mut app_instance.blocks,
+        block_number,
+    );
+    let state_data_availability = block::get_state_data_availability(block);
+    let state_calculated_at = block::get_state_calculated_at(block);
+    block::set_data_availability(
+        block,
+        state_data_availability,
+        option::some(proof_data_availability),
+        state_calculated_at,
+        option::some(timestamp),
+    );
+}
+
+#[error]
+const EBlockNotProved: vector<u8> = b"Block not proved";
+
+public fun update_block_mina_tx_hash(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    mina_tx_hash: String,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    only_admin(app_instance, ctx);
+    let timestamp = clock.timestamp_ms();
+    let block = borrow_mut(
+        &mut app_instance.blocks,
+        block_number,
+    );
+    assert!(
+        block::get_state_data_availability(block).is_some() && (block::get_proof_data_availability(block).is_some() || block_number == 0),
+        EBlockNotProved,
+    );
+    block::set_settlement_tx(
+        block,
+        option::some(mina_tx_hash),
+        false,
+        option::some(timestamp),
+        option::none(),
+    );
+}
+
+#[error]
+const EBlockNotSentToMina: vector<u8> = b"Block not sent to Mina";
+
+public fun update_block_mina_tx_included_in_block(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    settled_on_mina_at: u64,
+    ctx: &mut TxContext,
+) {
+    only_admin(app_instance, ctx);
+    let block = borrow_mut(
+        &mut app_instance.blocks,
+        block_number,
+    );
+    assert!(
+        block::get_state_data_availability(block).is_some() && (block::get_proof_data_availability(block).is_some() || block_number == 0),
+        EBlockNotProved,
+    );
+    assert!(
+        block::get_sent_to_settlement_at(block).is_some(),
+        EBlockNotSentToMina,
+    );
+    assert!(
+        block::get_settlement_tx_hash(block).is_some(),
+        EBlockNotSentToMina,
+    );
+    let sent_to_settlement_at = block::get_sent_to_settlement_at(block);
+    let settlement_tx_hash = block::get_settlement_tx_hash(block);
+    block::set_settlement_tx(
+        block,
+        settlement_tx_hash,
+        true,
+        sent_to_settlement_at,
+        option::some(settled_on_mina_at),
+    );
+}
