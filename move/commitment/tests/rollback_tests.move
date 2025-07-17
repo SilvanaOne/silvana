@@ -38,7 +38,7 @@ fun create_test_element(
     prev_val: u256,
     new_val: u256,
 ): RollbackElement {
-    let previous_state = vector[prev_val];
+    let previous_state = option::some(vector[prev_val]);
     let new_state = vector[new_val];
     let commitment_before = scalar_zero();
     let commitment_after = scalar_one();
@@ -76,7 +76,7 @@ fun test_create_rollback() {
 #[test]
 fun test_create_rollback_element() {
     let index = 5;
-    let previous_state = vector[100u256, 200u256];
+    let previous_state = option::some(vector[100u256, 200u256]);
     let new_state = vector[300u256, 400u256];
     let commitment_before = scalar_zero();
     let commitment_after = scalar_one();
@@ -90,7 +90,7 @@ fun test_create_rollback_element() {
     );
 
     assert!(get_element_index(&element) == index, 0);
-    assert!(*get_element_previous_state(&element) == previous_state, 1);
+    assert!(get_element_previous_state(&element) == previous_state, 1);
     assert!(*get_element_new_state(&element) == new_state, 2);
     assert!(*get_element_commitment_before(&element) == commitment_before, 3);
     assert!(*get_element_commitment_after(&element) == commitment_after, 4);
@@ -99,7 +99,7 @@ fun test_create_rollback_element() {
 #[test]
 fun test_create_rollback_element_empty_vectors() {
     let index = 0;
-    let previous_state = vector::empty<u256>();
+    let previous_state = option::some(vector::empty<u256>());
     let new_state = vector::empty<u256>();
     let commitment_before = scalar_zero();
     let commitment_after = scalar_one();
@@ -113,8 +113,33 @@ fun test_create_rollback_element_empty_vectors() {
     );
 
     assert!(get_element_index(&element) == index, 0);
-    assert!(vector::length(get_element_previous_state(&element)) == 0, 1);
-    assert!(vector::length(get_element_new_state(&element)) == 0, 2);
+    assert!(option::is_some(&get_element_previous_state(&element)), 1);
+    assert!(
+        vector::length(option::borrow(&get_element_previous_state(&element))) == 0,
+        2,
+    );
+    assert!(vector::length(get_element_new_state(&element)) == 0, 3);
+}
+
+#[test]
+fun test_create_rollback_element_none_previous_state() {
+    let index = 0;
+    let previous_state = option::none<vector<u256>>();
+    let new_state = vector[100u256];
+    let commitment_before = scalar_zero();
+    let commitment_after = scalar_one();
+
+    let element = create_rollback_element(
+        index,
+        previous_state,
+        new_state,
+        &commitment_before,
+        &commitment_after,
+    );
+
+    assert!(get_element_index(&element) == index, 0);
+    assert!(option::is_none(&get_element_previous_state(&element)), 1);
+    assert!(vector::length(get_element_new_state(&element)) == 1, 2);
 }
 
 // Sequence addition tests
@@ -487,7 +512,7 @@ fun test_purge_records_invalid_sequence_too_high() {
 #[test]
 fun test_rollback_element_with_multiple_data() {
     let index = 10;
-    let previous_state = vector[100u256, 200u256, 300u256];
+    let previous_state = option::some(vector[100u256, 200u256, 300u256]);
     let new_state = vector[400u256, 500u256, 600u256, 700u256];
     let commitment_before = scalar_zero();
     let commitment_after = scalar_add(&scalar_one(), &scalar_one());
@@ -501,13 +526,17 @@ fun test_rollback_element_with_multiple_data() {
     );
 
     assert!(get_element_index(&element) == index, 0);
-    assert!(vector::length(get_element_previous_state(&element)) == 3, 1);
-    assert!(vector::length(get_element_new_state(&element)) == 4, 2);
+    assert!(option::is_some(&get_element_previous_state(&element)), 1);
     assert!(
-        *vector::borrow(get_element_previous_state(&element), 0) == 100u256,
-        3,
+        vector::length(option::borrow(&get_element_previous_state(&element))) == 3,
+        2,
     );
-    assert!(*vector::borrow(get_element_new_state(&element), 3) == 700u256, 4);
+    assert!(vector::length(get_element_new_state(&element)) == 4, 3);
+    assert!(
+        *vector::borrow(option::borrow(&get_element_previous_state(&element)), 0) == 100u256,
+        4,
+    );
+    assert!(*vector::borrow(get_element_new_state(&element), 3) == 700u256, 5);
 }
 
 #[test]

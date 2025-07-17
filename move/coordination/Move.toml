@@ -7,6 +7,7 @@ authors = ["DFST"]
 
 [dependencies]
 commitment = { local = "../commitment" }
+constants = { local = "../constants" }
 
 [addresses]
 coordination = "0x0"

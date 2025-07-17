@@ -8,7 +8,7 @@ use sui::object_table::{Self, ObjectTable};
 
 public struct RollbackElement has copy, drop, store {
     index: u32,
-    previous_state: vector<u256>,
+    previous_state: Option<vector<u256>>,
     new_state: vector<u256>,
     commitment_before: Element<Scalar>,
     commitment_after: Element<Scalar>,
@@ -38,7 +38,7 @@ public struct RollbackCreatedEvent has copy, drop {
 
 public struct RollbackElementCreatedEvent has copy, drop {
     index: u32,
-    previous_state: vector<u256>,
+    previous_state: Option<vector<u256>>,
     new_state: vector<u256>,
     commitment_before: Element<Scalar>,
     commitment_after: Element<Scalar>,
@@ -100,7 +100,7 @@ public fun create_rollback(ctx: &mut TxContext): Rollback {
 /// Create a RollbackElement
 public fun create_rollback_element(
     index: u32,
-    previous_state: vector<u256>,
+    previous_state: Option<vector<u256>>,
     new_state: vector<u256>,
     commitment_before: &Element<Scalar>,
     commitment_after: &Element<Scalar>,
@@ -270,8 +270,8 @@ public fun get_element_index(element: &RollbackElement): u32 {
 
 public fun get_element_previous_state(
     element: &RollbackElement,
-): &vector<u256> {
-    &element.previous_state
+): Option<vector<u256>> {
+    element.previous_state
 }
 
 public fun get_element_new_state(element: &RollbackElement): &vector<u256> {

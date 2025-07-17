@@ -83,7 +83,7 @@ public fun create_app_instance(
     metadata: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
-) {
+): AppInstance {
     let timestamp = clock.timestamp_ms();
 
     let blocks = object_table::new<u64, Block>(ctx);
@@ -144,7 +144,7 @@ public fun create_app_instance(
         created_at: timestamp,
     });
 
-    transfer::share_object(app_instance);
+    app_instance
 }
 
 public fun add_method(
@@ -532,4 +532,130 @@ public fun update_block_mina_tx_included_in_block(
         sent_to_settlement_at,
         option::some(settled_on_mina_at),
     );
+}
+
+// Getter functions for AppInstance
+public fun silvana_app_name(app_instance: &AppInstance): &String {
+    &app_instance.silvana_app_name
+}
+
+public fun description(app_instance: &AppInstance): &Option<String> {
+    &app_instance.description
+}
+
+public fun metadata(app_instance: &AppInstance): &Option<String> {
+    &app_instance.metadata
+}
+
+public fun methods(app_instance: &AppInstance): &VecMap<String, AppMethod> {
+    &app_instance.methods
+}
+
+public fun state(app_instance: &AppInstance): &AppState {
+    &app_instance.state
+}
+
+public fun sequence(app_instance: &AppInstance): u64 {
+    app_instance.sequence
+}
+
+public fun admin(app_instance: &AppInstance): address {
+    app_instance.admin
+}
+
+public fun block_number(app_instance: &AppInstance): u64 {
+    app_instance.block_number
+}
+
+public fun previous_block_timestamp(app_instance: &AppInstance): u64 {
+    app_instance.previous_block_timestamp
+}
+
+public fun previous_block_last_sequence(app_instance: &AppInstance): u64 {
+    app_instance.previous_block_last_sequence
+}
+
+public fun previous_block_actions_state(
+    app_instance: &AppInstance,
+): &Element<Scalar> {
+    &app_instance.previous_block_actions_state
+}
+
+public fun last_proved_block_number(app_instance: &AppInstance): u64 {
+    app_instance.last_proved_block_number
+}
+
+public fun last_proved_sequence(app_instance: &AppInstance): u64 {
+    app_instance.last_proved_sequence
+}
+
+public fun is_paused(app_instance: &AppInstance): bool {
+    app_instance.isPaused
+}
+
+public fun created_at(app_instance: &AppInstance): u64 {
+    app_instance.created_at
+}
+
+public fun updated_at(app_instance: &AppInstance): u64 {
+    app_instance.updated_at
+}
+
+// Mutable getter functions
+public fun state_mut(app_instance: &mut AppInstance): &mut AppState {
+    &mut app_instance.state
+}
+
+public fun blocks_mut(
+    app_instance: &mut AppInstance,
+): &mut ObjectTable<u64, Block> {
+    &mut app_instance.blocks
+}
+
+public fun proof_calculations_mut(
+    app_instance: &mut AppInstance,
+): &mut ObjectTable<u64, ProofCalculation> {
+    &mut app_instance.proof_calculations
+}
+
+public fun get_block(app_instance: &AppInstance, block_number: u64): &Block {
+    borrow(&app_instance.blocks, block_number)
+}
+
+public fun get_block_mut(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+): &mut Block {
+    borrow_mut(&mut app_instance.blocks, block_number)
+}
+
+public fun get_proof_calculation(
+    app_instance: &AppInstance,
+    block_number: u64,
+): &ProofCalculation {
+    borrow(&app_instance.proof_calculations, block_number)
+}
+
+public fun get_proof_calculation_mut(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+): &mut ProofCalculation {
+    borrow_mut(&mut app_instance.proof_calculations, block_number)
+}
+
+// Getter functions for AppMethod
+public fun method_description(method: &AppMethod): &Option<String> {
+    &method.description
+}
+
+public fun method_developer(method: &AppMethod): &String {
+    &method.developer
+}
+
+public fun method_agent(method: &AppMethod): &String {
+    &method.agent
+}
+
+public fun method_agent_method(method: &AppMethod): &String {
+    &method.agent_method
 }

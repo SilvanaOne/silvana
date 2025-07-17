@@ -29,7 +29,6 @@ public struct AppState has key, store {
     id: UID,
     sequence: u64,
     actions_commitment: ActionsCommitment,
-    state_elements_length: u32,
     state: ObjectTable<u32, StateElement>,
     state_commitment: Element<Scalar>,
     rollback: Rollback, // TODO: implement rollback calls
@@ -38,7 +37,6 @@ public struct AppState has key, store {
 public struct AppStateCreatedEvent has copy, drop {
     id: address,
     sequence: u64,
-    state_elements_length: u32,
     state_commitment: Element<Scalar>,
 }
 
@@ -54,8 +52,6 @@ public struct ActionCommittedEvent has copy, drop {
     old_sequence: u64,
     new_sequence: u64,
     state_updates_count: u64,
-    old_state_elements_length: u32,
-    new_state_elements_length: u32,
     old_state_commitment: Element<Scalar>,
     new_state_commitment: Element<Scalar>,
 }
@@ -63,7 +59,7 @@ public struct ActionCommittedEvent has copy, drop {
 public struct StateElementUpdatedEvent has copy, drop {
     app_state_id: address,
     element_index: u32,
-    previous_state: vector<u256>,
+    previous_state: Option<vector<u256>>,
     new_state: vector<u256>,
     previous_commitment: Element<Scalar>,
     new_commitment: Element<Scalar>,
@@ -79,7 +75,6 @@ public fun create_app_state(ctx: &mut TxContext): AppState {
         id: app_state_id,
         sequence: 0,
         actions_commitment: commitment::actions::create_actions_commitment(ctx),
-        state_elements_length: 0,
         state: object_table::new<u32, StateElement>(ctx),
         state_commitment: initial_state_commitment,
         rollback: create_rollback(ctx),
@@ -88,7 +83,6 @@ public fun create_app_state(ctx: &mut TxContext): AppState {
     event::emit(AppStateCreatedEvent {
         id: address,
         sequence: 0,
-        state_elements_length: 0,
         state_commitment: initial_state_commitment,
     });
 
@@ -123,7 +117,6 @@ public fun commit_action(
     ctx: &mut TxContext,
 ) {
     let old_sequence = app_state.sequence;
-    let old_state_elements_length = app_state.state_elements_length;
     let old_state_commitment = app_state.state_commitment;
 
     app_state
@@ -139,16 +132,22 @@ public fun commit_action(
     let mut i = 0;
     while (i < state_updates.length()) {
         let state_update = vector::borrow(state_updates, i);
-        if (state_update.index > app_state.state_elements_length) {
-            app_state.state_elements_length = state_update.index;
-        };
         let new_state_element_commitment = digest_fields(
             &state_update.new_state,
         );
-        let previous_state = app_state.state.borrow(state_update.index);
-        let previous_state_element_commitment = digest_fields(
-            &previous_state.state,
-        );
+        let (previous_state_element_commitment, previous_state) = if (
+            app_state.state.contains(state_update.index)
+        ) {
+            (
+                digest_fields(
+                    &app_state.state.borrow(state_update.index).state,
+                ),
+                option::some(app_state.state.borrow(state_update.index).state),
+            )
+        } else {
+            (scalar_zero(), option::none())
+        };
+
         let updated_state_commitment = update(
             &app_state.state_commitment,
             &previous_state_element_commitment,
@@ -157,7 +156,7 @@ public fun commit_action(
         );
         let rollback_element = create_rollback_element(
             state_update.index,
-            previous_state.state,
+            previous_state,
             state_update.new_state,
             &app_state.state_commitment,
             &updated_state_commitment,
@@ -168,14 +167,25 @@ public fun commit_action(
         event::emit(StateElementUpdatedEvent {
             app_state_id: app_state.id.to_address(),
             element_index: state_update.index,
-            previous_state: previous_state.state,
+            previous_state: previous_state,
             new_state: state_update.new_state,
             previous_commitment: previous_state_element_commitment,
             new_commitment: new_state_element_commitment,
         });
-
-        app_state.state.borrow_mut(state_update.index).state =
-            state_update.new_state;
+        if (app_state.state.contains(state_update.index)) {
+            app_state.state.borrow_mut(state_update.index).state =
+                state_update.new_state;
+        } else {
+            app_state
+                .state
+                .add(
+                    state_update.index,
+                    StateElement {
+                        id: object::new(ctx),
+                        state: state_update.new_state,
+                    },
+                );
+        };
         app_state.state_commitment = updated_state_commitment;
         i = i + 1;
     };
@@ -196,8 +206,6 @@ public fun commit_action(
         old_sequence,
         new_sequence: app_state.sequence,
         state_updates_count: state_updates.length(),
-        old_state_elements_length,
-        new_state_elements_length: app_state.state_elements_length,
         old_state_commitment,
         new_state_commitment: app_state.state_commitment,
     });
@@ -206,10 +214,6 @@ public fun commit_action(
 // Getter functions
 public fun get_sequence(app_state: &AppState): u64 {
     app_state.sequence
-}
-
-public fun get_state_elements_length(app_state: &AppState): u32 {
-    app_state.state_elements_length
 }
 
 public fun get_state_commitment(app_state: &AppState): Element<Scalar> {
@@ -222,6 +226,10 @@ public fun get_actions_commitment(app_state: &AppState): &ActionsCommitment {
 
 public fun get_rollback(app_state: &AppState): &Rollback {
     &app_state.rollback
+}
+
+public fun get_rollback_mut(app_state: &mut AppState): &mut Rollback {
+    &mut app_state.rollback
 }
 
 public fun get_state_element(app_state: &AppState, index: u32): &StateElement {

@@ -1,6 +1,6 @@
 module commitment::actions;
 
-use commitment::constants::get_r;
+use constants::constants::get_r;
 use sui::bls12381::{Scalar, scalar_one, scalar_zero, scalar_mul, scalar_add};
 use sui::event;
 use sui::group_ops::Element;
