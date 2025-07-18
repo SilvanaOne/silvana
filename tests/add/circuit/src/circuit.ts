@@ -1,25 +1,25 @@
 import {
   ZkProgram,
-  Provable,
   Field,
   UInt32,
   Struct,
   MerkleWitness,
-  MerkleTree,
   SelfProof,
 } from "o1js";
+import { AddProgramCommitment, calculateNewCommitment } from "./commitment.js";
 
 export const TREE_DEPTH = 11; //TODO: increase depth
-
 export class Witness extends MerkleWitness(TREE_DEPTH) {}
 
 export class AddProgramState extends Struct({
   sum: Field,
   root: Field,
+  commitment: AddProgramCommitment,
 }) {
   static assertEquals(a: AddProgramState, b: AddProgramState) {
     a.sum.assertEquals(b.sum);
     a.root.assertEquals(b.root);
+    AddProgramCommitment.assertEquals(a.commitment, b.commitment);
   }
 }
 
@@ -29,15 +29,27 @@ export const AddProgram = ZkProgram({
   publicOutput: AddProgramState,
   methods: {
     add: {
-      privateInputs: [UInt32, Field, Field, Witness],
+      privateInputs: [
+        UInt32,
+        Field,
+        Field,
+        Witness,
+        AddProgramCommitment,
+        AddProgramCommitment,
+      ],
       async method(
         input: AddProgramState,
         index: UInt32,
         state: Field,
         value: Field,
-        witness: Witness
+        witness: Witness,
+        inputMoveCommitment: AddProgramCommitment,
+        outputMoveCommitment: AddProgramCommitment
       ) {
+        // Check value limits
         value.assertLessThan(100);
+
+        // Check inclusion proof for state
         const witnessRoot = witness.calculateRoot(state);
         const witnessIndex = witness.calculateIndex();
         witnessRoot.assertEquals(
@@ -48,21 +60,52 @@ export const AddProgram = ZkProgram({
           index.value,
           "Witness index should match index"
         );
+
+        // Calculate new sum, value and root
         const sum = input.sum.add(value);
-        const newRoot = witness.calculateRoot(state.add(value));
-        return { publicOutput: { sum, root: newRoot } };
+        const new_value = state.add(value);
+        const root = witness.calculateRoot(new_value);
+
+        // Calculate new commitment
+        const commitment = calculateNewCommitment({
+          methodName: "add",
+          inputCommitment: input.commitment,
+          inputMoveCommitment,
+          outputMoveCommitment,
+          index,
+          value,
+          old_value: state,
+          new_value,
+          old_sum: input.sum,
+          new_sum: sum,
+        });
+        return {
+          publicOutput: { sum, root, commitment },
+        };
       },
     },
     multiply: {
-      privateInputs: [UInt32, Field, Field, Witness],
+      privateInputs: [
+        UInt32,
+        Field,
+        Field,
+        Witness,
+        AddProgramCommitment,
+        AddProgramCommitment,
+      ],
       async method(
         input: AddProgramState,
         index: UInt32,
         state: Field,
         value: Field,
-        witness: Witness
+        witness: Witness,
+        inputCommitment: AddProgramCommitment,
+        outputCommitment: AddProgramCommitment
       ) {
+        // Check value limits
         value.assertLessThan(100);
+
+        // Check inclusion proof for state
         const witnessRoot = witness.calculateRoot(state);
         const witnessIndex = witness.calculateIndex();
         witnessRoot.assertEquals(
@@ -73,9 +116,28 @@ export const AddProgram = ZkProgram({
           index.value,
           "Witness index should match index"
         );
+
+        // Calculate new sum, value and root
         const sum = input.sum.add(state.mul(value).sub(state));
-        const newRoot = witness.calculateRoot(state.mul(value));
-        return { publicOutput: { sum, root: newRoot } };
+        const new_value = state.mul(value);
+        const root = witness.calculateRoot(new_value);
+
+        // Calculate new commitment
+        const commitment = calculateNewCommitment({
+          methodName: "multiply",
+          inputCommitment: input.commitment,
+          inputMoveCommitment: inputCommitment,
+          outputMoveCommitment: outputCommitment,
+          index,
+          value,
+          old_value: state,
+          new_value,
+          old_sum: input.sum,
+          new_sum: sum,
+        });
+        return {
+          publicOutput: { sum, root, commitment },
+        };
       },
     },
     merge: {

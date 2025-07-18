@@ -114,7 +114,6 @@ public fun add(app: &mut App, index: u32, value: u256, ctx: &mut TxContext) {
     assert!(index > SUM_INDEX, EReservedIndex);
     assert!(index < MAX_INDEX, EIndexTooLarge);
     assert!(value < 100, EInvalidValue);
-    let data: vector<u256> = vector[value];
     let old_value = get_value(app, index);
     let old_sum = get_sum(app);
     let state = app.instance.state_mut();
@@ -126,7 +125,10 @@ public fun add(app: &mut App, index: u32, value: u256, ctx: &mut TxContext) {
     let old_state_commitment = state.get_state_commitment();
 
     // Create action
-    let action = create_action(b"add".to_string(), data);
+    let action = create_action(
+        b"add".to_string(),
+        vector[index as u256, value],
+    );
     let new_value = old_value + value;
     let new_sum = old_sum + value;
     let state_update_value = create_state_update(index, vector[new_value]);
@@ -172,7 +174,6 @@ public fun multiply(
     assert!(index > SUM_INDEX, EReservedIndex);
     assert!(index < MAX_INDEX, EIndexTooLarge);
     assert!(value < 100, EInvalidValue);
-    let data: vector<u256> = vector[value];
     let old_value = get_value(app, index);
     let old_sum = get_sum(app);
     let state = app.instance.state_mut();
@@ -184,7 +185,10 @@ public fun multiply(
     let old_state_commitment = state.get_state_commitment();
 
     // Create action
-    let action = create_action(b"multiply".to_string(), data);
+    let action = create_action(
+        b"multiply".to_string(),
+        vector[index as u256, value],
+    );
     let new_value = old_value * value;
     let new_sum = old_sum  +  new_value - old_value;
     let state_update_value = create_state_update(index, vector[new_value]);

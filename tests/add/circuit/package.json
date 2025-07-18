@@ -12,7 +12,8 @@
     "add": "npm run test test/add.test.ts",
     "multiply": "npm run test test/multiply.test.ts",
     "purge": "npm run test test/purge.test.ts",
-    "rollup": "npm run test test/rollup.test.ts"
+    "rollup": "npm run test test/rollup.test.ts",
+    "commitment": "npm run test test/commitment.test.ts"
   },
   "node": {
     "version": ">=22.0.0"

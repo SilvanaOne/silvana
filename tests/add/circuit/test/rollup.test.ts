@@ -10,9 +10,19 @@ import {
   TREE_DEPTH,
   Witness,
 } from "../src/circuit.js";
-import { MerkleTree, Field, UInt32, Cache, VerificationKey } from "o1js";
+import { AddProgramCommitment } from "../src/commitment.js";
+import {
+  MerkleTree,
+  Field,
+  UInt32,
+  Cache,
+  VerificationKey,
+  Encoding,
+  UInt64,
+} from "o1js";
 import { getSum } from "./helpers/sum.js";
 import { getState } from "./helpers/state.js";
+import { scalar, R, rScalarPow } from "@silvana-one/mina-utils";
 
 let appID: string | undefined = undefined;
 let vk: VerificationKey | undefined = undefined;
@@ -20,12 +30,38 @@ const state: AddProgramState[] = [
   new AddProgramState({
     sum: Field(0),
     root: new MerkleTree(TREE_DEPTH).getRoot(),
+    commitment: new AddProgramCommitment({
+      stateCommitment: scalar(0n),
+      actionsCommitment: scalar(Encoding.stringToFields("init")[0].toBigInt()),
+      actionsSequence: UInt64.from(1n),
+      actionsRPower: R,
+    }),
   }),
 ];
 const proofs: AddProgramProof[] = [];
 
 describe("Add Rollup", async () => {
   it("should create app", async () => {
+    // const field = Field.random();
+    // const bits1 = field.toBits().map((x) => x.toBoolean());
+    // console.log("bits1 length", bits1.length);
+    // const value1 = bits1.reduce((acc, bit, index) => {
+    //   return acc + (bit ? 2n ** BigInt(index) : 0n);
+    // }, 0n);
+    // console.log("value1 from bits", value1);
+    // console.log("field", field.toBigInt());
+    // const commitment = scalar(field.toBigInt());
+    // console.log(
+    //   "commitment",
+    //   commitment.value.map((x) => x.toBigInt())
+    // );
+    // const bits2 = commitment.toBits().map((x) => x.toBoolean());
+    // console.log("bits2 length", bits2.length);
+    // const value2 = bits2.reduce((acc, bit, index) => {
+    //   return acc + (bit ? 2n ** BigInt(index) : 0n);
+    // }, 0n);
+    // console.log("value2 from bits", value2);
+    // return;
     appID = await createApp();
     assert.ok(appID !== undefined, "appID is not set");
     const state = await getState({ appID });
@@ -34,7 +70,7 @@ describe("Add Rollup", async () => {
     assert.ok(state[0] === 0n, "state is not 0");
     console.log("appID", appID);
   });
-  it.skip("should get ZkProgram constraints", async () => {
+  it("should get ZkProgram constraints", async () => {
     // Analyze the constraint count for both methods
     const methods = await AddProgram.analyzeMethods();
     const addMethodStats = (methods as any).add;
@@ -116,7 +152,19 @@ describe("Add Rollup", async () => {
       UInt32.from(result.index),
       Field(result.old_value),
       Field(result.value),
-      witness
+      witness,
+      new AddProgramCommitment({
+        actionsCommitment: scalar(result.old_actions_commitment),
+        stateCommitment: scalar(result.old_state_commitment),
+        actionsSequence: UInt64.from(result.old_actions_sequence),
+        actionsRPower: rScalarPow(result.old_actions_sequence),
+      }),
+      new AddProgramCommitment({
+        actionsCommitment: scalar(result.new_actions_commitment),
+        stateCommitment: scalar(result.new_state_commitment),
+        actionsSequence: UInt64.from(result.new_actions_sequence),
+        actionsRPower: rScalarPow(result.new_actions_sequence),
+      })
     );
     console.timeEnd("add proof");
     proofs.push(proofResult.proof);
@@ -169,7 +217,19 @@ describe("Add Rollup", async () => {
       UInt32.from(result.index),
       Field(result.old_value),
       Field(result.value),
-      witness
+      witness,
+      new AddProgramCommitment({
+        actionsCommitment: scalar(result.old_actions_commitment),
+        stateCommitment: scalar(result.old_state_commitment),
+        actionsSequence: UInt64.from(result.old_actions_sequence),
+        actionsRPower: rScalarPow(result.old_actions_sequence),
+      }),
+      new AddProgramCommitment({
+        actionsCommitment: scalar(result.new_actions_commitment),
+        stateCommitment: scalar(result.new_state_commitment),
+        actionsSequence: UInt64.from(result.new_actions_sequence),
+        actionsRPower: rScalarPow(result.new_actions_sequence),
+      })
     );
     console.timeEnd("multiply proof");
     proofs.push(proofResult.proof);
