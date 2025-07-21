@@ -1,15 +1,14 @@
 [package]
-name = "commitment"
+name = "constants"
 version = "0.1.0"
 edition = "2024.beta" 
 license = "Apache 2.0"        
 authors = ["DFST"]      
 
 [dependencies]
-constants = { local = "../constants" }
 
 [addresses]
-commitment = "0x0"
+constants = "0x0"
 
 [dev-dependencies]
 

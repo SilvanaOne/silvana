@@ -14,6 +14,9 @@ use commitment::actions::{
     get_sequence,
     get_commitment
 };
+use commitment::commitment::scalar_from_u256;
+use commitment::string::string_to_field;
+use std::debug::print;
 use std::string;
 use sui::bls12381::scalar_zero;
 use sui::test_scenario::{Self, Scenario};
@@ -86,6 +89,22 @@ fun test_create_action_empty_data() {
     assert!(vector::length(&get_action_data(&action)) == 0, 2);
 }
 
+#[test]
+fun test_create_action_init() {
+    let action_string = string::utf8(b"init");
+    let action_data = vector::empty<u256>();
+    let action = create_action(action_string, action_data);
+    let field = string_to_field(action_string);
+    print(&b"field".to_string());
+    print(&field);
+    let scalar = scalar_from_u256(field);
+    print(&b"scalar".to_string());
+    print(&scalar);
+
+    assert!(get_action(&action) == action_string, 0);
+    assert!(get_action_data(&action) == action_data, 1);
+    assert!(vector::length(&get_action_data(&action)) == 0, 2);
+}
 #[test]
 fun test_create_action_large_data() {
     let action_string = string::utf8(b"large_data");

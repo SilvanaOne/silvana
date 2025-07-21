@@ -1,6 +1,6 @@
 module commitment::exp;
 
-use commitment::constants::{
+use constants::constants::{
     get_r,
     get_table0_entry,
     get_table1_entry,

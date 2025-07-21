@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist",
+    "baseUrl": ".", // affects where output files end up
+    "target": "ESNext",
+    "module": "NodeNext", // allow top-level await
+    "moduleResolution": "NodeNext", // comply with node + "type": "module"
+
+    "experimentalDecorators": true, // needed for decorators
+    "emitDecoratorMetadata": true, // needed for decorators
+    "useDefineForClassFields": false, // ensure correct behaviour of class fields with decorators
+
+    "strict": true, // for the full TypeScript experience
+    "strictPropertyInitialization": false, // to enable generic constructors, e.g. on CircuitValue
+    "importHelpers": true, // reduces size
+    "declaration": true, // declaration files are how library consumers get our types
+    "noEmitOnError": true, // avoid accidentally shipping with type errors
+    "sourceMap": true,
+    "skipLibCheck": true, // skip lib check because of o1js types
+    "preserveSymlinks": true
+  },
+  "include": [
+    "src/**/*",
+    "test/**/*"
+  ],
+  "exclude": ["dist/**", "node_modules"],
+  "ts-node": {
+    "experimentalSpecifierResolution": "node",
+    "transpileOnly": true,
+    "esm": true
+  },
+}

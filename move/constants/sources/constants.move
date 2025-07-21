@@ -13,7 +13,7 @@
 /// Maximum supported exponent: 1024^3 - 1 = 1,073,741,823
 /// Total storage: 96 KiB (3 * 1024 * 32 bytes)
 
-module commitment::constants;
+module constants::constants;
 
 use sui::bls12381::{Scalar, scalar_from_bytes};
 use sui::group_ops::Element;

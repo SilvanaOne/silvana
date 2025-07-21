@@ -7,7 +7,6 @@ use commitment::state::{
     create_state_update,
     commit_action,
     get_sequence,
-    get_state_elements_length,
     get_state_commitment,
     get_actions_commitment,
     has_state_element,
@@ -42,7 +41,8 @@ fun test_create_app_state() {
 
     // Test initial state using getters
     assert!(get_sequence(&app_state) == 0, 0);
-    assert!(get_state_elements_length(&app_state) == 0, 1);
+    // Test that no state elements exist initially (since there's no length function)
+    assert!(!has_state_element(&app_state, 0), 1);
     assert!(get_state_commitment(&app_state) == scalar_zero(), 2);
 
     // Test that actions commitment is initialized

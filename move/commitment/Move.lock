@@ -2,13 +2,14 @@
 
 [move]
 version = 3
-manifest_digest = "E73176F7A227E9E1248C9BB441A57E1FB150B115BDB3A92D3B7DCA13AEA20D78"
-deps_digest = "F9B494B64F0615AED0E98FC12A85B85ECD2BC5185C22D30E7F67786BB52E507C"
+manifest_digest = "F423908F1FB8AEBF5356D68BC31B418645F1F7A7D8338E6E86174ADD46EAA55D"
+deps_digest = "397E6A9F7A624706DBDFEE056CE88391A15876868FD18A88504DA74EB458D697"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
   { id = "MoveStdlib", name = "MoveStdlib" },
   { id = "Sui", name = "Sui" },
   { id = "SuiSystem", name = "SuiSystem" },
+  { id = "constants", name = "constants" },
 ]
 
 [[move.package]]
@@ -42,7 +43,26 @@ dependencies = [
   { id = "Sui", name = "Sui" },
 ]
 
+[[move.package]]
+id = "constants"
+source = { local = "../constants" }
+
+dependencies = [
+  { id = "Bridge", name = "Bridge" },
+  { id = "MoveStdlib", name = "MoveStdlib" },
+  { id = "Sui", name = "Sui" },
+  { id = "SuiSystem", name = "SuiSystem" },
+]
+
 [move.toolchain-version]
-compiler-version = "1.51.3"
+compiler-version = "1.52.1"
 edition = "2024.beta"
 flavor = "sui"
+
+[env]
+
+[env.devnet]
+chain-id = "89671445"
+original-published-id = "0xad264e7c42da5362b67b38c6f6877c884032fd42abd953e4b5cda22772598bf2"
+latest-published-id = "0xad264e7c42da5362b67b38c6f6877c884032fd42abd953e4b5cda22772598bf2"
+published-version = "1"

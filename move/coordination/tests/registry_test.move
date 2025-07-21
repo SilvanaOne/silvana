@@ -1,7 +1,30 @@
 #[test_only]
 module coordination::registry_test;
 
-use coordination::registry;
+use coordination::registry::{
+    SilvanaRegistry,
+    create_registry,
+    add_developer,
+    add_agent,
+    get_agent,
+    remove_developer,
+    update_developer,
+    update_agent,
+    remove_agent,
+    add_method,
+    update_method,
+    set_default_method,
+    remove_method,
+    remove_default_method,
+    add_app,
+    update_app,
+    remove_app,
+    get_app,
+    add_instance_to_app,
+    remove_instance_from_app,
+    has_instance_in_app,
+    get_app_instance_owners
+};
 use std::string;
 use sui::clock;
 use sui::test_scenario::{Self as test, next_tx, ctx};
@@ -9,6 +32,11 @@ use sui::test_scenario::{Self as test, next_tx, ctx};
 const ADMIN: address = @0xa;
 const DEVELOPER: address = @0xb;
 const UNAUTHORIZED: address = @0xc;
+
+// Instance owners for testing
+const INSTANCE_OWNER_1: address = @0x1001;
+const INSTANCE_OWNER_2: address = @0x1002;
+const INSTANCE_OWNER_3: address = @0x2001;
 
 #[test]
 public fun test_create_registry_add_developer_and_agent() {
@@ -18,7 +46,7 @@ public fun test_create_registry_add_developer_and_agent() {
     // Test 1: Create Registry
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Silvana Agent Registry"),
             ctx(&mut scenario),
         );
@@ -27,11 +55,11 @@ public fun test_create_registry_add_developer_and_agent() {
     // Test 2: Add Developer
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"alice"),
             string::utf8(b"alice-github"),
@@ -50,11 +78,11 @@ public fun test_create_registry_add_developer_and_agent() {
     // Test 3: Add Agent
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"alice"),
             string::utf8(b"trading-bot"),
@@ -78,11 +106,11 @@ public fun test_create_registry_add_developer_and_agent() {
     // Test 4: Verify Agent Creation
     {
         next_tx(&mut scenario, DEVELOPER);
-        let registry_obj = test::take_shared<registry::AgentRegistry>(
+        let registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        let (developer_obj, agent_obj) = registry::get_agent(
+        let (developer_obj, agent_obj) = get_agent(
             &registry_obj,
             string::utf8(b"alice"),
             string::utf8(b"trading-bot"),
@@ -116,7 +144,7 @@ public fun test_add_multiple_developers_and_agents() {
     // Create Registry
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Multi-Developer Registry"),
             ctx(&mut scenario),
         );
@@ -125,11 +153,11 @@ public fun test_add_multiple_developers_and_agents() {
     // Add First Developer
     {
         next_tx(&mut scenario, @0xc);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"bob"),
             string::utf8(b"bob-github"),
@@ -146,11 +174,11 @@ public fun test_add_multiple_developers_and_agents() {
     // Add Second Developer
     {
         next_tx(&mut scenario, @0xd);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"charlie"),
             string::utf8(b"charlie-github"),
@@ -167,11 +195,11 @@ public fun test_add_multiple_developers_and_agents() {
     // Bob adds an agent
     {
         next_tx(&mut scenario, @0xc);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"bob"),
             string::utf8(b"yield-farmer"),
@@ -191,11 +219,11 @@ public fun test_add_multiple_developers_and_agents() {
     // Charlie adds an agent
     {
         next_tx(&mut scenario, @0xd);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"charlie"),
             string::utf8(b"nft-monitor"),
@@ -219,12 +247,12 @@ public fun test_add_multiple_developers_and_agents() {
     // Verify both agents exist
     {
         next_tx(&mut scenario, ADMIN);
-        let registry_obj = test::take_shared<registry::AgentRegistry>(
+        let registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
         // Check Bob's agent
-        let (bob_dev, bob_agent) = registry::get_agent(
+        let (bob_dev, bob_agent) = get_agent(
             &registry_obj,
             string::utf8(b"bob"),
             string::utf8(b"yield-farmer"),
@@ -237,7 +265,7 @@ public fun test_add_multiple_developers_and_agents() {
         );
 
         // Check Charlie's agent
-        let (charlie_dev, charlie_agent) = registry::get_agent(
+        let (charlie_dev, charlie_agent) = get_agent(
             &registry_obj,
             string::utf8(b"charlie"),
             string::utf8(b"nft-monitor"),
@@ -264,7 +292,7 @@ public fun test_agent_method_management() {
     // Setup: Create Registry and Developer
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Method Test Registry"),
             ctx(&mut scenario),
         );
@@ -272,11 +300,11 @@ public fun test_agent_method_management() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"dev1"),
             string::utf8(b"dev1-github"),
@@ -292,11 +320,11 @@ public fun test_agent_method_management() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"dev1"),
             string::utf8(b"test-agent"),
@@ -314,11 +342,11 @@ public fun test_agent_method_management() {
     // Test: Add Method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"dev1"),
             string::utf8(b"test-agent"),
@@ -338,11 +366,11 @@ public fun test_agent_method_management() {
     // Test: Set Default Method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::set_default_method(
+        set_default_method(
             &mut registry_obj,
             string::utf8(b"dev1"),
             string::utf8(b"test-agent"),
@@ -357,11 +385,11 @@ public fun test_agent_method_management() {
     // Test: Update Method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_method(
+        update_method(
             &mut registry_obj,
             string::utf8(b"dev1"),
             string::utf8(b"test-agent"),
@@ -391,7 +419,7 @@ public fun test_non_admin_cannot_remove_developer() {
     // Create Registry
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Admin Test Registry"),
             ctx(&mut scenario),
         );
@@ -400,11 +428,11 @@ public fun test_non_admin_cannot_remove_developer() {
     // Add Developer
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"testdev"),
             string::utf8(b"testdev-github"),
@@ -421,11 +449,11 @@ public fun test_non_admin_cannot_remove_developer() {
     // Try to remove developer as non-admin (should fail)
     {
         next_tx(&mut scenario, DEVELOPER); // Not admin
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_developer(
+        remove_developer(
             &mut registry_obj,
             string::utf8(b"testdev"),
             vector::empty(),
@@ -448,7 +476,7 @@ public fun test_update_developer() {
     // Create Registry
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Update Developer Test"),
             ctx(&mut scenario),
         );
@@ -457,11 +485,11 @@ public fun test_update_developer() {
     // Add Developer
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"updatable_dev"),
             string::utf8(b"old-github"),
@@ -478,11 +506,11 @@ public fun test_update_developer() {
     // Update Developer
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_developer(
+        update_developer(
             &mut registry_obj,
             string::utf8(b"updatable_dev"),
             string::utf8(b"new-github"),
@@ -499,11 +527,11 @@ public fun test_update_developer() {
     // Add an agent to verify developer update
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"updatable_dev"),
             string::utf8(b"test_agent"),
@@ -523,11 +551,11 @@ public fun test_update_developer() {
     // Verify Update
     {
         next_tx(&mut scenario, DEVELOPER);
-        let registry_obj = test::take_shared<registry::AgentRegistry>(
+        let registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        let (developer_obj, _) = registry::get_agent(
+        let (developer_obj, _) = get_agent(
             &registry_obj,
             string::utf8(b"updatable_dev"),
             string::utf8(b"test_agent"),
@@ -556,7 +584,7 @@ public fun test_update_agent() {
     // Setup
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Update Agent Test"),
             ctx(&mut scenario),
         );
@@ -564,11 +592,11 @@ public fun test_update_agent() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"agent_dev"),
             string::utf8(b"agent-dev-github"),
@@ -585,11 +613,11 @@ public fun test_update_agent() {
     // Add Agent
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"agent_dev"),
             string::utf8(b"updatable_agent"),
@@ -607,11 +635,11 @@ public fun test_update_agent() {
     // Update Agent
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_agent(
+        update_agent(
             &mut registry_obj,
             string::utf8(b"agent_dev"),
             string::utf8(b"updatable_agent"),
@@ -633,11 +661,11 @@ public fun test_update_agent() {
     // Verify Update
     {
         next_tx(&mut scenario, DEVELOPER);
-        let registry_obj = test::take_shared<registry::AgentRegistry>(
+        let registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        let (_, agent_obj) = registry::get_agent(
+        let (_, agent_obj) = get_agent(
             &registry_obj,
             string::utf8(b"agent_dev"),
             string::utf8(b"updatable_agent"),
@@ -663,7 +691,7 @@ public fun test_remove_agent() {
     // Setup
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Remove Agent Test"),
             ctx(&mut scenario),
         );
@@ -671,11 +699,11 @@ public fun test_remove_agent() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"remove_dev"),
             string::utf8(b"remove-dev-github"),
@@ -692,11 +720,11 @@ public fun test_remove_agent() {
     // Add two agents
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"remove_dev"),
             string::utf8(b"agent_to_keep"),
@@ -708,7 +736,7 @@ public fun test_remove_agent() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"remove_dev"),
             string::utf8(b"agent_to_remove"),
@@ -726,11 +754,11 @@ public fun test_remove_agent() {
     // Verify both agents exist
     {
         next_tx(&mut scenario, DEVELOPER);
-        let registry_obj = test::take_shared<registry::AgentRegistry>(
+        let registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        let (_, keep_agent) = registry::get_agent(
+        let (_, keep_agent) = get_agent(
             &registry_obj,
             string::utf8(b"remove_dev"),
             string::utf8(b"agent_to_keep"),
@@ -739,7 +767,7 @@ public fun test_remove_agent() {
             coordination::agent::agent_name(keep_agent) == string::utf8(b"agent_to_keep"),
         );
 
-        let (_, remove_agent) = registry::get_agent(
+        let (_, remove_agent) = get_agent(
             &registry_obj,
             string::utf8(b"remove_dev"),
             string::utf8(b"agent_to_remove"),
@@ -754,11 +782,11 @@ public fun test_remove_agent() {
     // Remove one agent
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_agent(
+        remove_agent(
             &mut registry_obj,
             string::utf8(b"remove_dev"),
             string::utf8(b"agent_to_remove"),
@@ -772,12 +800,12 @@ public fun test_remove_agent() {
     // Verify only one agent remains
     {
         next_tx(&mut scenario, DEVELOPER);
-        let registry_obj = test::take_shared<registry::AgentRegistry>(
+        let registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
         // Should still be able to get the kept agent
-        let (_, keep_agent) = registry::get_agent(
+        let (_, keep_agent) = get_agent(
             &registry_obj,
             string::utf8(b"remove_dev"),
             string::utf8(b"agent_to_keep"),
@@ -801,7 +829,7 @@ public fun test_method_removal_and_default_handling() {
     // Setup
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Method Removal Test"),
             ctx(&mut scenario),
         );
@@ -809,11 +837,11 @@ public fun test_method_removal_and_default_handling() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method-dev-github"),
@@ -829,11 +857,11 @@ public fun test_method_removal_and_default_handling() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -851,11 +879,11 @@ public fun test_method_removal_and_default_handling() {
     // Add multiple methods
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -869,7 +897,7 @@ public fun test_method_removal_and_default_handling() {
             ctx(&mut scenario),
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -889,11 +917,11 @@ public fun test_method_removal_and_default_handling() {
     // Set default method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::set_default_method(
+        set_default_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -908,11 +936,11 @@ public fun test_method_removal_and_default_handling() {
     // Remove non-default method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_method(
+        remove_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -927,11 +955,11 @@ public fun test_method_removal_and_default_handling() {
     // Remove default method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_default_method(
+        remove_default_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -945,11 +973,11 @@ public fun test_method_removal_and_default_handling() {
     // Remove remaining method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_method(
+        remove_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -973,7 +1001,7 @@ public fun test_admin_remove_developer_success() {
     // Create Registry
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Admin Remove Test"),
             ctx(&mut scenario),
         );
@@ -982,11 +1010,11 @@ public fun test_admin_remove_developer_success() {
     // Add Developer with Agent
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"removable_dev"),
             string::utf8(b"removable-github"),
@@ -997,7 +1025,7 @@ public fun test_admin_remove_developer_success() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"removable_dev"),
             string::utf8(b"removable_agent"),
@@ -1015,11 +1043,11 @@ public fun test_admin_remove_developer_success() {
     // Admin removes developer (should succeed)
     {
         next_tx(&mut scenario, ADMIN);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_developer(
+        remove_developer(
             &mut registry_obj,
             string::utf8(b"removable_dev"),
             vector[string::utf8(b"removable_agent")], // List agent names for cleanup
@@ -1042,7 +1070,7 @@ public fun test_comprehensive_workflow() {
     // 1. Create Registry
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Comprehensive Test Registry"),
             ctx(&mut scenario),
         );
@@ -1051,11 +1079,11 @@ public fun test_comprehensive_workflow() {
     // 2. Add Developer
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow-github"),
@@ -1072,11 +1100,11 @@ public fun test_comprehensive_workflow() {
     // 3. Add Agent
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1094,11 +1122,11 @@ public fun test_comprehensive_workflow() {
     // 4. Add Multiple Methods
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1112,7 +1140,7 @@ public fun test_comprehensive_workflow() {
             ctx(&mut scenario),
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1132,11 +1160,11 @@ public fun test_comprehensive_workflow() {
     // 5. Set and Change Default Method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::set_default_method(
+        set_default_method(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1151,11 +1179,11 @@ public fun test_comprehensive_workflow() {
     // 6. Update Developer
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_developer(
+        update_developer(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"new-workflow-github"),
@@ -1172,11 +1200,11 @@ public fun test_comprehensive_workflow() {
     // 7. Update Agent
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_agent(
+        update_agent(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1199,11 +1227,11 @@ public fun test_comprehensive_workflow() {
     // 8. Update Method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_method(
+        update_method(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1223,11 +1251,11 @@ public fun test_comprehensive_workflow() {
     // 9. Change Default Method
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::set_default_method(
+        set_default_method(
             &mut registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1242,11 +1270,11 @@ public fun test_comprehensive_workflow() {
     // 10. Verify Final State
     {
         next_tx(&mut scenario, DEVELOPER);
-        let registry_obj = test::take_shared<registry::AgentRegistry>(
+        let registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        let (developer_obj, agent_obj) = registry::get_agent(
+        let (developer_obj, agent_obj) = get_agent(
             &registry_obj,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow_agent"),
@@ -1283,7 +1311,7 @@ public fun test_unauthorized_update_developer() {
     // Setup: Create registry and developer
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1291,11 +1319,11 @@ public fun test_unauthorized_update_developer() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"secure_dev"),
             string::utf8(b"secure-github"),
@@ -1312,11 +1340,11 @@ public fun test_unauthorized_update_developer() {
     // Unauthorized attempt to update developer (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_developer(
+        update_developer(
             &mut registry_obj,
             string::utf8(b"secure_dev"),
             string::utf8(b"hacked-github"),
@@ -1343,7 +1371,7 @@ public fun test_unauthorized_add_agent() {
     // Setup: Create registry and developer
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1351,11 +1379,11 @@ public fun test_unauthorized_add_agent() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"target-github"),
@@ -1372,11 +1400,11 @@ public fun test_unauthorized_add_agent() {
     // Unauthorized attempt to add agent (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"malicious_agent"),
@@ -1406,7 +1434,7 @@ public fun test_unauthorized_update_agent() {
     // Setup: Create registry, developer, and agent
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1414,11 +1442,11 @@ public fun test_unauthorized_update_agent() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"target-github"),
@@ -1429,7 +1457,7 @@ public fun test_unauthorized_update_agent() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"target_agent"),
@@ -1447,11 +1475,11 @@ public fun test_unauthorized_update_agent() {
     // Unauthorized attempt to update agent (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_agent(
+        update_agent(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"target_agent"),
@@ -1479,7 +1507,7 @@ public fun test_unauthorized_remove_agent() {
     // Setup: Create registry, developer, and agent
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1487,11 +1515,11 @@ public fun test_unauthorized_remove_agent() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"target-github"),
@@ -1502,7 +1530,7 @@ public fun test_unauthorized_remove_agent() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"valuable_agent"),
@@ -1520,11 +1548,11 @@ public fun test_unauthorized_remove_agent() {
     // Unauthorized attempt to remove agent (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_agent(
+        remove_agent(
             &mut registry_obj,
             string::utf8(b"target_dev"),
             string::utf8(b"valuable_agent"),
@@ -1548,7 +1576,7 @@ public fun test_unauthorized_add_method() {
     // Setup: Create registry, developer, and agent
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1556,11 +1584,11 @@ public fun test_unauthorized_add_method() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method-github"),
@@ -1571,7 +1599,7 @@ public fun test_unauthorized_add_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1589,11 +1617,11 @@ public fun test_unauthorized_add_method() {
     // Unauthorized attempt to add method (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1623,7 +1651,7 @@ public fun test_unauthorized_update_method() {
     // Setup: Create registry, developer, agent, and method
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1631,11 +1659,11 @@ public fun test_unauthorized_update_method() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method-github"),
@@ -1646,7 +1674,7 @@ public fun test_unauthorized_update_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1658,7 +1686,7 @@ public fun test_unauthorized_update_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1678,11 +1706,11 @@ public fun test_unauthorized_update_method() {
     // Unauthorized attempt to update method (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::update_method(
+        update_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1712,7 +1740,7 @@ public fun test_unauthorized_remove_method() {
     // Setup: Create registry, developer, agent, and method
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1720,11 +1748,11 @@ public fun test_unauthorized_remove_method() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method-github"),
@@ -1735,7 +1763,7 @@ public fun test_unauthorized_remove_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1747,7 +1775,7 @@ public fun test_unauthorized_remove_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1767,11 +1795,11 @@ public fun test_unauthorized_remove_method() {
     // Unauthorized attempt to remove method (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_method(
+        remove_method(
             &mut registry_obj,
             string::utf8(b"method_dev"),
             string::utf8(b"method_agent"),
@@ -1796,7 +1824,7 @@ public fun test_unauthorized_set_default_method() {
     // Setup: Create registry, developer, agent, and method
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1804,11 +1832,11 @@ public fun test_unauthorized_set_default_method() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default-github"),
@@ -1819,7 +1847,7 @@ public fun test_unauthorized_set_default_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default_agent"),
@@ -1831,7 +1859,7 @@ public fun test_unauthorized_set_default_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default_agent"),
@@ -1851,11 +1879,11 @@ public fun test_unauthorized_set_default_method() {
     // Unauthorized attempt to set default method (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::set_default_method(
+        set_default_method(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default_agent"),
@@ -1880,7 +1908,7 @@ public fun test_unauthorized_remove_default_method() {
     // Setup: Create registry, developer, agent, method, and set as default
     {
         next_tx(&mut scenario, ADMIN);
-        registry::create_registry(
+        create_registry(
             string::utf8(b"Security Test Registry"),
             ctx(&mut scenario),
         );
@@ -1888,11 +1916,11 @@ public fun test_unauthorized_remove_default_method() {
 
     {
         next_tx(&mut scenario, DEVELOPER);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::add_developer(
+        add_developer(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default-github"),
@@ -1903,7 +1931,7 @@ public fun test_unauthorized_remove_default_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_agent(
+        add_agent(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default_agent"),
@@ -1915,7 +1943,7 @@ public fun test_unauthorized_remove_default_method() {
             ctx(&mut scenario),
         );
 
-        registry::add_method(
+        add_method(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default_agent"),
@@ -1929,7 +1957,7 @@ public fun test_unauthorized_remove_default_method() {
             ctx(&mut scenario),
         );
 
-        registry::set_default_method(
+        set_default_method(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default_agent"),
@@ -1944,17 +1972,864 @@ public fun test_unauthorized_remove_default_method() {
     // Unauthorized attempt to remove default method (should fail)
     {
         next_tx(&mut scenario, UNAUTHORIZED);
-        let mut registry_obj = test::take_shared<registry::AgentRegistry>(
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
 
-        registry::remove_default_method(
+        remove_default_method(
             &mut registry_obj,
             string::utf8(b"default_dev"),
             string::utf8(b"default_agent"),
             &clock,
             ctx(&mut scenario),
         );
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+// === APP MANAGEMENT TESTS ===
+
+#[test]
+public fun test_create_and_manage_apps() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Create Registry
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"App Test Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    // Add App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"trading_app"),
+            option::some(string::utf8(b"Automated trading application")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Verify App Creation
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        let app = get_app(&registry_obj, string::utf8(b"trading_app"));
+        assert!(
+            coordination::silvana_app::app_name(app) == string::utf8(b"trading_app"),
+        );
+        assert!(coordination::silvana_app::app_owner(app) == DEVELOPER);
+
+        test::return_shared(registry_obj);
+    };
+
+    // Update App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        update_app(
+            &mut registry_obj,
+            string::utf8(b"trading_app"),
+            option::some(
+                string::utf8(
+                    b"Advanced automated trading application with ML capabilities",
+                ),
+            ),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Verify Update
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        let app = get_app(&registry_obj, string::utf8(b"trading_app"));
+        assert!(
+            coordination::silvana_app::app_name(app) == string::utf8(b"trading_app"),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+public fun test_multiple_apps_same_owner() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Create Registry
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"Multi-App Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    // Add First App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"defi_app"),
+            option::some(string::utf8(b"DeFi protocol management")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Add Second App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"nft_app"),
+            option::some(string::utf8(b"NFT marketplace application")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Verify Both Apps
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        let defi_app = get_app(&registry_obj, string::utf8(b"defi_app"));
+        assert!(
+            coordination::silvana_app::app_name(defi_app) == string::utf8(b"defi_app"),
+        );
+
+        let nft_app = get_app(&registry_obj, string::utf8(b"nft_app"));
+        assert!(
+            coordination::silvana_app::app_name(nft_app) == string::utf8(b"nft_app"),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+#[allow(implicit_const_copy)]
+public fun test_app_instance_management() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Create Registry and App
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"Instance Test Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"instance_app"),
+            option::some(string::utf8(b"App for instance testing")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Add First Instance
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_instance_to_app(
+            &mut registry_obj,
+            string::utf8(b"instance_app"),
+            INSTANCE_OWNER_1,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Add Second Instance
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_instance_to_app(
+            &mut registry_obj,
+            string::utf8(b"instance_app"),
+            INSTANCE_OWNER_2,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Verify Instances
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        assert!(
+            has_instance_in_app(
+                &registry_obj,
+                string::utf8(b"instance_app"),
+                INSTANCE_OWNER_1,
+            ),
+        );
+
+        assert!(
+            has_instance_in_app(
+                &registry_obj,
+                string::utf8(b"instance_app"),
+                INSTANCE_OWNER_2,
+            ),
+        );
+
+        let instance_owners = get_app_instance_owners(
+            &registry_obj,
+            string::utf8(b"instance_app"),
+        );
+        assert!(vector::length(&instance_owners) == 2);
+        assert!(vector::contains(&instance_owners, &INSTANCE_OWNER_1));
+        assert!(vector::contains(&instance_owners, &INSTANCE_OWNER_2));
+
+        test::return_shared(registry_obj);
+    };
+
+    // Remove One Instance
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        remove_instance_from_app(
+            &mut registry_obj,
+            string::utf8(b"instance_app"),
+            INSTANCE_OWNER_1,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Verify Instance Removal
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        assert!(
+            !has_instance_in_app(
+                &registry_obj,
+                string::utf8(b"instance_app"),
+                INSTANCE_OWNER_1,
+            ),
+        );
+
+        assert!(
+            has_instance_in_app(
+                &registry_obj,
+                string::utf8(b"instance_app"),
+                INSTANCE_OWNER_2,
+            ),
+        );
+
+        let instance_owners = get_app_instance_owners(
+            &registry_obj,
+            string::utf8(b"instance_app"),
+        );
+        assert!(vector::length(&instance_owners) == 1);
+        assert!(vector::contains(&instance_owners, &INSTANCE_OWNER_2));
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+public fun test_app_basic_workflow() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Setup: Create Registry and App
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"App Basic Test Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"basic_app"),
+            option::some(string::utf8(b"App for basic testing")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Verify app was created successfully
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        let app = get_app(&registry_obj, string::utf8(b"basic_app"));
+        assert!(
+            coordination::silvana_app::app_name(app) == string::utf8(b"basic_app"),
+        );
+        assert!(coordination::silvana_app::app_owner(app) == DEVELOPER);
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = coordination::registry::ENotAdmin)]
+public fun test_non_admin_cannot_remove_app() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Create Registry
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"Admin App Test Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    // Add App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"protected_app"),
+            option::some(string::utf8(b"App that should be protected")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Try to remove app as non-admin (should fail)
+    {
+        next_tx(&mut scenario, DEVELOPER); // Not admin
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        remove_app(
+            &mut registry_obj,
+            string::utf8(b"protected_app"),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+public fun test_admin_remove_app_success() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Create Registry
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"Admin Remove App Test"),
+            ctx(&mut scenario),
+        );
+    };
+
+    // Add App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"removable_app"),
+            option::some(string::utf8(b"App to be removed by admin")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Admin removes app (should succeed)
+    {
+        next_tx(&mut scenario, ADMIN);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        remove_app(
+            &mut registry_obj,
+            string::utf8(b"removable_app"),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+// === APP SECURITY TESTS ===
+
+#[test]
+#[expected_failure(abort_code = coordination::silvana_app::EInvalidOwner)]
+public fun test_unauthorized_update_app() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Setup: Create registry and app
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"App Security Test Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"secure_app"),
+            option::some(string::utf8(b"Original secure app")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Unauthorized attempt to update app (should fail)
+    {
+        next_tx(&mut scenario, UNAUTHORIZED);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        update_app(
+            &mut registry_obj,
+            string::utf8(b"secure_app"),
+            option::some(string::utf8(b"Hacked app description")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+public fun test_app_access_verification() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Setup: Create registry, developer, agent, and app
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"App Security Test Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_developer(
+            &mut registry_obj,
+            string::utf8(b"secure_dev"),
+            string::utf8(b"secure-github"),
+            option::none(),
+            option::none(),
+            option::none(),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        add_agent(
+            &mut registry_obj,
+            string::utf8(b"secure_dev"),
+            string::utf8(b"secure_agent"),
+            option::none(),
+            option::none(),
+            option::none(),
+            vector[string::utf8(b"sui")],
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"secure_app"),
+            option::some(string::utf8(b"Secure app")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Since we can't create AppMethod directly from tests,
+    // this test is simplified to just verify the app exists
+    {
+        next_tx(&mut scenario, UNAUTHORIZED);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        let app = get_app(&registry_obj, string::utf8(b"secure_app"));
+        // Verify app exists and has correct owner
+        assert!(coordination::silvana_app::app_owner(app) == DEVELOPER);
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = coordination::silvana_app::EInvalidOwner)]
+public fun test_unauthorized_add_instance_to_app() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // Setup: Create registry and app
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"App Security Test Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"secure_app"),
+            option::some(string::utf8(b"Secure app")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // Unauthorized attempt to add instance to app (should fail)
+    {
+        next_tx(&mut scenario, UNAUTHORIZED);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_instance_to_app(
+            &mut registry_obj,
+            string::utf8(b"secure_app"),
+            @0x9999, // Arbitrary instance owner
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    clock::destroy_for_testing(clock);
+    test::end(scenario);
+}
+
+#[test]
+#[allow(implicit_const_copy)]
+public fun test_comprehensive_app_workflow() {
+    let mut scenario = test::begin(ADMIN);
+    let clock = clock::create_for_testing(ctx(&mut scenario));
+
+    // 1. Create Registry
+    {
+        next_tx(&mut scenario, ADMIN);
+        create_registry(
+            string::utf8(b"Comprehensive App Workflow Registry"),
+            ctx(&mut scenario),
+        );
+    };
+
+    // 2. Add Developer and Agent
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_developer(
+            &mut registry_obj,
+            string::utf8(b"app_workflow_dev"),
+            string::utf8(b"app-workflow-github"),
+            option::some(string::utf8(b"https://avatar.com/workflow.png")),
+            option::some(string::utf8(b"Comprehensive app workflow developer")),
+            option::some(string::utf8(b"https://workflow-app.dev")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        add_agent(
+            &mut registry_obj,
+            string::utf8(b"app_workflow_dev"),
+            string::utf8(b"workflow_agent"),
+            option::some(string::utf8(b"https://agent.com/workflow.png")),
+            option::some(string::utf8(b"Workflow testing agent")),
+            option::some(string::utf8(b"https://agent.workflow.dev")),
+            vector[string::utf8(b"sui"), string::utf8(b"ethereum")],
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // 3. Add App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_app(
+            &mut registry_obj,
+            string::utf8(b"comprehensive_app"),
+            option::some(string::utf8(b"Comprehensive workflow testing app")),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // 4. Add Multiple Instances
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        add_instance_to_app(
+            &mut registry_obj,
+            string::utf8(b"comprehensive_app"),
+            INSTANCE_OWNER_1,
+            ctx(&mut scenario),
+        );
+
+        add_instance_to_app(
+            &mut registry_obj,
+            string::utf8(b"comprehensive_app"),
+            INSTANCE_OWNER_2,
+            ctx(&mut scenario),
+        );
+
+        add_instance_to_app(
+            &mut registry_obj,
+            string::utf8(b"comprehensive_app"),
+            INSTANCE_OWNER_3,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // 5. Update App
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        update_app(
+            &mut registry_obj,
+            string::utf8(b"comprehensive_app"),
+            option::some(
+                string::utf8(
+                    b"Updated comprehensive workflow testing app with advanced features",
+                ),
+            ),
+            &clock,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // 7. Remove One Instance
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let mut registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        remove_instance_from_app(
+            &mut registry_obj,
+            string::utf8(b"comprehensive_app"),
+            INSTANCE_OWNER_2,
+            ctx(&mut scenario),
+        );
+
+        test::return_shared(registry_obj);
+    };
+
+    // 7. Verify Final State
+    {
+        next_tx(&mut scenario, DEVELOPER);
+        let registry_obj = test::take_shared<SilvanaRegistry>(
+            &scenario,
+        );
+
+        // Verify app exists
+        let app = get_app(&registry_obj, string::utf8(b"comprehensive_app"));
+        assert!(
+            coordination::silvana_app::app_name(app) == string::utf8(b"comprehensive_app"),
+        );
+        assert!(coordination::silvana_app::app_owner(app) == DEVELOPER);
+
+        // Verify instances
+        assert!(
+            has_instance_in_app(
+                &registry_obj,
+                string::utf8(b"comprehensive_app"),
+                INSTANCE_OWNER_1,
+            ),
+        );
+        assert!(
+            !has_instance_in_app(
+                &registry_obj,
+                string::utf8(b"comprehensive_app"),
+                INSTANCE_OWNER_2,
+            ),
+        );
+        assert!(
+            has_instance_in_app(
+                &registry_obj,
+                string::utf8(b"comprehensive_app"),
+                INSTANCE_OWNER_3,
+            ),
+        );
+
+        let instance_owners = get_app_instance_owners(
+            &registry_obj,
+            string::utf8(b"comprehensive_app"),
+        );
+        assert!(vector::length(&instance_owners) == 2);
+        assert!(vector::contains(&instance_owners, &INSTANCE_OWNER_1));
+        assert!(vector::contains(&instance_owners, &INSTANCE_OWNER_3));
 
         test::return_shared(registry_obj);
     };

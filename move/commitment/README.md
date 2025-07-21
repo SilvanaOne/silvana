@@ -416,7 +416,7 @@ pub fn string_to_field(text: String): u256 {
 
 - Polynomial commitments are not hash-collision resistant
 - Algebraic structure allows theoretical collision construction
-- Mitigated by large field size (381 bits) and random bases
+- Mitigated by large scalar size (256 bits), random bases, calculating two commitments (for actions and state), using signatures or hash in the action data, and using MerkleTree inside o1js ZkProgram
 
 ---
 

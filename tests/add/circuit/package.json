@@ -1,0 +1,33 @@
+{
+  "name": "add",
+  "version": "0.1.0",
+  "author": "DFST",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "NODE_NO_WARNINGS=1 node --loader=ts-node/esm --enable-source-maps -r dotenv/config --require dotenv/config  --env-file=.env --env-file=.env.app --test",
+    "template": "npm run test test/template.test.ts",
+    "create": "npm run test test/create.test.ts",
+    "sum": "npm run test test/sum.test.ts",
+    "add": "npm run test test/add.test.ts",
+    "multiply": "npm run test test/multiply.test.ts",
+    "purge": "npm run test test/purge.test.ts",
+    "rollup": "npm run test test/rollup.test.ts",
+    "commitment": "npm run test test/commitment.test.ts"
+  },
+  "node": {
+    "version": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.12",
+    "dotenv": "^17.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.36.0",
+    "@silvana-one/coordination": "^1.0.25",
+    "@silvana-one/mina-utils": "^1.0.25",
+    "o1js": "2.4.0"
+  }
+}
