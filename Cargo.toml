@@ -8,5 +8,6 @@ members = [
     "crates/buffer",
     "crates/proto",
     "crates/nats",
+    "crates/indexed-merkle-map",
     "xtask",
 ]
