@@ -98,6 +98,17 @@ public struct ProofCalculationCreatedEvent has copy, drop {
     timestamp: u64,
 }
 
+public struct ProofCalculationFinishedEvent has copy, drop {
+    proof_calculation_address: address,
+    block_number: u64,
+    start_sequence: u64,
+    end_sequence: u64,
+    block_proof: String,
+    is_finished: bool,
+    proofs_count: u64,
+    timestamp: u64,
+}
+
 public struct PROVER has drop {}
 
 fun init(otw: PROVER, ctx: &mut TxContext) {
@@ -230,6 +241,41 @@ public fun get_proof_calculation_end_sequence(
 
 public fun is_finished(proof_calculation: &ProofCalculation): bool {
     proof_calculation.is_finished
+}
+
+// Delete proof calculation after block is settled and emit comprehensive event
+public(package) fun delete_proof_calculation(
+    proof_calculation: ProofCalculation,
+    clock: &Clock,
+) {
+    let ProofCalculation {
+        id,
+        block_number,
+        start_sequence,
+        end_sequence,
+        proofs,
+        block_proof,
+        is_finished,
+    } = proof_calculation;
+    
+    let proof_calculation_address = id.to_address();
+    let proofs_count = sui::vec_map::size(&proofs);
+    let timestamp = sui::clock::timestamp_ms(clock);
+    
+    // Emit comprehensive event with all data before deletion
+    event::emit(ProofCalculationFinishedEvent {
+        proof_calculation_address,
+        block_number,
+        start_sequence,
+        end_sequence: *option::borrow_with_default(&end_sequence, &0),
+        block_proof: *option::borrow_with_default(&block_proof, &b"".to_string()),
+        is_finished,
+        proofs_count,
+        timestamp,
+    });
+    
+    // Delete the object
+    object::delete(id);
 }
 
 #[error]

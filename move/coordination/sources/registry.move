@@ -593,3 +593,21 @@ public fun get_app_instance_owners(
     let app = registry.apps.borrow(app_name);
     coordination::silvana_app::get_instance_owners(app)
 }
+
+public fun create_app_instance_from_registry(
+    registry: &mut SilvanaRegistry,
+    app_name: String,
+    description: Option<String>,
+    url: Option<String>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): coordination::app_instance::AppInstance {
+    let app = registry.apps.borrow_mut(app_name);
+    coordination::app_instance::create_app_instance(
+        app,
+        description,
+        url,
+        clock,
+        ctx,
+    )
+}

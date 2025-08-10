@@ -7,7 +7,8 @@ use commitment::state::{
     get_state_element,
     has_state_element
 };
-use coordination::app_instance::{AppInstance, create_app_instance};
+use coordination::app_instance::AppInstance;
+use coordination::registry::{SilvanaRegistry, create_app_instance_from_registry};
 use sui::bls12381::Scalar;
 use sui::clock::Clock;
 use sui::event;
@@ -68,8 +69,10 @@ public struct ValueMultipliedEvent has copy, drop {
 
 const SUM_INDEX: u32 = 0;
 
-public fun create_app(clock: &Clock, ctx: &mut TxContext): App {
-    let mut instance = create_app_instance(
+public fun create_app(registry: &mut SilvanaRegistry, clock: &Clock, ctx: &mut TxContext): App {
+    // Create an app instance from the registry's SilvanaApp
+    let mut instance = create_app_instance_from_registry(
+        registry,
         b"test_app".to_string(),
         option::none(),
         option::none(),

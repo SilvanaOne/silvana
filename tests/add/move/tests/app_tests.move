@@ -2,15 +2,44 @@
 module app::app_tests;
 
 use app::main::{create_app, add, multiply, get_value, get_sum};
+use coordination::registry::{SilvanaRegistry, create_registry, add_app};
 use sui::clock;
 use sui::test_scenario as test;
+
+// Helper function to create a test registry with a SilvanaApp
+fun setup_test_registry_and_app(
+    scenario: &mut test::Scenario,
+    clock: &clock::Clock,
+) {
+    // Create registry
+    create_registry(
+        b"Test Registry".to_string(),
+        test::ctx(scenario),
+    );
+    test::next_tx(scenario, @0x1);
+    
+    // Add app to registry
+    let mut registry = test::take_shared<SilvanaRegistry>(scenario);
+    add_app(
+        &mut registry,
+        b"test_app".to_string(),
+        option::some(b"Test application for adding values".to_string()),
+        clock,
+        test::ctx(scenario),
+    );
+    test::return_shared(registry);
+}
 
 #[test]
 fun test_create_app() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Initial sum should be 0 since no elements exist yet
     assert!(get_sum(&app) == 0, 0);
@@ -19,6 +48,7 @@ fun test_create_app() {
     assert!(get_value(&app, 5) == 0, 0);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -28,7 +58,11 @@ fun test_add_function_single_index() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Initial state is 0 at index 1, add 5 should make it 5
     add(&mut app, 1, 5, test::ctx(&mut scenario));
@@ -45,6 +79,7 @@ fun test_add_function_single_index() {
     assert!(get_value(&app, 3) == 0, 0);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -54,7 +89,11 @@ fun test_multiply_function_single_index() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Initial state is 0 at index 1, multiply by 3 should still be 0 (0 * 3 = 0)
     multiply(&mut app, 1, 3, test::ctx(&mut scenario));
@@ -71,6 +110,7 @@ fun test_multiply_function_single_index() {
     assert!(get_sum(&app) == 10, 2);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -80,7 +120,11 @@ fun test_multiple_indexes_sequential() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Test sequential indexes 1, 2, 3, 4 (index 0 is reserved)
     add(&mut app, 1, 10, test::ctx(&mut scenario));
@@ -117,6 +161,7 @@ fun test_multiple_indexes_sequential() {
     assert!(get_value(&app, 4) == 80, 0); // 40 * 2
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -126,7 +171,11 @@ fun test_multiple_indexes_non_sequential() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Test non-sequential indexes: 5, 2, 10, 1
     add(&mut app, 5, 15, test::ctx(&mut scenario));
@@ -166,6 +215,7 @@ fun test_multiple_indexes_non_sequential() {
     assert!(get_value(&app, 2) == 35, 0); // 25 + 10
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -175,7 +225,11 @@ fun test_mixed_operations_same_index() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Test multiple operations on the same index
     let index = 7;
@@ -199,6 +253,7 @@ fun test_mixed_operations_same_index() {
     assert!(get_sum(&app) == 69, 0);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -208,7 +263,11 @@ fun test_interleaved_operations_multiple_indexes() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Interleave operations between different indexes
     add(&mut app, 1, 10, test::ctx(&mut scenario));
@@ -234,6 +293,7 @@ fun test_interleaved_operations_multiple_indexes() {
     assert!(get_value(&app, 12) == 32, 0); // 8 * 4 = 32
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -243,7 +303,11 @@ fun test_boundary_values_multiple_indexes() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Test with value 99 (should work as it's < 100) on different indexes
     add(&mut app, 1, 99, test::ctx(&mut scenario));
@@ -273,6 +337,7 @@ fun test_boundary_values_multiple_indexes() {
     assert!(get_value(&app, 50) == 99, 0);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -283,12 +348,17 @@ fun test_add_reserved_index_0() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // This should fail as index 0 is reserved
     add(&mut app, 0, 5, test::ctx(&mut scenario));
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -299,12 +369,17 @@ fun test_multiply_reserved_index_0() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // This should fail as index 0 is reserved
     multiply(&mut app, 0, 2, test::ctx(&mut scenario));
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -315,12 +390,17 @@ fun test_add_invalid_value_100() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // This should fail as value >= 100
     add(&mut app, 1, 100, test::ctx(&mut scenario));
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -331,12 +411,17 @@ fun test_add_invalid_value_greater_than_100() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // This should fail as value >= 100
     add(&mut app, 42, 150, test::ctx(&mut scenario));
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -347,12 +432,17 @@ fun test_multiply_invalid_value_100() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // This should fail as value >= 100
     multiply(&mut app, 10, 100, test::ctx(&mut scenario));
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -363,12 +453,17 @@ fun test_multiply_invalid_value_greater_than_100() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // This should fail as value >= 100
     multiply(&mut app, 99, 200, test::ctx(&mut scenario));
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -378,7 +473,11 @@ fun test_zero_operations_multiple_indexes() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Adding 0 should not change the state at different indexes
     add(&mut app, 1, 0, test::ctx(&mut scenario));
@@ -412,6 +511,7 @@ fun test_zero_operations_multiple_indexes() {
     assert!(get_sum(&app) == 75, 0); // 0 + 42 + 33
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -421,7 +521,11 @@ fun test_large_index_values() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Test with large index values (must be < MAX_INDEX = 1,073,741,824)
     let large_index1 = 1000000;
@@ -446,6 +550,7 @@ fun test_large_index_values() {
     assert!(get_value(&app, large_index2) == 100, 0);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -455,7 +560,11 @@ fun test_sum_functionality() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Initial sum should be 0
     assert!(get_sum(&app) == 0, 0);
@@ -480,6 +589,7 @@ fun test_sum_functionality() {
     assert!(get_sum(&app) == 60, 0);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -490,12 +600,17 @@ fun test_index_too_large() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // This should fail as index >= MAX_INDEX
     add(&mut app, 1073741824, 10, test::ctx(&mut scenario)); // MAX_INDEX
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }
@@ -505,7 +620,11 @@ fun test_multiply_by_zero_safe() {
     let mut scenario = test::begin(@0x1);
     let clock = clock::create_for_testing(test::ctx(&mut scenario));
 
-    let mut app = create_app(&clock, test::ctx(&mut scenario));
+    setup_test_registry_and_app(&mut scenario, &clock);
+    test::next_tx(&mut scenario, @0x1);
+    
+    let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
+    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
 
     // Add a non-zero value then multiply by 0 to test the new safe calculation
     add(&mut app, 1, 5, test::ctx(&mut scenario));
@@ -519,6 +638,7 @@ fun test_multiply_by_zero_safe() {
     assert!(get_sum(&app) == 0, 0);
 
     sui::transfer::public_transfer(app, @0x1);
+    test::return_shared(registry);
     clock::destroy_for_testing(clock);
     scenario.end();
 }

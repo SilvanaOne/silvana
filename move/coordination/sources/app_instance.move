@@ -42,7 +42,6 @@ public struct AppInstance has key, store {
     previous_block_last_sequence: u64,
     previous_block_actions_state: Element<Scalar>,
     last_proved_block_number: u64,
-    last_proved_sequence: u64,
     isPaused: bool,
     created_at: u64,
     updated_at: u64,
@@ -100,7 +99,7 @@ public fun create_app_instance(
 
     let state = create_app_state(ctx);
     let jobs = jobs::create_jobs(option::none(), ctx);
-    
+
     // Clone methods from the SilvanaApp
     let methods = silvana_app::clone_app_methods(app);
     let app_name = silvana_app::app_name(app);
@@ -122,7 +121,6 @@ public fun create_app_instance(
         previous_block_last_sequence: 0u64,
         previous_block_actions_state: scalar_zero(),
         last_proved_block_number: 0u64,
-        last_proved_sequence: 0u64,
         isPaused: false,
         created_at: timestamp,
         updated_at: timestamp,
@@ -140,7 +138,7 @@ public fun create_app_instance(
         ctx,
     );
     app_instance.blocks.add(0u64, block_0);
-    
+
     // Track the instance in the SilvanaApp
     let instance_address = app_instance.id.to_address();
     silvana_app::add_instance_to_app(app, instance_address, ctx);
@@ -339,10 +337,6 @@ public fun submit_proof(
             );
             if (prover::is_finished(proof_calculation)) {
                 app_instance.last_proved_block_number = i;
-                let end_sequence = prover::get_proof_calculation_end_sequence(
-                    proof_calculation,
-                );
-                app_instance.last_proved_sequence = *end_sequence.borrow();
             } else return;
             i = i + 1;
         };
@@ -511,6 +505,7 @@ public fun update_block_mina_tx_included_in_block(
     app_instance: &mut AppInstance,
     block_number: u64,
     settled_on_mina_at: u64,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     only_admin(app_instance, ctx);
@@ -539,6 +534,17 @@ public fun update_block_mina_tx_included_in_block(
         sent_to_settlement_at,
         option::some(settled_on_mina_at),
     );
+    
+    // Delete the proof_calculation for this block as it's no longer needed
+    // All information has been preserved in events
+    // Note: Block 0 (genesis) doesn't have proof_calculation, only blocks >= 1
+    if (block_number > 0 && object_table::contains(&app_instance.proof_calculations, block_number)) {
+        let proof_calculation = object_table::remove(
+            &mut app_instance.proof_calculations,
+            block_number,
+        );
+        prover::delete_proof_calculation(proof_calculation, clock);
+    };
 }
 
 // Getter functions for AppInstance
@@ -590,10 +596,6 @@ public fun previous_block_actions_state(
 
 public fun last_proved_block_number(app_instance: &AppInstance): u64 {
     app_instance.last_proved_block_number
-}
-
-public fun last_proved_sequence(app_instance: &AppInstance): u64 {
-    app_instance.last_proved_sequence
 }
 
 public fun is_paused(app_instance: &AppInstance): bool {
@@ -672,9 +674,12 @@ public fun create_app_job(
     ctx: &mut TxContext,
 ): u64 {
     // Get method from app instance methods
-    assert!(vec_map::contains(&app_instance.methods, &method_name), EMethodNotFound);
+    assert!(
+        vec_map::contains(&app_instance.methods, &method_name),
+        EMethodNotFound,
+    );
     let method = vec_map::get(&app_instance.methods, &method_name);
-    
+
     jobs::create_job(
         &mut app_instance.jobs,
         job_description,
@@ -731,4 +736,3 @@ public fun get_app_pending_jobs_count(app_instance: &AppInstance): u64 {
 public fun get_next_pending_app_job(app_instance: &AppInstance): Option<u64> {
     jobs::get_next_pending_job(&app_instance.jobs)
 }
-
