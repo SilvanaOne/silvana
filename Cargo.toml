@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/rpc",
     "crates/coordinator",
+    "crates/docker",
     "crates/tidb",
     "crates/monitoring",
     "crates/buffer",

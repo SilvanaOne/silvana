@@ -46,7 +46,7 @@ public struct StateUpdateCreatedEvent has copy, drop {
     state_length: u64,
 }
 
-public struct ActionCommittedEvent has copy, drop {
+public struct StateActionCommittedEvent has copy, drop {
     app_state_id: address,
     action: Action,
     old_sequence: u64,
@@ -200,7 +200,7 @@ public fun commit_action(
     app_state.sequence = new_sequence;
 
     // Emit event for the overall action commitment
-    event::emit(ActionCommittedEvent {
+    event::emit(StateActionCommittedEvent {
         app_state_id: app_state.id.to_address(),
         action,
         old_sequence,

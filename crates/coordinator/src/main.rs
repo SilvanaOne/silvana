@@ -1,109 +1,78 @@
-//! # Coordinator Service
-//!
+mod config;
+mod error;
+mod events;
+mod processor;
 
 use anyhow::Result;
-use buffer::EventBuffer;
-use monitoring::{init_logging, init_monitoring, spawn_monitoring_tasks, start_metrics_server};
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::time::sleep;
-use tracing::info;
+use clap::Parser;
+use dotenv::dotenv;
+use tracing::{error, info};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-// Example coordinator event type that implements BufferableEvent
-#[derive(Debug, Clone)]
-pub struct CoordinatorEvent {
-    pub id: String,
-    pub coordinator_id: String,
-    pub event_type: String,
-    pub data: String,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-}
+use crate::config::Config;
+use crate::processor::EventProcessor;
 
-// Implement BufferableEvent for our coordinator events
-impl buffer::BufferableEvent for CoordinatorEvent {
-    fn estimate_size(&self) -> usize {
-        self.id.len() + self.coordinator_id.len() + self.event_type.len() + self.data.len() + 32 // rough estimate
-    }
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(long, env = "SUI_RPC_URL", default_value = "http://148.251.75.59:9000")]
+    rpc_url: String,
 
-    fn event_type_name(&self) -> &'static str {
-        "CoordinatorEvent"
-    }
-}
+    #[arg(long, env = "COORDINATION_PACKAGE_ID")]
+    package_id: String,
 
-// Simple mock backend for demonstration
-struct MockBackend;
+    #[arg(long, env = "COORDINATION_MODULE", default_value = "agent")]
+    module: String,
 
-#[async_trait::async_trait]
-impl buffer::EventBackend<CoordinatorEvent> for MockBackend {
-    async fn process_batch(&self, events: &[CoordinatorEvent]) -> Result<usize, anyhow::Error> {
-        info!("📝 Coordinator processing batch of {} events", events.len());
-        // Simulate some processing time
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        Ok(events.len()) // Return number of successfully processed events
-    }
+    #[arg(long, env = "DOCKER_USE_TEE", default_value = "false")]
+    use_tee: bool,
 
-    fn backend_name(&self) -> &'static str {
-        "MockCoordinatorBackend"
-    }
+    #[arg(long, env = "CONTAINER_TIMEOUT_SECS", default_value = "300")]
+    container_timeout: u64,
+
+    #[arg(long, env = "LOG_LEVEL", default_value = "info")]
+    log_level: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging (using monitoring crate)
-    init_logging().await?;
-    info!("✅ Logging initialized");
+    dotenv().ok();
 
-    info!("🚀 Starting Coordinator Service with Monitoring");
+    let args = Args::parse();
 
-    // Initialize the monitoring system (same as RPC service)
-    init_monitoring()?;
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| args.log_level.clone().into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
-    // Create an event buffer for coordinator events
-    let backend = Arc::new(MockBackend);
-    let event_buffer = EventBuffer::with_config(
-        backend,
-        None,                   // No secondary publisher for this example
-        50,                     // Batch size
-        Duration::from_secs(5), // Flush interval
-        10000,                  // Channel capacity
-    );
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
 
-    // Start monitoring tasks (same as RPC service)
-    spawn_monitoring_tasks(event_buffer.clone());
+    info!("🚀 Starting Silvana Coordinator");
+    info!("📦 Monitoring package: {}", args.package_id);
+    info!("📝 Module: {}", args.module);
+    info!("🔗 RPC URL: {}", args.rpc_url);
 
-    // Start metrics server
-    let metrics_addr: SocketAddr = "0.0.0.0:9091".parse()?;
-    tokio::spawn(async move {
-        if let Err(e) = start_metrics_server(metrics_addr).await {
-            tracing::error!("Failed to start metrics server: {}", e);
-        }
-    });
+    let config = Config {
+        rpc_url: args.rpc_url,
+        package_id: args.package_id,
+        module: args.module,
+        use_tee: args.use_tee,
+        container_timeout_secs: args.container_timeout,
+    };
 
-    info!("📊 Coordinator metrics available at http://localhost:9091/metrics");
-    info!("🔧 Coordinator service running with shared monitoring system");
+    let mut processor = EventProcessor::new(config).await?;
 
-    // Simulate some coordinator activity
-    for i in 0..100 {
-        let event = CoordinatorEvent {
-            id: format!("coord-event-{}", i),
-            coordinator_id: "coordinator-001".to_string(),
-            event_type: "task_assignment".to_string(),
-            data: format!("Task data for event {}", i),
-            timestamp: chrono::Utc::now(),
-        };
+    info!("✅ Coordinator initialized, starting event monitoring...");
 
-        if let Err(e) = event_buffer.add_event(event).await {
-            tracing::error!("Failed to add event: {}", e);
-        }
-
-        sleep(Duration::from_millis(100)).await;
+    if let Err(e) = processor.run().await {
+        error!("Fatal error in event processor: {}", e);
+        return Err(e.into());
     }
-
-    info!("✅ Coordinator finished processing events");
-
-    // Keep running to see metrics
-    sleep(Duration::from_secs(60)).await;
 
     Ok(())
 }

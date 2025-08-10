@@ -1,7 +1,7 @@
 module coordination::registry;
 
 use coordination::agent::Agent;
-use coordination::app_instance::AppMethod;
+use coordination::app_method::AppMethod;
 use coordination::developer::{Developer, DeveloperNames};
 use coordination::silvana_app::{SilvanaApp, AppNames};
 use std::string::String;

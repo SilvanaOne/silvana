@@ -1,6 +1,6 @@
 module coordination::silvana_app;
 
-use coordination::app_instance::AppMethod;
+use coordination::app_method::AppMethod;
 use std::string::String;
 use sui::clock::{timestamp_ms, Clock};
 use sui::event;
@@ -335,4 +335,23 @@ public(package) fun has_instance_in_app(
 
 public(package) fun get_instance_owners(app: &SilvanaApp): vector<address> {
     app.instances.into_keys()
+}
+
+// Get all methods from the app
+public fun get_app_methods(app: &SilvanaApp): &VecMap<String, AppMethod> {
+    &app.methods
+}
+
+// Clone methods for app instance creation
+public(package) fun clone_app_methods(app: &SilvanaApp): VecMap<String, AppMethod> {
+    let mut cloned = sui::vec_map::empty<String, AppMethod>();
+    let keys = sui::vec_map::keys(&app.methods);
+    let mut i = 0;
+    while (i < vector::length(&keys)) {
+        let key = vector::borrow(&keys, i);
+        let method = *sui::vec_map::get(&app.methods, key);
+        sui::vec_map::insert(&mut cloned, *key, method);
+        i = i + 1;
+    };
+    cloned
 }

@@ -1,8 +1,11 @@
 module coordination::app_instance;
 
 use commitment::state::{AppState, get_state_commitment, create_app_state};
+use coordination::app_method::{Self, AppMethod};
 use coordination::block::{Self, Block};
+use coordination::jobs::{Self, Jobs};
 use coordination::prover::{Self, ProofCalculation};
+use coordination::silvana_app::{Self, SilvanaApp};
 use std::string::String;
 use sui::bls12381::{Scalar, scalar_zero};
 use sui::clock::{timestamp_ms, Clock};
@@ -12,13 +15,6 @@ use sui::group_ops::Element;
 use sui::object_table::{Self, ObjectTable, add, borrow_mut, borrow};
 use sui::package;
 use sui::vec_map::{Self, VecMap};
-
-public struct AppMethod has copy, drop, store {
-    description: Option<String>,
-    developer: String,
-    agent: String,
-    agent_method: String,
-}
 
 public struct AppMethodAddedEvent has copy, drop {
     app_instance_address: address,
@@ -38,6 +34,7 @@ public struct AppInstance has key, store {
     state: AppState,
     blocks: ObjectTable<u64, Block>,
     proof_calculations: ObjectTable<u64, ProofCalculation>,
+    jobs: Jobs,
     sequence: u64,
     admin: address,
     block_number: u64,
@@ -78,9 +75,9 @@ fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
 }
 
 public fun create_app_instance(
-    silvana_app_name: String,
-    description: Option<String>,
-    metadata: Option<String>,
+    app: &mut SilvanaApp,
+    instance_description: Option<String>,
+    instance_metadata: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstance {
@@ -102,16 +99,22 @@ public fun create_app_instance(
     proof_calculations.add(1u64, proof_calculation_block_1);
 
     let state = create_app_state(ctx);
+    let jobs = jobs::create_jobs(option::none(), ctx);
+    
+    // Clone methods from the SilvanaApp
+    let methods = silvana_app::clone_app_methods(app);
+    let app_name = silvana_app::app_name(app);
 
     let mut app_instance: AppInstance = AppInstance {
         id: object::new(ctx),
-        silvana_app_name: silvana_app_name,
-        description,
-        metadata,
-        methods: vec_map::empty<String, AppMethod>(),
+        silvana_app_name: app_name,
+        description: instance_description,
+        metadata: instance_metadata,
+        methods,
         state,
         blocks,
         proof_calculations,
+        jobs,
         sequence: 1u64,
         admin: ctx.sender(),
         block_number: 1u64,
@@ -137,9 +140,13 @@ public fun create_app_instance(
         ctx,
     );
     app_instance.blocks.add(0u64, block_0);
+    
+    // Track the instance in the SilvanaApp
+    let instance_address = app_instance.id.to_address();
+    silvana_app::add_instance_to_app(app, instance_address, ctx);
 
     event::emit(AppInstanceCreatedEvent {
-        app_instance_address: app_instance.id.to_address(),
+        app_instance_address: instance_address,
         admin: app_instance.admin,
         created_at: timestamp,
     });
@@ -155,12 +162,12 @@ public fun add_method(
     method_agent: String,
     method_agent_method: String,
 ) {
-    let method = AppMethod {
-        description: method_description,
-        developer: method_developer,
-        agent: method_agent,
-        agent_method: method_agent_method,
-    };
+    let method = app_method::new(
+        method_description,
+        method_developer,
+        method_agent,
+        method_agent_method,
+    );
     vec_map::insert(&mut app_instance.methods, method_name, method);
     event::emit(AppMethodAddedEvent {
         app_instance_address: app_instance.id.to_address(),
@@ -618,6 +625,14 @@ public fun proof_calculations_mut(
     &mut app_instance.proof_calculations
 }
 
+public fun jobs(app_instance: &AppInstance): &Jobs {
+    &app_instance.jobs
+}
+
+public(package) fun jobs_mut(app_instance: &mut AppInstance): &mut Jobs {
+    &mut app_instance.jobs
+}
+
 public fun get_block(app_instance: &AppInstance, block_number: u64): &Block {
     borrow(&app_instance.blocks, block_number)
 }
@@ -643,19 +658,77 @@ public fun get_proof_calculation_mut(
     borrow_mut(&mut app_instance.proof_calculations, block_number)
 }
 
-// Getter functions for AppMethod
-public fun method_description(method: &AppMethod): &Option<String> {
-    &method.description
+// Job-related convenience methods
+#[error]
+const EMethodNotFound: vector<u8> = b"Method not found in app instance";
+
+public fun create_app_job(
+    app_instance: &mut AppInstance,
+    method_name: String,
+    job_description: Option<String>,
+    sequences: Option<vector<u64>>,
+    data: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): u64 {
+    // Get method from app instance methods
+    assert!(vec_map::contains(&app_instance.methods, &method_name), EMethodNotFound);
+    let method = vec_map::get(&app_instance.methods, &method_name);
+    
+    jobs::create_job(
+        &mut app_instance.jobs,
+        job_description,
+        *app_method::developer(method),
+        *app_method::agent(method),
+        *app_method::agent_method(method),
+        app_instance.silvana_app_name,
+        app_instance.id.to_address().to_string(),
+        method_name,
+        sequences,
+        data,
+        clock,
+        ctx,
+    )
 }
 
-public fun method_developer(method: &AppMethod): &String {
-    &method.developer
+public fun start_app_job(
+    app_instance: &mut AppInstance,
+    job_id: u64,
+    clock: &Clock,
+) {
+    jobs::start_job(&mut app_instance.jobs, job_id, clock)
 }
 
-public fun method_agent(method: &AppMethod): &String {
-    &method.agent
+public fun complete_app_job(
+    app_instance: &mut AppInstance,
+    job_id: u64,
+    clock: &Clock,
+) {
+    jobs::complete_job(&mut app_instance.jobs, job_id, clock)
 }
 
-public fun method_agent_method(method: &AppMethod): &String {
-    &method.agent_method
+public fun fail_app_job(
+    app_instance: &mut AppInstance,
+    job_id: u64,
+    error: String,
+    clock: &Clock,
+) {
+    jobs::fail_job(&mut app_instance.jobs, job_id, error, clock)
 }
+
+public fun get_app_job(app_instance: &AppInstance, job_id: u64): &jobs::Job {
+    jobs::get_job(&app_instance.jobs, job_id)
+}
+
+public fun get_app_pending_jobs(app_instance: &AppInstance): vector<u64> {
+    jobs::get_pending_jobs(&app_instance.jobs)
+}
+
+public fun get_app_pending_jobs_count(app_instance: &AppInstance): u64 {
+    jobs::get_pending_jobs_count(&app_instance.jobs)
+}
+
+public fun get_next_pending_app_job(app_instance: &AppInstance): Option<u64> {
+    jobs::get_next_pending_job(&app_instance.jobs)
+}
+

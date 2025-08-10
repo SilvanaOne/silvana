@@ -1,0 +1,26 @@
+[package]
+name = "silvana-docker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bollard = "0.19"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+bytes = "1"
+chrono = "0.4"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+tee = ["libc"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2", optional = true }
