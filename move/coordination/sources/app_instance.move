@@ -47,6 +47,11 @@ public struct AppInstance has key, store {
     updated_at: u64,
 }
 
+public struct AppInstanceCap has key, store {
+    id: UID,
+    instance_address: address,
+}
+
 public struct AppInstanceCreatedEvent has copy, drop {
     app_instance_address: address,
     admin: address,
@@ -79,7 +84,7 @@ public fun create_app_instance(
     instance_metadata: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
-): AppInstance {
+): AppInstanceCap {
     let timestamp = clock.timestamp_ms();
 
     let blocks = object_table::new<u64, Block>(ctx);
@@ -103,9 +108,11 @@ public fun create_app_instance(
     // Clone methods from the SilvanaApp
     let methods = silvana_app::clone_app_methods(app);
     let app_name = silvana_app::app_name(app);
+    let instance_id = object::new(ctx);
+    let instance_address = instance_id.to_address();
 
     let mut app_instance: AppInstance = AppInstance {
-        id: object::new(ctx),
+        id: instance_id,
         silvana_app_name: app_name,
         description: instance_description,
         metadata: instance_metadata,
@@ -140,7 +147,6 @@ public fun create_app_instance(
     app_instance.blocks.add(0u64, block_0);
 
     // Track the instance in the SilvanaApp
-    let instance_address = app_instance.id.to_address();
     silvana_app::add_instance_to_app(app, instance_address, ctx);
 
     event::emit(AppInstanceCreatedEvent {
@@ -149,10 +155,15 @@ public fun create_app_instance(
         created_at: timestamp,
     });
 
-    app_instance
+    transfer::share_object(app_instance);
+    
+    AppInstanceCap {
+        id: object::new(ctx),
+        instance_address,
+    }
 }
 
-public fun add_method(
+public(package) fun add_method(
     app_instance: &mut AppInstance,
     method_name: String,
     method_description: Option<String>,
@@ -534,11 +545,13 @@ public fun update_block_mina_tx_included_in_block(
         sent_to_settlement_at,
         option::some(settled_on_mina_at),
     );
-    
+
     // Delete the proof_calculation for this block as it's no longer needed
     // All information has been preserved in events
     // Note: Block 0 (genesis) doesn't have proof_calculation, only blocks >= 1
-    if (block_number > 0 && object_table::contains(&app_instance.proof_calculations, block_number)) {
+    if (
+        block_number > 0 && object_table::contains(&app_instance.proof_calculations, block_number)
+    ) {
         let proof_calculation = object_table::remove(
             &mut app_instance.proof_calculations,
             block_number,
@@ -611,7 +624,8 @@ public fun updated_at(app_instance: &AppInstance): u64 {
 }
 
 // Mutable getter functions
-public fun state_mut(app_instance: &mut AppInstance): &mut AppState {
+public fun state_mut(app_instance: &mut AppInstance, cap: &AppInstanceCap): &mut AppState {
+    assert!(cap.instance_address == app_instance.id.to_address(), ENotAuthorized);
     &mut app_instance.state
 }
 

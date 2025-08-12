@@ -1,6 +1,7 @@
 module coordination::registry;
 
 use coordination::agent::Agent;
+use coordination::app_instance::AppInstanceCap;
 use coordination::app_method::AppMethod;
 use coordination::developer::{Developer, DeveloperNames};
 use coordination::silvana_app::{SilvanaApp, AppNames};
@@ -598,15 +599,15 @@ public fun create_app_instance_from_registry(
     registry: &mut SilvanaRegistry,
     app_name: String,
     description: Option<String>,
-    url: Option<String>,
+    metadata: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
-): coordination::app_instance::AppInstance {
+): AppInstanceCap {
     let app = registry.apps.borrow_mut(app_name);
     coordination::app_instance::create_app_instance(
         app,
         description,
-        url,
+        metadata,
         clock,
         ctx,
     )

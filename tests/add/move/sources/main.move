@@ -7,7 +7,7 @@ use commitment::state::{
     get_state_element,
     has_state_element
 };
-use coordination::app_instance::AppInstance;
+use coordination::app_instance::{AppInstance, AppInstanceCap};
 use coordination::registry::{SilvanaRegistry, create_app_instance_from_registry};
 use sui::bls12381::Scalar;
 use sui::clock::Clock;
@@ -22,7 +22,7 @@ use sui::group_ops::Element;
 
 public struct App has key, store {
     id: UID,
-    instance: AppInstance,
+    instance_cap: AppInstanceCap,
 }
 
 // Events
@@ -69,9 +69,9 @@ public struct ValueMultipliedEvent has copy, drop {
 
 const SUM_INDEX: u32 = 0;
 
-public fun create_app(registry: &mut SilvanaRegistry, clock: &Clock, ctx: &mut TxContext): App {
+public fun create_app(registry: &mut SilvanaRegistry, instance: &mut AppInstance, clock: &Clock, ctx: &mut TxContext): App {
     // Create an app instance from the registry's SilvanaApp
-    let mut instance = create_app_instance_from_registry(
+    let instance_cap = create_app_instance_from_registry(
         registry,
         b"test_app".to_string(),
         option::none(),
@@ -82,7 +82,7 @@ public fun create_app(registry: &mut SilvanaRegistry, clock: &Clock, ctx: &mut T
     // Initialize with sum equal to 0 as there are no elements yet
     let action = create_action(b"init".to_string(), vector[]);
     let state_update = create_state_update(SUM_INDEX, vector[0u256]);
-    instance.state_mut().commit_action(action, &vector[state_update], ctx);
+    instance.state_mut(&instance_cap).commit_action(action, &vector[state_update], ctx);
     let actions_commitment_data = instance.state().get_actions_commitment();
     let actions_commitment = actions_commitment_data.get_commitment();
     let actions_sequence = actions_commitment_data.get_sequence();
@@ -93,7 +93,7 @@ public fun create_app(registry: &mut SilvanaRegistry, clock: &Clock, ctx: &mut T
 
     let app = App {
         id: app_id,
-        instance,
+        instance_cap,
     };
 
     event::emit(AppCreatedEvent {
@@ -113,13 +113,13 @@ const EIndexTooLarge: u64 = 1;
 const EReservedIndex: u64 = 2;
 const MAX_INDEX: u32 = 1024 * 1024 * 1024;
 
-public fun add(app: &mut App, index: u32, value: u256, ctx: &mut TxContext) {
+public fun add(app: &mut App, instance: &mut AppInstance, index: u32, value: u256, ctx: &mut TxContext) {
     assert!(index > SUM_INDEX, EReservedIndex);
     assert!(index < MAX_INDEX, EIndexTooLarge);
     assert!(value < 100, EInvalidValue);
-    let old_value = get_value(app, index);
-    let old_sum = get_sum(app);
-    let state = app.instance.state_mut();
+    let old_value = get_value(instance, index);
+    let old_sum = get_sum(instance);
+    let state = instance.state_mut(&app.instance_cap);
 
     // Get old commitment
     let old_actions_commitment_data = state.get_actions_commitment();
@@ -170,6 +170,7 @@ public fun add(app: &mut App, index: u32, value: u256, ctx: &mut TxContext) {
 
 public fun multiply(
     app: &mut App,
+    instance: &mut AppInstance,
     index: u32,
     value: u256,
     ctx: &mut TxContext,
@@ -177,9 +178,9 @@ public fun multiply(
     assert!(index > SUM_INDEX, EReservedIndex);
     assert!(index < MAX_INDEX, EIndexTooLarge);
     assert!(value < 100, EInvalidValue);
-    let old_value = get_value(app, index);
-    let old_sum = get_sum(app);
-    let state = app.instance.state_mut();
+    let old_value = get_value(instance, index);
+    let old_sum = get_sum(instance);
+    let state = instance.state_mut(&app.instance_cap);
 
     // Get old commitment
     let old_actions_commitment_data = state.get_actions_commitment();
@@ -228,10 +229,10 @@ public fun multiply(
     });
 }
 
-public fun get_value(app: &App, index: u32): u256 {
+public fun get_value(instance: &AppInstance, index: u32): u256 {
     assert!(index > SUM_INDEX, EReservedIndex);
     assert!(index < MAX_INDEX, EIndexTooLarge);
-    let state = app.instance.state();
+    let state = instance.state();
     if (has_state_element(state, index)) {
         *get_state_element(state, index).get_state_element_state().borrow(0)
     } else {
@@ -243,8 +244,8 @@ public struct GetSumEvent has copy, drop {
     sum: u256,
 }
 
-public fun get_sum(app: &App): u256 {
-    let state = app.instance.state();
+public fun get_sum(instance: &AppInstance): u256 {
+    let state = instance.state();
     let sum =
         *get_state_element(state, SUM_INDEX)
             .get_state_element_state()
@@ -253,8 +254,8 @@ public fun get_sum(app: &App): u256 {
     sum
 }
 
-public fun purge_rollback_records(app: &mut App, proved_sequence: u64) {
-    let state = app.instance.state_mut();
+public fun purge_rollback_records(app: &mut App, instance: &mut AppInstance, proved_sequence: u64) {
+    let state = instance.state_mut(&app.instance_cap);
     let rollback = state.get_rollback_mut();
     commitment::rollback::purge_records(rollback, proved_sequence);
 }
