@@ -6,17 +6,20 @@ import {
 } from "@silvana-one/coordination";
 
 export async function getState(
-  params: { appID?: string } = {}
+  params: { appInstanceID?: string } = {}
 ): Promise<bigint[]> {
-  const { appID = process.env.APP_OBJECT_ID } = params;
-  if (!appID) {
-    throw new Error("APP_OBJECT_ID is not set");
+  const { appInstanceID = process.env.APP_INSTANCE_ID } = params;
+  if (!appInstanceID) {
+    throw new Error("APP_INSTANCE_ID is not set");
   }
-  const object = await fetchSuiObject(appID);
-  if (object?.data?.content?.dataType !== "moveObject")
-    throw new Error("Object not found");
-  const stateObjectID = (object?.data?.content?.fields as any).instance.fields
-    .state.fields.state.fields.id.id;
+  // Get the AppInstance object
+  const appInstance = await fetchSuiObject(appInstanceID);
+  if (appInstance?.data?.content?.dataType !== "moveObject")
+    throw new Error("AppInstance not found");
+  
+  // The state is inside the AppInstance
+  const stateObjectID = (appInstance?.data?.content?.fields as any).state.fields
+    .state.fields.id.id;
   const state: bigint[] = [];
   const fields = await fetchSuiDynamicFieldsList(stateObjectID);
   const names = fields.data.map((field) => field.name);

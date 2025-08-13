@@ -42,33 +42,23 @@ const proofs: AddProgramProof[] = [];
 
 describe("Add Rollup", async () => {
   it("should create app", async () => {
-    // const field = Field.random();
-    // const bits1 = field.toBits().map((x) => x.toBoolean());
-    // console.log("bits1 length", bits1.length);
-    // const value1 = bits1.reduce((acc, bit, index) => {
-    //   return acc + (bit ? 2n ** BigInt(index) : 0n);
-    // }, 0n);
-    // console.log("value1 from bits", value1);
-    // console.log("field", field.toBigInt());
-    // const commitment = scalar(field.toBigInt());
-    // console.log(
-    //   "commitment",
-    //   commitment.value.map((x) => x.toBigInt())
-    // );
-    // const bits2 = commitment.toBits().map((x) => x.toBoolean());
-    // console.log("bits2 length", bits2.length);
-    // const value2 = bits2.reduce((acc, bit, index) => {
-    //   return acc + (bit ? 2n ** BigInt(index) : 0n);
-    // }, 0n);
-    // console.log("value2 from bits", value2);
-    // return;
+    console.log("Creating a fresh app for rollup testing...");
     appID = await createApp();
     assert.ok(appID !== undefined, "appID is not set");
-    const state = await getState({ appID });
-    assert.ok(state !== undefined, "state is not set");
-    assert.ok(state.length === 1, "state is not 1");
-    assert.ok(state[0] === 0n, "state is not 0");
-    console.log("appID", appID);
+
+    // Get the AppInstance ID from environment (set by createApp)
+    const appInstanceID = process.env.APP_INSTANCE_ID;
+    assert.ok(appInstanceID !== undefined, "appInstanceID is not set");
+
+    // Verify initial state
+    const initialState = await getState({ appInstanceID });
+    assert.ok(initialState !== undefined, "state is not set");
+    assert.ok(initialState.length === 1, "state length is not 1");
+    assert.ok(initialState[0] === 0n, "initial sum is not 0");
+
+    console.log("App ID:", appID);
+    console.log("AppInstance ID:", appInstanceID);
+    console.log("Initial state verified: sum = 0");
   });
   it("should get ZkProgram constraints", async () => {
     // Analyze the constraint count for both methods
@@ -117,7 +107,8 @@ describe("Add Rollup", async () => {
     console.log("vk", vk.hash.toJSON());
   });
   it("should add", async () => {
-    const initialState = await getState({ appID });
+    const appInstanceID = process.env.APP_INSTANCE_ID;
+    const initialState = await getState({ appInstanceID });
     assert.ok(initialState !== undefined, "initialState is not set");
 
     const result = await action({
@@ -125,6 +116,7 @@ describe("Add Rollup", async () => {
       value: 1,
       index: 1,
       appID,
+      appInstanceID,
     });
     console.log("add result", result);
     assert.ok(result.index === 1, "index is not 1");
@@ -142,7 +134,7 @@ describe("Add Rollup", async () => {
       "tree root mismatch"
     );
     const witness = new Witness(tree.getWitness(BigInt(result.index)));
-    const newState = await getState({ appID });
+    const newState = await getState({ appInstanceID });
     assert.ok(newState.length === 2, "newState length is not 2");
     assert.ok(newState[0] === 1n, "newState[0] is not 1");
     assert.ok(newState[1] === 1n, "newState[1] is not 1");
@@ -182,7 +174,8 @@ describe("Add Rollup", async () => {
     );
   });
   it("should multiply", async () => {
-    const initialState = await getState({ appID });
+    const appInstanceID = process.env.APP_INSTANCE_ID;
+    const initialState = await getState({ appInstanceID });
     assert.ok(initialState !== undefined, "initialState is not set");
 
     const result = await action({
@@ -190,6 +183,7 @@ describe("Add Rollup", async () => {
       value: 2,
       index: 1,
       appID,
+      appInstanceID,
     });
     console.log("multiply result", result);
     assert.ok(result.index === 1, "index is not 1");
@@ -207,7 +201,7 @@ describe("Add Rollup", async () => {
       "tree root mismatch"
     );
     const witness = new Witness(tree.getWitness(BigInt(result.index)));
-    const newState = await getState({ appID });
+    const newState = await getState({ appInstanceID });
     assert.ok(newState.length === 2, "newState length is not 2");
     assert.ok(newState[0] === 2n, "newState[0] is not 2");
     assert.ok(newState[1] === 2n, "newState[1] is not 2");
@@ -246,7 +240,8 @@ describe("Add Rollup", async () => {
     );
   });
   it("should get sum", async () => {
-    const sum = await getSum({ appID });
+    const appInstanceID = process.env.APP_INSTANCE_ID;
+    const sum = await getSum({ appInstanceID });
     assert.ok(sum !== undefined, "sum is not set");
     assert.ok(sum === 2, "sum is not 2");
   });
@@ -262,9 +257,11 @@ describe("Add Rollup", async () => {
     assert.ok(mergedProof !== undefined, "mergedProof is not set");
   });
   it("should purge", async () => {
+    const appInstanceID = process.env.APP_INSTANCE_ID;
     await purge({
       proved_sequence: 2,
       appID,
+      appInstanceID,
     });
   });
 });

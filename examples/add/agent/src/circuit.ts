@@ -8,7 +8,7 @@ import {
 } from "o1js";
 import { AddProgramCommitment, calculateNewCommitment } from "./commitment.js";
 
-export const TREE_DEPTH = 16; //TODO: increase depth
+export const TREE_DEPTH = 16;
 export class Witness extends MerkleWitness(TREE_DEPTH) {}
 
 export class AddProgramState extends Struct({

@@ -16,15 +16,6 @@ use sui::object_table::{Self, ObjectTable, add, borrow_mut, borrow};
 use sui::package;
 use sui::vec_map::{Self, VecMap};
 
-public struct AppMethodAddedEvent has copy, drop {
-    app_instance_address: address,
-    method_name: String,
-    method_description: Option<String>,
-    method_developer: String,
-    method_agent: String,
-    method_agent_method: String,
-}
-
 public struct AppInstance has key, store {
     id: UID,
     silvana_app_name: String,
@@ -156,36 +147,11 @@ public fun create_app_instance(
     });
 
     transfer::share_object(app_instance);
-    
+
     AppInstanceCap {
         id: object::new(ctx),
         instance_address,
     }
-}
-
-public(package) fun add_method(
-    app_instance: &mut AppInstance,
-    method_name: String,
-    method_description: Option<String>,
-    method_developer: String,
-    method_agent: String,
-    method_agent_method: String,
-) {
-    let method = app_method::new(
-        method_description,
-        method_developer,
-        method_agent,
-        method_agent_method,
-    );
-    vec_map::insert(&mut app_instance.methods, method_name, method);
-    event::emit(AppMethodAddedEvent {
-        app_instance_address: app_instance.id.to_address(),
-        method_name,
-        method_description,
-        method_developer,
-        method_agent,
-        method_agent_method,
-    });
 }
 
 // Error codes
@@ -624,8 +590,14 @@ public fun updated_at(app_instance: &AppInstance): u64 {
 }
 
 // Mutable getter functions
-public fun state_mut(app_instance: &mut AppInstance, cap: &AppInstanceCap): &mut AppState {
-    assert!(cap.instance_address == app_instance.id.to_address(), ENotAuthorized);
+public fun state_mut(
+    app_instance: &mut AppInstance,
+    cap: &AppInstanceCap,
+): &mut AppState {
+    assert!(
+        cap.instance_address == app_instance.id.to_address(),
+        ENotAuthorized,
+    );
     &mut app_instance.state
 }
 

@@ -5,10 +5,10 @@ import { getSuiAddress } from "./key.js";
 
 export async function getSum(
   params: {
-    appID?: string;
+    appInstanceID?: string;
   } = {}
 ): Promise<number | undefined> {
-  const { appID = process.env.APP_OBJECT_ID } = params;
+  const { appInstanceID = process.env.APP_INSTANCE_ID } = params;
   const suiSecretKey: string = process.env.SUI_SECRET_KEY!;
 
   if (!suiSecretKey) {
@@ -20,8 +20,8 @@ export async function getSum(
     throw new Error("PACKAGE_ID is not set");
   }
 
-  if (!appID) {
-    throw new Error("APP_OBJECT_ID is not set");
+  if (!appInstanceID) {
+    throw new Error("APP_INSTANCE_ID is not set");
   }
 
   const keyPair = Ed25519Keypair.fromSecretKey(suiSecretKey);
@@ -30,8 +30,8 @@ export async function getSum(
   });
 
   const tx = new Transaction();
-  // public fun get_sum(app: &App): u256
-  const args = [tx.object(appID)];
+  // public fun get_sum(instance: &AppInstance): u256
+  const args = [tx.object(appInstanceID)];
 
   const { Result: sum } = tx.moveCall({
     package: packageID,

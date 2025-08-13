@@ -2,6 +2,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { executeTx, waitTx } from "@silvana-one/coordination";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getSuiAddress } from "./key.js";
+import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
 interface ActionResult {
   index: number;
@@ -23,8 +24,15 @@ export async function action(params: {
   value: number;
   index: number;
   appID?: string;
+  appInstanceID?: string;
 }): Promise<ActionResult> {
-  const { action, value, index, appID = process.env.APP_OBJECT_ID } = params;
+  const { 
+    action, 
+    value, 
+    index, 
+    appID = process.env.APP_OBJECT_ID,
+    appInstanceID = process.env.APP_INSTANCE_ID 
+  } = params;
   const suiSecretKey: string = process.env.SUI_SECRET_KEY!;
 
   if (!suiSecretKey) {
@@ -39,6 +47,10 @@ export async function action(params: {
   if (!appID) {
     throw new Error("APP_OBJECT_ID is not set");
   }
+  
+  if (!appInstanceID) {
+    throw new Error("APP_INSTANCE_ID is not set");
+  }
 
   const keyPair = Ed25519Keypair.fromSecretKey(suiSecretKey);
   const address = await getSuiAddress({
@@ -46,8 +58,15 @@ export async function action(params: {
   });
 
   const tx = new Transaction();
-  // public fun add(app: &mut App, index: u32, value: u256, ctx: &mut TxContext)
-  const args = [tx.object(appID), tx.pure.u32(index), tx.pure.u256(value)];
+  // public fun add(app: &mut App, instance: &mut AppInstance, index: u32, value: u256, clock: &Clock, ctx: &mut TxContext)
+  // public fun multiply(app: &mut App, instance: &mut AppInstance, index: u32, value: u256, clock: &Clock, ctx: &mut TxContext)
+  const args = [
+    tx.object(appID),
+    tx.object(appInstanceID), 
+    tx.pure.u32(index), 
+    tx.pure.u256(value),
+    tx.object(SUI_CLOCK_OBJECT_ID)
+  ];
 
   tx.moveCall({
     package: packageID,
@@ -66,19 +85,15 @@ export async function action(params: {
   if (!result) {
     throw new Error("Failed to create action");
   }
-  const { tx: actionTx, digest } = result;
+  const { digest } = result;
   const waitResult = await waitTx(digest);
   if (waitResult.errors) {
     console.log(`Errors for tx ${digest}:`, waitResult.errors);
+    throw new Error("Transaction failed");
   }
 
-  // console.log("Created Action:", {
-  //   actionTx,
-  //   objectChanges: actionTx.objectChanges,
-  //   digest,
-  //   events,
-  // });
-  const events = actionTx.events;
+  // waitResult contains the full transaction with events
+  const events = waitResult.events;
   if (!events) {
     throw new Error("No events found");
   }

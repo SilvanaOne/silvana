@@ -15,7 +15,8 @@
     "rollup": "npm run test test/rollup.test.ts",
     "commitment": "npm run test test/commitment.test.ts",
     "deploy": "npm run test test/deploy.test.ts",
-    "send": "npm run test test/send.test.ts"
+    "send": "npm run test test/send.test.ts",
+    "compile": "npm run test test/compile.test.ts"
   },
   "node": {
     "version": ">=22.0.0"
@@ -28,8 +29,8 @@
   },
   "dependencies": {
     "@mysten/sui": "^1.36.0",
-    "@silvana-one/coordination": "^1.0.25",
-    "@silvana-one/mina-utils": "^1.0.25",
+    "@silvana-one/coordination": "^1.0.26",
+    "@silvana-one/mina-utils": "^1.0.26",
     "o1js": "2.4.0"
   }
 }

@@ -1,4 +1,4 @@
-module app::main;
+module add::main;
 
 use commitment::action::create_action;
 use commitment::state::{
@@ -8,7 +8,11 @@ use commitment::state::{
     has_state_element
 };
 use coordination::app_instance::{AppInstance, AppInstanceCap};
-use coordination::registry::{SilvanaRegistry, create_app_instance_from_registry};
+use coordination::registry::{
+    SilvanaRegistry,
+    create_app_instance_from_registry
+};
+use sui::bcs;
 use sui::bls12381::Scalar;
 use sui::clock::Clock;
 use sui::event;
@@ -69,8 +73,19 @@ public struct ValueMultipliedEvent has copy, drop {
 
 const SUM_INDEX: u32 = 0;
 
-public fun create_app(registry: &mut SilvanaRegistry, instance: &mut AppInstance, clock: &Clock, ctx: &mut TxContext): App {
+// Struct for serializing job data
+public struct JobData has copy, drop {
+    index: u32,
+    value: u256,
+}
+
+public fun create_app(
+    registry: &mut SilvanaRegistry,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): App {
     // Create an app instance from the registry's SilvanaApp
+    // This creates and shares an AppInstance
     let instance_cap = create_app_instance_from_registry(
         registry,
         b"test_app".to_string(),
@@ -79,14 +94,6 @@ public fun create_app(registry: &mut SilvanaRegistry, instance: &mut AppInstance
         clock,
         ctx,
     );
-    // Initialize with sum equal to 0 as there are no elements yet
-    let action = create_action(b"init".to_string(), vector[]);
-    let state_update = create_state_update(SUM_INDEX, vector[0u256]);
-    instance.state_mut(&instance_cap).commit_action(action, &vector[state_update], ctx);
-    let actions_commitment_data = instance.state().get_actions_commitment();
-    let actions_commitment = actions_commitment_data.get_commitment();
-    let actions_sequence = actions_commitment_data.get_sequence();
-    let state_commitment = instance.state().get_state_commitment();
 
     let app_id = object::new(ctx);
     let app_address = app_id.to_address();
@@ -100,12 +107,25 @@ public fun create_app(registry: &mut SilvanaRegistry, instance: &mut AppInstance
         app_address,
         initial_sum: 0u256,
         created_at: clock.timestamp_ms(),
-        initial_actions_commitment: actions_commitment,
-        initial_actions_sequence: actions_sequence,
-        initial_state_commitment: state_commitment,
+        initial_actions_commitment: sui::bls12381::scalar_zero(),
+        initial_actions_sequence: 1u64,
+        initial_state_commitment: sui::bls12381::scalar_zero(),
     });
 
     app
+}
+
+public fun init_app_with_instance(
+    app: &App,
+    instance: &mut AppInstance,
+    ctx: &mut TxContext,
+) {
+    // Initialize with sum equal to 0 as there are no elements yet
+    let action = create_action(b"init".to_string(), vector[]);
+    let state_update = create_state_update(SUM_INDEX, vector[0u256]);
+    instance
+        .state_mut(&app.instance_cap)
+        .commit_action(action, &vector[state_update], ctx);
 }
 
 const EInvalidValue: u64 = 0;
@@ -113,7 +133,14 @@ const EIndexTooLarge: u64 = 1;
 const EReservedIndex: u64 = 2;
 const MAX_INDEX: u32 = 1024 * 1024 * 1024;
 
-public fun add(app: &mut App, instance: &mut AppInstance, index: u32, value: u256, ctx: &mut TxContext) {
+public fun add(
+    app: &mut App,
+    instance: &mut AppInstance,
+    index: u32,
+    value: u256,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
     assert!(index > SUM_INDEX, EReservedIndex);
     assert!(index < MAX_INDEX, EIndexTooLarge);
     assert!(value < 100, EInvalidValue);
@@ -150,6 +177,19 @@ public fun add(app: &mut App, instance: &mut AppInstance, index: u32, value: u25
     let new_actions_sequence = new_actions_commitment_data.get_sequence();
     let new_state_commitment = state.get_state_commitment();
 
+    // Create job for this add operation
+    let job_data_struct = JobData { index, value };
+    let job_data = bcs::to_bytes(&job_data_struct);
+    coordination::app_instance::create_app_job(
+        instance,
+        b"add".to_string(),
+        option::some(b"Add operation job".to_string()),
+        option::none(),
+        job_data,
+        clock,
+        ctx,
+    );
+
     // Emit event for prover
     event::emit(ValueAddedEvent {
         app_address: app.id.to_address(),
@@ -173,6 +213,7 @@ public fun multiply(
     instance: &mut AppInstance,
     index: u32,
     value: u256,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     assert!(index > SUM_INDEX, EReservedIndex);
@@ -210,6 +251,19 @@ public fun multiply(
     let new_actions_commitment = new_actions_commitment_data.get_commitment();
     let new_actions_sequence = new_actions_commitment_data.get_sequence();
     let new_state_commitment = state.get_state_commitment();
+
+    // Create job for this multiply operation
+    let job_data_struct = JobData { index, value };
+    let job_data = bcs::to_bytes(&job_data_struct);
+    coordination::app_instance::create_app_job(
+        instance,
+        b"multiply".to_string(),
+        option::some(b"Multiply operation job".to_string()),
+        option::none(),
+        job_data,
+        clock,
+        ctx,
+    );
 
     // Emit event for prover
     event::emit(ValueMultipliedEvent {
@@ -254,7 +308,11 @@ public fun get_sum(instance: &AppInstance): u256 {
     sum
 }
 
-public fun purge_rollback_records(app: &mut App, instance: &mut AppInstance, proved_sequence: u64) {
+public fun purge_rollback_records(
+    app: &mut App,
+    instance: &mut AppInstance,
+    proved_sequence: u64,
+) {
     let state = instance.state_mut(&app.instance_cap);
     let rollback = state.get_rollback_mut();
     commitment::rollback::purge_records(rollback, proved_sequence);

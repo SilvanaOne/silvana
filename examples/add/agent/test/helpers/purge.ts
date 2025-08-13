@@ -6,8 +6,13 @@ import { getSuiAddress } from "./key.js";
 export async function purge(params: {
   proved_sequence: number;
   appID?: string;
+  appInstanceID?: string;
 }) {
-  const { proved_sequence, appID = process.env.APP_OBJECT_ID } = params;
+  const { 
+    proved_sequence, 
+    appID = process.env.APP_OBJECT_ID,
+    appInstanceID = process.env.APP_INSTANCE_ID
+  } = params;
   const suiSecretKey: string = process.env.SUI_SECRET_KEY!;
 
   if (!suiSecretKey) {
@@ -21,6 +26,9 @@ export async function purge(params: {
   if (!appID) {
     throw new Error("APP_OBJECT_ID is not set");
   }
+  if (!appInstanceID) {
+    throw new Error("APP_INSTANCE_ID is not set");
+  }
 
   const keyPair = Ed25519Keypair.fromSecretKey(suiSecretKey);
   const address = await getSuiAddress({
@@ -28,8 +36,12 @@ export async function purge(params: {
   });
 
   const tx = new Transaction();
-  // public fun purge_rollback_records(app: &mut App, proved_sequence: u64)
-  const args = [tx.object(appID), tx.pure.u64(proved_sequence)];
+  // public fun purge_rollback_records(app: &mut App, instance: &mut AppInstance, proved_sequence: u64)
+  const args = [
+    tx.object(appID), 
+    tx.object(appInstanceID),
+    tx.pure.u64(proved_sequence)
+  ];
 
   tx.moveCall({
     package: packageID,
@@ -48,7 +60,7 @@ export async function purge(params: {
   if (!result) {
     throw new Error("Failed to create action");
   }
-  const { tx: actionTx, digest, events } = result;
+  const { tx: actionTx, digest } = result;
   const waitResult = await waitTx(digest);
   if (waitResult.errors) {
     console.log(`Errors for tx ${digest}:`, waitResult.errors);
