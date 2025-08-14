@@ -603,6 +603,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
+name = "coordinator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bcs",
+ "chrono",
+ "clap",
+ "docker",
+ "dotenv",
+ "futures",
+ "hex",
+ "prost",
+ "prost-types",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sui-rpc",
+ "sui-sdk-types",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -760,6 +788,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.104",
+]
+
+[[package]]
+name = "docker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bollard",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3159,49 +3205,6 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest",
  "rand_core 0.6.4",
-]
-
-[[package]]
-name = "silvana-coordinator"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "clap",
- "dotenv",
- "futures",
- "prost",
- "prost-types",
- "rustls",
- "serde",
- "serde_json",
- "silvana-docker",
- "sui-rpc",
- "thiserror 1.0.69",
- "tokio",
- "tokio-stream",
- "tonic",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "silvana-docker"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bollard",
- "bytes",
- "chrono",
- "futures-util",
- "libc",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -1,11 +1,15 @@
 [package]
-name = "silvana-coordinator"
+name = "coordinator"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+name = "coordinator"
+path = "src/lib.rs"
 
 [dependencies]
 # Docker management
-silvana-docker = { path = "../docker" }
+docker = { path = "../docker" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -13,6 +17,7 @@ tokio-stream = "0.1"
 
 # Sui RPC SDK
 sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
+sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
 
 # gRPC and protobuf
 tonic = "0.13"
@@ -34,11 +39,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+bcs = "0.1"
 
 # Utilities
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 dotenv = "0.15"
+hex = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [[bin]]

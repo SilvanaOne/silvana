@@ -7,7 +7,7 @@ use commitment::state::{
     get_state_element,
     has_state_element
 };
-use coordination::app_instance::{AppInstance, AppInstanceCap};
+use coordination::app_instance::{AppInstance, AppInstanceCap, try_create_block};
 use coordination::registry::{
     SilvanaRegistry,
     create_app_instance_from_registry
@@ -206,6 +206,7 @@ public fun add(
         new_actions_sequence,
         new_state_commitment,
     });
+    try_create_block(instance, clock, ctx);
 }
 
 public fun multiply(
@@ -281,6 +282,7 @@ public fun multiply(
         new_actions_sequence,
         new_state_commitment,
     });
+    try_create_block(instance, clock, ctx);
 }
 
 public fun get_value(instance: &AppInstance, index: u32): u256 {

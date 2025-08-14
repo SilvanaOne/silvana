@@ -2,6 +2,7 @@ mod config;
 mod error;
 mod events;
 mod processor;
+mod registry;
 
 use anyhow::Result;
 use clap::Parser;
@@ -15,14 +16,11 @@ use crate::processor::EventProcessor;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long, env = "SUI_RPC_URL", default_value = "http://148.251.75.59:9000")]
+    #[arg(long, env = "SUI_RPC_URL")]
     rpc_url: String,
 
-    #[arg(long, env = "COORDINATION_PACKAGE_ID")]
+    #[arg(long, env = "SILVANA_REGISTRY_PACKAGE")]
     package_id: String,
-
-    #[arg(long, env = "COORDINATION_MODULE", default_value = "agent")]
-    module: String,
 
     #[arg(long, env = "DOCKER_USE_TEE", default_value = "false")]
     use_tee: bool,
@@ -54,13 +52,13 @@ async fn main() -> Result<()> {
 
     info!("🚀 Starting Silvana Coordinator");
     info!("📦 Monitoring package: {}", args.package_id);
-    info!("📝 Module: {}", args.module);
+    info!("📝 Module: jobs");
     info!("🔗 RPC URL: {}", args.rpc_url);
 
     let config = Config {
         rpc_url: args.rpc_url,
         package_id: args.package_id,
-        module: args.module,
+        modules: vec!["jobs".to_string()],
         use_tee: args.use_tee,
         container_timeout_secs: args.container_timeout,
     };

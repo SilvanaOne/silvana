@@ -5,6 +5,9 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
+    "build": "tsc",
+    "agent": "NODE_NO_WARNINGS=1 node --enable-source-maps dist/src/agent.js",
+    "docker": "docker compose up push --build --remove-orphans",
     "test": "NODE_NO_WARNINGS=1 node --loader=ts-node/esm --enable-source-maps -r dotenv/config --require dotenv/config  --env-file=.env --env-file=.env.app --test",
     "template": "npm run test test/template.test.ts",
     "create": "npm run test test/create.test.ts",

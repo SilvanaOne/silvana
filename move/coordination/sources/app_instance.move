@@ -169,29 +169,20 @@ public(package) fun not_paused(app_instance: &AppInstance) {
     assert!(app_instance.isPaused == false, EAppInstancePaused);
 }
 
-#[error]
-const ENoTransactions: vector<u8> = b"No new transactions";
+const MIN_TIME_BETWEEN_BLOCKS: u64 = 60_000;
 
-#[error]
-const ETooShortTimeSinceLastBlock: vector<u8> =
-    b"The minimum time between blocks is 30 seconds";
-
-const MIN_TIME_BETWEEN_BLOCKS: u64 = 30_000;
-
-public fun create_block(
+public fun try_create_block(
     app_instance: &mut AppInstance,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    assert!(
-        (app_instance.previous_block_last_sequence + 1) != app_instance.sequence,
-        ENoTransactions,
-    );
+    if (
+        (app_instance.previous_block_last_sequence + 1) == app_instance.sequence
+    ) return;
     let current_time = clock.timestamp_ms();
-    assert!(
-        current_time - app_instance.previous_block_timestamp > MIN_TIME_BETWEEN_BLOCKS,
-        ETooShortTimeSinceLastBlock,
-    );
+    if (
+        current_time - app_instance.previous_block_timestamp <= MIN_TIME_BETWEEN_BLOCKS
+    ) return;
     let mut block_number = app_instance.block_number;
     let start_sequence = app_instance.previous_block_last_sequence + 1;
     let end_sequence = app_instance.sequence - 1;

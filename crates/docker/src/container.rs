@@ -380,6 +380,7 @@ impl DockerManager {
     }
 
     #[cfg(not(feature = "tee"))]
+    #[allow(dead_code)]
     async fn cleanup_tee_resources(&self) -> Result<()> {
         Ok(())
     }
