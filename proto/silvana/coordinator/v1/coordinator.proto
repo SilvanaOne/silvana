@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package silvana.coordinator.v1;
+
+option go_package = "github.com/SilvanaOne/zk-tests/packages/avs/rpc/proto;coordinator";
+
+
+// Job message matching the partial Move struct
+message Job {
+  uint64 job_id = 1;
+  optional string description = 2;
+  // Metadata of the agent method to call
+  string developer = 3;
+  string agent =4 ;
+  string agent_method = 5;
+  // Metadata of the calling app instance
+  string app = 6;
+  string app_instance = 7;
+  string app_instance_method = 8;
+  repeated uint64 sequences = 9;
+  bytes data = 10;
+  // Metadata of the job
+  uint32 attempts = 12;
+  // Metadata of the job
+  uint64 created_at = 13;
+  uint64 updated_at = 14;
+}
+
+// Request message for getting a job
+message GetJobRequest {
+  string developer = 1;
+  string agent = 2;
+  string agent_method = 3;
+}
+
+// Response message containing a job
+message GetJobResponse {
+  Job job = 1;
+}
+
+// gRPC service definition
+service CoordinatorService {
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+}

@@ -617,6 +617,7 @@ dependencies = [
  "hex",
  "prost",
  "prost-types",
+ "proto",
  "rustls",
  "serde",
  "serde_json",
@@ -626,6 +627,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "tonic-build",
  "tracing",
  "tracing-subscriber",
 ]

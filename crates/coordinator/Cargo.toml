@@ -23,6 +23,7 @@ sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
 tonic = "0.13"
 prost = "0.13"
 prost-types = "0.13"
+proto = { path = "../proto" }
 
 # Async utilities
 futures = "0.3"
@@ -47,6 +48,9 @@ clap = { version = "4", features = ["derive", "env"] }
 dotenv = "0.15"
 hex = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+
+[build-dependencies]
+tonic-build = "0.13"
 
 [[bin]]
 name = "coordinator"

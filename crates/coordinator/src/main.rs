@@ -1,17 +1,22 @@
 mod config;
 mod error;
 mod events;
+mod grpc;
+mod pending;
 mod processor;
 mod registry;
+mod state;
 
 use anyhow::Result;
 use clap::Parser;
 use dotenv::dotenv;
+use tokio::task;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
 use crate::processor::EventProcessor;
+use crate::state::SharedState;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -30,6 +35,9 @@ struct Args {
 
     #[arg(long, env = "LOG_LEVEL", default_value = "info")]
     log_level: String,
+
+    #[arg(long, env = "GRPC_SOCKET_PATH", default_value = "/tmp/coordinator.sock")]
+    grpc_socket_path: String,
 }
 
 #[tokio::main]
@@ -55,19 +63,44 @@ async fn main() -> Result<()> {
     info!("📝 Module: jobs");
     info!("🔗 RPC URL: {}", args.rpc_url);
 
+    // Create Sui client once
+    let sui_client = sui_rpc::Client::new(&args.rpc_url)
+        .map_err(|e| anyhow::anyhow!("Failed to create Sui client: {}", e))?;
+    info!("✅ Connected to Sui RPC");
+
     let config = Config {
-        rpc_url: args.rpc_url,
+        rpc_url: args.rpc_url.clone(),
         package_id: args.package_id,
         modules: vec!["jobs".to_string()],
         use_tee: args.use_tee,
         container_timeout_secs: args.container_timeout,
     };
 
-    let mut processor = EventProcessor::new(config).await?;
+    // Create shared state with the Sui client
+    let state = SharedState::new(sui_client);
 
-    info!("✅ Coordinator initialized, starting event monitoring...");
+    let mut processor = EventProcessor::new(config, state.clone()).await?;
 
-    if let Err(e) = processor.run().await {
+    info!("✅ Coordinator initialized, starting services...");
+
+    // Start gRPC server in a separate task with shared state
+    let grpc_socket_path = args.grpc_socket_path.clone();
+    let grpc_state = state.clone();
+    let grpc_handle = task::spawn(async move {
+        info!("🔌 Starting gRPC server on socket: {}", grpc_socket_path);
+        if let Err(e) = grpc::start_grpc_server(&grpc_socket_path, grpc_state).await {
+            error!("gRPC server error: {}", e);
+        }
+    });
+
+    // Start event monitoring
+    info!("👁️ Starting event monitoring...");
+    let processor_result = processor.run().await;
+
+    // If processor exits, cancel gRPC server
+    grpc_handle.abort();
+
+    if let Err(e) = processor_result {
         error!("Fatal error in event processor: {}", e);
         return Err(e.into());
     }

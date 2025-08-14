@@ -73,3 +73,11 @@ When `DOCKER_USE_TEE` is enabled:
 - Uses host network mode for containers
 - Performs polling-based container monitoring (for Nitro Enclave compatibility)
 - Cleans up system resources after container execution
+
+## gRPC service
+
+grpcurl -plaintext -unix=true -import-path /Users/mike/Documents/Silvana/silvana/proto -proto silvana/coordinator/v1/coordinator.proto -d '{"developer": "test_dev", "agent": "test_agent", "agent_method": "test_method"}' unix:/tmp/coordinator.sock silvana.coordinator.v1.CoordinatorService/GetJob
+
+AddExampleDev/AddAgent/prove
+
+grpcurl -plaintext -unix=true -import-path /Users/mike/Documents/Silvana/silvana/proto -proto silvana/coordinator/v1/coordinator.proto -d '{"developer": "AddExampleDev", "agent": "AddAgent", "agent_method": "prove"}' unix:/tmp/coordinator.sock silvana.coordinator.v1.CoordinatorService/GetJob

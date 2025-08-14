@@ -1,14 +1,15 @@
 use crate::config::Config;
 use crate::error::{CoordinatorError, Result};
 use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, CoordinationEvent};
+use crate::pending::{fetch_all_pending_jobs, fetch_pending_jobs_from_app_instance};
 use crate::registry::fetch_agent_method;
+use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use sui_rpc::proto::sui::rpc::v2beta2::{
     GetTransactionRequest, SubscribeCheckpointsRequest, SubscribeCheckpointsResponse,
 };
-use sui_rpc::Client;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
@@ -19,26 +20,23 @@ const STREAM_TIMEOUT_SECS: u64 = 30;
 
 pub struct EventProcessor {
     config: Config,
-    client: Client,
     docker_manager: DockerManager,
     processed_events: HashMap<String, bool>,
+    state: SharedState,
 }
 
 impl EventProcessor {
-    pub async fn new(config: Config) -> Result<Self> {
+    pub async fn new(config: Config, state: SharedState) -> Result<Self> {
         info!("Initializing event processor...");
-
-        let client = Client::new(&config.rpc_url)
-            .map_err(|e| CoordinatorError::RpcConnectionError(e.to_string()))?;
 
         let docker_manager =
             DockerManager::new(config.use_tee).map_err(|e| CoordinatorError::DockerError(e))?;
 
         Ok(Self {
             config,
-            client,
             docker_manager,
             processed_events: HashMap::new(),
+            state,
         })
     }
 
@@ -74,7 +72,8 @@ impl EventProcessor {
     async fn stream_checkpoints(&mut self) -> Result<()> {
         info!("Starting checkpoint stream...");
 
-        let mut subscription_client = self.client.subscription_client();
+        let mut client = self.state.get_sui_client();
+        let mut subscription_client = client.subscription_client();
 
         let request = SubscribeCheckpointsRequest {
             read_mask: Some(prost_types::FieldMask {
@@ -149,6 +148,24 @@ impl EventProcessor {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             info!("Jobs Event Details:\n{}", job_details);
 
+                            // Extract and track app_instance
+                            // JobCreatedEvent creates a pending job, so we need to track this app_instance
+                            if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
+                                // Extract developer, agent, and agent_method for this event
+                                let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
+                                let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
+                                let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
+                                
+                                self.state.add_app_instance(
+                                    app_instance.clone(),
+                                    developer.clone(),
+                                    agent.clone(),
+                                    agent_method.clone(),
+                                ).await;
+                                info!("Tracked app_instance from JobCreatedEvent: {} ({}/{}/{})", 
+                                    app_instance, developer, agent, agent_method);
+                            }
+
                             // Extract job details from the event for fetching agent method
                             // Parse the job_details string to extract developer, agent, and method
                             if let Some(developer) = extract_field(&job_details, "developer: ") {
@@ -164,8 +181,9 @@ impl EventProcessor {
                                             {
                                                 // Fetch the agent method configuration from registry
                                                 let agent_fetch_start = Instant::now();
+                                                let mut client = self.state.get_sui_client();
                                                 match fetch_agent_method(
-                                                    &mut self.client,
+                                                    &mut client,
                                                     &developer,
                                                     &agent,
                                                     &method,
@@ -189,11 +207,75 @@ impl EventProcessor {
                                                             agent_method.requires_tee
                                                         );
 
+                                                        // TEST: Fetch pending jobs from this app_instance
+                                                        if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
+                                                            info!("Testing fetch_pending_jobs_from_app_instance for: {}", app_instance);
+                                                            // Test with full fetch (only_check = false)
+                                                            let mut client = self.state.get_sui_client();
+                                                            match fetch_pending_jobs_from_app_instance(&mut client, &app_instance, &self.state, false, None).await {
+                                                                Ok(pending_jobs) => {
+                                                                    info!("Successfully fetched {} pending jobs from app_instance {}", 
+                                                                        pending_jobs.len(), app_instance);
+                                                                    for job in &pending_jobs {
+                                                                        info!("  Pending Job: id={}, developer={}, agent={}, method={}, status={:?}, attempts={}", 
+                                                                            job.job_id, job.developer, job.agent, job.agent_method, job.status, job.attempts);
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    error!("Failed to fetch pending jobs from app_instance {}: {}", app_instance, e);
+                                                                }
+                                                            }
+                                                            
+                                                            // Test check-only mode on all tracked app_instances
+                                                            let all_app_instances = self.state.get_app_instances().await;
+                                                            if !all_app_instances.is_empty() {
+                                                                info!("Testing check-only mode for {} app_instances", all_app_instances.len());
+                                                                let app_instance_vec: Vec<String> = all_app_instances.into_iter().collect();
+                                                                
+                                                                // First do a fast check
+                                                                let mut client = self.state.get_sui_client();
+                                                                match fetch_all_pending_jobs(&mut client, &app_instance_vec, &self.state, true).await {
+                                                                    Ok(_) => {
+                                                                        info!("Check-only mode completed, app_instances with no pending jobs were removed");
+                                                                    }
+                                                                    Err(e) => {
+                                                                        error!("Failed to check pending jobs: {}", e);
+                                                                    }
+                                                                }
+                                                                
+                                                                // Then fetch details from remaining app_instances
+                                                                let remaining = self.state.get_app_instances().await;
+                                                                if !remaining.is_empty() {
+                                                                    info!("Fetching details from {} remaining app_instances", remaining.len());
+                                                                    let remaining_vec: Vec<String> = remaining.into_iter().collect();
+                                                                    let mut client = self.state.get_sui_client();
+                                                                    match fetch_all_pending_jobs(&mut client, &remaining_vec, &self.state, false).await {
+                                                                        Ok(all_pending) => {
+                                                                            info!("Total pending jobs across {} app_instances: {}", 
+                                                                                remaining_vec.len(), all_pending.len());
+                                                                        }
+                                                                        Err(e) => {
+                                                                            error!("Failed to fetch all pending jobs: {}", e);
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
                                                         // Run the Docker container immediately
                                                         info!(
                                                             "Starting Docker container for job {}",
                                                             job_id
                                                         );
+
+                                                        // Set current agent before pulling image
+                                                        self.state
+                                                            .set_current_agent(
+                                                                developer.clone(),
+                                                                agent.clone(),
+                                                                method.clone(),
+                                                            )
+                                                            .await;
 
                                                         // Pull the Docker image first
                                                         info!(
@@ -224,12 +306,16 @@ impl EventProcessor {
                                                                             "Image SHA mismatch: expected {}, got {}",
                                                                             expected_sha, digest
                                                                         );
+                                                                        // Clear current agent on SHA mismatch
+                                                                        self.state.clear_current_agent().await;
                                                                         continue;
                                                                     }
                                                                 }
                                                             }
                                                             Err(e) => {
                                                                 error!("Failed to pull image for job {}: {}", job_id, e);
+                                                                // Clear current agent on error
+                                                                self.state.clear_current_agent().await;
                                                                 continue;
                                                             }
                                                         }
@@ -290,10 +376,15 @@ impl EventProcessor {
 
                                                         // Run the container
                                                         let container_start = Instant::now();
-                                                        match self
+                                                        let container_result = self
                                                             .docker_manager
                                                             .run_container(&container_config)
-                                                            .await
+                                                            .await;
+                                                        
+                                                        // Clear current agent after container finishes
+                                                        self.state.clear_current_agent().await;
+                                                        
+                                                        match container_result
                                                         {
                                                             Ok(result) => {
                                                                 let container_duration =
@@ -330,6 +421,37 @@ impl EventProcessor {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                } else if event.event_type.contains("JobFailedEvent") {
+                    // Handle JobFailedEvent - track app_instance as it creates a pending job
+                    if let Some(full_event) = self
+                        .fetch_event_with_contents(
+                            event.checkpoint_seq,
+                            event.tx_index,
+                            event.event_index,
+                        )
+                        .await?
+                    {
+                        if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
+                            info!("Jobs Event Details:\n{}", job_details);
+                            
+                            // Extract and track app_instance from JobFailedEvent
+                            // JobFailedEvent creates a pending job, so we need to track this app_instance
+                            if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
+                                // For JobFailedEvent, we need to look up the job to get developer/agent/method
+                                // Since JobFailedEvent doesn't include these fields directly
+                                // For now, we'll add with empty values - these will only match current_agent if all are empty
+                                // TODO: Fetch the original job details to get the correct developer/agent/method
+                                self.state.add_app_instance(
+                                    app_instance.clone(),
+                                    String::new(),  // developer not in JobFailedEvent
+                                    String::new(),  // agent not in JobFailedEvent
+                                    String::new(),  // agent_method not in JobFailedEvent
+                                ).await;
+                                info!("Tracked app_instance from JobFailedEvent: {} (Note: agent details not available in event)", 
+                                    app_instance);
                             }
                         }
                     }
@@ -397,8 +519,8 @@ impl EventProcessor {
             }),
         };
 
-        let checkpoint_response = self
-            .client
+        let mut client = self.state.get_sui_client();
+        let checkpoint_response = client
             .ledger_client()
             .get_checkpoint(checkpoint_request)
             .await
@@ -430,8 +552,7 @@ impl EventProcessor {
                 }),
             };
 
-            let tx_response = self
-                .client
+            let tx_response = client
                 .ledger_client()
                 .get_transaction(tx_request)
                 .await
