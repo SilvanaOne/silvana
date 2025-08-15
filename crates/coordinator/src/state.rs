@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::jobs::JobsTracker;
 use std::sync::Arc;
 use sui_rpc::Client;
 use tokio::sync::RwLock;
@@ -13,8 +13,7 @@ pub struct CurrentAgent {
 #[derive(Clone)]
 pub struct SharedState {
     current_agent: Arc<RwLock<Option<CurrentAgent>>>,
-    app_instances: Arc<RwLock<HashSet<String>>>,
-    current_app_instances: Arc<RwLock<HashSet<String>>>,  // App instances for current agent only
+    jobs_tracker: JobsTracker,
     sui_client: Client,  // Sui client (cloneable)
 }
 
@@ -22,8 +21,7 @@ impl SharedState {
     pub fn new(sui_client: Client) -> Self {
         Self {
             current_agent: Arc::new(RwLock::new(None)),
-            app_instances: Arc::new(RwLock::new(HashSet::new())),
-            current_app_instances: Arc::new(RwLock::new(HashSet::new())),
+            jobs_tracker: JobsTracker::new(),
             sui_client,
         }
     }
@@ -54,13 +52,6 @@ impl SharedState {
             );
         }
         *current = None;
-        
-        // Also clear current_app_instances when clearing current_agent
-        let mut current_instances = self.current_app_instances.write().await;
-        if !current_instances.is_empty() {
-            tracing::info!("Clearing {} current_app_instances", current_instances.len());
-            current_instances.clear();
-        }
     }
 
     pub async fn get_current_agent(&self) -> Option<CurrentAgent> {
@@ -68,94 +59,87 @@ impl SharedState {
         current.clone()
     }
 
-    pub async fn add_app_instance(
-        &self, 
-        app_instance_id: String,
+    /// Add a new job to tracking from JobCreatedEvent
+    pub async fn add_job(
+        &self,
+        _job_id: u64,  // No longer tracking individual job IDs
         developer: String,
         agent: String,
         agent_method: String,
-    ) -> bool {
-        // Always add to global app_instances
-        let mut instances = self.app_instances.write().await;
-        let is_new = instances.insert(app_instance_id.clone());
-        if is_new {
-            tracing::info!("Added app_instance to tracking: {}", app_instance_id);
-        } else {
-            tracing::debug!("App_instance already tracked: {}", app_instance_id);
-        }
+        app_instance: String,
+    ) {
+        self.jobs_tracker.add_job(
+            app_instance.clone(),
+            developer.clone(),
+            agent.clone(),
+            agent_method.clone(),
+        ).await;
         
-        // Check if this matches the current agent and add to current_app_instances
-        let current = self.current_agent.read().await;
-        if let Some(current_agent) = current.as_ref() {
-            if current_agent.developer == developer 
-                && current_agent.agent == agent 
-                && current_agent.agent_method == agent_method {
-                
-                let mut current_instances = self.current_app_instances.write().await;
-                let is_new_current = current_instances.insert(app_instance_id.clone());
-                if is_new_current {
-                    tracing::info!(
-                        "Added app_instance {} to current agent tracking ({}/{}/{})",
-                        app_instance_id, developer, agent, agent_method
-                    );
-                }
-            }
-        }
-        
-        is_new
+        tracing::info!(
+            "Added app_instance {} for {}/{}/{}",
+            app_instance, developer, agent, agent_method
+        );
+    }
+    
+    /// Remove a completed or failed job (no longer tracking individual jobs)
+    pub async fn remove_job(&self, _job_id: u64) {
+        // No longer tracking individual jobs, only app_instances
+        // The reconciliation process will handle removing app_instances with no pending jobs
+        tracing::debug!("Job completion/failure noted (individual jobs not tracked)");
     }
 
-    pub async fn remove_app_instance(&self, app_instance_id: &str) -> bool {
-        // Remove from global app_instances
-        let mut instances = self.app_instances.write().await;
-        let was_removed = instances.remove(app_instance_id);
-        if was_removed {
-            tracing::info!("Removed app_instance from tracking: {}", app_instance_id);
-        } else {
-            tracing::debug!("App_instance was not tracked: {}", app_instance_id);
-        }
-        
-        // Also remove from current_app_instances if present
-        let mut current_instances = self.current_app_instances.write().await;
-        let was_removed_current = current_instances.remove(app_instance_id);
-        if was_removed_current {
-            tracing::info!("Removed app_instance from current tracking: {}", app_instance_id);
-        }
-        
-        was_removed
+    /// Remove an app_instance when it has no pending jobs
+    pub async fn remove_app_instance(&self, app_instance_id: &str) {
+        self.jobs_tracker.remove_app_instance(app_instance_id).await;
+        tracing::info!("Removed app_instance from tracking: {}", app_instance_id);
     }
 
-    pub async fn get_app_instances(&self) -> HashSet<String> {
-        let instances = self.app_instances.read().await;
-        instances.clone()
+    /// Get all app_instances with pending jobs
+    pub async fn get_app_instances(&self) -> Vec<String> {
+        self.jobs_tracker.get_all_app_instances().await
     }
 
+    /// Check if an app_instance is being tracked
     pub async fn has_app_instance(&self, app_instance_id: &str) -> bool {
-        let instances = self.app_instances.read().await;
-        instances.contains(app_instance_id)
+        self.jobs_tracker.is_tracking(app_instance_id).await
     }
 
+    /// Get the count of app_instances with pending jobs
     pub async fn app_instances_count(&self) -> usize {
-        let instances = self.app_instances.read().await;
-        instances.len()
+        self.jobs_tracker.app_instances_count().await
     }
 
-    pub async fn get_current_app_instances(&self) -> HashSet<String> {
-        let instances = self.current_app_instances.read().await;
-        instances.clone()
+    /// Get app_instances with pending jobs for the current agent
+    pub async fn get_current_app_instances(&self) -> Vec<String> {
+        if let Some(current_agent) = self.get_current_agent().await {
+            self.jobs_tracker.get_app_instances_for_agent_method(
+                &current_agent.developer,
+                &current_agent.agent,
+                &current_agent.agent_method,
+            ).await
+        } else {
+            Vec::new()
+        }
     }
 
+    /// Check if an app_instance has pending jobs for the current agent
     pub async fn has_current_app_instance(&self, app_instance_id: &str) -> bool {
-        let instances = self.current_app_instances.read().await;
-        instances.contains(app_instance_id)
+        let current_instances = self.get_current_app_instances().await;
+        current_instances.contains(&app_instance_id.to_string())
     }
 
+    /// Get the count of app_instances with pending jobs for the current agent
     pub async fn current_app_instances_count(&self) -> usize {
-        let instances = self.current_app_instances.read().await;
-        instances.len()
+        let current_instances = self.get_current_app_instances().await;
+        current_instances.len()
     }
 
     pub fn get_sui_client(&self) -> Client {
         self.sui_client.clone()
+    }
+    
+    /// Get reference to the JobsTracker for direct access
+    pub fn get_jobs_tracker(&self) -> &JobsTracker {
+        &self.jobs_tracker
     }
 }

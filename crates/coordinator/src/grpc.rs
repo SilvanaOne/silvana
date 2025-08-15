@@ -1,4 +1,4 @@
-use crate::pending::fetch_pending_jobs_from_app_instance;
+use crate::fetch::fetch_pending_job_from_instances;
 use crate::state::SharedState;
 use std::path::Path;
 use tokio::net::UnixListener;
@@ -57,47 +57,48 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     // Get a cloned Sui client
                     let mut client = self.state.get_sui_client();
                     
-                    // Try to fetch one job from the first available app_instance
-                    for app_instance in current_instances.iter() {
-                        tracing::debug!("Trying to fetch job from app_instance: {}", app_instance);
-                        
-                        // Fetch just one job from this app_instance
-                        match fetch_pending_jobs_from_app_instance(
-                            &mut client,
-                            app_instance,
-                            &self.state,
-                            false,  // not only_check, we want the actual job
-                            Some(1) // limit to 1 job
-                        ).await {
-                            Ok(jobs) if !jobs.is_empty() => {
-                                let pending_job = &jobs[0];
-                                tracing::info!("Found pending job {} in app_instance {}", 
-                                    pending_job.job_id, app_instance);
-                                
-                                // Convert PendingJob to protobuf Job
-                                let job = Job {
-                                    job_id: pending_job.job_id,
-                                    description: pending_job.description.clone(),
-                                    developer: pending_job.developer.clone(),
-                                    agent: pending_job.agent.clone(),
-                                    agent_method: pending_job.agent_method.clone(),
-                                    app: pending_job.app.clone(),
-                                    app_instance: pending_job.app_instance.clone(),
-                                    app_instance_method: pending_job.app_instance_method.clone(),
-                                    sequences: pending_job.sequences.clone().unwrap_or_default(),
-                                    data: pending_job.data.clone(),
-                                    attempts: pending_job.attempts as u32,
-                                    created_at: pending_job.created_at,
-                                    updated_at: pending_job.updated_at,
-                                };
-                                
-                                return Ok(Response::new(GetJobResponse { job: Some(job) }));
-                            }
-                            Ok(_) => {
-                                tracing::debug!("No pending jobs in app_instance {}", app_instance);
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to fetch from app_instance {}: {}", app_instance, e);
+                    // Use index-based fetching to get the job with lowest job_id
+                    match fetch_pending_job_from_instances(
+                        &mut client,
+                        &current_instances,
+                        &req.developer,
+                        &req.agent,
+                        &req.agent_method,
+                    ).await {
+                        Ok(Some(pending_job)) => {
+                            tracing::info!("Found pending job {} using index", pending_job.job_id);
+                            
+                            // Convert PendingJob to protobuf Job
+                            let job = Job {
+                                job_id: pending_job.job_id,
+                                description: pending_job.description.clone(),
+                                developer: pending_job.developer.clone(),
+                                agent: pending_job.agent.clone(),
+                                agent_method: pending_job.agent_method.clone(),
+                                app: pending_job.app.clone(),
+                                app_instance: pending_job.app_instance.clone(),
+                                app_instance_method: pending_job.app_instance_method.clone(),
+                                sequences: pending_job.sequences.clone().unwrap_or_default(),
+                                data: pending_job.data.clone(),
+                                attempts: pending_job.attempts as u32,
+                                created_at: pending_job.created_at,
+                                updated_at: pending_job.updated_at,
+                            };
+                            
+                            return Ok(Response::new(GetJobResponse { job: Some(job) }));
+                        }
+                        Ok(None) => {
+                            tracing::info!("No pending jobs found using index for {}/{}/{}", 
+                                req.developer, req.agent, req.agent_method);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to fetch jobs using index: {}", e);
+                            // If it's a not found error, remove the stale app_instance
+                            if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
+                                tracing::warn!("Jobs object not found, removing stale app_instances from tracking");
+                                for instance in &current_instances {
+                                    self.state.remove_app_instance(instance).await;
+                                }
                             }
                         }
                     }

@@ -12,6 +12,7 @@ use coordination::jobs::{
     job_exists,
     get_pending_jobs,
     get_pending_jobs_count,
+    get_pending_jobs_for_method,
     get_next_pending_job,
     update_max_attempts,
     job_id,
@@ -396,6 +397,322 @@ fun test_get_next_pending_job_empty() {
         
         let next = get_next_pending_job(&jobs);
         assert!(option::is_none(&next), 0);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_pending_jobs_index() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        // Create jobs for same developer/agent/method
+        let job_id1 = create_job(
+            &mut jobs,
+            option::some(b"Job 1".to_string()),
+            b"dev1".to_string(),
+            b"agent1".to_string(),
+            b"method1".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            b"data1",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        let job_id2 = create_job(
+            &mut jobs,
+            option::some(b"Job 2".to_string()),
+            b"dev1".to_string(),
+            b"agent1".to_string(),
+            b"method1".to_string(),
+            b"app2".to_string(),
+            b"instance2".to_string(),
+            b"app_method2".to_string(),
+            option::none(),
+            b"data2",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Create job for different method
+        let _job_id3 = create_job(
+            &mut jobs,
+            option::some(b"Job 3".to_string()),
+            b"dev1".to_string(),
+            b"agent1".to_string(),
+            b"method2".to_string(),
+            b"app3".to_string(),
+            b"instance3".to_string(),
+            b"app_method3".to_string(),
+            option::none(),
+            b"data3",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Check index for method1
+        let method1_jobs = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method1".to_string(),
+        );
+        assert!(vector::length(&method1_jobs) == 2, 0);
+        assert!(vector::contains(&method1_jobs, &job_id1), 1);
+        assert!(vector::contains(&method1_jobs, &job_id2), 2);
+        
+        // Check index for method2
+        let method2_jobs = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method2".to_string(),
+        );
+        assert!(vector::length(&method2_jobs) == 1, 3);
+        
+        // Check non-existent method
+        let no_jobs = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method_nonexistent".to_string(),
+        );
+        assert!(vector::is_empty(&no_jobs), 4);
+        
+        // Start job1 - should remove from index
+        start_job(&mut jobs, job_id1, &clock);
+        let method1_jobs_after = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method1".to_string(),
+        );
+        assert!(vector::length(&method1_jobs_after) == 1, 5);
+        assert!(vector::contains(&method1_jobs_after, &job_id2), 6);
+        assert!(!vector::contains(&method1_jobs_after, &job_id1), 7);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_pending_jobs_count_tracking() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        // Initially no pending jobs
+        assert!(get_pending_jobs_count(&jobs) == 0, 0);
+        
+        // Create first job
+        let job_id1 = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev1".to_string(),
+            b"agent1".to_string(),
+            b"method1".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            b"data1",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        assert!(get_pending_jobs_count(&jobs) == 1, 1);
+        
+        // Create second job
+        let job_id2 = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev2".to_string(),
+            b"agent2".to_string(),
+            b"method2".to_string(),
+            b"app2".to_string(),
+            b"instance2".to_string(),
+            b"app_method2".to_string(),
+            option::none(),
+            b"data2",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        assert!(get_pending_jobs_count(&jobs) == 2, 2);
+        
+        // Start job1 - count should decrease
+        start_job(&mut jobs, job_id1, &clock);
+        assert!(get_pending_jobs_count(&jobs) == 1, 3);
+        
+        // Fail job1 - should go back to pending, count increases
+        fail_job(&mut jobs, job_id1, b"Error".to_string(), &clock);
+        assert!(get_pending_jobs_count(&jobs) == 2, 4);
+        
+        // Start and complete job1 - count should decrease
+        start_job(&mut jobs, job_id1, &clock);
+        assert!(get_pending_jobs_count(&jobs) == 1, 5);
+        complete_job(&mut jobs, job_id1, &clock);
+        assert!(get_pending_jobs_count(&jobs) == 1, 6);
+        
+        // Start and complete job2
+        start_job(&mut jobs, job_id2, &clock);
+        assert!(get_pending_jobs_count(&jobs) == 0, 7);
+        complete_job(&mut jobs, job_id2, &clock);
+        assert!(get_pending_jobs_count(&jobs) == 0, 8);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = jobs::EJobNotRunning)]
+fun test_complete_job_not_running() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let job_id = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev1".to_string(),
+            b"agent1".to_string(),
+            b"method1".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            b"data",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Try to complete a pending job - should fail
+        complete_job(&mut jobs, job_id, &clock);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = jobs::EJobNotRunning)]
+fun test_fail_job_not_running() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let job_id = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev1".to_string(),
+            b"agent1".to_string(),
+            b"method1".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            b"data",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Try to fail a pending job - should fail
+        fail_job(&mut jobs, job_id, b"Error".to_string(), &clock);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_index_with_retry() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::some(2), ts::ctx(&mut scenario));
+        
+        let job_id = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev1".to_string(),
+            b"agent1".to_string(),
+            b"method1".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            b"data",
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Job should be in index
+        let jobs_in_index = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method1".to_string(),
+        );
+        assert!(vector::contains(&jobs_in_index, &job_id), 0);
+        
+        // Start job - should be removed from index
+        start_job(&mut jobs, job_id, &clock);
+        let jobs_after_start = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method1".to_string(),
+        );
+        assert!(vector::is_empty(&jobs_after_start), 1);
+        
+        // Fail job (first attempt) - should be back in index
+        fail_job(&mut jobs, job_id, b"Error".to_string(), &clock);
+        let jobs_after_fail = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method1".to_string(),
+        );
+        assert!(vector::contains(&jobs_after_fail, &job_id), 2);
+        
+        // Start again and fail on max attempts - should be removed permanently
+        start_job(&mut jobs, job_id, &clock);
+        fail_job(&mut jobs, job_id, b"Error 2".to_string(), &clock);
+        
+        // Job should be deleted (max attempts reached)
+        assert!(!job_exists(&jobs, job_id), 3);
+        let jobs_final = get_pending_jobs_for_method(
+            &jobs,
+            &b"dev1".to_string(),
+            &b"agent1".to_string(),
+            &b"method1".to_string(),
+        );
+        assert!(vector::is_empty(&jobs_final), 4);
         
         transfer::public_share_object(jobs);
     };

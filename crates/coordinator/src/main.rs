@@ -1,7 +1,9 @@
 mod config;
 mod error;
 mod events;
+mod fetch;
 mod grpc;
+mod jobs;
 mod pending;
 mod processor;
 mod registry;
@@ -42,6 +44,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file from current directory
     dotenv().ok();
 
     let args = Args::parse();
@@ -76,8 +79,8 @@ async fn main() -> Result<()> {
         container_timeout_secs: args.container_timeout,
     };
 
-    // Create shared state with the Sui client
-    let state = SharedState::new(sui_client);
+    // Create shared state with a cloned Sui client
+    let state = SharedState::new(sui_client.clone());
 
     let mut processor = EventProcessor::new(config, state.clone()).await?;
 
@@ -93,12 +96,20 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Start reconciliation task that syncs with on-chain state every 10 minutes
+    let reconciliation_handle = crate::jobs::JobsTracker::start_reconciliation_task(
+        state.get_jobs_tracker().clone(),
+        sui_client,
+    );
+    info!("🔄 Started reconciliation task (runs every 10 minutes)");
+
     // Start event monitoring
     info!("👁️ Starting event monitoring...");
     let processor_result = processor.run().await;
 
-    // If processor exits, cancel gRPC server
+    // If processor exits, cancel background tasks
     grpc_handle.abort();
+    reconciliation_handle.abort();
 
     if let Err(e) = processor_result {
         error!("Fatal error in event processor: {}", e);

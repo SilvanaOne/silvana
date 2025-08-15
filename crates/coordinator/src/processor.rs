@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::error::{CoordinatorError, Result};
 use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, CoordinationEvent};
-use crate::pending::{fetch_all_pending_jobs, fetch_pending_jobs_from_app_instance};
+use crate::fetch::{fetch_all_pending_jobs, fetch_pending_jobs_from_app_instance};
 use crate::registry::fetch_agent_method;
 use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
@@ -148,22 +148,27 @@ impl EventProcessor {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             info!("Jobs Event Details:\n{}", job_details);
 
-                            // Extract and track app_instance
-                            // JobCreatedEvent creates a pending job, so we need to track this app_instance
+                            // Extract and track the job
+                            // JobCreatedEvent creates a pending job, so we need to track this job
                             if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
-                                // Extract developer, agent, and agent_method for this event
-                                let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
-                                let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
-                                let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
-                                
-                                self.state.add_app_instance(
-                                    app_instance.clone(),
-                                    developer.clone(),
-                                    agent.clone(),
-                                    agent_method.clone(),
-                                ).await;
-                                info!("Tracked app_instance from JobCreatedEvent: {} ({}/{}/{})", 
-                                    app_instance, developer, agent, agent_method);
+                                if let Some(job_id_str) = extract_field(&job_details, "job_id: ") {
+                                    if let Ok(job_id) = job_id_str.parse::<u64>() {
+                                        // Extract developer, agent, and agent_method for this event
+                                        let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
+                                        let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
+                                        let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
+                                        
+                                        self.state.add_job(
+                                            job_id,
+                                            developer.clone(),
+                                            agent.clone(),
+                                            agent_method.clone(),
+                                            app_instance.clone(),
+                                        ).await;
+                                        info!("Tracked job {} from JobCreatedEvent: {} ({}/{}/{})", 
+                                            job_id, app_instance, developer, agent, agent_method);
+                                    }
+                                }
                             }
 
                             // Extract job details from the event for fetching agent method
@@ -212,14 +217,14 @@ impl EventProcessor {
                                                             info!("Testing fetch_pending_jobs_from_app_instance for: {}", app_instance);
                                                             // Test with full fetch (only_check = false)
                                                             let mut client = self.state.get_sui_client();
-                                                            match fetch_pending_jobs_from_app_instance(&mut client, &app_instance, &self.state, false, None).await {
-                                                                Ok(pending_jobs) => {
-                                                                    info!("Successfully fetched {} pending jobs from app_instance {}", 
-                                                                        pending_jobs.len(), app_instance);
-                                                                    for job in &pending_jobs {
-                                                                        info!("  Pending Job: id={}, developer={}, agent={}, method={}, status={:?}, attempts={}", 
-                                                                            job.job_id, job.developer, job.agent, job.agent_method, job.status, job.attempts);
-                                                                    }
+                                                            match fetch_pending_jobs_from_app_instance(&mut client, &app_instance, &self.state, false).await {
+                                                                Ok(Some(pending_job)) => {
+                                                                    info!("Successfully fetched pending job from app_instance {}", app_instance);
+                                                                    info!("  Pending Job: id={}, developer={}, agent={}, method={}, status={:?}, attempts={}", 
+                                                                        pending_job.job_id, pending_job.developer, pending_job.agent, pending_job.agent_method, pending_job.status, pending_job.attempts);
+                                                                }
+                                                                Ok(None) => {
+                                                                    info!("No pending jobs found in app_instance {}", app_instance);
                                                                 }
                                                                 Err(e) => {
                                                                     error!("Failed to fetch pending jobs from app_instance {}: {}", app_instance, e);
@@ -250,9 +255,13 @@ impl EventProcessor {
                                                                     let remaining_vec: Vec<String> = remaining.into_iter().collect();
                                                                     let mut client = self.state.get_sui_client();
                                                                     match fetch_all_pending_jobs(&mut client, &remaining_vec, &self.state, false).await {
-                                                                        Ok(all_pending) => {
-                                                                            info!("Total pending jobs across {} app_instances: {}", 
-                                                                                remaining_vec.len(), all_pending.len());
+                                                                        Ok(Some(pending_job)) => {
+                                                                            info!("Found pending job with smallest job_id: {} across {} app_instances", 
+                                                                                pending_job.job_id, remaining_vec.len());
+                                                                        }
+                                                                        Ok(None) => {
+                                                                            info!("No pending jobs found across {} app_instances", 
+                                                                                remaining_vec.len());
                                                                         }
                                                                         Err(e) => {
                                                                             error!("Failed to fetch all pending jobs: {}", e);
@@ -424,8 +433,8 @@ impl EventProcessor {
                             }
                         }
                     }
-                } else if event.event_type.contains("JobFailedEvent") {
-                    // Handle JobFailedEvent - track app_instance as it creates a pending job
+                } else if event.event_type.contains("JobCompletedEvent") {
+                    // Handle JobCompletedEvent - job is completed and removed
                     if let Some(full_event) = self
                         .fetch_event_with_contents(
                             event.checkpoint_seq,
@@ -437,21 +446,51 @@ impl EventProcessor {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             info!("Jobs Event Details:\n{}", job_details);
                             
-                            // Extract and track app_instance from JobFailedEvent
-                            // JobFailedEvent creates a pending job, so we need to track this app_instance
-                            if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
-                                // For JobFailedEvent, we need to look up the job to get developer/agent/method
-                                // Since JobFailedEvent doesn't include these fields directly
-                                // For now, we'll add with empty values - these will only match current_agent if all are empty
-                                // TODO: Fetch the original job details to get the correct developer/agent/method
-                                self.state.add_app_instance(
-                                    app_instance.clone(),
-                                    String::new(),  // developer not in JobFailedEvent
-                                    String::new(),  // agent not in JobFailedEvent
-                                    String::new(),  // agent_method not in JobFailedEvent
-                                ).await;
-                                info!("Tracked app_instance from JobFailedEvent: {} (Note: agent details not available in event)", 
-                                    app_instance);
+                            // Extract job_id and remove from tracking
+                            if let Some(job_id_str) = extract_field(&job_details, "job_id: ") {
+                                if let Ok(job_id) = job_id_str.parse::<u64>() {
+                                    self.state.remove_job(job_id).await;
+                                    info!("Removed completed job {} from tracking", job_id);
+                                }
+                            }
+                        }
+                    }
+                } else if event.event_type.contains("JobFailedEvent") {
+                    // Handle JobFailedEvent - job failed, may retry (handled by Move contract)
+                    // We don't need to do anything here as the Move contract handles retry logic
+                    // If max attempts reached, JobDeletedEvent will be emitted
+                    if let Some(full_event) = self
+                        .fetch_event_with_contents(
+                            event.checkpoint_seq,
+                            event.tx_index,
+                            event.event_index,
+                        )
+                        .await?
+                    {
+                        if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
+                            info!("Jobs Event Details:\n{}", job_details);
+                            // No tracking changes needed - Move contract handles retry logic
+                        }
+                    }
+                } else if event.event_type.contains("JobDeletedEvent") {
+                    // Handle JobDeletedEvent - job is permanently removed
+                    if let Some(full_event) = self
+                        .fetch_event_with_contents(
+                            event.checkpoint_seq,
+                            event.tx_index,
+                            event.event_index,
+                        )
+                        .await?
+                    {
+                        if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
+                            info!("Jobs Event Details:\n{}", job_details);
+                            
+                            // Extract job_id and remove from tracking
+                            if let Some(job_id_str) = extract_field(&job_details, "job_id: ") {
+                                if let Ok(job_id) = job_id_str.parse::<u64>() {
+                                    self.state.remove_job(job_id).await;
+                                    info!("Removed deleted job {} from tracking", job_id);
+                                }
                             }
                         }
                     }

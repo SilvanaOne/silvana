@@ -1,7 +1,9 @@
 pub mod config;
 pub mod error;
 pub mod events;
+pub mod fetch;
 pub mod grpc;
+pub mod jobs;
 pub mod pending;
 pub mod processor;
 pub mod registry;

@@ -37,7 +37,7 @@ message GetJobRequest {
 
 // Response message containing a job
 message GetJobResponse {
-  Job job = 1;
+  optional Job job = 1;
 }
 
 // gRPC service definition
