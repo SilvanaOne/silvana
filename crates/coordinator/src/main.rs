@@ -3,6 +3,7 @@ mod error;
 mod events;
 mod fetch;
 mod grpc;
+mod job_searcher;
 mod jobs;
 mod pending;
 mod processor;
@@ -13,10 +14,12 @@ use anyhow::Result;
 use clap::Parser;
 use dotenv::dotenv;
 use tokio::task;
-use tracing::{error, info};
+use tokio::time::Duration;
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
+use crate::job_searcher::JobSearcher;
 use crate::processor::EventProcessor;
 use crate::state::SharedState;
 
@@ -72,21 +75,16 @@ async fn main() -> Result<()> {
     info!("✅ Connected to Sui RPC");
 
     let config = Config {
-        rpc_url: args.rpc_url.clone(),
         package_id: args.package_id,
         modules: vec!["jobs".to_string()],
-        use_tee: args.use_tee,
-        container_timeout_secs: args.container_timeout,
     };
 
     // Create shared state with a cloned Sui client
     let state = SharedState::new(sui_client.clone());
 
-    let mut processor = EventProcessor::new(config, state.clone()).await?;
-
     info!("✅ Coordinator initialized, starting services...");
 
-    // Start gRPC server in a separate task with shared state
+    // 1. Start gRPC server in a separate thread
     let grpc_socket_path = args.grpc_socket_path.clone();
     let grpc_state = state.clone();
     let grpc_handle = task::spawn(async move {
@@ -96,20 +94,73 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Start reconciliation task that syncs with on-chain state every 10 minutes
-    let reconciliation_handle = crate::jobs::JobsTracker::start_reconciliation_task(
-        state.get_jobs_tracker().clone(),
-        sui_client,
-    );
+    // 2. Start reconciliation task in a separate thread (runs every 10 minutes)
+    let reconciliation_state = state.clone();
+    let reconciliation_client = sui_client.clone();
+    let reconciliation_handle = task::spawn(async move {
+        let mut reconciliation_interval = tokio::time::interval(Duration::from_secs(600)); // 10 minutes
+        reconciliation_interval.tick().await; // Skip the first immediate tick
+        
+        loop {
+            reconciliation_interval.tick().await;
+            
+            // Get current stats before reconciliation
+            let stats = reconciliation_state.get_jobs_tracker().get_stats().await;
+            info!(
+                "Starting periodic reconciliation (currently tracking {} app_instances, {} agent methods)",
+                stats.app_instances_count,
+                stats.agent_methods_count
+            );
+            
+            let mut client = reconciliation_client.clone();
+            match reconciliation_state.get_jobs_tracker().reconcile_with_chain(&mut client).await {
+                Ok(has_jobs) => {
+                    // Update the pending jobs flag based on reconciliation result
+                    reconciliation_state.update_pending_jobs_flag().await;
+                    info!("Reconciliation complete, has_pending_jobs={}", has_jobs);
+                }
+                Err(e) => {
+                    warn!("Reconciliation failed: {}", e);
+                }
+            }
+        }
+    });
     info!("🔄 Started reconciliation task (runs every 10 minutes)");
 
-    // Start event monitoring
+    // 3. Start job searcher in a separate thread
+    let job_searcher_state = state.clone();
+    let use_tee = args.use_tee;
+    let container_timeout_secs = args.container_timeout;
+    let job_searcher_handle = task::spawn(async move {
+        let mut job_searcher = match JobSearcher::new(
+            job_searcher_state,
+            use_tee,
+            container_timeout_secs,
+        ) {
+            Ok(searcher) => searcher,
+            Err(e) => {
+                error!("Failed to create job searcher: {}", e);
+                return;
+            }
+        };
+        
+        if let Err(e) = job_searcher.run().await {
+            error!("Job searcher error: {}", e);
+        }
+    });
+    info!("🔍 Started job searcher thread");
+
+    // 4. Start event processor in main thread (processes events and updates shared state)
+    let mut processor = EventProcessor::new(config, state.clone()).await?;
     info!("👁️ Starting event monitoring...");
+    
+    // Run processor (this blocks)
     let processor_result = processor.run().await;
 
-    // If processor exits, cancel background tasks
+    // If processor exits, cancel all background tasks
     grpc_handle.abort();
     reconciliation_handle.abort();
+    job_searcher_handle.abort();
 
     if let Err(e) = processor_result {
         error!("Fatal error in event processor: {}", e);

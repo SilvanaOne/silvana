@@ -1,12 +1,9 @@
 use crate::config::Config;
 use crate::error::{CoordinatorError, Result};
 use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, CoordinationEvent};
-use crate::fetch::{fetch_all_pending_jobs, fetch_pending_jobs_from_app_instance};
-use crate::registry::fetch_agent_method;
 use crate::state::SharedState;
-use docker::{ContainerConfig, DockerManager};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use sui_rpc::proto::sui::rpc::v2beta2::{
     GetTransactionRequest, SubscribeCheckpointsRequest, SubscribeCheckpointsResponse,
 };
@@ -20,7 +17,6 @@ const STREAM_TIMEOUT_SECS: u64 = 30;
 
 pub struct EventProcessor {
     config: Config,
-    docker_manager: DockerManager,
     processed_events: HashMap<String, bool>,
     state: SharedState,
 }
@@ -29,12 +25,8 @@ impl EventProcessor {
     pub async fn new(config: Config, state: SharedState) -> Result<Self> {
         info!("Initializing event processor...");
 
-        let docker_manager =
-            DockerManager::new(config.use_tee).map_err(|e| CoordinatorError::DockerError(e))?;
-
         Ok(Self {
             config,
-            docker_manager,
             processed_events: HashMap::new(),
             state,
         })
@@ -131,8 +123,6 @@ impl EventProcessor {
             for event in all_events {
                 // If this is a jobs event, fetch contents and display
                 if event.event_type.contains("JobCreatedEvent") {
-                    let job_start = Instant::now();
-                    let fetch_start = Instant::now();
                     if let Some(full_event) = self
                         .fetch_event_with_contents(
                             event.checkpoint_seq,
@@ -141,15 +131,11 @@ impl EventProcessor {
                         )
                         .await?
                     {
-                        let fetch_duration = fetch_start.elapsed();
-                        info!("⏱️ Event fetch time: {}ms", fetch_duration.as_millis());
-
                         // Parse and display the event details
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
-                            info!("Jobs Event Details:\n{}", job_details);
+                            info!("📝 JobCreatedEvent detected: {}", job_details);
 
-                            // Extract and track the job
-                            // JobCreatedEvent creates a pending job, so we need to track this job
+                            // Extract and track the job in shared state
                             if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
                                 if let Some(job_id_str) = extract_field(&job_details, "job_id: ") {
                                     if let Ok(job_id) = job_id_str.parse::<u64>() {
@@ -158,6 +144,7 @@ impl EventProcessor {
                                         let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
                                         let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
                                         
+                                        // Add to shared state - this will trigger the job searcher
                                         self.state.add_job(
                                             job_id,
                                             developer.clone(),
@@ -165,269 +152,8 @@ impl EventProcessor {
                                             agent_method.clone(),
                                             app_instance.clone(),
                                         ).await;
-                                        info!("Tracked job {} from JobCreatedEvent: {} ({}/{}/{})", 
+                                        info!("✅ Added job {} to shared state: {} ({}/{}/{})", 
                                             job_id, app_instance, developer, agent, agent_method);
-                                    }
-                                }
-                            }
-
-                            // Extract job details from the event for fetching agent method
-                            // Parse the job_details string to extract developer, agent, and method
-                            if let Some(developer) = extract_field(&job_details, "developer: ") {
-                                if let Some(agent) = extract_field(&job_details, "agent: ") {
-                                    if let Some(method) =
-                                        extract_field(&job_details, "agent_method: ")
-                                    {
-                                        if let Some(job_id) =
-                                            extract_field(&job_details, "job_id: ")
-                                        {
-                                            if let Some(data) =
-                                                extract_field(&job_details, "data: ")
-                                            {
-                                                // Fetch the agent method configuration from registry
-                                                let agent_fetch_start = Instant::now();
-                                                let mut client = self.state.get_sui_client();
-                                                match fetch_agent_method(
-                                                    &mut client,
-                                                    &developer,
-                                                    &agent,
-                                                    &method,
-                                                )
-                                                .await
-                                                {
-                                                    Ok(agent_method) => {
-                                                        let agent_fetch_duration =
-                                                            agent_fetch_start.elapsed();
-                                                        info!(
-                                                            "⏱️ Agent method fetch time: {}ms",
-                                                            agent_fetch_duration.as_millis()
-                                                        );
-
-                                                        info!(
-                                                            "Agent Method: image={}, sha256={:?}, memory={}GB, cpu={}, tee={}",
-                                                            agent_method.docker_image,
-                                                            agent_method.docker_sha256,
-                                                            agent_method.min_memory_gb,
-                                                            agent_method.min_cpu_cores,
-                                                            agent_method.requires_tee
-                                                        );
-
-                                                        // TEST: Fetch pending jobs from this app_instance
-                                                        if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
-                                                            info!("Testing fetch_pending_jobs_from_app_instance for: {}", app_instance);
-                                                            // Test with full fetch (only_check = false)
-                                                            let mut client = self.state.get_sui_client();
-                                                            match fetch_pending_jobs_from_app_instance(&mut client, &app_instance, &self.state, false).await {
-                                                                Ok(Some(pending_job)) => {
-                                                                    info!("Successfully fetched pending job from app_instance {}", app_instance);
-                                                                    info!("  Pending Job: id={}, developer={}, agent={}, method={}, status={:?}, attempts={}", 
-                                                                        pending_job.job_id, pending_job.developer, pending_job.agent, pending_job.agent_method, pending_job.status, pending_job.attempts);
-                                                                }
-                                                                Ok(None) => {
-                                                                    info!("No pending jobs found in app_instance {}", app_instance);
-                                                                }
-                                                                Err(e) => {
-                                                                    error!("Failed to fetch pending jobs from app_instance {}: {}", app_instance, e);
-                                                                }
-                                                            }
-                                                            
-                                                            // Test check-only mode on all tracked app_instances
-                                                            let all_app_instances = self.state.get_app_instances().await;
-                                                            if !all_app_instances.is_empty() {
-                                                                info!("Testing check-only mode for {} app_instances", all_app_instances.len());
-                                                                let app_instance_vec: Vec<String> = all_app_instances.into_iter().collect();
-                                                                
-                                                                // First do a fast check
-                                                                let mut client = self.state.get_sui_client();
-                                                                match fetch_all_pending_jobs(&mut client, &app_instance_vec, &self.state, true).await {
-                                                                    Ok(_) => {
-                                                                        info!("Check-only mode completed, app_instances with no pending jobs were removed");
-                                                                    }
-                                                                    Err(e) => {
-                                                                        error!("Failed to check pending jobs: {}", e);
-                                                                    }
-                                                                }
-                                                                
-                                                                // Then fetch details from remaining app_instances
-                                                                let remaining = self.state.get_app_instances().await;
-                                                                if !remaining.is_empty() {
-                                                                    info!("Fetching details from {} remaining app_instances", remaining.len());
-                                                                    let remaining_vec: Vec<String> = remaining.into_iter().collect();
-                                                                    let mut client = self.state.get_sui_client();
-                                                                    match fetch_all_pending_jobs(&mut client, &remaining_vec, &self.state, false).await {
-                                                                        Ok(Some(pending_job)) => {
-                                                                            info!("Found pending job with smallest job_id: {} across {} app_instances", 
-                                                                                pending_job.job_id, remaining_vec.len());
-                                                                        }
-                                                                        Ok(None) => {
-                                                                            info!("No pending jobs found across {} app_instances", 
-                                                                                remaining_vec.len());
-                                                                        }
-                                                                        Err(e) => {
-                                                                            error!("Failed to fetch all pending jobs: {}", e);
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-
-                                                        // Run the Docker container immediately
-                                                        info!(
-                                                            "Starting Docker container for job {}",
-                                                            job_id
-                                                        );
-
-                                                        // Set current agent before pulling image
-                                                        self.state
-                                                            .set_current_agent(
-                                                                developer.clone(),
-                                                                agent.clone(),
-                                                                method.clone(),
-                                                            )
-                                                            .await;
-
-                                                        // Pull the Docker image first
-                                                        info!(
-                                                            "Pulling Docker image: {}",
-                                                            agent_method.docker_image
-                                                        );
-                                                        let pull_start = Instant::now();
-                                                        match self
-                                                            .docker_manager
-                                                            .load_image(
-                                                                &agent_method.docker_image,
-                                                                false,
-                                                            )
-                                                            .await
-                                                        {
-                                                            Ok(digest) => {
-                                                                let pull_duration =
-                                                                    pull_start.elapsed();
-                                                                info!("⏱️ Docker image pull time: {}ms", pull_duration.as_millis());
-                                                                info!("Image pulled successfully with digest: {}", digest);
-
-                                                                // Verify SHA256 if provided
-                                                                if let Some(expected_sha) =
-                                                                    &agent_method.docker_sha256
-                                                                {
-                                                                    if &digest != expected_sha {
-                                                                        error!(
-                                                                            "Image SHA mismatch: expected {}, got {}",
-                                                                            expected_sha, digest
-                                                                        );
-                                                                        // Clear current agent on SHA mismatch
-                                                                        self.state.clear_current_agent().await;
-                                                                        continue;
-                                                                    }
-                                                                }
-                                                            }
-                                                            Err(e) => {
-                                                                error!("Failed to pull image for job {}: {}", job_id, e);
-                                                                // Clear current agent on error
-                                                                self.state.clear_current_agent().await;
-                                                                continue;
-                                                            }
-                                                        }
-
-                                                        // Prepare container configuration
-                                                        let container_config = ContainerConfig {
-                                                            image_name: agent_method
-                                                                .docker_image
-                                                                .clone(),
-                                                            image_source: agent_method
-                                                                .docker_image
-                                                                .clone(),
-                                                            command: vec![], // Empty command to use image default
-                                                            env_vars: {
-                                                                let mut env = HashMap::new();
-                                                                env.insert(
-                                                                    "JOB_ID".to_string(),
-                                                                    job_id.clone(),
-                                                                );
-                                                                env.insert(
-                                                                    "JOB_DATA".to_string(),
-                                                                    data.clone(),
-                                                                );
-                                                                env.insert(
-                                                                    "DEVELOPER".to_string(),
-                                                                    developer.clone(),
-                                                                );
-                                                                env.insert(
-                                                                    "AGENT".to_string(),
-                                                                    agent.clone(),
-                                                                );
-                                                                env.insert(
-                                                                    "METHOD".to_string(),
-                                                                    method.clone(),
-                                                                );
-                                                                env
-                                                            },
-                                                            port_bindings: HashMap::new(),
-                                                            timeout_seconds: self
-                                                                .config
-                                                                .container_timeout_secs,
-                                                            memory_limit_mb: Some(
-                                                                (agent_method.min_memory_gb as u64)
-                                                                    * 1024,
-                                                            ),
-                                                            cpu_cores: Some(
-                                                                agent_method.min_cpu_cores as f64,
-                                                            ),
-                                                            network_mode: if agent_method
-                                                                .requires_tee
-                                                            {
-                                                                Some("host".to_string())
-                                                            } else {
-                                                                None
-                                                            },
-                                                            requires_tee: agent_method.requires_tee,
-                                                        };
-
-                                                        // Run the container
-                                                        let container_start = Instant::now();
-                                                        let container_result = self
-                                                            .docker_manager
-                                                            .run_container(&container_config)
-                                                            .await;
-                                                        
-                                                        // Clear current agent after container finishes
-                                                        self.state.clear_current_agent().await;
-                                                        
-                                                        match container_result
-                                                        {
-                                                            Ok(result) => {
-                                                                let container_duration =
-                                                                    container_start.elapsed();
-                                                                info!("⏱️ Container execution time: {}ms", container_duration.as_millis());
-                                                                info!(
-                                                                    "Container completed for job {}: exit_code={}, internal_duration={}ms",
-                                                                    job_id, result.exit_code, result.duration_ms
-                                                                );
-                                                                if !result.logs.is_empty() {
-                                                                    info!(
-                                                                        "Container logs:\n{}",
-                                                                        result.logs
-                                                                    );
-                                                                }
-
-                                                                let total_duration =
-                                                                    job_start.elapsed();
-                                                                info!("⏱️ Total job processing time: {}ms", total_duration.as_millis());
-                                                            }
-                                                            Err(e) => {
-                                                                error!("Failed to run container for job {}: {}", job_id, e);
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Failed to fetch agent method: {}",
-                                                            e
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -456,9 +182,7 @@ impl EventProcessor {
                         }
                     }
                 } else if event.event_type.contains("JobFailedEvent") {
-                    // Handle JobFailedEvent - job failed, may retry (handled by Move contract)
-                    // We don't need to do anything here as the Move contract handles retry logic
-                    // If max attempts reached, JobDeletedEvent will be emitted
+                    // Handle JobFailedEvent - job failed and may be retried
                     if let Some(full_event) = self
                         .fetch_event_with_contents(
                             event.checkpoint_seq,
@@ -468,8 +192,49 @@ impl EventProcessor {
                         .await?
                     {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
-                            info!("Jobs Event Details:\n{}", job_details);
-                            // No tracking changes needed - Move contract handles retry logic
+                            info!("📉 JobFailedEvent: {}", job_details);
+                            // Note: If job is retried, a JobUpdatedEvent will follow
+                        }
+                    }
+                } else if event.event_type.contains("JobUpdatedEvent") {
+                    // Handle JobUpdatedEvent - job status changed (e.g., failed job retried)
+                    if let Some(full_event) = self
+                        .fetch_event_with_contents(
+                            event.checkpoint_seq,
+                            event.tx_index,
+                            event.event_index,
+                        )
+                        .await?
+                    {
+                        if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
+                            info!("🔄 JobUpdatedEvent: {}", job_details);
+                            
+                            // Check if status is Pending (job was retried after failure)
+                            if job_details.contains("status: JobStatus::Pending") {
+                                // Extract job details to re-add to tracking
+                                if let Some(job_id_str) = extract_field(&job_details, "job_id: ") {
+                                    if let Ok(job_id) = job_id_str.parse::<u64>() {
+                                        if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
+                                            let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
+                                            let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
+                                            let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
+                                            
+                                            // Re-add to tracking (job was retried and is pending again)
+                                            self.state.add_job(
+                                                job_id,
+                                                developer.clone(),
+                                                agent.clone(),
+                                                agent_method.clone(),
+                                                app_instance.clone(),
+                                            ).await;
+                                            info!("✅ Job {} was retried and re-added to tracking: {} ({}/{}/{})", 
+                                                job_id, app_instance, developer, agent, agent_method);
+                                        }
+                                    }
+                                }
+                            }
+                            // If status is Running, job was started - no action needed
+                            // The job searcher will handle it when it completes or fails
                         }
                     }
                 } else if event.event_type.contains("JobDeletedEvent") {

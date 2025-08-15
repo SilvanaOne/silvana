@@ -66,6 +66,10 @@ public struct JobCreatedEvent has copy, drop {
 
 public struct JobUpdatedEvent has copy, drop {
     job_id: u64,
+    developer: String,
+    agent: String,
+    agent_method: String,
+    app_instance: String,
     status: JobStatus,
     attempts: u8,
     updated_at: u64,
@@ -197,7 +201,7 @@ public fun start_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
     assert!(object_table::contains(&jobs.jobs, job_id), EJobNotFound);
 
     // First, get the values we need and update the job
-    let (developer, agent, agent_method, attempts) = {
+    let (developer, agent, agent_method, app_instance, attempts) = {
         let job = object_table::borrow_mut(&mut jobs.jobs, job_id);
         assert!(job.status == JobStatus::Pending, EJobNotPending);
         
@@ -205,6 +209,7 @@ public fun start_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
         let dev = job.developer;
         let ag = job.agent;
         let meth = job.agent_method;
+        let app_inst = job.app_instance;
         let att = job.attempts + 1;
         
         // Update job
@@ -212,7 +217,7 @@ public fun start_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
         job.attempts = att;
         job.updated_at = clock::timestamp_ms(clock);
         
-        (dev, ag, meth, att)
+        (dev, ag, meth, app_inst, att)
     }; // Mutable borrow of job ends here
 
     // Remove from pending set
@@ -226,6 +231,10 @@ public fun start_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
 
     event::emit(JobUpdatedEvent {
         job_id,
+        developer,
+        agent,
+        agent_method,
+        app_instance,
         status: JobStatus::Running,
         attempts,
         updated_at: clock::timestamp_ms(clock),
@@ -320,6 +329,10 @@ public fun fail_job(
 
         event::emit(JobUpdatedEvent {
             job_id,
+            developer,
+            agent,
+            agent_method,
+            app_instance,
             status: JobStatus::Pending,
             attempts,
             updated_at: timestamp,

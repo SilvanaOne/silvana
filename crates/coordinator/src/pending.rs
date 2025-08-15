@@ -22,6 +22,7 @@ pub struct PendingJob {
 pub enum JobStatus {
     Pending,
     Running,
+    #[allow(dead_code)]
     Failed(String),
 }
 

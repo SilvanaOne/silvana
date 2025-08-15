@@ -599,59 +599,6 @@ pub async fn get_jobs_info_from_app_instance(
     
     Ok(None)
 }
-
-/// Fetch a pending job for the specified (developer, agent, agent_method) using the index
-/// Returns the job with the lowest job_id if multiple jobs exist
-pub async fn fetch_pending_job_using_index(
-    client: &mut Client,
-    app_instance_id: &str,
-    developer: &str,
-    agent: &str,
-    agent_method: &str,
-) -> Result<Option<PendingJob>> {
-    info!(
-        "Fetching pending job for {}/{}/{} from app_instance {}",
-        developer, agent, agent_method, app_instance_id
-    );
-    
-    // Get Jobs table ID from the AppInstance
-    let (_app_instance_id, jobs_table_id) = match get_jobs_info_from_app_instance(client, app_instance_id).await? {
-        Some(info) => info,
-        None => {
-            warn!("Could not extract Jobs info from app_instance {}", app_instance_id);
-            return Ok(None);
-        }
-    };
-    
-    debug!("Jobs table ID: {}", jobs_table_id);
-    
-    // Use the index to get pending job IDs for this method from the app_instance directly
-    let mut job_ids = fetch_pending_job_ids_from_app_instance(
-        client,
-        app_instance_id,
-        developer,
-        agent,
-        agent_method,
-    ).await?;
-    
-    if job_ids.is_empty() {
-        debug!("No pending jobs found for {}/{}/{}", developer, agent, agent_method);
-        return Ok(None);
-    }
-    
-    // Sort job IDs to get the lowest one
-    job_ids.sort();
-    let lowest_job_id = job_ids[0];
-    
-    info!(
-        "Found {} pending jobs for {}/{}/{}, fetching job with lowest ID: {}",
-        job_ids.len(), developer, agent, agent_method, lowest_job_id
-    );
-    
-    // Fetch the specific job by ID
-    fetch_job_by_id(client, &jobs_table_id, lowest_job_id).await
-}
-
 /// Try to fetch a pending job from any of the given app_instances using the index
 pub async fn fetch_pending_job_from_instances(
     client: &mut Client,
@@ -742,18 +689,4 @@ pub async fn fetch_all_pending_jobs(
         info!("Returning pending job with smallest job_id: {}", job.job_id);
         Ok(Some(job))
     }
-}
-
-// This function is no longer needed since we read from embedded Jobs
-#[deprecated(note = "Use fetch_pending_job_ids_from_app_instance instead")]
-pub async fn fetch_pending_job_ids_for_method(
-    _client: &mut Client,
-    _jobs_object_id: &str,
-    _developer: &str,
-    _agent: &str,
-    _agent_method: &str,
-) -> Result<Vec<u64>> {
-    Err(CoordinatorError::ConfigError(
-        "This function is deprecated. Use fetch_pending_job_ids_from_app_instance instead".to_string()
-    ))
 }

@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tokio::time::{interval, Duration};
 use tracing::{debug, info, warn};
 use sui_rpc::Client;
 use crate::error::Result;
@@ -133,17 +132,6 @@ impl JobsTracker {
         instances.keys().cloned().collect()
     }
 
-    /// Check if we have any app_instances with pending jobs
-    pub async fn has_pending_jobs(&self) -> bool {
-        let instances = self.app_instances_with_jobs.read().await;
-        !instances.is_empty()
-    }
-
-    /// Check if a specific app_instance is being tracked
-    pub async fn is_tracking(&self, app_instance_id: &str) -> bool {
-        let instances = self.app_instances_with_jobs.read().await;
-        instances.contains_key(app_instance_id)
-    }
 
     /// Get the count of tracked app_instances
     pub async fn app_instances_count(&self) -> usize {
@@ -151,19 +139,11 @@ impl JobsTracker {
         instances.len()
     }
 
-    /// Clear all tracked app_instances
-    pub async fn clear(&self) {
-        let mut instances = self.app_instances_with_jobs.write().await;
-        let mut agent_method_index = self.agent_method_index.write().await;
-        
-        instances.clear();
-        agent_method_index.clear();
-        info!("Cleared all tracked app_instances and indexes");
-    }
 
     /// Reconcile with on-chain state by checking pending_jobs_count for each tracked app_instance
     /// Only removes app_instances that haven't been updated during the reconciliation
-    pub async fn reconcile_with_chain(&self, client: &mut Client) -> Result<()> {
+    /// Returns true if there are still pending jobs after reconciliation
+    pub async fn reconcile_with_chain(&self, client: &mut Client) -> Result<bool> {
         let initial_count = self.app_instances_count().await;
         info!("Starting reconciliation with on-chain state ({} app_instances tracked)", initial_count);
         
@@ -230,54 +210,21 @@ impl JobsTracker {
             skipped_updated,
             final_count
         );
-        Ok(())
+        
+        // Return whether we still have pending jobs
+        Ok(final_count > 0)
     }
 
-    /// Start a background task that periodically reconciles with on-chain state
-    pub fn start_reconciliation_task(
-        tracker: JobsTracker,
-        mut client: Client,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            let mut reconciliation_interval = interval(Duration::from_secs(600)); // 10 minutes
-            reconciliation_interval.tick().await; // Skip the first immediate tick
-            
-            loop {
-                reconciliation_interval.tick().await;
-                
-                // Get current stats before reconciliation
-                let stats = tracker.get_stats().await;
-                info!(
-                    "Starting periodic reconciliation (currently tracking {} app_instances, {} agent methods)",
-                    stats.app_instances_count,
-                    stats.agent_methods_count
-                );
-                
-                if let Err(e) = tracker.reconcile_with_chain(&mut client).await {
-                    warn!("Reconciliation failed: {}", e);
-                }
-            }
-        })
-    }
 
-    /// Get time since last reconciliation
-    pub async fn time_since_reconciliation(&self) -> Duration {
-        let last_rec = self.last_reconciliation.read().await;
-        Instant::now().duration_since(*last_rec)
-    }
 
     /// Get statistics about the tracker
     pub async fn get_stats(&self) -> TrackerStats {
         let instances = self.app_instances_with_jobs.read().await;
         let agent_method_index = self.agent_method_index.read().await;
-        let last_rec = self.last_reconciliation.read().await;
         
         TrackerStats {
             app_instances_count: instances.len(),
             agent_methods_count: agent_method_index.len(),
-            seconds_since_reconciliation: Instant::now()
-                .duration_since(*last_rec)
-                .as_secs(),
         }
     }
 }
@@ -293,7 +240,6 @@ impl Default for JobsTracker {
 pub struct TrackerStats {
     pub app_instances_count: usize,
     pub agent_methods_count: usize,
-    pub seconds_since_reconciliation: u64,
 }
 
 /// Helper function to fetch pending_jobs_count from embedded Jobs in AppInstance

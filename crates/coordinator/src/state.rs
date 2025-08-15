@@ -1,5 +1,6 @@
 use crate::jobs::JobsTracker;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use sui_rpc::Client;
 use tokio::sync::RwLock;
 
@@ -15,6 +16,7 @@ pub struct SharedState {
     current_agent: Arc<RwLock<Option<CurrentAgent>>>,
     jobs_tracker: JobsTracker,
     sui_client: Client,  // Sui client (cloneable)
+    has_pending_jobs: Arc<AtomicBool>,  // Fast check for pending jobs availability
 }
 
 impl SharedState {
@@ -23,6 +25,7 @@ impl SharedState {
             current_agent: Arc::new(RwLock::new(None)),
             jobs_tracker: JobsTracker::new(),
             sui_client,
+            has_pending_jobs: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -75,6 +78,9 @@ impl SharedState {
             agent_method.clone(),
         ).await;
         
+        // Set the flag that we have pending jobs
+        self.has_pending_jobs.store(true, Ordering::Release);
+        
         tracing::info!(
             "Added app_instance {} for {}/{}/{}",
             app_instance, developer, agent, agent_method
@@ -91,7 +97,14 @@ impl SharedState {
     /// Remove an app_instance when it has no pending jobs
     pub async fn remove_app_instance(&self, app_instance_id: &str) {
         self.jobs_tracker.remove_app_instance(app_instance_id).await;
-        tracing::info!("Removed app_instance from tracking: {}", app_instance_id);
+        
+        // Check if we still have app_instances with pending jobs
+        let count = self.jobs_tracker.app_instances_count().await;
+        if count == 0 {
+            self.has_pending_jobs.store(false, Ordering::Release);
+        }
+        
+        tracing::info!("Removed app_instance from tracking: {} (remaining: {})", app_instance_id, count);
     }
 
     /// Get all app_instances with pending jobs
@@ -99,15 +112,6 @@ impl SharedState {
         self.jobs_tracker.get_all_app_instances().await
     }
 
-    /// Check if an app_instance is being tracked
-    pub async fn has_app_instance(&self, app_instance_id: &str) -> bool {
-        self.jobs_tracker.is_tracking(app_instance_id).await
-    }
-
-    /// Get the count of app_instances with pending jobs
-    pub async fn app_instances_count(&self) -> usize {
-        self.jobs_tracker.app_instances_count().await
-    }
 
     /// Get app_instances with pending jobs for the current agent
     pub async fn get_current_app_instances(&self) -> Vec<String> {
@@ -122,17 +126,6 @@ impl SharedState {
         }
     }
 
-    /// Check if an app_instance has pending jobs for the current agent
-    pub async fn has_current_app_instance(&self, app_instance_id: &str) -> bool {
-        let current_instances = self.get_current_app_instances().await;
-        current_instances.contains(&app_instance_id.to_string())
-    }
-
-    /// Get the count of app_instances with pending jobs for the current agent
-    pub async fn current_app_instances_count(&self) -> usize {
-        let current_instances = self.get_current_app_instances().await;
-        current_instances.len()
-    }
 
     pub fn get_sui_client(&self) -> Client {
         self.sui_client.clone()
@@ -141,5 +134,16 @@ impl SharedState {
     /// Get reference to the JobsTracker for direct access
     pub fn get_jobs_tracker(&self) -> &JobsTracker {
         &self.jobs_tracker
+    }
+    
+    /// Fast check if there are pending jobs available
+    pub fn has_pending_jobs_available(&self) -> bool {
+        self.has_pending_jobs.load(Ordering::Acquire)
+    }
+    
+    /// Update the pending jobs flag based on current app_instances count
+    pub async fn update_pending_jobs_flag(&self) {
+        let count = self.jobs_tracker.app_instances_count().await;
+        self.has_pending_jobs.store(count > 0, Ordering::Release);
     }
 }
