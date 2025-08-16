@@ -138,7 +138,8 @@ public fun create_app_instance(
     app_instance.blocks.add(0u64, block_0);
 
     // Track the instance in the SilvanaApp
-    silvana_app::add_instance_to_app(app, instance_address, ctx);
+    // Pass @0x0 as admin_address since this is the app owner creating their own instance
+    silvana_app::add_instance_to_app(app, instance_address, @0x0, ctx);
 
     event::emit(AppInstanceCreatedEvent {
         app_instance_address: instance_address,

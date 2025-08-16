@@ -103,9 +103,10 @@ public(package) fun update_app(
     app: &mut SilvanaApp,
     description: Option<String>,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(app.owner == ctx.sender(), EInvalidOwner);
+    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     app.description = description;
     app.updated_at = clock.timestamp_ms();
     app.version = app.version + 1;
@@ -271,9 +272,10 @@ public(package) fun add_method_to_app(
     app: &mut SilvanaApp,
     method_name: String,
     method: AppMethod,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(app.owner == ctx.sender(), EInvalidOwner);
+    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     app.methods.insert(method_name, method);
     app.version = app.version + 1;
 }
@@ -281,9 +283,10 @@ public(package) fun add_method_to_app(
 public(package) fun remove_method_from_app(
     app: &mut SilvanaApp,
     method_name: String,
+    admin_address: address,
     ctx: &TxContext,
 ): AppMethod {
-    assert!(app.owner == ctx.sender(), EInvalidOwner);
+    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let (_, method) = app.methods.remove(&method_name);
     app.version = app.version + 1;
     method
@@ -309,9 +312,10 @@ public(package) fun get_method_from_app_mut(
 public(package) fun add_instance_to_app(
     app: &mut SilvanaApp,
     instance_owner: address,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(app.owner == ctx.sender(), EInvalidOwner);
+    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     app.instances.insert(instance_owner);
     app.version = app.version + 1;
 }
@@ -319,9 +323,10 @@ public(package) fun add_instance_to_app(
 public(package) fun remove_instance_from_app(
     app: &mut SilvanaApp,
     instance_owner: address,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(app.owner == ctx.sender(), EInvalidOwner);
+    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     app.instances.remove(&instance_owner);
     app.version = app.version + 1;
 }

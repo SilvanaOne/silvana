@@ -123,9 +123,10 @@ public(package) fun update_developer(
     description: Option<String>,
     site: Option<String>,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     developer.github = github;
     developer.image = image;
     developer.description = description;
@@ -140,7 +141,7 @@ public(package) fun update_developer(
         image,
         description,
         site,
-        owner: ctx.sender(),
+        owner: developer.owner,
         updated_at: developer.updated_at,
         version: developer.version,
     });
@@ -176,9 +177,10 @@ public(package) fun delete_developer(
 public(package) fun add_agent_to_developer(
     developer: &mut Developer,
     agent: Agent,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let agent_name = coordination::agent::agent_name(&agent);
     developer.agents.add(agent_name, agent);
 }
@@ -186,9 +188,10 @@ public(package) fun add_agent_to_developer(
 public(package) fun remove_agent_from_developer(
     developer: &mut Developer,
     agent_name: String,
+    admin_address: address,
     ctx: &TxContext,
 ): Agent {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     developer.agents.remove(agent_name)
 }
 
@@ -364,9 +367,10 @@ public(package) fun add_method_to_agent(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let agent = developer.agents.borrow_mut(agent_name);
     coordination::agent::registry_add_method(
         agent,
@@ -391,9 +395,10 @@ public(package) fun update_method_on_agent(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let agent = developer.agents.borrow_mut(agent_name);
     coordination::agent::registry_update_method(
         agent,
@@ -413,9 +418,10 @@ public(package) fun remove_method_from_agent(
     agent_name: String,
     method_name: String,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let agent = developer.agents.borrow_mut(agent_name);
     coordination::agent::registry_remove_method(
         agent,
@@ -430,9 +436,10 @@ public(package) fun set_default_method_on_agent(
     agent_name: String,
     method_name: String,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let agent = developer.agents.borrow_mut(agent_name);
     coordination::agent::registry_set_default_method(
         agent,
@@ -446,9 +453,10 @@ public(package) fun remove_default_method_from_agent(
     developer: &mut Developer,
     agent_name: String,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let agent = developer.agents.borrow_mut(agent_name);
     coordination::agent::registry_remove_default_method(
         agent,
@@ -465,9 +473,10 @@ public(package) fun update_agent_in_developer(
     site: Option<String>,
     chains: vector<String>,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(developer.owner == ctx.sender(), EInvalidOwner);
+    assert!(developer.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let agent = developer.agents.borrow_mut(agent_name);
     coordination::agent::registry_update_agent(
         agent,
@@ -489,6 +498,7 @@ public(package) fun registry_update_agent(
     site: Option<String>,
     chains: vector<String>,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
     let developer = developers.borrow_mut(developer_name);
@@ -500,6 +510,7 @@ public(package) fun registry_update_agent(
         site,
         chains,
         clock,
+        admin_address,
         ctx,
     );
 }
@@ -515,6 +526,7 @@ public(package) fun registry_add_method(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
     let developer = developers.borrow_mut(developer_name);
@@ -528,6 +540,7 @@ public(package) fun registry_add_method(
         min_cpu_cores,
         requires_tee,
         clock,
+        admin_address,
         ctx,
     );
 }
@@ -543,6 +556,7 @@ public(package) fun registry_update_method(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
     let developer = developers.borrow_mut(developer_name);
@@ -556,6 +570,7 @@ public(package) fun registry_update_method(
         min_cpu_cores,
         requires_tee,
         clock,
+        admin_address,
         ctx,
     );
 }
@@ -566,6 +581,7 @@ public(package) fun registry_remove_method(
     agent_name: String,
     method_name: String,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
     let developer = developers.borrow_mut(developer_name);
@@ -574,6 +590,7 @@ public(package) fun registry_remove_method(
         agent_name,
         method_name,
         clock,
+        admin_address,
         ctx,
     );
 }
@@ -584,6 +601,7 @@ public(package) fun registry_set_default_method(
     agent_name: String,
     method_name: String,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
     let developer = developers.borrow_mut(developer_name);
@@ -592,6 +610,7 @@ public(package) fun registry_set_default_method(
         agent_name,
         method_name,
         clock,
+        admin_address,
         ctx,
     );
 }
@@ -601,6 +620,7 @@ public(package) fun registry_remove_default_method(
     developer_name: String,
     agent_name: String,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
     let developer = developers.borrow_mut(developer_name);
@@ -608,6 +628,7 @@ public(package) fun registry_remove_default_method(
         developer,
         agent_name,
         clock,
+        admin_address,
         ctx,
     );
 }

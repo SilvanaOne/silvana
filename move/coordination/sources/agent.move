@@ -195,9 +195,10 @@ public(package) fun delete_agent(
     agent: Agent,
     owner: address,
     clock: &Clock,
+    admin_address: address,
     ctx: &TxContext,
 ) {
-    assert!(owner == ctx.sender(), EInvalidOwner);
+    assert!(owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let timestamp = clock.timestamp_ms();
     event::emit(AgentDeletedEvent {
         id: agent.id.to_address(),

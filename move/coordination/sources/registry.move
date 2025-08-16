@@ -192,6 +192,7 @@ public fun update_developer(
         description,
         site,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -265,6 +266,7 @@ public fun add_agent(
     coordination::developer::add_agent_to_developer(
         developer_object,
         agent,
+        registry.admin,
         ctx,
     );
 }
@@ -289,6 +291,7 @@ public fun update_agent(
         site,
         chains,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -307,10 +310,11 @@ public fun remove_agent(
     let agent = coordination::developer::remove_agent_from_developer(
         developer_object,
         name,
+        registry.admin,
         ctx,
     );
 
-    coordination::agent::delete_agent(agent, developer_owner, clock, ctx);
+    coordination::agent::delete_agent(agent, developer_owner, clock, registry.admin, ctx);
 }
 
 public fun add_method(
@@ -337,6 +341,7 @@ public fun add_method(
         min_cpu_cores,
         requires_tee,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -365,6 +370,7 @@ public fun update_method(
         min_cpu_cores,
         requires_tee,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -383,6 +389,7 @@ public fun remove_method(
         agent_name,
         method_name,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -401,6 +408,7 @@ public fun set_default_method(
         agent_name,
         method_name,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -417,6 +425,7 @@ public fun remove_default_method(
         developer,
         agent_name,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -481,6 +490,7 @@ public fun update_app(
         app,
         description,
         clock,
+        registry.admin,
         ctx,
     );
 }
@@ -532,6 +542,7 @@ public fun add_method_to_app(
         app,
         method_name,
         method,
+        registry.admin,
         ctx,
     );
 }
@@ -546,6 +557,7 @@ public fun remove_method_from_app(
     coordination::silvana_app::remove_method_from_app(
         app,
         method_name,
+        registry.admin,
         ctx,
     )
 }
@@ -560,6 +572,7 @@ public fun add_instance_to_app(
     coordination::silvana_app::add_instance_to_app(
         app,
         instance_owner,
+        registry.admin,
         ctx,
     );
 }
@@ -574,6 +587,7 @@ public fun remove_instance_from_app(
     coordination::silvana_app::remove_instance_from_app(
         app,
         instance_owner,
+        registry.admin,
         ctx,
     );
 }
