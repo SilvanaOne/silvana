@@ -1,0 +1,31 @@
+[package]
+name = "sui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+base64ct = { version = "1.6", features = ["alloc"] }
+bech32 = "0.9"
+hex = "0.4"
+prost = "0.13"
+prost-types = "0.13"
+
+# Sui dependencies
+sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
+sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
+sui-crypto = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", features = ["ed25519"] }
+sui-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
+
+# For Move call
+bcs = "0.1"
+
+# For keypair generation
+blake2 = "0.10"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+tracing-subscriber = "0.3"

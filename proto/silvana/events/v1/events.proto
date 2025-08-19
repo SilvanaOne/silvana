@@ -252,6 +252,37 @@ message SearchCoordinatorMessageEventsResponse {
   uint32 returned_count = 5;             // Number of events in this response
 }
 
+// Secrets storage messages
+message SecretReference {
+  string developer = 1;
+  string agent = 2;
+  optional string app = 3;
+  optional string app_instance = 4;
+  optional string name = 5;
+}
+
+message StoreSecretRequest {
+  SecretReference reference = 1;
+  string secret_value = 2;
+  bytes signature = 3;  // Developer signature (not validated yet)
+}
+
+message StoreSecretResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RetrieveSecretRequest {
+  SecretReference reference = 1;
+  bytes signature = 2;  // Coordinator signature (not validated yet)
+}
+
+message RetrieveSecretResponse {
+  bool success = 1;
+  string message = 2;
+  string secret_value = 3;  // Only returned if success is true
+}
+
 // gRPC service definition
 service SilvanaEventsService {
   rpc SubmitEvents(SubmitEventsRequest) returns (SubmitEventsResponse);
@@ -263,4 +294,8 @@ service SilvanaEventsService {
   
   // Full-text search methods
   rpc SearchCoordinatorMessageEvents(SearchCoordinatorMessageEventsRequest) returns (SearchCoordinatorMessageEventsResponse);
+  
+  // Secrets storage methods
+  rpc StoreSecret(StoreSecretRequest) returns (StoreSecretResponse);
+  rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
 } 

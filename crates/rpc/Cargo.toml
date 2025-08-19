@@ -18,6 +18,9 @@ buffer = { path = "../buffer" }
 monitoring = { path = "../monitoring" }
 # NATS messaging (optional backend)
 nats = { path = "../nats" }
+# Database and KMS for secrets storage
+db = { path = "../db" }
+kms = { path = "../kms" }
 
 tonic = { version = "0.13", features = [ "tls-webpki-roots"] }
 tonic-web = "0.13"
@@ -49,6 +52,9 @@ futures = "0.3"
 async-trait = "0.1"
 
 # Random number generation for retry jitter
+
+# TLS support for rustls crypto provider
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
 
 [dev-dependencies]
 # For integration tests

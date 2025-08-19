@@ -53,25 +53,56 @@ check-database-url:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url validate-schema check-schema show-tables show-schema apply-ddl proto2entities dev-reset build
+.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url validate-schema check-schema show-tables show-schema apply-ddl proto2entities dev-reset build store-secret retrieve-secret
+
+# Default target when no arguments are provided
+.DEFAULT_GOAL := help
 
 # Default target
 help: ## Show this help message
 	@echo "Silvana RPC Database Schema Management"
 	@echo "====================================="
 	@echo ""
-	@echo "Available targets:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@echo "📋 GENERAL COMMANDS:"
+	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "Build Information:"
+	@echo "🏗️  BUILD & DEPLOYMENT:"
+	@grep -E '^(build):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "🗃️  DATABASE MANAGEMENT:"
+	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "🔧 DEVELOPMENT & DEBUGGING:"
+	@grep -E '^(clean-dev|dev-reset|show-tables|show-schema|validate-schema|check-schema):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "🔐 SECRET MANAGEMENT:"
+	@grep -E '^(store-secret|retrieve-secret):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "💡 SECRET MANAGEMENT EXAMPLES:"
+	@echo "  Store basic secret:"
+	@echo "    make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"
+	@echo ""
+	@echo "  Store with app context:"
+	@echo "    make store-secret DEVELOPER=bob AGENT=bot APP=trading NAME=db-pass SECRET=secret123"
+	@echo ""
+	@echo "  Store with full context:"
+	@echo "    make store-secret DEVELOPER=charlie AGENT=processor APP=analytics \\"
+	@echo "                      APP_INSTANCE=prod-123 NAME=redis-url \\"
+	@echo "                      SECRET='redis://user:pass@host:6379/0'"
+	@echo ""
+	@echo "  Retrieve secrets:"
+	@echo "    make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"
+	@echo "    make retrieve-secret DEVELOPER=bob AGENT=bot APP=trading NAME=db-pass"
+	@echo ""
+	@echo "⚙️  CONFIGURATION:"
+	@echo "  .env              Contains DATABASE_URL (REQUIRED)"
+	@echo "                    Format: DATABASE_URL=mysql://user:pass@tcp(host:port)/database"
+	@echo "  docker/rpc/.env   Contains AWS credentials for build (OPTIONAL for S3 upload)"
+	@echo "                    Format: AWS_ACCESS_KEY_ID=key, AWS_SECRET_ACCESS_KEY=secret"
+	@echo ""
+	@echo "🏗️  BUILD INFORMATION:"
 	@echo "  The 'build' target creates ARM64 binaries for AWS Graviton processors"
 	@echo "  Requires Docker with BuildKit and cross-compilation support"
-	@echo ""
-	@echo "Configuration:"
-	@echo "  .env            Contains DATABASE_URL (REQUIRED)"
-	@echo "                  Format: DATABASE_URL=mysql://user:pass@tcp(host:port)/database"
-	@echo "  docker/rpc/.env Contains AWS credentials for build process (OPTIONAL for S3 upload)"
-	@echo "                  Format: AWS_ACCESS_KEY_ID=key, AWS_SECRET_ACCESS_KEY=secret, AWS_DEFAULT_REGION=region"
 	@echo ""
 	@echo ""
 	@if [ -f .env ] && grep -q "^DATABASE_URL=" .env; then \
@@ -221,6 +252,30 @@ clean-dev: ## Drop all tables for fast development iteration
 
 # Development targets
 dev-reset: clean-dev regen ## Full development reset: drop all tables + regenerate from proto
+
+# Secret management targets
+store-secret: ## Store a secret via gRPC (requires: DEVELOPER, AGENT, NAME, SECRET, optional: ENDPOINT, APP, APP_INSTANCE)
+	@echo "📦 Storing secret via gRPC..."
+	@if [ -z "$(DEVELOPER)" ]; then echo "❌ ERROR: DEVELOPER is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
+	@if [ -z "$(AGENT)" ]; then echo "❌ ERROR: AGENT is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
+	@if [ -z "$(NAME)" ]; then echo "❌ ERROR: NAME is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
+	@if [ -z "$(SECRET)" ]; then echo "❌ ERROR: SECRET is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
+	@COMMAND="cargo xtask store-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME) --secret '$(SECRET)'"; \
+	if [ -n "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
+	if [ -n "$(APP)" ]; then COMMAND="$$COMMAND --app $(APP)"; fi; \
+	if [ -n "$(APP_INSTANCE)" ]; then COMMAND="$$COMMAND --app-instance $(APP_INSTANCE)"; fi; \
+	eval $$COMMAND
+
+retrieve-secret: ## Retrieve a secret via gRPC (requires: DEVELOPER, AGENT, NAME, optional: ENDPOINT, APP, APP_INSTANCE)
+	@echo "🔍 Retrieving secret via gRPC..."
+	@if [ -z "$(DEVELOPER)" ]; then echo "❌ ERROR: DEVELOPER is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
+	@if [ -z "$(AGENT)" ]; then echo "❌ ERROR: AGENT is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
+	@if [ -z "$(NAME)" ]; then echo "❌ ERROR: NAME is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
+	@COMMAND="cargo xtask retrieve-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME)"; \
+	if [ -n "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
+	if [ -n "$(APP)" ]; then COMMAND="$$COMMAND --app $(APP)"; fi; \
+	if [ -n "$(APP_INSTANCE)" ]; then COMMAND="$$COMMAND --app-instance $(APP_INSTANCE)"; fi; \
+	eval $$COMMAND
 
 # Utility targets
 show-tables: check-database-url ## Show all tables in the database

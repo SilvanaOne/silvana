@@ -87,6 +87,83 @@ export = async () => {
   });
 
   // -------------------------
+  // KMS Key for Secrets Encryption
+  // -------------------------
+  
+  const secretsKmsKey = new aws.kms.Key("silvana-secrets-encryption-key", {
+    description: "KMS key for encrypting Silvana secrets at rest",
+    keyUsage: "ENCRYPT_DECRYPT",
+    customerMasterKeySpec: "SYMMETRIC_DEFAULT",
+    tags: {
+      Name: "silvana-secrets-encryption",
+      Purpose: "Encrypt secrets at rest",
+      Project: "silvana-rpc",
+    },
+  });
+
+  const secretsKmsKeyAlias = new aws.kms.Alias("silvana-secrets-encryption-alias", {
+    name: "alias/silvana-secrets-encryption",
+    targetKeyId: secretsKmsKey.id,
+  });
+
+  // -------------------------
+  // DynamoDB Table for Secrets Storage
+  // -------------------------
+  
+  const secretsTable = new aws.dynamodb.Table("silvana-secrets", {
+    name: "silvana-secrets",
+    billingMode: "PAY_PER_REQUEST",
+    hashKey: "id", // Binary composite key (developer + agent + app + app_instance + name)
+    attributes: [
+      {
+        name: "id",
+        type: "B", // Binary
+      },
+    ],
+    pointInTimeRecovery: {
+      enabled: true,
+    },
+    tags: {
+      Name: "silvana-secrets",
+      Purpose: "Store encrypted secrets for developers and agents",
+      BackupEnabled: "true",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // Create policy for DynamoDB and KMS access (for secrets storage)
+  const secretsPolicy = new aws.iam.Policy("silvana-rpc-secrets-policy", {
+    description: "Policy for accessing DynamoDB and KMS for secrets storage",
+    policy: pulumi.interpolate`{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:UpdateItem"
+          ],
+          "Resource": "${secretsTable.arn}"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "kms:Decrypt",
+            "kms:GenerateDataKey"
+          ],
+          "Resource": "${secretsKmsKey.arn}"
+        }
+      ]
+    }`,
+    tags: {
+      Name: "silvana-rpc-secrets-policy",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // -------------------------
   // IAM User for S3 uploads (API keys)
   // -------------------------
   const s3UploaderUser = new aws.iam.User("silvana-rpc-s3-uploader", {
@@ -132,6 +209,11 @@ export = async () => {
   new aws.iam.RolePolicyAttachment("silvana-rpc-s3-attachment", {
     role: ec2Role.name,
     policyArn: s3Policy.arn,
+  });
+
+  new aws.iam.RolePolicyAttachment("silvana-rpc-secrets-attachment", {
+    role: ec2Role.name,
+    policyArn: secretsPolicy.arn,
   });
 
   // Create instance profile
@@ -310,5 +392,10 @@ export = async () => {
     parameterStoreArn: envParameter.arn,
     s3UploaderAccessKeyId: pulumi.secret(s3UploaderAccessKey.id),
     s3UploaderSecretAccessKey: pulumi.secret(s3UploaderAccessKey.secret),
+    // Secrets storage resources
+    secretsTableName: secretsTable.name,
+    secretsTableArn: secretsTable.arn,
+    secretsKmsKeyId: secretsKmsKey.id,
+    secretsKmsKeyAlias: secretsKmsKeyAlias.name,
   };
 };

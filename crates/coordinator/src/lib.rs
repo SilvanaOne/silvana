@@ -8,3 +8,4 @@ pub mod pending;
 pub mod processor;
 pub mod registry;
 pub mod state;
+pub mod sui_interface;

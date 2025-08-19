@@ -5,6 +5,7 @@ use tracing::{debug, error, warn};
 
 use crate::database::EventDatabase;
 use buffer::EventBuffer;
+use db::secrets_storage::SecureSecretsStorage;
 use monitoring::record_grpc_request;
 use proto::{
     AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
@@ -12,12 +13,14 @@ use proto::{
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
     SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
+    StoreSecretRequest, StoreSecretResponse, RetrieveSecretRequest, RetrieveSecretResponse,
     silvana_events_service_server::SilvanaEventsService,
 };
 
 pub struct SilvanaEventsServiceImpl {
     event_buffer: EventBuffer<Event>,
     database: Arc<EventDatabase>,
+    secrets_storage: Option<Arc<SecureSecretsStorage>>,
 }
 
 impl SilvanaEventsServiceImpl {
@@ -25,7 +28,13 @@ impl SilvanaEventsServiceImpl {
         Self {
             event_buffer,
             database,
+            secrets_storage: None,
         }
+    }
+    
+    pub fn with_secrets_storage(mut self, secrets_storage: Arc<SecureSecretsStorage>) -> Self {
+        self.secrets_storage = Some(secrets_storage);
+        self
     }
 }
 
@@ -388,6 +397,120 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
             Err(e) => {
                 error!("Failed to search coordinator message events: {}", e);
                 Err(Status::internal(format!("Full-text search failed: {}", e)))
+            }
+        }
+    }
+    
+    async fn store_secret(
+        &self,
+        request: Request<StoreSecretRequest>,
+    ) -> Result<Response<StoreSecretResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Received store secret request for developer: {}, agent: {}", 
+               req.reference.as_ref().map(|r| &r.developer).unwrap_or(&"<missing>".to_string()),
+               req.reference.as_ref().map(|r| &r.agent).unwrap_or(&"<missing>".to_string()));
+        
+        let secrets_storage = match &self.secrets_storage {
+            Some(storage) => storage,
+            None => {
+                error!("Secrets storage not configured");
+                return Err(Status::unavailable("Secrets storage not available"));
+            }
+        };
+        
+        let reference = req.reference
+            .ok_or_else(|| Status::invalid_argument("Missing secret reference"))?;
+            
+        if reference.developer.is_empty() || reference.agent.is_empty() {
+            return Err(Status::invalid_argument("Developer and agent are required"));
+        }
+        
+        if req.secret_value.is_empty() {
+            return Err(Status::invalid_argument("Secret value cannot be empty"));
+        }
+        
+        // TODO: Validate signature (not implemented yet as per requirements)
+        
+        match secrets_storage.store_secret(
+            &reference.developer,
+            &reference.agent,
+            reference.app.as_deref(),
+            reference.app_instance.as_deref(),
+            reference.name.as_deref(),
+            &req.secret_value,
+        ).await {
+            Ok(()) => {
+                record_grpc_request("store_secret", "success", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(StoreSecretResponse {
+                    success: true,
+                    message: "Secret stored successfully".to_string(),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to store secret: {}", e);
+                record_grpc_request("store_secret", "error", start_time.elapsed().as_secs_f64());
+                Err(Status::internal("Failed to store secret"))
+            }
+        }
+    }
+    
+    async fn retrieve_secret(
+        &self,
+        request: Request<RetrieveSecretRequest>,
+    ) -> Result<Response<RetrieveSecretResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Received retrieve secret request for developer: {}, agent: {}", 
+               req.reference.as_ref().map(|r| &r.developer).unwrap_or(&"<missing>".to_string()),
+               req.reference.as_ref().map(|r| &r.agent).unwrap_or(&"<missing>".to_string()));
+        
+        let secrets_storage = match &self.secrets_storage {
+            Some(storage) => storage,
+            None => {
+                error!("Secrets storage not configured");
+                return Err(Status::unavailable("Secrets storage not available"));
+            }
+        };
+        
+        let reference = req.reference
+            .ok_or_else(|| Status::invalid_argument("Missing secret reference"))?;
+            
+        if reference.developer.is_empty() || reference.agent.is_empty() {
+            return Err(Status::invalid_argument("Developer and agent are required"));
+        }
+        
+        // TODO: Validate signature (not implemented yet as per requirements)
+        
+        match secrets_storage.retrieve_secret(
+            &reference.developer,
+            &reference.agent,
+            reference.app.as_deref(),
+            reference.app_instance.as_deref(),
+            reference.name.as_deref(),
+        ).await {
+            Ok(Some(secret_value)) => {
+                record_grpc_request("retrieve_secret", "success", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(RetrieveSecretResponse {
+                    success: true,
+                    message: "Secret retrieved successfully".to_string(),
+                    secret_value,
+                }))
+            }
+            Ok(None) => {
+                record_grpc_request("retrieve_secret", "not_found", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(RetrieveSecretResponse {
+                    success: false,
+                    message: "Secret not found".to_string(),
+                    secret_value: String::new(),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to retrieve secret: {}", e);
+                record_grpc_request("retrieve_secret", "error", start_time.elapsed().as_secs_f64());
+                Err(Status::internal("Failed to retrieve secret"))
             }
         }
     }

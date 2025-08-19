@@ -10,5 +10,9 @@ members = [
     "crates/proto",
     "crates/nats",
     "crates/indexed-merkle-map",
+    "crates/sui",
+    "crates/kms",
+    "crates/db",
+    "crates/secrets-client",
     "xtask",
 ]

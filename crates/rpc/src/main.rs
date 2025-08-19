@@ -24,6 +24,9 @@ use ::rpc::adapters::create_tidb_backend;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize Rustls crypto provider for TLS connections
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    
     dotenvy::dotenv().ok();
 
     println!("🚀 Starting Silvana RPC server");

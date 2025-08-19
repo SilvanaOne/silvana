@@ -72,6 +72,9 @@ impl SentEventsCollector {
 
 #[tokio::test]
 async fn test_send_coordinator_and_agent_events() {
+    // Initialize Rustls crypto provider for HTTPS connections
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    
     let start_time = Instant::now();
 
     let server_addr = get_server_addr();

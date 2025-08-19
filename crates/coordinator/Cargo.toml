@@ -11,6 +11,12 @@ path = "src/lib.rs"
 # Docker management
 docker = { path = "../docker" }
 
+# Sui utilities
+sui = { path = "../sui" }
+
+# Secrets client
+secrets-client = { path = "../secrets-client" }
+
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"

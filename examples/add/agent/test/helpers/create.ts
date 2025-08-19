@@ -34,6 +34,9 @@ export async function createApp(): Promise<string> {
   const address = await getSuiAddress({
     secretKey: suiSecretKey,
   });
+  console.log("address1", address);
+  const address2 = keyPair.getPublicKey().toSuiAddress();
+  console.log("address2", address2);
 
   if (!registryAddress) {
     console.log("SILVANA_REGISTRY not set, creating a test registry...");

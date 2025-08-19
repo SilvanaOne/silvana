@@ -32,6 +32,8 @@ COPY crates/rpc/ ./crates/rpc/
 COPY crates/monitoring/ ./crates/monitoring/
 COPY crates/buffer/ ./crates/buffer/
 COPY crates/nats/ ./crates/nats/
+COPY crates/db/ ./crates/db/
+COPY crates/kms/ ./crates/kms/
 
 # Build the RPC server in release mode for ARM64
 RUN cargo build --release --target aarch64-unknown-linux-gnu -p rpc

@@ -1,0 +1,21 @@
+[package]
+name = "secrets-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Proto definitions
+proto = { path = "../proto" }
+
+# gRPC client
+tonic = { version = "0.13", features = ["tls-webpki-roots"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
