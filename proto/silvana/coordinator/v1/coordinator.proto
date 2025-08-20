@@ -68,9 +68,28 @@ message FailJobResponse {
   string message = 2;
 }
 
+// Request message for submitting a proof
+message SubmitProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  repeated uint64 sequences = 3; // should be sorted
+  repeated uint64 merged_sequences_1 = 4; // optional
+  repeated uint64 merged_sequences_2 = 5; // optional
+  string job_id = 6;
+  string proof = 7;
+  uint64 cpu_time = 8; // in milliseconds
+}
+
+// Response message for proof submission
+message SubmitProofResponse {
+  string tx_hash = 1;
+  string da_hash = 2;
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
   rpc FailJob(FailJobRequest) returns (FailJobResponse);
+  rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
 }

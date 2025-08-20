@@ -16,6 +16,7 @@ use coordinator::{
     GetJobRequest, GetJobResponse, Job,
     CompleteJobRequest, CompleteJobResponse,
     FailJobRequest, FailJobResponse,
+    SubmitProofRequest, SubmitProofResponse,
 };
 
 #[derive(Clone)]
@@ -325,6 +326,147 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 success: false,
                 message: format!("Failed to fail job {} on blockchain", req.job_id),
             }))
+        }
+    }
+
+    async fn submit_proof(
+        &self,
+        request: Request<SubmitProofRequest>,
+    ) -> Result<Response<SubmitProofResponse>, Status> {
+        let req = request.into_inner();
+        
+        tracing::info!(
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            job_id = %req.job_id,
+            cpu_time = %req.cpu_time,
+            "Received SubmitProof request"
+        );
+
+        // Validate sequences are sorted
+        let sequences = req.sequences;
+        if !sequences.windows(2).all(|w| w[0] <= w[1]) {
+            return Err(Status::invalid_argument("Sequences must be sorted"));
+        }
+
+        // Validate merged sequences are sorted if provided
+        if !req.merged_sequences_1.is_empty() {
+            if !req.merged_sequences_1.windows(2).all(|w| w[0] <= w[1]) {
+                return Err(Status::invalid_argument("Merged sequences 1 must be sorted"));
+            }
+        }
+        if !req.merged_sequences_2.is_empty() {
+            if !req.merged_sequences_2.windows(2).all(|w| w[0] <= w[1]) {
+                return Err(Status::invalid_argument("Merged sequences 2 must be sorted"));
+            }
+        }
+
+        // Get job from agent database to validate it exists and get app_instance
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => job,
+            None => {
+                tracing::warn!("SubmitProof request for unknown job_id: {}", req.job_id);
+                return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer 
+                || current.agent != agent_job.agent 
+                || current.agent_method != agent_job.agent_method {
+                tracing::warn!(
+                    "SubmitProof request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer, agent_job.agent, agent_job.agent_method,
+                    current.developer, current.agent, current.agent_method
+                );
+                return Err(Status::permission_denied("Job does not belong to requesting session"));
+            }
+        } else {
+            tracing::warn!("SubmitProof request from unknown session: {}", req.session_id);
+            return Err(Status::unauthenticated("Invalid session ID"));
+        }
+
+        // Save proof to Walrus DA
+        tracing::info!("Saving proof to Walrus DA for job {}", req.job_id);
+        let walrus_client = walrus::WalrusClient::new();
+        
+        let save_params = walrus::SaveToWalrusParams {
+            data: req.proof.clone(),
+            address: None,
+            num_epochs: Some(53), // Maximum epochs for longer retention
+        };
+
+        let da_hash = match walrus_client.save_to_walrus(save_params).await {
+            Ok(Some(blob_id)) => {
+                tracing::info!("Successfully saved proof to Walrus with blob_id: {}", blob_id);
+                blob_id
+            }
+            Ok(None) => {
+                tracing::error!("Failed to save proof to Walrus: no blob_id returned");
+                return Err(Status::internal("Failed to save proof to data availability layer"));
+            }
+            Err(e) => {
+                tracing::error!("Error saving proof to Walrus: {}", e);
+                return Err(Status::internal("Failed to save proof to data availability layer"));
+            }
+        };
+
+        // Get hardware information
+        let hardware_info = crate::hardware::get_hardware_info();
+        
+        // Convert optional repeated fields
+        let merged_sequences_1 = if req.merged_sequences_1.is_empty() { 
+            None 
+        } else { 
+            Some(req.merged_sequences_1) 
+        };
+        let merged_sequences_2 = if req.merged_sequences_2.is_empty() { 
+            None 
+        } else { 
+            Some(req.merged_sequences_2) 
+        };
+
+        // Submit proof transaction on Sui
+        let sui_client = self.state.get_sui_client();
+        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        
+        let tx_result = sui_interface.submit_proof(
+            &agent_job.app_instance,
+            req.block_number,
+            sequences,
+            merged_sequences_1,
+            merged_sequences_2,
+            req.job_id.clone(),
+            da_hash.clone(),
+            hardware_info.cpu_cores,
+            hardware_info.prover_architecture.clone(),
+            hardware_info.prover_memory,
+            req.cpu_time,
+        ).await;
+
+        match tx_result {
+            Ok(tx_hash) => {
+                tracing::info!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
+                
+                // Remove job from agent database after successful proof submission
+                let removed_job = self.state.get_agent_job_db().complete_job(&req.job_id).await;
+                if removed_job.is_some() {
+                    tracing::info!("Successfully completed and removed job {} from agent database after proof submission", req.job_id);
+                } else {
+                    tracing::warn!("Job {} completed on blockchain but was not found in agent database", req.job_id);
+                }
+
+                Ok(Response::new(SubmitProofResponse {
+                    tx_hash,
+                    da_hash,
+                }))
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit proof for job {} on blockchain: {}", req.job_id, e);
+                Err(Status::internal(format!("Failed to submit proof transaction: {}", e)))
+            }
         }
     }
 }

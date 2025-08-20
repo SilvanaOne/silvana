@@ -4,6 +4,7 @@ pub mod error;
 pub mod events;
 pub mod fetch;
 pub mod grpc;
+pub mod hardware;
 pub mod job_id;
 pub mod job_searcher;
 pub mod jobs;

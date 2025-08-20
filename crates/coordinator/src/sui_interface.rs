@@ -1,4 +1,4 @@
-use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx};
+use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx};
 use sui_rpc::Client;
 use tracing::{info, error, warn};
 
@@ -85,5 +85,56 @@ impl SuiJobInterface {
         
         error!("Failed to start job {} after {} attempts", job_sequence, max_retries);
         false
+    }
+
+    /// Submit a proof on the Sui blockchain by calling the submit_proof Move function
+    /// Returns the transaction hash if successful, or None if it failed
+    pub async fn submit_proof(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        sequences: Vec<u64>,
+        merged_sequences_1: Option<Vec<u64>>,
+        merged_sequences_2: Option<Vec<u64>>,
+        job_id: String,
+        da_hash: String,
+        cpu_cores: u8,
+        prover_architecture: String,
+        prover_memory: u64,
+        cpu_time: u64,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to submit proof for block {} job {} on Sui blockchain",
+            block_number, job_id
+        );
+
+        match submit_proof_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            sequences,
+            merged_sequences_1,
+            merged_sequences_2,
+            job_id.clone(),
+            da_hash.clone(),
+            cpu_cores,
+            prover_architecture,
+            prover_memory,
+            cpu_time,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully submitted proof for job {} on blockchain, tx: {}",
+                    job_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to submit proof for job {} on blockchain: {}", job_id, e);
+                Err(format!("Failed to submit proof: {}", e).into())
+            }
+        }
     }
 }

@@ -17,6 +17,9 @@ sui = { path = "../sui" }
 # Secrets client
 secrets-client = { path = "../secrets-client" }
 
+# Walrus data availability
+walrus = { path = "../walrus" }
+
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
@@ -58,6 +61,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Cryptographic utilities
 sha2 = "0.10"
 num-bigint = "0.4"
+
+# Hardware detection
+num_cpus = "1.0"
+sys-info = "0.9"
 
 # For parallel coin management (used by sui crate)
 parking_lot = "0.12"

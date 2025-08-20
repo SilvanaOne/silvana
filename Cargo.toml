@@ -14,5 +14,6 @@ members = [
     "crates/kms",
     "crates/db",
     "crates/secrets-client",
+    "crates/walrus",
     "xtask",
 ]

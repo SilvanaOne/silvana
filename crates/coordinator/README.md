@@ -42,7 +42,13 @@ The coordinator acts as a bridge between the Sui blockchain and Docker-based age
 - **Job Retrieval**: Agents request jobs via `GetJob` with session validation
 - **Job Completion**: Agents complete jobs via `CompleteJob` with blockchain updates
 - **Job Failure**: Agents fail jobs via `FailJob` with error reporting
+- **Proof Submission**: Agents submit proofs via `SubmitProof` with Walrus DA integration
 - **Session Security**: All operations validated against session credentials
+
+### 6. Data Availability & Hardware Detection
+- **Walrus Integration**: Automatic proof storage to Walrus data availability layer
+- **Hardware Detection**: Real-time system specifications (CPU cores, architecture, memory)
+- **Blockchain Proof Submission**: Complete proof lifecycle from DA storage to blockchain finality
 
 ## Configuration
 
@@ -100,10 +106,22 @@ const job = await client.getJob({
 
 // Process job...
 
-// Complete job
+// Complete job (simple completion)
 await client.completeJob({
   jobId: job.jobId,
   sessionId: sessionId
+});
+
+// OR submit proof with DA storage
+await client.submitProof({
+  sessionId: sessionId,
+  blockNumber: 42n,
+  sequences: [1n, 2n, 3n], // Must be sorted
+  mergedSequences1: [1n, 2n], // Optional
+  mergedSequences2: [3n], // Optional
+  jobId: job.jobId,
+  proof: "base64_encoded_proof_data",
+  cpuTime: 5000n // Processing time in ms
 });
 ```
 
@@ -154,6 +172,48 @@ grpcurl -plaintext -unix=true \
   silvana.coordinator.v1.CoordinatorService/FailJob
 ```
 
+### SubmitProof
+Submits a completed proof with automatic Walrus DA storage and blockchain finality.
+
+```bash
+grpcurl -plaintext -unix=true \
+  -import-path /path/to/proto \
+  -proto silvana/coordinator/v1/coordinator.proto \
+  -d '{
+    "session_id": "session123",
+    "block_number": 42,
+    "sequences": [1, 2, 3],
+    "merged_sequences_1": [1, 2],
+    "merged_sequences_2": [3],
+    "job_id": "snABC123...",
+    "proof": "base64_encoded_proof_data",
+    "cpu_time": 5000
+  }' \
+  unix:/tmp/coordinator.sock \
+  silvana.coordinator.v1.CoordinatorService/SubmitProof
+```
+
+**Request Fields:**
+- `session_id`: Unique session identifier (required)
+- `block_number`: Target block number for proof (required)
+- `sequences`: Sorted array of sequence numbers (required)
+- `merged_sequences_1`: Optional sorted array of merged sequences
+- `merged_sequences_2`: Optional sorted array of merged sequences  
+- `job_id`: Job identifier from GetJob response (required)
+- `proof`: Base64 or string encoded proof data (required)
+- `cpu_time`: Processing time in milliseconds (required)
+
+**Response:**
+- `tx_hash`: Sui blockchain transaction hash
+- `da_hash`: Walrus data availability blob ID
+
+**Automatic Processing:**
+1. **Validation**: Sequences must be sorted, session must match job owner
+2. **DA Storage**: Proof automatically saved to Walrus with 53 epochs retention
+3. **Hardware Detection**: CPU cores, architecture, and memory auto-detected
+4. **Blockchain Submission**: Complete transaction with all metadata
+5. **Job Completion**: Job automatically marked as completed upon success
+
 ## Job Lifecycle
 
 ### 1. Job Discovery
@@ -179,10 +239,27 @@ grpcurl -plaintext -unix=true \
 - Coordinator returns jobs with generated `job_id`
 
 ### 4. Job Completion
-- Agent calls `CompleteJob` or `FailJob` with `job_id` and `session_id`
+Agents can complete jobs in two ways:
+
+**Standard Completion (`CompleteJob`)**:
+- Agent calls `CompleteJob` with `job_id` and `session_id`
 - Coordinator validates session and executes blockchain transaction
 - Job is removed from memory database
 - Blockchain state is updated
+
+**Proof Submission (`SubmitProof`)**:
+- Agent calls `SubmitProof` with proof data, sequences, and metadata
+- Coordinator automatically:
+  1. Validates session and sequence sorting
+  2. Saves proof to Walrus data availability (53 epochs retention)
+  3. Detects hardware specs (CPU cores, architecture, memory)
+  4. Submits complete proof transaction to Sui blockchain
+  5. Returns both `tx_hash` and `da_hash` to agent
+  6. Marks job as completed in memory database
+
+**Job Failure (`FailJob`)**:
+- Agent calls `FailJob` with error message
+- Coordinator validates session and records failure on blockchain
 
 ### 5. Cleanup
 - When Docker container terminates, coordinator cleans up:
@@ -324,6 +401,12 @@ npm run proto:generate
    - Check Move contract state and job status
    - Verify session validation logic
 
+5. **Proof Submission Failures**
+   - Check Walrus data availability connectivity
+   - Verify sequences are properly sorted
+   - Ensure proof data is valid and not empty
+   - Check hardware detection functionality
+
 ### Debug Commands
 ```bash
 # Check coordinator health
@@ -334,6 +417,12 @@ tail -f coordinator.log | grep "JobCreatedEvent"
 
 # Test gRPC connectivity
 grpcurl -plaintext -unix=true unix:/tmp/coordinator.sock describe
+
+# Test Walrus connectivity
+curl -X GET https://wal-aggregator-testnet.staketab.org/v1/blobs/test_blob_id
+
+# Check hardware detection
+grep "Detected hardware" coordinator.log
 ```
 
 This coordinator provides a robust, scalable foundation for distributed agent execution on the Sui blockchain with strong isolation guarantees and comprehensive lifecycle management.

@@ -4,6 +4,7 @@ mod error;
 mod events;
 mod fetch;
 mod grpc;
+mod hardware;
 mod job_id;
 mod job_searcher;
 mod jobs;

@@ -7,8 +7,6 @@ import {
   AddProgram,
   AddProgramProof,
   AddProgramState,
-  TREE_DEPTH,
-  Witness,
 } from "../src/circuit.js";
 import { AddProgramCommitment } from "../src/commitment.js";
 import {
@@ -26,18 +24,8 @@ import { scalar, R, rScalarPow } from "@silvana-one/mina-utils";
 
 let appID: string | undefined = undefined;
 let vk: VerificationKey | undefined = undefined;
-const state: AddProgramState[] = [
-  new AddProgramState({
-    sum: Field(0),
-    root: new MerkleTree(TREE_DEPTH).getRoot(),
-    commitment: new AddProgramCommitment({
-      stateCommitment: scalar(0n),
-      actionsCommitment: scalar(Encoding.stringToFields("init")[0].toBigInt()),
-      actionsSequence: UInt64.from(1n),
-      actionsRPower: R,
-    }),
-  }),
-];
+const { state, map } = AddProgramState.create();
+let serializedState: string = state.serialize(map);
 const proofs: AddProgramProof[] = [];
 
 describe("Add Rollup", async () => {

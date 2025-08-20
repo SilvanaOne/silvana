@@ -20,6 +20,30 @@ export class AddProgramCommitment extends Struct({
     a.actionsSequence.assertEquals(b.actionsSequence);
     a.actionsRPower.assertEquals(b.actionsRPower);
   }
+
+  serialize(): string {
+    return JSON.stringify({
+      stateCommitment: this.stateCommitment.toBigInt().toString(),
+      actionsCommitment: this.actionsCommitment.toBigInt().toString(),
+      actionsSequence: this.actionsSequence.toBigInt().toString(),
+      actionsRPower: this.actionsRPower.toBigInt().toString(),
+    });
+  }
+
+  static deserialize(str: string): AddProgramCommitment {
+    const {
+      stateCommitment,
+      actionsCommitment,
+      actionsSequence,
+      actionsRPower,
+    } = JSON.parse(str);
+    return new AddProgramCommitment({
+      stateCommitment: Fr.from(BigInt(stateCommitment)).assertCanonical(),
+      actionsCommitment: Fr.from(BigInt(actionsCommitment)).assertCanonical(),
+      actionsSequence: UInt64.from(BigInt(actionsSequence)),
+      actionsRPower: Fr.from(BigInt(actionsRPower)).assertCanonical(),
+    });
+  }
 }
 
 export function calculateNewCommitment(params: {
