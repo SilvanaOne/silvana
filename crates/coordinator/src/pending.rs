@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PendingJob {
-    pub job_id: u64,
+    pub job_sequence: u64,
     pub description: Option<String>,
     pub developer: String,
     pub agent: String,

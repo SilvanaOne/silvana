@@ -182,7 +182,7 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                         developer: event.developer,
                         agent: event.agent,
                         app: event.app,
-                        job_id: event.job_id,
+                        job_sequence: event.job_sequence,
                         sequences: event.sequences,
                         event_timestamp: event.event_timestamp,
                         tx_hash: event.tx_hash,
@@ -273,7 +273,7 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                             developer: event.developer,
                             agent: event.agent,
                             app: event.app,
-                            job_id: event.job_id,
+                            job_sequence: event.job_sequence,
                             sequences: event.sequences,
                             event_timestamp: event.event_timestamp,
                             level: safe_level, // Safely converted to protobuf enum

@@ -1,9 +1,11 @@
+use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
 use crate::fetch::fetch_all_pending_jobs;
 use crate::pending::PendingJob;
 use crate::registry::fetch_agent_method;
+use crate::session_id::generate_docker_session;
 use crate::state::SharedState;
-use coordinator::sui_interface::SuiJobInterface;
+use crate::sui_interface::SuiJobInterface;
 use docker::{ContainerConfig, DockerManager};
 use secrets_client::SecretsClient;
 use std::collections::HashMap;
@@ -104,7 +106,27 @@ impl JobSearcher {
                     match self.check_and_clean_pending_jobs().await? {
                         Some(job) => {
                             info!("Found pending job: {} in app_instance {}", 
-                                job.job_id, job.app_instance);
+                                job.job_sequence, job.app_instance);
+                            
+                            // Check if this agent is already running
+                            if self.state.is_agent_running(&job.developer, &job.agent, &job.agent_method).await {
+                                debug!("Agent {}/{}/{} is already running, skipping", 
+                                    job.developer, job.agent, job.agent_method);
+                                // Small delay before checking again
+                                sleep(Duration::from_millis(500)).await;
+                                continue;
+                            }
+                            
+                            // Check if we can start another container (under the limit)
+                            if self.state.get_current_agent_count().await >= crate::state::MAX_CONCURRENT_AGENTS {
+                                debug!("Maximum concurrent agents ({}) reached, waiting", 
+                                    crate::state::MAX_CONCURRENT_AGENTS);
+                                sleep(Duration::from_secs(1)).await;
+                                continue;
+                            }
+                            
+                            info!("Starting Docker container for agent {}/{}/{}", 
+                                job.developer, job.agent, job.agent_method);
                             
                             // Set state to running Docker
                             {
@@ -195,14 +217,24 @@ impl JobSearcher {
     async fn run_docker_container(&mut self, job: PendingJob) {
         let job_start = Instant::now();
         
-        info!("🐳 Starting Docker container for job {}", job.job_id);
+        info!("🐳 Starting Docker container for job {}", job.job_sequence);
         info!("  Developer: {}", job.developer);
         info!("  Agent: {}", job.agent);
         info!("  Method: {}", job.agent_method);
         info!("  App Instance: {}", job.app_instance);
         
-        // Set current agent in shared state
+        // Generate Docker session keys
+        let docker_session = match generate_docker_session() {
+            Ok(session) => session,
+            Err(e) => {
+                error!("Failed to generate Docker session for job {}: {}", job.job_sequence, e);
+                return;
+            }
+        };
+        
+        // Set current agent in shared state with session_id
         self.state.set_current_agent(
+            docker_session.session_id.clone(),
             job.developer.clone(),
             job.agent.clone(),
             job.agent_method.clone(),
@@ -231,25 +263,30 @@ impl JobSearcher {
                 method
             }
             Err(e) => {
-                error!("Failed to fetch agent method for job {}: {}", job.job_id, e);
-                self.state.clear_current_agent().await;
+                error!("Failed to fetch agent method for job {}: {}", job.job_sequence, e);
+                self.state.clear_current_agent(&docker_session.session_id).await;
                 return;
             }
         };
         
         // Start the job on Sui blockchain before processing
-        info!("🔗 Starting job {} on Sui blockchain", job.job_id);
+        info!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
         let sui_client = self.state.get_sui_client();
         let mut sui_interface = SuiJobInterface::new(sui_client);
         
         // Try to start the job on blockchain with retries to prevent race conditions
-        if !sui_interface.try_start_job_with_retry(&job.app_instance, job.job_id, 3).await {
-            error!("Failed to start job {} on Sui blockchain, aborting", job.job_id);
-            self.state.clear_current_agent().await;
+        if !sui_interface.try_start_job_with_retry(&job.app_instance, job.job_sequence, 3).await {
+            error!("Failed to start job {} on Sui blockchain, aborting", job.job_sequence);
+            self.state.clear_current_agent(&docker_session.session_id).await;
             return;
         }
         
-        info!("✅ Successfully started job {} on Sui blockchain", job.job_id);
+        info!("✅ Successfully started job {} on Sui blockchain", job.job_sequence);
+        
+        // Add job to agent database as ready for gRPC retrieval
+        let agent_job = AgentJob::new(job.clone(), &self.state);
+        self.state.get_agent_job_db().add_ready_job(agent_job).await;
+        info!("Added job {} to agent database as ready", job.job_sequence);
         
         // Pull the Docker image
         info!("Pulling Docker image: {}", agent_method.docker_image);
@@ -265,29 +302,32 @@ impl JobSearcher {
                     if &digest != expected_sha {
                         error!(
                             "Image SHA mismatch for job {}: expected {}, got {}",
-                            job.job_id, expected_sha, digest
+                            job.job_sequence, expected_sha, digest
                         );
-                        self.state.clear_current_agent().await;
+                        self.state.clear_current_agent(&docker_session.session_id).await;
                         return;
                     }
                 }
                 digest
             }
             Err(e) => {
-                error!("Failed to pull image for job {}: {}", job.job_id, e);
-                self.state.clear_current_agent().await;
+                error!("Failed to pull image for job {}: {}", job.job_sequence, e);
+                self.state.clear_current_agent(&docker_session.session_id).await;
                 return;
             }
         };
         
-        // Prepare container configuration with secrets retrieval
+        // Docker session was already generated earlier
+        
+        // Prepare container configuration with new environment variables
         let mut env_vars = HashMap::new();
-        env_vars.insert("JOB_ID".to_string(), job.job_id.to_string());
-        env_vars.insert("JOB_DATA".to_string(), format!("0x{}", hex::encode(&job.data)));
+        env_vars.insert("CHAIN".to_string(), self.state.get_chain().clone());
+        env_vars.insert("COORDINATOR_ID".to_string(), self.state.get_coordinator_id().clone());
+        env_vars.insert("SESSION_ID".to_string(), docker_session.session_id.clone());
+        env_vars.insert("SESSION_PRIVATE_KEY".to_string(), docker_session.session_private_key);
         env_vars.insert("DEVELOPER".to_string(), job.developer.clone());
         env_vars.insert("AGENT".to_string(), job.agent.clone());
-        env_vars.insert("METHOD".to_string(), job.agent_method.clone());
-        env_vars.insert("APP_INSTANCE".to_string(), job.app_instance.clone());
+        env_vars.insert("AGENT_METHOD".to_string(), job.agent_method.clone());
         
         // Retrieve secrets if secrets client is available
         if let Some(ref mut secrets_client) = self.secrets_client {
@@ -296,10 +336,10 @@ impl JobSearcher {
                     for (key, value) in secrets {
                         env_vars.insert(format!("SECRET_{}", key.to_uppercase()), value);
                     }
-                    info!("Retrieved {} secrets for job {}", env_vars.len() - 6, job.job_id);
+                    info!("Retrieved {} secrets for job {}", env_vars.len() - 7, job.job_sequence);
                 }
                 Err(e) => {
-                    warn!("Failed to retrieve secrets for job {}: {}", job.job_id, e);
+                    warn!("Failed to retrieve secrets for job {}: {}", job.job_sequence, e);
                     // Continue without secrets - let the agent decide if this is acceptable
                 }
             }
@@ -311,6 +351,7 @@ impl JobSearcher {
             command: vec![],
             env_vars,
             port_bindings: HashMap::new(),
+            volume_binds: vec![],
             timeout_seconds: self.container_timeout_secs,
             memory_limit_mb: Some((agent_method.min_memory_gb as u64) * 1024),
             cpu_cores: Some(agent_method.min_cpu_cores as f64),
@@ -326,9 +367,6 @@ impl JobSearcher {
         let container_start = Instant::now();
         let container_result = self.docker_manager.run_container(&container_config).await;
         
-        // Get client for Sui operations
-        let sui_client = self.state.get_sui_client();
-        let mut sui_interface = SuiJobInterface::new(sui_client);
         
         match container_result {
             Ok(result) => {
@@ -336,7 +374,7 @@ impl JobSearcher {
                 info!("⏱️ Container execution time: {}ms", container_duration.as_millis());
                 info!(
                     "Container completed for job {}: exit_code={}, internal_duration={}ms",
-                    job.job_id, result.exit_code, result.duration_ms
+                    job.job_sequence, result.exit_code, result.duration_ms
                 );
                 if !result.logs.is_empty() {
                     info!("Container logs:\n{}", result.logs);
@@ -345,38 +383,52 @@ impl JobSearcher {
                 let total_duration = job_start.elapsed();
                 info!("⏱️ Total job processing time: {}ms", total_duration.as_millis());
                 
-                // Complete or fail the job based on exit code
-                if result.exit_code == 0 {
-                    info!("🔗 Completing job {} on Sui blockchain", job.job_id);
-                    if !sui_interface.complete_job(&job.app_instance, job.job_id).await {
-                        error!("Failed to complete job {} on Sui blockchain", job.job_id);
-                    } else {
-                        info!("✅ Successfully completed job {} on Sui blockchain", job.job_id);
-                    }
-                } else {
-                    let error_message = format!("Container exited with code {}", result.exit_code);
-                    info!("🔗 Failing job {} on Sui blockchain: {}", job.job_id, error_message);
-                    if !sui_interface.fail_job(&job.app_instance, job.job_id, &error_message).await {
-                        error!("Failed to fail job {} on Sui blockchain", job.job_id);
-                    } else {
-                        info!("✅ Successfully failed job {} on Sui blockchain", job.job_id);
-                    }
-                }
+                info!("Docker container finished. Job completion/failure will be handled by agent via gRPC calls.");
             }
             Err(e) => {
-                error!("Failed to run container for job {}: {}", job.job_id, e);
-                let error_message = format!("Container execution failed: {}", e);
-                info!("🔗 Failing job {} on Sui blockchain: {}", job.job_id, error_message);
-                if !sui_interface.fail_job(&job.app_instance, job.job_id, &error_message).await {
-                    error!("Failed to fail job {} on Sui blockchain", job.job_id);
+                error!("Failed to run container for job {}: {}", job.job_sequence, e);
+                info!("Container execution failed. Job failure will be handled by cleanup logic or agent gRPC calls.");
+            }
+        }
+        
+        // Small delay to allow any pending gRPC operations to complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        // Clean up any jobs (ready or pending) that weren't completed/failed via gRPC
+        info!("Starting cleanup of uncompleted jobs for agent {}/{}:{}", job.developer, job.agent, job.agent_method);
+        let jobs_to_fail = self.state.get_agent_job_db()
+            .cleanup_all_jobs_for_agent(&job.developer, &job.agent, &job.agent_method).await;
+        
+        if !jobs_to_fail.is_empty() {
+            info!("Cleaning up {} uncompleted jobs after Docker termination", jobs_to_fail.len());
+            
+            let sui_client = self.state.get_sui_client();
+            let mut sui_interface = SuiJobInterface::new(sui_client);
+            
+            for uncompleted_job in jobs_to_fail {
+                let error_message = "Job not completed before Docker container termination";
+                info!("Auto-failing uncompleted job {}", uncompleted_job.job_id);
+                
+                if !sui_interface.fail_job(
+                    &uncompleted_job.app_instance, 
+                    uncompleted_job.job_sequence, 
+                    error_message
+                ).await {
+                    error!(
+                        "Failed to auto-fail uncompleted job {} on blockchain", 
+                        uncompleted_job.job_id
+                    );
                 } else {
-                    info!("✅ Successfully failed job {} on Sui blockchain", job.job_id);
+                    info!(
+                        "Successfully auto-failed uncompleted job {} on blockchain", 
+                        uncompleted_job.job_id
+                    );
                 }
             }
         }
         
         // Clear current agent after container finishes
-        self.state.clear_current_agent().await;
+        self.state.clear_current_agent(&docker_session.session_id).await;
     }
     
     /// Retrieve secrets for a job from the secrets storage
@@ -414,7 +466,7 @@ impl JobSearcher {
                         (None, Some(_)) => "instance".to_string(),
                         _ => "app".to_string(),
                     };
-                    debug!("Retrieved secret '{}' for job {}", key, job.job_id);
+                    debug!("Retrieved secret '{}' for job {}", key, job.job_sequence);
                     secrets.insert(key, secret_value);
                 }
                 Err(secrets_client::SecretsClientError::SecretNotFound) => {
@@ -422,7 +474,7 @@ impl JobSearcher {
                     continue;
                 }
                 Err(e) => {
-                    warn!("Failed to retrieve secret for job {}: {}", job.job_id, e);
+                    warn!("Failed to retrieve secret for job {}: {}", job.job_sequence, e);
                     // Continue trying other secrets
                 }
             }

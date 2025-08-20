@@ -19,7 +19,8 @@
     "commitment": "npm run test test/commitment.test.ts",
     "deploy": "npm run test test/deploy.test.ts",
     "send": "npm run test test/send.test.ts",
-    "compile": "npm run test test/compile.test.ts"
+    "compile": "npm run test test/compile.test.ts",
+    "proto:generate": "rm -rf src/proto && cd ../../../ && buf generate --template buf.gen.agent.yaml"
   },
   "node": {
     "version": ">=22.0.0"
@@ -34,6 +35,9 @@
     "@mysten/sui": "^1.36.0",
     "@silvana-one/coordination": "^1.0.26",
     "@silvana-one/mina-utils": "^1.0.26",
-    "o1js": "2.4.0"
+    "o1js": "2.4.0",
+    "@bufbuild/protobuf": "^2.6.0",
+    "@connectrpc/connect": "^2.0.2",
+    "@connectrpc/connect-node": "^2.0.2"
   }
 }

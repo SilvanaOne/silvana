@@ -11,7 +11,7 @@ pub struct Model {
     pub developer: String,
     pub agent: String,
     pub app: String,
-    pub job_id: String,
+    pub job_sequence: String,
     pub memo: String,
     pub tx_hash: String,
     pub event_timestamp: i64,

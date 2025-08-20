@@ -311,7 +311,7 @@ mod tests {
         ).await;
         
         // Check it was added
-        assert!(tracker.is_tracking("app_instance1").await);
+        assert_eq!(tracker.app_instances_count().await, 1);
         assert_eq!(tracker.app_instances_count().await, 1);
         
         // Check the index
@@ -323,7 +323,7 @@ mod tests {
         tracker.remove_app_instance("app_instance1").await;
         
         // Check it was removed from both main map and index
-        assert!(!tracker.is_tracking("app_instance1").await);
+        assert_eq!(tracker.app_instances_count().await, 0);
         let instances = tracker.get_app_instances_for_agent_method("dev1", "agent1", "method1").await;
         assert_eq!(instances.len(), 0);
     }
@@ -416,7 +416,7 @@ mod tests {
         };
         
         // Wait a bit
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         
         // Add another job to the same instance
         tracker.add_job(

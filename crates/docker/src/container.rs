@@ -25,6 +25,7 @@ pub struct ContainerConfig {
     pub command: Vec<String>,
     pub env_vars: HashMap<String, String>,
     pub port_bindings: HashMap<String, u16>,
+    pub volume_binds: Vec<String>,
     pub timeout_seconds: u64,
     pub memory_limit_mb: Option<u64>,
     pub cpu_cores: Option<f64>,
@@ -244,6 +245,11 @@ impl DockerManager {
                 Some(port_bindings)
             },
             network_mode: config.network_mode.clone(),
+            binds: if config.volume_binds.is_empty() {
+                None
+            } else {
+                Some(config.volume_binds.clone())
+            },
             ..Default::default()
         };
 

@@ -1,11 +1,15 @@
+pub mod agent;
 pub mod config;
 pub mod error;
 pub mod events;
 pub mod fetch;
 pub mod grpc;
+pub mod job_id;
+pub mod job_searcher;
 pub mod jobs;
 pub mod pending;
 pub mod processor;
 pub mod registry;
+pub mod session_id;
 pub mod state;
 pub mod sui_interface;

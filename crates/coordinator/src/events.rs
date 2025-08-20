@@ -107,8 +107,8 @@ pub fn parse_jobs_event_with_contents(event: &Event) -> Option<String> {
                                 job_event.description.unwrap_or_else(|| "None".to_string());
 
                             return Some(format!(
-                                "JobCreatedEvent:\n  job_id: {}\n  description: {}\n  developer: {}\n  agent: {}\n  agent_method: {}\n  app: {}\n  app_instance: {}\n  app_instance_method: {}\n  sequences: {}\n  data: 0x{}\n  status: {:?}\n  created_at: {}",
-                                job_event.job_id,
+                                "JobCreatedEvent:\n  job_sequence: {}\n  description: {}\n  developer: {}\n  agent: {}\n  agent_method: {}\n  app: {}\n  app_instance: {}\n  app_instance_method: {}\n  sequences: {}\n  data: 0x{}\n  status: {:?}\n  created_at: {}",
+                                job_event.job_sequence,
                                 description_str,
                                 job_event.developer,
                                 job_event.agent,
@@ -135,8 +135,8 @@ pub fn parse_jobs_event_with_contents(event: &Event) -> Option<String> {
                                     .unwrap_or_else(|| format!("{}ms", job_event.failed_at));
 
                             return Some(format!(
-                                "JobFailedEvent:\n  job_id: {}\n  app_instance: {}\n  error: {}\n  attempts: {}\n  failed_at: {}",
-                                job_event.job_id,
+                                "JobFailedEvent:\n  job_sequence: {}\n  app_instance: {}\n  error: {}\n  attempts: {}\n  failed_at: {}",
+                                job_event.job_sequence,
                                 job_event.app_instance,
                                 job_event.error,
                                 job_event.attempts,
@@ -157,7 +157,7 @@ pub fn parse_jobs_event_with_contents(event: &Event) -> Option<String> {
 // BCS structures matching the Move types
 #[derive(Debug, Deserialize)]
 struct JobCreatedEventBcs {
-    job_id: u64,
+    job_sequence: u64,
     description: Option<String>,
     developer: String,
     agent: String,
@@ -173,7 +173,7 @@ struct JobCreatedEventBcs {
 
 #[derive(Debug, Deserialize)]
 struct JobFailedEventBcs {
-    job_id: u64,
+    job_sequence: u64,
     app_instance: String,
     error: String,
     attempts: u8,

@@ -6,9 +6,10 @@ use sui_rpc::proto::sui::rpc::v2beta2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
 use sui_crypto::SuiSigner;
-use tracing::{debug, info, error};
+use tracing::{debug, info, error, warn};
 
-use crate::chain::{get_reference_gas_price, pick_gas_object, load_sender_from_env};
+use crate::chain::{get_reference_gas_price, load_sender_from_env};
+use crate::coin::fetch_coin;
 
 /// Get the app instance object ID from the job data
 fn get_app_instance_id(app_instance_str: &str) -> Result<sui::Address> {
@@ -32,13 +33,20 @@ fn get_coordination_package_id() -> Result<sui::Address> {
     Ok(sui::Address::from_str(&package_id)?)
 }
 
+/// Get RPC URL from environment variables  
+fn get_rpc_url() -> Result<String> {
+    let rpc_url = env::var("SUI_RPC_URL")
+        .map_err(|_| anyhow!("SUI_RPC_URL environment variable not set"))?;
+    Ok(rpc_url)
+}
+
 /// Create and submit a transaction to start a job
 pub async fn start_job_tx(
     client: &mut GrpcClient,
     app_instance_str: &str,
-    job_id: u64,
+    job_sequence: u64,
 ) -> Result<String> {
-    info!("Creating start_app_job transaction for job_id: {}", job_id);
+    info!("Creating start_app_job transaction for job_sequence: {}", job_sequence);
     
     // Parse IDs
     let package_id = get_coordination_package_id()
@@ -64,16 +72,24 @@ pub async fn start_job_tx(
     tb.set_gas_price(gas_price);
     debug!("Gas price: {}", gas_price);
 
-    // Select gas object
-    let gas_ref = pick_gas_object(client, sender).await
-        .context("Failed to pick gas object")?;
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
     let gas_input = sui_transaction_builder::unresolved::Input::owned(
-        *gas_ref.object_id(),
-        gas_ref.version(),
-        *gas_ref.digest(),
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
     );
     tb.add_gas_objects(vec![gas_input]);
-    debug!("Gas object added: {:?}", gas_ref);
+    debug!("Gas coin selected: id={} ver={} digest={} balance={}", 
+        gas_coin.object_id(), gas_coin.object_ref.version(), gas_coin.object_ref.digest(), gas_coin.balance);
 
     // Get current version and ownership info of app_instance object
     let (app_instance_ref, initial_shared_version) = get_object_details(client, app_instance_id).await
@@ -98,7 +114,7 @@ pub async fn start_job_tx(
     let app_instance_arg = tb.input(app_instance_input);
 
     // Job ID argument
-    let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
+    let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
 
     // Clock object (shared)
     let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
@@ -113,7 +129,7 @@ pub async fn start_job_tx(
             .map_err(|e| anyhow!("Failed to parse function name 'start_app_job': {}", e))?,
         vec![],
     );
-    tb.move_call(func, vec![app_instance_arg, job_id_arg, clock_arg]);
+    tb.move_call(func, vec![app_instance_arg, job_sequence_arg, clock_arg]);
 
     // Finalize and sign
     let tx = tb.finish()?;
@@ -165,9 +181,9 @@ pub async fn start_job_tx(
 pub async fn complete_job_tx(
     client: &mut GrpcClient,
     app_instance_str: &str,
-    job_id: u64,
+    job_sequence: u64,
 ) -> Result<String> {
-    info!("Creating complete_app_job transaction for job_id: {}", job_id);
+    info!("Creating complete_app_job transaction for job_sequence: {}", job_sequence);
     
     // Parse IDs
     let package_id = get_coordination_package_id()
@@ -184,16 +200,24 @@ pub async fn complete_job_tx(
     tb.set_sender(sender);
     tb.set_gas_budget(100_000_000); // 0.1 SUI
 
-    // Get gas price and gas object using provided client
+    // Get gas price and gas coin using provided client
     let gas_price = get_reference_gas_price(client).await?;
     tb.set_gas_price(gas_price);
 
-    let gas_ref = pick_gas_object(client, sender).await
-        .context("Failed to pick gas object")?;
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
     let gas_input = sui_transaction_builder::unresolved::Input::owned(
-        *gas_ref.object_id(),
-        gas_ref.version(),
-        *gas_ref.digest(),
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
     );
     tb.add_gas_objects(vec![gas_input]);
 
@@ -220,7 +244,7 @@ pub async fn complete_job_tx(
     let app_instance_arg = tb.input(app_instance_input);
 
     // Job ID argument
-    let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
+    let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
 
     // Clock object (shared)
     let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
@@ -235,7 +259,7 @@ pub async fn complete_job_tx(
             .map_err(|e| anyhow!("Failed to parse function name 'complete_app_job': {}", e))?,
         vec![],
     );
-    tb.move_call(func, vec![app_instance_arg, job_id_arg, clock_arg]);
+    tb.move_call(func, vec![app_instance_arg, job_sequence_arg, clock_arg]);
 
     // Finalize and sign
     let tx = tb.finish()?;
@@ -287,10 +311,22 @@ pub async fn complete_job_tx(
 pub async fn fail_job_tx(
     client: &mut GrpcClient,
     app_instance_str: &str,
-    job_id: u64,
+    job_sequence: u64,
     error_message: &str,
 ) -> Result<String> {
-    info!("Creating fail_app_job transaction for job_id: {} with error: {}", job_id, error_message);
+    info!("Creating fail_app_job transaction for job_sequence: {} with error: {}", job_sequence, error_message);
+    
+    // Debug: Query current job state before attempting to fail it
+    let app_instance_id = get_app_instance_id(app_instance_str)
+        .context("Failed to parse app instance ID for debug query")?;
+    match query_job_status(client, app_instance_id, job_sequence).await {
+        Ok(status) => {
+            info!("Current job {} status before fail attempt: {:?}", job_sequence, status);
+        }
+        Err(e) => {
+            warn!("Failed to query job {} status before fail: {}", job_sequence, e);
+        }
+    }
     
     // Parse IDs
     let package_id = get_coordination_package_id()
@@ -307,16 +343,24 @@ pub async fn fail_job_tx(
     tb.set_sender(sender);
     tb.set_gas_budget(100_000_000); // 0.1 SUI
 
-    // Get gas price and gas object using provided client
+    // Get gas price and gas coin using provided client
     let gas_price = get_reference_gas_price(client).await?;
     tb.set_gas_price(gas_price);
 
-    let gas_ref = pick_gas_object(client, sender).await
-        .context("Failed to pick gas object")?;
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
     let gas_input = sui_transaction_builder::unresolved::Input::owned(
-        *gas_ref.object_id(),
-        gas_ref.version(),
-        *gas_ref.digest(),
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
     );
     tb.add_gas_objects(vec![gas_input]);
 
@@ -343,7 +387,7 @@ pub async fn fail_job_tx(
     let app_instance_arg = tb.input(app_instance_input);
 
     // Job ID argument
-    let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
+    let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
 
     // Error message argument
     let error_arg = tb.input(sui_transaction_builder::Serialized(&error_message.to_string()));
@@ -361,7 +405,7 @@ pub async fn fail_job_tx(
             .map_err(|e| anyhow!("Failed to parse function name 'fail_app_job': {}", e))?,
         vec![],
     );
-    tb.move_call(func, vec![app_instance_arg, job_id_arg, error_arg, clock_arg]);
+    tb.move_call(func, vec![app_instance_arg, job_sequence_arg, error_arg, clock_arg]);
 
     // Finalize and sign
     let tx = tb.finish()?;
@@ -389,10 +433,39 @@ pub async fn fail_job_tx(
     };
     let tx_resp = resp.into_inner();
 
+    // Debug: Log full transaction response details
+    debug!("Transaction response finality: {:?}", tx_resp.finality);
+    if let Some(ref transaction) = tx_resp.transaction {
+        debug!("Transaction digest: {:?}", transaction.digest);
+        debug!("Transaction signatures: {:?}", transaction.signatures);
+        debug!("Transaction effects: {:?}", transaction.effects);
+        
+        // Check for errors in transaction effects
+        if let Some(ref effects) = transaction.effects {
+            debug!("Effects status: {:?}", effects.status);
+            if let Some(ref status) = effects.status {
+                if status.error.is_some() {
+                    error!("Transaction failed with error: {:?}", status.error);
+                    let error_msg = status.error.as_ref().unwrap();
+                    return Err(anyhow!("Transaction failed: {:?}", error_msg));
+                }
+            }
+        }
+    }
+
     // Check transaction was successful
     if tx_resp.finality.is_none() {
+        error!("Transaction did not achieve finality");
         return Err(anyhow!("Transaction did not achieve finality"));
     }
+
+    // Check for transaction success in effects
+    let tx_successful = tx_resp.transaction
+        .as_ref()
+        .and_then(|t| t.effects.as_ref())
+        .and_then(|e| e.status.as_ref())
+        .map(|s| s.error.is_none())
+        .unwrap_or(false);
 
     let tx_digest = tx_resp
         .transaction
@@ -401,14 +474,51 @@ pub async fn fail_job_tx(
         .context("Failed to get transaction digest")?
         .to_string();
 
-    info!(
-        "fail_app_job transaction executed: {} (took {}ms)",
-        tx_digest, tx_elapsed_ms
-    );
+    if tx_successful {
+        info!(
+            "fail_app_job transaction executed successfully: {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+    } else {
+        error!(
+            "fail_app_job transaction failed: {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+        return Err(anyhow!("Transaction failed despite being executed"));
+    }
 
     Ok(tx_digest)
 }
 
+/// Debug function to query job status from the blockchain
+async fn query_job_status(
+    client: &mut GrpcClient,
+    app_instance_id: sui::Address,
+    job_sequence: u64,
+) -> Result<String> {
+    let mut ledger = client.ledger_client();
+    
+    // Query the app_instance object to get the jobs field
+    let response = ledger
+        .get_object(proto::GetObjectRequest {
+            object_id: Some(app_instance_id.to_string()),
+            version: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["data".to_string()],
+            }),
+        })
+        .await
+        .context("Failed to get app_instance object")?
+        .into_inner();
+
+    if let Some(object) = response.object {
+        // For now, just log that we found the object
+        debug!("Found app_instance object with version: {:?}", object.version);
+        return Ok(format!("Found job {} in app_instance (object version: {:?})", job_sequence, object.version));
+    } else {
+        return Err(anyhow!("App instance object not found"));
+    }
+}
 
 /// Get object details including ownership information and initial_shared_version
 async fn get_object_details(

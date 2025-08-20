@@ -15,7 +15,7 @@ public enum JobStatus has copy, drop, store {
 
 public struct Job has key, store {
     id: UID,
-    job_id: u64,
+    job_sequence: u64,
     description: Option<String>,
     // Metadata of the agent method to call
     developer: String,
@@ -45,12 +45,12 @@ public struct Jobs has key, store {
         String,
         VecMap<String, VecMap<String, VecSet<u64>>>,
     >,
-    next_job_id: u64,
+    next_job_sequence: u64,
     max_attempts: u8,
 }
 
 public struct JobCreatedEvent has copy, drop {
-    job_id: u64,
+    job_sequence: u64,
     description: Option<String>,
     developer: String,
     agent: String,
@@ -65,7 +65,7 @@ public struct JobCreatedEvent has copy, drop {
 }
 
 public struct JobUpdatedEvent has copy, drop {
-    job_id: u64,
+    job_sequence: u64,
     developer: String,
     agent: String,
     agent_method: String,
@@ -76,13 +76,13 @@ public struct JobUpdatedEvent has copy, drop {
 }
 
 public struct JobCompletedEvent has copy, drop {
-    job_id: u64,
+    job_sequence: u64,
     app_instance: String,
     completed_at: u64,
 }
 
 public struct JobFailedEvent has copy, drop {
-    job_id: u64,
+    job_sequence: u64,
     app_instance: String,
     error: String,
     attempts: u8,
@@ -90,7 +90,7 @@ public struct JobFailedEvent has copy, drop {
 }
 
 public struct JobDeletedEvent has copy, drop {
-    job_id: u64,
+    job_sequence: u64,
     deleted_at: u64,
 }
 
@@ -124,7 +124,7 @@ public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
         pending_jobs: vec_set::empty(),
         pending_jobs_count: 0,
         pending_jobs_indexes: vec_map::empty(),
-        next_job_id: 1,
+        next_job_sequence: 1,
         max_attempts: attempts,
     }
 }
@@ -144,12 +144,12 @@ public fun create_job(
     clock: &Clock,
     ctx: &mut TxContext,
 ): u64 {
-    let job_id = jobs.next_job_id;
+    let job_sequence = jobs.next_job_sequence;
     let timestamp = clock::timestamp_ms(clock);
 
     let job = Job {
         id: object::new(ctx),
-        job_id,
+        job_sequence,
         description,
         developer,
         agent,
@@ -167,7 +167,7 @@ public fun create_job(
 
     // Emit creation event with all metadata
     event::emit(JobCreatedEvent {
-        job_id,
+        job_sequence,
         description,
         developer,
         agent,
@@ -182,27 +182,27 @@ public fun create_job(
     });
 
     // Add to storage
-    object_table::add(&mut jobs.jobs, job_id, job);
-    vec_set::insert(&mut jobs.pending_jobs, job_id);
+    object_table::add(&mut jobs.jobs, job_sequence, job);
+    vec_set::insert(&mut jobs.pending_jobs, job_sequence);
     
     // Update pending jobs count
     jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
     
     // Add to index
-    add_to_index(jobs, job_id, &developer, &agent, &agent_method);
+    add_to_index(jobs, job_sequence, &developer, &agent, &agent_method);
     
-    jobs.next_job_id = job_id + 1;
+    jobs.next_job_sequence = job_sequence + 1;
 
-    job_id
+    job_sequence
 }
 
 // Update job status to running
-public fun start_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
-    assert!(object_table::contains(&jobs.jobs, job_id), EJobNotFound);
+public fun start_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
+    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
 
     // First, get the values we need and update the job
     let (developer, agent, agent_method, app_instance, attempts) = {
-        let job = object_table::borrow_mut(&mut jobs.jobs, job_id);
+        let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
         assert!(job.status == JobStatus::Pending, EJobNotPending);
         
         // Copy values we need
@@ -221,16 +221,16 @@ public fun start_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
     }; // Mutable borrow of job ends here
 
     // Remove from pending set
-    vec_set::remove(&mut jobs.pending_jobs, &job_id);
+    vec_set::remove(&mut jobs.pending_jobs, &job_sequence);
     
     // Update pending jobs count
     jobs.pending_jobs_count = jobs.pending_jobs_count - 1;
     
     // Remove from index
-    remove_from_index(jobs, job_id, &developer, &agent, &agent_method);
+    remove_from_index(jobs, job_sequence, &developer, &agent, &agent_method);
 
     event::emit(JobUpdatedEvent {
-        job_id,
+        job_sequence,
         developer,
         agent,
         agent_method,
@@ -243,10 +243,10 @@ public fun start_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
 
 // Mark job as completed and remove it
 // Only running jobs can be completed
-public fun complete_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
-    assert!(object_table::contains(&jobs.jobs, job_id), EJobNotFound);
+public fun complete_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
+    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
 
-    let job = object_table::remove(&mut jobs.jobs, job_id);
+    let job = object_table::remove(&mut jobs.jobs, job_sequence);
     
     // Job must be in Running state to be completed
     assert!(job.status == JobStatus::Running, EJobNotRunning);
@@ -254,13 +254,13 @@ public fun complete_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
     let timestamp = clock::timestamp_ms(clock);
 
     event::emit(JobCompletedEvent {
-        job_id,
+        job_sequence,
         app_instance: job.app_instance,
         completed_at: timestamp,
     });
 
     event::emit(JobDeletedEvent {
-        job_id,
+        job_sequence,
         deleted_at: timestamp,
     });
 
@@ -273,17 +273,17 @@ public fun complete_job(jobs: &mut Jobs, job_id: u64, clock: &Clock) {
 // Only running jobs can fail
 public fun fail_job(
     jobs: &mut Jobs,
-    job_id: u64,
+    job_sequence: u64,
     error: String,
     clock: &Clock,
 ) {
-    assert!(object_table::contains(&jobs.jobs, job_id), EJobNotFound);
+    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
     
     let timestamp = clock::timestamp_ms(clock);
     
     // Get job info and determine if we should retry
     let (developer, agent, agent_method, app_instance, attempts, should_retry) = {
-        let job = object_table::borrow_mut(&mut jobs.jobs, job_id);
+        let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
         
         // Job must be in Running state to fail
         assert!(job.status == JobStatus::Running, EJobNotRunning);
@@ -309,7 +309,7 @@ public fun fail_job(
     }; // Mutable borrow ends here
 
     event::emit(JobFailedEvent {
-        job_id,
+        job_sequence,
         app_instance,
         error,
         attempts,
@@ -319,16 +319,16 @@ public fun fail_job(
     // Check if we should retry
     if (should_retry) {
         // Add back to pending set
-        vec_set::insert(&mut jobs.pending_jobs, job_id);
+        vec_set::insert(&mut jobs.pending_jobs, job_sequence);
         
         // Update pending jobs count (job is being added to pending from running state)
         jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
         
         // Add to index (it wasn't in index since it was running)
-        add_to_index(jobs, job_id, &developer, &agent, &agent_method);
+        add_to_index(jobs, job_sequence, &developer, &agent, &agent_method);
 
         event::emit(JobUpdatedEvent {
-            job_id,
+            job_sequence,
             developer,
             agent,
             agent_method,
@@ -339,17 +339,17 @@ public fun fail_job(
         });
     } else {
         // Max attempts reached, remove the job
-        let job = object_table::remove(&mut jobs.jobs, job_id);
+        let job = object_table::remove(&mut jobs.jobs, job_sequence);
         
         // If job was pending (shouldn't be, but just in case), update count and index
-        if (vec_set::contains(&jobs.pending_jobs, &job_id)) {
-            vec_set::remove(&mut jobs.pending_jobs, &job_id);
+        if (vec_set::contains(&jobs.pending_jobs, &job_sequence)) {
+            vec_set::remove(&mut jobs.pending_jobs, &job_sequence);
             jobs.pending_jobs_count = jobs.pending_jobs_count - 1;
-            remove_from_index(jobs, job_id, &job.developer, &job.agent, &job.agent_method);
+            remove_from_index(jobs, job_sequence, &job.developer, &job.agent, &job.agent_method);
         };
 
         event::emit(JobDeletedEvent {
-            job_id,
+            job_sequence,
             deleted_at: timestamp,
         });
 
@@ -361,7 +361,7 @@ public fun fail_job(
 // Internal helper function to add a job to the index
 fun add_to_index(
     jobs: &mut Jobs,
-    job_id: u64,
+    job_sequence: u64,
     developer: &String,
     agent: &String,
     agent_method: &String,
@@ -384,15 +384,15 @@ fun add_to_index(
     };
     let method_set = vec_map::get_mut(agent_map, agent_method);
     
-    // Add job_id to the set
-    vec_set::insert(method_set, job_id);
+    // Add job_sequence to the set
+    vec_set::insert(method_set, job_sequence);
 }
 
 // Internal helper function to remove a job from the index
 // Asserts that the job exists in the index
 fun remove_from_index(
     jobs: &mut Jobs,
-    job_id: u64,
+    job_sequence: u64,
     developer: &String,
     agent: &String,
     agent_method: &String,
@@ -410,10 +410,10 @@ fun remove_from_index(
     let method_set = vec_map::get_mut(agent_map, agent_method);
     
     // Job must exist in the set
-    assert!(vec_set::contains(method_set, &job_id), EJobNotInIndex);
+    assert!(vec_set::contains(method_set, &job_sequence), EJobNotInIndex);
     
-    // Remove job_id from the set
-    vec_set::remove(method_set, &job_id);
+    // Remove job_sequence from the set
+    vec_set::remove(method_set, &job_sequence);
     
     // Keep empty structures for reuse - they will likely be needed again soon
 }
@@ -424,18 +424,18 @@ public fun update_max_attempts(jobs: &mut Jobs, max_attempts: u8) {
 }
 
 // Getter functions
-public fun get_job(jobs: &Jobs, job_id: u64): &Job {
-    assert!(object_table::contains(&jobs.jobs, job_id), EJobNotFound);
-    object_table::borrow(&jobs.jobs, job_id)
+public fun get_job(jobs: &Jobs, job_sequence: u64): &Job {
+    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
+    object_table::borrow(&jobs.jobs, job_sequence)
 }
 
-public fun get_job_mut(jobs: &mut Jobs, job_id: u64): &mut Job {
-    assert!(object_table::contains(&jobs.jobs, job_id), EJobNotFound);
-    object_table::borrow_mut(&mut jobs.jobs, job_id)
+public fun get_job_mut(jobs: &mut Jobs, job_sequence: u64): &mut Job {
+    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
+    object_table::borrow_mut(&mut jobs.jobs, job_sequence)
 }
 
-public fun job_exists(jobs: &Jobs, job_id: u64): bool {
-    object_table::contains(&jobs.jobs, job_id)
+public fun job_exists(jobs: &Jobs, job_sequence: u64): bool {
+    object_table::contains(&jobs.jobs, job_sequence)
 }
 
 public fun get_pending_jobs(jobs: &Jobs): vector<u64> {
@@ -488,8 +488,8 @@ public fun get_next_pending_job(jobs: &Jobs): Option<u64> {
 }
 
 // Job field getters
-public fun job_id(job: &Job): u64 {
-    job.job_id
+public fun job_sequence(job: &Job): u64 {
+    job.job_sequence
 }
 
 public fun job_description(job: &Job): &Option<String> {
@@ -549,8 +549,8 @@ public fun max_attempts(jobs: &Jobs): u8 {
     jobs.max_attempts
 }
 
-public fun next_job_id(jobs: &Jobs): u64 {
-    jobs.next_job_id
+public fun next_job_sequence(jobs: &Jobs): u64 {
+    jobs.next_job_sequence
 }
 
 // Status checking helpers

@@ -15,7 +15,7 @@ use coordination::jobs::{
     get_pending_jobs_for_method,
     get_next_pending_job,
     update_max_attempts,
-    job_id,
+    job_sequence,
     job_attempts,
     max_attempts,
     is_job_pending,
@@ -72,7 +72,7 @@ fun test_create_job() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::some(b"Test job".to_string()),
             b"developer1".to_string(),
@@ -87,12 +87,12 @@ fun test_create_job() {
             ts::ctx(&mut scenario),
         );
         
-        assert!(job_id == 1, 0);
-        assert!(job_exists(&jobs, job_id), 1);
+        assert!(job_sequence == 1, 0);
+        assert!(job_exists(&jobs, job_sequence), 1);
         assert!(get_pending_jobs_count(&jobs) == 1, 2);
         
-        let job = get_job(&jobs, job_id);
-        assert!(job_id(job) == 1, 3);
+        let job = get_job(&jobs, job_sequence);
+        assert!(job_sequence(job) == 1, 3);
         assert!(is_job_pending(job), 4);
         assert!(job_attempts(job) == 0, 5);
         
@@ -111,7 +111,7 @@ fun test_start_job() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -127,9 +127,9 @@ fun test_start_job() {
         );
         
         // Start the job
-        start_job(&mut jobs, job_id, &clock);
+        start_job(&mut jobs, job_sequence, &clock);
         
-        let job = get_job(&jobs, job_id);
+        let job = get_job(&jobs, job_sequence);
         assert!(is_job_running(job), 0);
         assert!(job_attempts(job) == 1, 1);
         
@@ -152,7 +152,7 @@ fun test_start_job_not_pending() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -167,9 +167,9 @@ fun test_start_job_not_pending() {
             ts::ctx(&mut scenario),
         );
         
-        start_job(&mut jobs, job_id, &clock);
+        start_job(&mut jobs, job_sequence, &clock);
         // This should fail - trying to start an already running job
-        start_job(&mut jobs, job_id, &clock);
+        start_job(&mut jobs, job_sequence, &clock);
         
         transfer::public_share_object(jobs);
     };
@@ -186,7 +186,7 @@ fun test_complete_job() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -201,11 +201,11 @@ fun test_complete_job() {
             ts::ctx(&mut scenario),
         );
         
-        start_job(&mut jobs, job_id, &clock);
-        complete_job(&mut jobs, job_id, &clock);
+        start_job(&mut jobs, job_sequence, &clock);
+        complete_job(&mut jobs, job_sequence, &clock);
         
         // Job should be deleted
-        assert!(!job_exists(&jobs, job_id), 0);
+        assert!(!job_exists(&jobs, job_sequence), 0);
         assert!(get_pending_jobs_count(&jobs) == 0, 1);
         
         transfer::public_share_object(jobs);
@@ -223,7 +223,7 @@ fun test_fail_job_with_retry() {
     {
         let mut jobs = create_jobs(option::some(3), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -239,28 +239,28 @@ fun test_fail_job_with_retry() {
         );
         
         // First attempt
-        start_job(&mut jobs, job_id, &clock);
-        assert!(job_attempts(get_job(&jobs, job_id)) == 1, 0);
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 0);
         
         // Fail the job - should go back to pending
-        fail_job(&mut jobs, job_id, b"Error 1".to_string(), &clock);
-        assert!(job_exists(&jobs, job_id), 1);
-        assert!(is_job_pending(get_job(&jobs, job_id)), 2);
+        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock);
+        assert!(job_exists(&jobs, job_sequence), 1);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 2);
         assert!(get_pending_jobs_count(&jobs) == 1, 3);
         
         // Second attempt
-        start_job(&mut jobs, job_id, &clock);
-        assert!(job_attempts(get_job(&jobs, job_id)) == 2, 4);
-        fail_job(&mut jobs, job_id, b"Error 2".to_string(), &clock);
-        assert!(job_exists(&jobs, job_id), 5);
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 4);
+        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock);
+        assert!(job_exists(&jobs, job_sequence), 5);
         
         // Third attempt
-        start_job(&mut jobs, job_id, &clock);
-        assert!(job_attempts(get_job(&jobs, job_id)) == 3, 6);
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 3, 6);
         
         // Fail after max attempts - job should be deleted
-        fail_job(&mut jobs, job_id, b"Error 3".to_string(), &clock);
-        assert!(!job_exists(&jobs, job_id), 7);
+        fail_job(&mut jobs, job_sequence, b"Error 3".to_string(), &clock);
+        assert!(!job_exists(&jobs, job_sequence), 7);
         assert!(get_pending_jobs_count(&jobs) == 0, 8);
         
         transfer::public_share_object(jobs);
@@ -279,7 +279,7 @@ fun test_multiple_pending_jobs() {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
         // Create multiple jobs
-        let _job_id1 = create_job(
+        let _job_sequence1 = create_job(
             &mut jobs,
             option::some(b"Job 1".to_string()),
             b"dev1".to_string(),
@@ -294,7 +294,7 @@ fun test_multiple_pending_jobs() {
             ts::ctx(&mut scenario),
         );
         
-        let job_id2 = create_job(
+        let job_sequence2 = create_job(
             &mut jobs,
             option::some(b"Job 2".to_string()),
             b"dev2".to_string(),
@@ -309,7 +309,7 @@ fun test_multiple_pending_jobs() {
             ts::ctx(&mut scenario),
         );
         
-        let _job_id3 = create_job(
+        let _job_sequence3 = create_job(
             &mut jobs,
             option::some(b"Job 3".to_string()),
             b"dev3".to_string(),
@@ -334,13 +334,13 @@ fun test_multiple_pending_jobs() {
         assert!(option::is_some(&next), 2);
         
         // Start one job
-        start_job(&mut jobs, job_id2, &clock);
+        start_job(&mut jobs, job_sequence2, &clock);
         assert!(get_pending_jobs_count(&jobs) == 2, 3);
         
         // Complete one job
-        complete_job(&mut jobs, job_id2, &clock);
+        complete_job(&mut jobs, job_sequence2, &clock);
         assert!(get_pending_jobs_count(&jobs) == 2, 4);
-        assert!(!job_exists(&jobs, job_id2), 5);
+        assert!(!job_exists(&jobs, job_sequence2), 5);
         
         transfer::public_share_object(jobs);
     };
@@ -414,7 +414,7 @@ fun test_pending_jobs_index() {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
         // Create jobs for same developer/agent/method
-        let job_id1 = create_job(
+        let job_sequence1 = create_job(
             &mut jobs,
             option::some(b"Job 1".to_string()),
             b"dev1".to_string(),
@@ -429,7 +429,7 @@ fun test_pending_jobs_index() {
             ts::ctx(&mut scenario),
         );
         
-        let job_id2 = create_job(
+        let job_sequence2 = create_job(
             &mut jobs,
             option::some(b"Job 2".to_string()),
             b"dev1".to_string(),
@@ -445,7 +445,7 @@ fun test_pending_jobs_index() {
         );
         
         // Create job for different method
-        let _job_id3 = create_job(
+        let _job_sequence3 = create_job(
             &mut jobs,
             option::some(b"Job 3".to_string()),
             b"dev1".to_string(),
@@ -468,8 +468,8 @@ fun test_pending_jobs_index() {
             &b"method1".to_string(),
         );
         assert!(vector::length(&method1_jobs) == 2, 0);
-        assert!(vector::contains(&method1_jobs, &job_id1), 1);
-        assert!(vector::contains(&method1_jobs, &job_id2), 2);
+        assert!(vector::contains(&method1_jobs, &job_sequence1), 1);
+        assert!(vector::contains(&method1_jobs, &job_sequence2), 2);
         
         // Check index for method2
         let method2_jobs = get_pending_jobs_for_method(
@@ -490,7 +490,7 @@ fun test_pending_jobs_index() {
         assert!(vector::is_empty(&no_jobs), 4);
         
         // Start job1 - should remove from index
-        start_job(&mut jobs, job_id1, &clock);
+        start_job(&mut jobs, job_sequence1, &clock);
         let method1_jobs_after = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),
@@ -498,8 +498,8 @@ fun test_pending_jobs_index() {
             &b"method1".to_string(),
         );
         assert!(vector::length(&method1_jobs_after) == 1, 5);
-        assert!(vector::contains(&method1_jobs_after, &job_id2), 6);
-        assert!(!vector::contains(&method1_jobs_after, &job_id1), 7);
+        assert!(vector::contains(&method1_jobs_after, &job_sequence2), 6);
+        assert!(!vector::contains(&method1_jobs_after, &job_sequence1), 7);
         
         transfer::public_share_object(jobs);
     };
@@ -520,7 +520,7 @@ fun test_pending_jobs_count_tracking() {
         assert!(get_pending_jobs_count(&jobs) == 0, 0);
         
         // Create first job
-        let job_id1 = create_job(
+        let job_sequence1 = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -537,7 +537,7 @@ fun test_pending_jobs_count_tracking() {
         assert!(get_pending_jobs_count(&jobs) == 1, 1);
         
         // Create second job
-        let job_id2 = create_job(
+        let job_sequence2 = create_job(
             &mut jobs,
             option::none(),
             b"dev2".to_string(),
@@ -554,23 +554,23 @@ fun test_pending_jobs_count_tracking() {
         assert!(get_pending_jobs_count(&jobs) == 2, 2);
         
         // Start job1 - count should decrease
-        start_job(&mut jobs, job_id1, &clock);
+        start_job(&mut jobs, job_sequence1, &clock);
         assert!(get_pending_jobs_count(&jobs) == 1, 3);
         
         // Fail job1 - should go back to pending, count increases
-        fail_job(&mut jobs, job_id1, b"Error".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence1, b"Error".to_string(), &clock);
         assert!(get_pending_jobs_count(&jobs) == 2, 4);
         
         // Start and complete job1 - count should decrease
-        start_job(&mut jobs, job_id1, &clock);
+        start_job(&mut jobs, job_sequence1, &clock);
         assert!(get_pending_jobs_count(&jobs) == 1, 5);
-        complete_job(&mut jobs, job_id1, &clock);
+        complete_job(&mut jobs, job_sequence1, &clock);
         assert!(get_pending_jobs_count(&jobs) == 1, 6);
         
         // Start and complete job2
-        start_job(&mut jobs, job_id2, &clock);
+        start_job(&mut jobs, job_sequence2, &clock);
         assert!(get_pending_jobs_count(&jobs) == 0, 7);
-        complete_job(&mut jobs, job_id2, &clock);
+        complete_job(&mut jobs, job_sequence2, &clock);
         assert!(get_pending_jobs_count(&jobs) == 0, 8);
         
         transfer::public_share_object(jobs);
@@ -589,7 +589,7 @@ fun test_complete_job_not_running() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -605,7 +605,7 @@ fun test_complete_job_not_running() {
         );
         
         // Try to complete a pending job - should fail
-        complete_job(&mut jobs, job_id, &clock);
+        complete_job(&mut jobs, job_sequence, &clock);
         
         transfer::public_share_object(jobs);
     };
@@ -623,7 +623,7 @@ fun test_fail_job_not_running() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -639,7 +639,7 @@ fun test_fail_job_not_running() {
         );
         
         // Try to fail a pending job - should fail
-        fail_job(&mut jobs, job_id, b"Error".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error".to_string(), &clock);
         
         transfer::public_share_object(jobs);
     };
@@ -656,7 +656,7 @@ fun test_index_with_retry() {
     {
         let mut jobs = create_jobs(option::some(2), ts::ctx(&mut scenario));
         
-        let job_id = create_job(
+        let job_sequence = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -678,10 +678,10 @@ fun test_index_with_retry() {
             &b"agent1".to_string(),
             &b"method1".to_string(),
         );
-        assert!(vector::contains(&jobs_in_index, &job_id), 0);
+        assert!(vector::contains(&jobs_in_index, &job_sequence), 0);
         
         // Start job - should be removed from index
-        start_job(&mut jobs, job_id, &clock);
+        start_job(&mut jobs, job_sequence, &clock);
         let jobs_after_start = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),
@@ -691,21 +691,21 @@ fun test_index_with_retry() {
         assert!(vector::is_empty(&jobs_after_start), 1);
         
         // Fail job (first attempt) - should be back in index
-        fail_job(&mut jobs, job_id, b"Error".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error".to_string(), &clock);
         let jobs_after_fail = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),
             &b"agent1".to_string(),
             &b"method1".to_string(),
         );
-        assert!(vector::contains(&jobs_after_fail, &job_id), 2);
+        assert!(vector::contains(&jobs_after_fail, &job_sequence), 2);
         
         // Start again and fail on max attempts - should be removed permanently
-        start_job(&mut jobs, job_id, &clock);
-        fail_job(&mut jobs, job_id, b"Error 2".to_string(), &clock);
+        start_job(&mut jobs, job_sequence, &clock);
+        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock);
         
         // Job should be deleted (max attempts reached)
-        assert!(!job_exists(&jobs, job_id), 3);
+        assert!(!job_exists(&jobs, job_sequence), 3);
         let jobs_final = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),

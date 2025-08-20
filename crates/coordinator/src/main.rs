@@ -1,14 +1,18 @@
+mod agent;
 mod config;
 mod error;
 mod events;
 mod fetch;
 mod grpc;
+mod job_id;
 mod job_searcher;
 mod jobs;
 mod pending;
 mod processor;
 mod registry;
+mod session_id;
 mod state;
+mod sui_interface;
 
 use anyhow::Result;
 use clap::Parser;

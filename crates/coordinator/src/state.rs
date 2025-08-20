@@ -1,11 +1,18 @@
+use crate::agent::AgentJobDatabase;
 use crate::jobs::JobsTracker;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use sui_rpc::Client;
 use tokio::sync::RwLock;
 
+// Maximum number of concurrent Docker containers/agents that can run simultaneously
+pub const MAX_CONCURRENT_AGENTS: usize = 2;
+
 #[derive(Debug, Clone)]
 pub struct CurrentAgent {
+    pub session_id: String,
     pub developer: String,
     pub agent: String,
     pub agent_method: String,
@@ -13,59 +20,113 @@ pub struct CurrentAgent {
 
 #[derive(Clone)]
 pub struct SharedState {
-    current_agent: Arc<RwLock<Option<CurrentAgent>>>,
+    // Track multiple current agents by session_id
+    current_agents: Arc<RwLock<HashMap<String, CurrentAgent>>>,
     jobs_tracker: JobsTracker,
+    agent_job_db: AgentJobDatabase,  // Memory database for agent job tracking
     sui_client: Client,  // Sui client (cloneable)
     has_pending_jobs: Arc<AtomicBool>,  // Fast check for pending jobs availability
 }
 
+// Global static values initialized once from environment variables
+static COORDINATOR_ID: OnceLock<String> = OnceLock::new();
+static CHAIN: OnceLock<String> = OnceLock::new();
+
 impl SharedState {
     pub fn new(sui_client: Client) -> Self {
+        // Initialize static values from environment variables
+        Self::init_coordinator_id();
+        Self::init_chain();
+        
         Self {
-            current_agent: Arc::new(RwLock::new(None)),
+            current_agents: Arc::new(RwLock::new(HashMap::new())),
             jobs_tracker: JobsTracker::new(),
+            agent_job_db: AgentJobDatabase::new(),
             sui_client,
             has_pending_jobs: Arc::new(AtomicBool::new(false)),
         }
     }
+    
+    /// Initialize coordinator ID from SUI_ADDRESS environment variable
+    fn init_coordinator_id() {
+        COORDINATOR_ID.get_or_init(|| {
+            std::env::var("SUI_ADDRESS")
+                .expect("SUI_ADDRESS environment variable must be set")
+        });
+    }
+    
+    /// Initialize chain from SUI_CHAIN environment variable
+    fn init_chain() {
+        CHAIN.get_or_init(|| {
+            std::env::var("SUI_CHAIN")
+                .expect("SUI_CHAIN environment variable must be set")
+        });
+    }
+    
+    /// Get the coordinator ID
+    pub fn get_coordinator_id(&self) -> &String {
+        COORDINATOR_ID.get()
+            .expect("Coordinator ID should be initialized")
+    }
+    
+    /// Get the chain
+    pub fn get_chain(&self) -> &String {
+        CHAIN.get()
+            .expect("Chain should be initialized")
+    }
 
-    pub async fn set_current_agent(&self, developer: String, agent: String, agent_method: String) {
-        let mut current = self.current_agent.write().await;
-        *current = Some(CurrentAgent {
+    pub async fn set_current_agent(&self, session_id: String, developer: String, agent: String, agent_method: String) {
+        let mut current_agents = self.current_agents.write().await;
+        let current_agent = CurrentAgent {
+            session_id: session_id.clone(),
             developer,
             agent,
             agent_method,
-        });
+        };
+        current_agents.insert(session_id, current_agent.clone());
         tracing::info!(
-            "Set current agent: {}/{}/{}",
-            current.as_ref().unwrap().developer,
-            current.as_ref().unwrap().agent,
-            current.as_ref().unwrap().agent_method
+            "Set current agent for session {}: {}/{}/{}",
+            current_agent.session_id,
+            current_agent.developer,
+            current_agent.agent,
+            current_agent.agent_method
         );
     }
 
-    pub async fn clear_current_agent(&self) {
-        let mut current = self.current_agent.write().await;
-        if let Some(agent) = current.as_ref() {
+    pub async fn clear_current_agent(&self, session_id: &str) {
+        let mut current_agents = self.current_agents.write().await;
+        if let Some(agent) = current_agents.remove(session_id) {
             tracing::info!(
-                "Clearing current agent: {}/{}/{}",
+                "Clearing current agent: {}/{}/{} (session: {})",
                 agent.developer,
                 agent.agent,
-                agent.agent_method
+                agent.agent_method,
+                session_id
             );
         }
-        *current = None;
     }
 
-    pub async fn get_current_agent(&self) -> Option<CurrentAgent> {
-        let current = self.current_agent.read().await;
-        current.clone()
+    pub async fn get_current_agent(&self, session_id: &str) -> Option<CurrentAgent> {
+        let current_agents = self.current_agents.read().await;
+        current_agents.get(session_id).cloned()
+    }
+
+    pub async fn get_current_agent_count(&self) -> usize {
+        let current_agents = self.current_agents.read().await;
+        current_agents.len()
+    }
+
+    pub async fn is_agent_running(&self, developer: &str, agent: &str, agent_method: &str) -> bool {
+        let current_agents = self.current_agents.read().await;
+        current_agents.values().any(|a| {
+            a.developer == developer && a.agent == agent && a.agent_method == agent_method
+        })
     }
 
     /// Add a new job to tracking from JobCreatedEvent
     pub async fn add_job(
         &self,
-        _job_id: u64,  // No longer tracking individual job IDs
+        _job_sequence: u64,  // No longer tracking individual job sequences
         developer: String,
         agent: String,
         agent_method: String,
@@ -88,7 +149,7 @@ impl SharedState {
     }
     
     /// Remove a completed or failed job (no longer tracking individual jobs)
-    pub async fn remove_job(&self, _job_id: u64) {
+    pub async fn remove_job(&self, _job_sequence: u64) {
         // No longer tracking individual jobs, only app_instances
         // The reconciliation process will handle removing app_instances with no pending jobs
         tracing::debug!("Job completion/failure noted (individual jobs not tracked)");
@@ -114,8 +175,8 @@ impl SharedState {
 
 
     /// Get app_instances with pending jobs for the current agent
-    pub async fn get_current_app_instances(&self) -> Vec<String> {
-        if let Some(current_agent) = self.get_current_agent().await {
+    pub async fn get_current_app_instances(&self, session_id: &str) -> Vec<String> {
+        if let Some(current_agent) = self.get_current_agent(session_id).await {
             self.jobs_tracker.get_app_instances_for_agent_method(
                 &current_agent.developer,
                 &current_agent.agent,
@@ -134,6 +195,11 @@ impl SharedState {
     /// Get reference to the JobsTracker for direct access
     pub fn get_jobs_tracker(&self) -> &JobsTracker {
         &self.jobs_tracker
+    }
+    
+    /// Get reference to the AgentJobDatabase for direct access
+    pub fn get_agent_job_db(&self) -> &AgentJobDatabase {
+        &self.agent_job_db
     }
     
     /// Fast check if there are pending jobs available

@@ -55,6 +55,13 @@ dotenv = "0.15"
 hex = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
+# Cryptographic utilities
+sha2 = "0.10"
+num-bigint = "0.4"
+
+# For parallel coin management (used by sui crate)
+parking_lot = "0.12"
+
 [build-dependencies]
 tonic-build = "0.13"
 

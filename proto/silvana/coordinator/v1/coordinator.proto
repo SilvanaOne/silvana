@@ -9,7 +9,7 @@ option go_package = "github.com/SilvanaOne/zk-tests/packages/avs/rpc/proto;coord
 
 // Job message matching the partial Move struct
 message Job {
-  uint64 job_id = 1;
+  uint64 job_sequence = 1;
   optional string description = 2;
   // Metadata of the agent method to call
   string developer = 3;
@@ -21,6 +21,8 @@ message Job {
   string app_instance_method = 8;
   repeated uint64 sequences = 9;
   bytes data = 10;
+  // Generated unique job ID for agent reference
+  string job_id = 11;
   // Metadata of the job
   uint32 attempts = 12;
   // Metadata of the job
@@ -33,6 +35,7 @@ message GetJobRequest {
   string developer = 1;
   string agent = 2;
   string agent_method = 3;
+  string session_id = 4;
 }
 
 // Response message containing a job
@@ -40,7 +43,34 @@ message GetJobResponse {
   optional Job job = 1;
 }
 
+// Request message for completing a job
+message CompleteJobRequest {
+  string job_id = 1;
+  string session_id = 2;
+}
+
+// Response message for job completion
+message CompleteJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Request message for failing a job
+message FailJobRequest {
+  string job_id = 1;
+  string error_message = 2;
+  string session_id = 3;
+}
+
+// Response message for job failure
+message FailJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
+  rpc FailJob(FailJobRequest) returns (FailJobResponse);
 }

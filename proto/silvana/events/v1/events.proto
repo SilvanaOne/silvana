@@ -31,7 +31,7 @@ message AgentStartedJobEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   uint64 event_timestamp = 6;
 }
 
@@ -40,7 +40,7 @@ message AgentFinishedJobEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   uint64 duration = 6;
   uint64 event_timestamp = 7;
 }
@@ -50,7 +50,7 @@ message CoordinationTxEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   string memo = 6 [ (silvana.options.v1.search) = true];
   string tx_hash = 7 [ (silvana.options.v1.search) = true];
   uint64 event_timestamp = 8;
@@ -94,7 +94,7 @@ message AgentMessageEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   repeated uint64 sequences = 6 [ (silvana.options.v1.sequences) = true];
   uint64 event_timestamp = 7;
   LogLevel level = 8;
@@ -108,7 +108,7 @@ message AgentTransactionEvent {
   string developer = 3 [ (silvana.options.v1.search) = true];
   string agent = 4 [ (silvana.options.v1.search) = true];
   string app = 5 [ (silvana.options.v1.search) = true];
-  string job_id = 6 [ (silvana.options.v1.search) = true];
+  string job_sequence = 6 [ (silvana.options.v1.search) = true];
   repeated uint64 sequences = 7 [ (silvana.options.v1.sequences) = true];
   uint64 event_timestamp = 8;
   string tx_hash = 9 [ (silvana.options.v1.search) = true];
@@ -174,7 +174,7 @@ message AgentTransactionEventWithId {
   string developer = 4;
   string agent = 5;
   string app = 6;
-  string job_id = 7;
+  string job_sequence = 7;
   repeated uint64 sequences = 8;    // All sequences for this event
   uint64 event_timestamp = 9;
   string tx_hash = 10;
@@ -210,7 +210,7 @@ message AgentMessageEventWithId {
   string developer = 3;
   string agent = 4;
   string app = 5;
-  string job_id = 6;
+  string job_sequence = 6;
   repeated uint64 sequences = 7;
   uint64 event_timestamp = 8;
   LogLevel level = 9;
