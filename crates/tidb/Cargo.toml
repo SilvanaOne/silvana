@@ -1,20 +1,20 @@
 [package]
 name = "tidb"
-version = "0.1.0"
-edition = "2024"
-authors = ["DFST"]
-license = "Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 # Buffer integration
 buffer = { path = "../buffer" }
 
 # Async traits and error handling
-async-trait = "0.1"
-anyhow = "1.0"
+async-trait.workspace = true
+anyhow.workspace = true
 
 # Sea-ORM and Database
-sea-orm = { version = "1.1", features = ["sqlx-mysql", "runtime-tokio-rustls", "macros", "with-chrono", "with-json", "with-uuid"] }
+sea-orm.workspace = true
 
 # Time and UUID for entity fields
 

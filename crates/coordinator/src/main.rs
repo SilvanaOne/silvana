@@ -65,9 +65,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install rustls crypto provider");
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     info!("🚀 Starting Silvana Coordinator");
     info!("📦 Monitoring package: {}", args.package_id);

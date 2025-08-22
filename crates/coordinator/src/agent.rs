@@ -17,6 +17,7 @@ pub struct AgentJob {
     pub agent: String,
     pub agent_method: String,
     pub pending_job: PendingJob,
+    #[allow(dead_code)]
     pub sent_at: u64, // Unix timestamp when job was sent to agent
     pub start_tx_sent: bool, // Whether start_job transaction was sent
 }
@@ -195,6 +196,7 @@ impl AgentJobDatabase {
 
     /// Get all pending jobs that haven't been completed/failed
     /// Used for cleanup when Docker containers terminate
+    #[allow(dead_code)]
     pub async fn get_pending_jobs(&self) -> Vec<AgentJob> {
         let pending = self.pending_jobs.read().await;
         pending.values().cloned().collect()
@@ -270,6 +272,7 @@ impl AgentJobDatabase {
 
     /// Clean up pending jobs for a specific agent method
     /// Returns jobs that need to be failed on the blockchain
+    #[allow(dead_code)]
     pub async fn cleanup_pending_jobs_for_agent(
         &self,
         developer: &str,
@@ -313,6 +316,7 @@ impl AgentJobDatabase {
     }
 
     /// Get statistics about the job database
+    #[allow(dead_code)]
     pub async fn get_stats(&self) -> (usize, usize) {
         let ready_count = self.ready_jobs.read().await.len();
         let pending_count = self.pending_jobs.read().await.len();
@@ -338,8 +342,10 @@ mod tests {
     use sui_rpc::Client;
 
     fn create_test_state() -> SharedState {
-        std::env::set_var("SUI_ADDRESS", "0x123");
-        std::env::set_var("SUI_CHAIN", "testnet");
+        unsafe {
+            std::env::set_var("SUI_ADDRESS", "0x123");
+            std::env::set_var("SUI_CHAIN", "testnet");
+        }
         let client = Client::new("https://test.com".to_string()).unwrap();
         SharedState::new(client)
     }

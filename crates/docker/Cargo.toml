@@ -1,19 +1,21 @@
 [package]
 name = "docker"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 bollard = "0.19"
-tokio = { version = "1", features = ["full"] }
+tokio.workspace = true
 futures-util = "0.3"
 bytes = "1"
-chrono = "0.4"
-anyhow = "1"
-thiserror = "1"
-tracing = "0.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+chrono.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,34 +1,36 @@
 [package]
 name = "sui"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-anyhow = "1.0"
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tracing = "0.1"
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
 base64ct = { version = "1.6", features = ["alloc"] }
 bech32 = "0.9"
-hex = "0.4"
-prost = "0.13"
-prost-types = "0.13"
+hex.workspace = true
+prost.workspace = true
+prost-types.workspace = true
 
 # Sui dependencies
-sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
-sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
-sui-crypto = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", features = ["ed25519"] }
-sui-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
+sui-rpc.workspace = true
+sui-sdk-types.workspace = true
+sui-crypto.workspace = true
+sui-transaction-builder.workspace = true
 
 # For Move call
-bcs = "0.1"
+bcs.workspace = true
 
 # For keypair generation
 blake2 = "0.10"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
-rand = "0.8"
-tracing-subscriber = "0.3"
+rand.workspace = true
+tracing-subscriber.workspace = true
 
 # For parallel coin management
-parking_lot = "0.12"
+parking_lot.workspace = true

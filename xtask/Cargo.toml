@@ -1,11 +1,13 @@
 [package]
 name = "xtask"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap.workspace = true
 duct = "1.0"             
-anyhow = "1.0.98"
+anyhow.workspace = true
 secrets-client = { path = "../crates/secrets-client" }
-tokio = { version = "1", features = ["full"] }
+tokio.workspace = true

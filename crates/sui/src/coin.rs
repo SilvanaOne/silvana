@@ -1,4 +1,5 @@
 use anyhow::Result;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -6,9 +7,7 @@ use std::time::{Duration, Instant};
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
-use parking_lot::Mutex;
 
-const MIN_BALANCE: u64 = 100_000_000;
 const MAX_RETRIES: u32 = 6;
 const RETRY_DELAY_MS: u64 = 500;
 
@@ -107,11 +106,11 @@ pub async fn fetch_coin(
     min_balance: u64,
 ) -> Result<Option<(CoinInfo, CoinLockGuard)>> {
     let lock_manager = get_coin_lock_manager();
-    
+
     for attempt in 1..=MAX_RETRIES {
         let mut client = GrpcClient::new(rpc_url.to_string())?;
         let mut live = client.live_data_client();
-        
+
         // List owned objects to find SUI coins
         let resp = live
             .list_owned_objects(proto::ListOwnedObjectsRequest {
@@ -121,7 +120,7 @@ pub async fn fetch_coin(
                 read_mask: Some(prost_types::FieldMask {
                     paths: vec![
                         "object_id".into(),
-                        "version".into(), 
+                        "version".into(),
                         "digest".into(),
                         "object_type".into(),
                         "contents".into(),
@@ -133,13 +132,13 @@ pub async fn fetch_coin(
             .into_inner();
 
         for obj in resp.objects {
-            if let (Some(id_str), Some(version), Some(digest_str)) = 
-                (&obj.object_id, obj.version, &obj.digest) {
-                    
+            if let (Some(id_str), Some(version), Some(digest_str)) =
+                (&obj.object_id, obj.version, &obj.digest)
+            {
                 let object_id = sui::Address::from_str(id_str)?;
                 let digest = sui::Digest::from_base58(digest_str)?;
                 let object_ref = sui::ObjectReference::new(object_id, version, digest);
-                
+
                 // Extract coin balance from contents if available
                 let balance = if let Some(contents) = &obj.contents {
                     if let Some(value) = &contents.value {
@@ -151,7 +150,7 @@ pub async fn fetch_coin(
                     // Fallback: fetch object details to get balance
                     get_coin_balance_via_get_object(rpc_url, &object_ref).await?
                 };
-                
+
                 if balance >= min_balance {
                     // Try to lock this coin atomically
                     if let Some(guard) = lock_manager.try_lock_coin(object_id) {
@@ -192,10 +191,13 @@ fn extract_coin_balance_from_contents(contents: &[u8]) -> Result<u64> {
 }
 
 /// Gets the balance of a specific coin object via get_object RPC
-async fn get_coin_balance_via_get_object(rpc_url: &str, object_ref: &sui::ObjectReference) -> Result<u64> {
+async fn get_coin_balance_via_get_object(
+    rpc_url: &str,
+    object_ref: &sui::ObjectReference,
+) -> Result<u64> {
     let mut client = GrpcClient::new(rpc_url.to_string())?;
     let mut ledger = client.ledger_client();
-    
+
     let resp = ledger
         .get_object(proto::GetObjectRequest {
             object_id: Some(object_ref.object_id().to_string()),
@@ -206,7 +208,7 @@ async fn get_coin_balance_via_get_object(rpc_url: &str, object_ref: &sui::Object
         })
         .await?
         .into_inner();
-        
+
     if let Some(obj) = resp.object {
         if let Some(contents) = obj.contents {
             if let Some(value) = contents.value {
@@ -214,18 +216,15 @@ async fn get_coin_balance_via_get_object(rpc_url: &str, object_ref: &sui::Object
             }
         }
     }
-    
+
     Ok(0)
 }
 
 /// Lists all available coins for a sender with their balances
-pub async fn list_coins(
-    rpc_url: &str,
-    sender: sui::Address,
-) -> Result<Vec<CoinInfo>> {
+pub async fn list_coins(rpc_url: &str, sender: sui::Address) -> Result<Vec<CoinInfo>> {
     let mut client = GrpcClient::new(rpc_url.to_string())?;
     let mut live = client.live_data_client();
-    
+
     let resp = live
         .list_owned_objects(proto::ListOwnedObjectsRequest {
             owner: Some(sender.to_string()),
@@ -246,15 +245,15 @@ pub async fn list_coins(
         .into_inner();
 
     let mut coins = Vec::new();
-    
+
     for obj in resp.objects {
-        if let (Some(id_str), Some(version), Some(digest_str)) = 
-            (&obj.object_id, obj.version, &obj.digest) {
-                
+        if let (Some(id_str), Some(version), Some(digest_str)) =
+            (&obj.object_id, obj.version, &obj.digest)
+        {
             let object_id = sui::Address::from_str(id_str)?;
             let digest = sui::Digest::from_base58(digest_str)?;
             let object_ref = sui::ObjectReference::new(object_id, version, digest);
-            
+
             let balance = if let Some(contents) = &obj.contents {
                 if let Some(value) = &contents.value {
                     extract_coin_balance_from_contents(value)?
@@ -264,14 +263,14 @@ pub async fn list_coins(
             } else {
                 get_coin_balance_via_get_object(rpc_url, &object_ref).await?
             };
-            
+
             coins.push(CoinInfo {
                 object_ref,
                 balance,
             });
         }
     }
-    
+
     Ok(coins)
 }
 
@@ -324,7 +323,7 @@ mod tests {
         let mut coin_data = vec![0u8; 40];
         // Set balance to 1000000000 (little endian)
         coin_data[32..40].copy_from_slice(&1000000000u64.to_le_bytes());
-        
+
         let balance = extract_coin_balance_from_contents(&coin_data).unwrap();
         assert_eq!(balance, 1000000000);
 

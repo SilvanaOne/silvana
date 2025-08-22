@@ -52,6 +52,7 @@ impl JobSearcher {
     }
     
     /// Set the secrets client for retrieving secrets during job execution
+    #[allow(dead_code)]
     pub fn with_secrets_client(mut self, secrets_client: SecretsClient) -> Self {
         self.secrets_client = Some(secrets_client);
         self
