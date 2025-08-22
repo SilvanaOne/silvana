@@ -105,6 +105,7 @@ export const AddProgram = ZkProgram({
         AddProgramCommitment,
         AddProgramCommitment,
       ],
+      auxiliaryOutput: AddMap,
       async method(
         input: AddProgramState,
         index: UInt32,
@@ -155,6 +156,7 @@ export const AddProgram = ZkProgram({
             length: map.length,
             commitment,
           }),
+          auxiliaryOutput: map,
         };
       },
     },
@@ -167,6 +169,7 @@ export const AddProgram = ZkProgram({
         AddProgramCommitment,
         AddProgramCommitment,
       ],
+      auxiliaryOutput: AddMap,
       async method(
         input: AddProgramState,
         index: UInt32,
@@ -217,6 +220,7 @@ export const AddProgram = ZkProgram({
             length: map.length,
             commitment,
           }),
+          auxiliaryOutput: map,
         };
       },
     },
