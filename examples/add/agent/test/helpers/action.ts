@@ -127,7 +127,8 @@ export async function action(params: {
       event.type.endsWith("::main::ValueMultipliedEvent")
     ) {
       const json = event.parsedJson as any;
-      //console.log("json", json);
+      
+      // Updated for nested CommitmentData structure
       actionResult = {
         index: json.index,
         value: BigInt(json.amount_added || json.multiplier),
@@ -135,12 +136,12 @@ export async function action(params: {
         new_value: BigInt(json.new_value),
         old_sum: BigInt(json.old_sum),
         old_value: BigInt(json.old_value),
-        old_actions_commitment: convertCommitment(json.old_actions_commitment),
-        new_actions_commitment: convertCommitment(json.new_actions_commitment),
-        old_state_commitment: convertCommitment(json.old_state_commitment),
-        new_state_commitment: convertCommitment(json.new_state_commitment),
-        old_actions_sequence: BigInt(json.old_actions_sequence),
-        new_actions_sequence: BigInt(json.new_actions_sequence),
+        old_actions_commitment: convertCommitment(json.old_commitment?.actions_commitment),
+        new_actions_commitment: convertCommitment(json.new_commitment?.actions_commitment),
+        old_state_commitment: convertCommitment(json.old_commitment?.state_commitment),
+        new_state_commitment: convertCommitment(json.new_commitment?.state_commitment),
+        old_actions_sequence: BigInt(json.old_commitment?.actions_sequence || 0),
+        new_actions_sequence: BigInt(json.new_commitment?.actions_sequence || 0),
       };
     } else if (event.type.endsWith("::jobs::JobCreatedEvent")) {
       jobCreatedEvent = event.parsedJson as JobCreatedEvent;

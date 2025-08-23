@@ -5,7 +5,9 @@ use commitment::state::{
     create_state_update,
     commit_action,
     get_state_element,
-    has_state_element
+    has_state_element,
+    get_commitment_data,
+    CommitmentData
 };
 use coordination::app_instance::{AppInstance, AppInstanceCap};
 use coordination::registry::{
@@ -47,12 +49,8 @@ public struct ValueAddedEvent has copy, drop {
     amount_added: u256,
     old_sum: u256,
     new_sum: u256,
-    old_actions_commitment: Element<Scalar>,
-    old_actions_sequence: u64,
-    old_state_commitment: Element<Scalar>,
-    new_actions_commitment: Element<Scalar>,
-    new_actions_sequence: u64,
-    new_state_commitment: Element<Scalar>,
+    old_commitment: CommitmentData,
+    new_commitment: CommitmentData,
 }
 
 public struct ValueMultipliedEvent has copy, drop {
@@ -63,12 +61,8 @@ public struct ValueMultipliedEvent has copy, drop {
     multiplier: u256,
     old_sum: u256,
     new_sum: u256,
-    old_actions_commitment: Element<Scalar>,
-    old_actions_sequence: u64,
-    old_state_commitment: Element<Scalar>,
-    new_actions_commitment: Element<Scalar>,
-    new_actions_sequence: u64,
-    new_state_commitment: Element<Scalar>,
+    old_commitment: CommitmentData,
+    new_commitment: CommitmentData,
 }
 
 const SUM_INDEX: u32 = 0;
@@ -78,12 +72,8 @@ public struct JobData has copy, drop {
     index: u32,
     value: u256,
     old_value: u256,
-    old_actions_commitment: Element<Scalar>,
-    old_state_commitment: Element<Scalar>,
-    old_actions_sequence: u64,
-    new_actions_commitment: Element<Scalar>,
-    new_state_commitment: Element<Scalar>,
-    new_actions_sequence: u64,
+    old_commitment: CommitmentData,
+    new_commitment: CommitmentData,
     block_number: u64,
     sequence: u64,
 }
@@ -157,11 +147,8 @@ public fun add(
     let old_sum = get_sum(instance);
     let state = instance.state_mut(&app.instance_cap);
 
-    // Get old commitment
-    let old_actions_commitment_data = state.get_actions_commitment();
-    let old_actions_commitment = old_actions_commitment_data.get_commitment();
-    let old_actions_sequence = old_actions_commitment_data.get_sequence();
-    let old_state_commitment = state.get_state_commitment();
+    // Get old commitment data
+    let old_commitment = get_commitment_data(state);
 
     // Create action
     let action = create_action(
@@ -180,23 +167,16 @@ public fun add(
         ctx,
     );
 
-    // Get new commitment
-    let new_actions_commitment_data = state.get_actions_commitment();
-    let new_actions_commitment = new_actions_commitment_data.get_commitment();
-    let new_actions_sequence = new_actions_commitment_data.get_sequence();
-    let new_state_commitment = state.get_state_commitment();
+    // Get new commitment data
+    let new_commitment = get_commitment_data(state);
 
     // Create job for this add operation
     let job_data_struct = JobData { 
         index, 
         value,
         old_value,
-        old_actions_commitment,
-        old_state_commitment,
-        old_actions_sequence,
-        new_actions_commitment,
-        new_state_commitment,
-        new_actions_sequence,
+        old_commitment,
+        new_commitment,
         block_number: instance.block_number(),
         sequence: instance.sequence(),
     };
@@ -220,12 +200,8 @@ public fun add(
         amount_added: value,
         old_sum,
         new_sum,
-        old_actions_commitment,
-        old_actions_sequence,
-        old_state_commitment,
-        new_actions_commitment,
-        new_actions_sequence,
-        new_state_commitment,
+        old_commitment,
+        new_commitment,
     });
     coordination::app_instance::increase_sequence(instance, clock, ctx);
 }
@@ -245,11 +221,8 @@ public fun multiply(
     let old_sum = get_sum(instance);
     let state = instance.state_mut(&app.instance_cap);
 
-    // Get old commitment
-    let old_actions_commitment_data = state.get_actions_commitment();
-    let old_actions_commitment = old_actions_commitment_data.get_commitment();
-    let old_actions_sequence = old_actions_commitment_data.get_sequence();
-    let old_state_commitment = state.get_state_commitment();
+    // Get old commitment data
+    let old_commitment = get_commitment_data(state);
 
     // Create action
     let action = create_action(
@@ -268,23 +241,16 @@ public fun multiply(
         ctx,
     );
 
-    // Get new commitment
-    let new_actions_commitment_data = state.get_actions_commitment();
-    let new_actions_commitment = new_actions_commitment_data.get_commitment();
-    let new_actions_sequence = new_actions_commitment_data.get_sequence();
-    let new_state_commitment = state.get_state_commitment();
+    // Get new commitment data
+    let new_commitment = get_commitment_data(state);
 
     // Create job for this multiply operation
     let job_data_struct = JobData { 
         index, 
         value,
         old_value,
-        old_actions_commitment,
-        old_state_commitment,
-        old_actions_sequence,
-        new_actions_commitment,
-        new_state_commitment,
-        new_actions_sequence,
+        old_commitment,
+        new_commitment,
         block_number: instance.block_number(),
         sequence: instance.sequence(),
     };
@@ -308,12 +274,8 @@ public fun multiply(
         multiplier: value,
         old_sum,
         new_sum,
-        old_actions_commitment,
-        old_actions_sequence,
-        old_state_commitment,
-        new_actions_commitment,
-        new_actions_sequence,
-        new_state_commitment,
+        old_commitment,
+        new_commitment,
     });
     coordination::app_instance::increase_sequence(instance, clock, ctx);
 }

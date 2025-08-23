@@ -1,6 +1,18 @@
 import { bcs } from "@mysten/sui/bcs";
 import { UInt64 } from "o1js";
-import { Fr, scalar, rScalarPow } from "@silvana-one/mina-utils";
+import { scalar, rScalarPow } from "@silvana-one/mina-utils";
+import type { CanonicalElement } from "@silvana-one/mina-utils";
+
+/**
+ * CommitmentData struct matching the Move definition in state.move
+ *
+ * Move struct:
+ * public struct CommitmentData has copy, drop {
+ *     actions_commitment: Element<Scalar>,
+ *     actions_sequence: u64,
+ *     state_commitment: Element<Scalar>,
+ * }
+ */
 
 /**
  * JobData struct matching the Move definition in main.move
@@ -10,38 +22,42 @@ import { Fr, scalar, rScalarPow } from "@silvana-one/mina-utils";
  *     index: u32,
  *     value: u256,
  *     old_value: u256,
- *     old_actions_commitment: Element<Scalar>,
- *     old_state_commitment: Element<Scalar>,
- *     old_actions_sequence: u64,
- *     new_actions_commitment: Element<Scalar>,
- *     new_state_commitment: Element<Scalar>,
- *     new_actions_sequence: u64,
+ *     old_commitment: CommitmentData,
+ *     new_commitment: CommitmentData,
  *     block_number: u64,
  *     sequence: u64,
  * }
  */
 
-// Element<Scalar> is serialized as bytes vector in Move
-const ElementScalar = bcs.vector(bcs.u8());
+// Element<Scalar> is a struct with bytes field (from group_ops.move line 22-24)
+const ElementScalar = bcs.struct("Element", {
+  bytes: bcs.vector(bcs.u8())
+});
+
+export const CommitmentDataBcs = bcs.struct("CommitmentData", {
+  actions_commitment: ElementScalar,
+  actions_sequence: bcs.u64(),
+  state_commitment: ElementScalar,
+});
 
 export const JobDataBcs = bcs.struct("JobData", {
   index: bcs.u32(),
   value: bcs.u256(),
   old_value: bcs.u256(),
-  old_actions_commitment: ElementScalar,
-  old_state_commitment: ElementScalar,
-  old_actions_sequence: bcs.u64(),
-  new_actions_commitment: ElementScalar,
-  new_state_commitment: ElementScalar,
-  new_actions_sequence: bcs.u64(),
+  old_commitment: CommitmentDataBcs,
+  new_commitment: CommitmentDataBcs,
   block_number: bcs.u64(),
   sequence: bcs.u64(),
 });
 
 /**
- * Canonical Element type representing a BLS12-381 scalar as a bigint
+ * Raw CommitmentData as returned by BCS deserialization
  */
-export type CanonicalElement = bigint;
+export interface RawCommitmentData {
+  actions_commitment: { bytes: number[] }; // Element struct with bytes vector
+  actions_sequence: string; // BCS returns u64 as string
+  state_commitment: { bytes: number[] }; // Element struct with bytes vector
+}
 
 /**
  * Raw JobData as returned by BCS deserialization
@@ -50,14 +66,19 @@ export interface RawJobData {
   index: number;
   value: string; // BCS returns u256 as string
   old_value: string; // BCS returns u256 as string
-  old_actions_commitment: number[]; // BCS returns fixedArray as number[]
-  old_state_commitment: number[]; // BCS returns fixedArray as number[]
-  old_actions_sequence: string; // BCS returns u64 as string
-  new_actions_commitment: number[]; // BCS returns fixedArray as number[]
-  new_state_commitment: number[]; // BCS returns fixedArray as number[]
-  new_actions_sequence: string; // BCS returns u64 as string
+  old_commitment: RawCommitmentData;
+  new_commitment: RawCommitmentData;
   block_number: string; // BCS returns u64 as string
   sequence: string; // BCS returns u64 as string
+}
+
+/**
+ * Processed CommitmentData with provable commitment representations
+ */
+export interface CommitmentData {
+  actions_commitment: CanonicalElement; // Provable scalar
+  actions_sequence: bigint; // u64 as bigint for numeric operations
+  state_commitment: CanonicalElement; // Provable scalar
 }
 
 /**
@@ -65,16 +86,12 @@ export interface RawJobData {
  */
 export interface JobData {
   index: number;
-  value: string; // BCS returns u256 as string
-  old_value: string; // BCS returns u256 as string
-  old_actions_commitment: Fr.Canonical.provable; // Provable scalar
-  old_state_commitment: Fr.Canonical.provable; // Provable scalar
-  old_actions_sequence: string; // BCS returns u64 as string
-  new_actions_commitment: Fr.Canonical.provable; // Provable scalar
-  new_state_commitment: Fr.Canonical.provable; // Provable scalar
-  new_actions_sequence: string; // BCS returns u64 as string
-  block_number: string; // BCS returns u64 as string
-  sequence: string; // BCS returns u64 as string
+  value: bigint; // u256 as bigint for numeric operations
+  old_value: bigint; // u256 as bigint for numeric operations
+  old_commitment: CommitmentData;
+  new_commitment: CommitmentData;
+  block_number: bigint; // u64 as bigint for numeric operations
+  sequence: bigint; // u64 as bigint for numeric operations
 }
 
 /**
@@ -83,7 +100,7 @@ export interface JobData {
  * @param bytes - Byte array representing Element<Scalar>
  * @returns BigInt representation
  */
-export function commitmentArrayToBigInt(bytes: number[]): CanonicalElement {
+export function commitmentArrayToBigInt(bytes: number[]): bigint {
   let result = 0n;
   for (let i = 0; i < bytes.length; i++) {
     result = result * 256n + BigInt(bytes[i]);
@@ -96,7 +113,7 @@ export function commitmentArrayToBigInt(bytes: number[]): CanonicalElement {
  * @param value - BigInt representation
  * @returns 32-byte array for BCS compatibility
  */
-export function bigIntToCommitmentArray(value: CanonicalElement): number[] {
+export function bigIntToCommitmentArray(value: bigint): number[] {
   const bytes: number[] = new Array(32).fill(0);
   let remaining = value;
 
@@ -128,24 +145,28 @@ export function deserializeJobData(data: number[] | Uint8Array): JobData {
 
   return {
     index: rawJobData.index,
-    value: rawJobData.value,
-    old_value: rawJobData.old_value,
-    old_actions_commitment: scalar(
-      commitmentArrayToBigInt(rawJobData.old_actions_commitment)
-    ),
-    old_state_commitment: scalar(
-      commitmentArrayToBigInt(rawJobData.old_state_commitment)
-    ),
-    old_actions_sequence: rawJobData.old_actions_sequence,
-    new_actions_commitment: scalar(
-      commitmentArrayToBigInt(rawJobData.new_actions_commitment)
-    ),
-    new_state_commitment: scalar(
-      commitmentArrayToBigInt(rawJobData.new_state_commitment)
-    ),
-    new_actions_sequence: rawJobData.new_actions_sequence,
-    block_number: rawJobData.block_number,
-    sequence: rawJobData.sequence,
+    value: BigInt(rawJobData.value),
+    old_value: BigInt(rawJobData.old_value),
+    old_commitment: {
+      actions_commitment: scalar(
+        commitmentArrayToBigInt(rawJobData.old_commitment.actions_commitment.bytes)
+      ),
+      actions_sequence: BigInt(rawJobData.old_commitment.actions_sequence),
+      state_commitment: scalar(
+        commitmentArrayToBigInt(rawJobData.old_commitment.state_commitment.bytes)
+      ),
+    },
+    new_commitment: {
+      actions_commitment: scalar(
+        commitmentArrayToBigInt(rawJobData.new_commitment.actions_commitment.bytes)
+      ),
+      actions_sequence: BigInt(rawJobData.new_commitment.actions_sequence),
+      state_commitment: scalar(
+        commitmentArrayToBigInt(rawJobData.new_commitment.state_commitment.bytes)
+      ),
+    },
+    block_number: BigInt(rawJobData.block_number),
+    sequence: BigInt(rawJobData.sequence),
   };
 }
 
@@ -154,7 +175,7 @@ export function deserializeJobData(data: number[] | Uint8Array): JobData {
  * @param provable - Fr.Canonical.provable object
  * @returns BigInt representation
  */
-function provableToBigInt(provable: Fr.Canonical.provable): CanonicalElement {
+function provableToBigInt(provable: CanonicalElement): bigint {
   return provable.toBigInt();
 }
 
@@ -167,24 +188,28 @@ export function serializeJobData(jobData: JobData): Uint8Array {
   // Convert back to raw format for serialization
   const rawJobData: RawJobData = {
     index: jobData.index,
-    value: jobData.value,
-    old_value: jobData.old_value,
-    old_actions_commitment: bigIntToCommitmentArray(
-      provableToBigInt(jobData.old_actions_commitment)
-    ),
-    old_state_commitment: bigIntToCommitmentArray(
-      provableToBigInt(jobData.old_state_commitment)
-    ),
-    old_actions_sequence: jobData.old_actions_sequence,
-    new_actions_commitment: bigIntToCommitmentArray(
-      provableToBigInt(jobData.new_actions_commitment)
-    ),
-    new_state_commitment: bigIntToCommitmentArray(
-      provableToBigInt(jobData.new_state_commitment)
-    ),
-    new_actions_sequence: jobData.new_actions_sequence,
-    block_number: jobData.block_number,
-    sequence: jobData.sequence,
+    value: jobData.value.toString(),
+    old_value: jobData.old_value.toString(),
+    old_commitment: {
+      actions_commitment: { bytes: bigIntToCommitmentArray(
+        provableToBigInt(jobData.old_commitment.actions_commitment)
+      ) },
+      actions_sequence: jobData.old_commitment.actions_sequence.toString(),
+      state_commitment: { bytes: bigIntToCommitmentArray(
+        provableToBigInt(jobData.old_commitment.state_commitment)
+      ) },
+    },
+    new_commitment: {
+      actions_commitment: { bytes: bigIntToCommitmentArray(
+        provableToBigInt(jobData.new_commitment.actions_commitment)
+      ) },
+      actions_sequence: jobData.new_commitment.actions_sequence.toString(),
+      state_commitment: { bytes: bigIntToCommitmentArray(
+        provableToBigInt(jobData.new_commitment.state_commitment)
+      ) },
+    },
+    block_number: jobData.block_number.toString(),
+    sequence: jobData.sequence.toString(),
   };
 
   return JobDataBcs.serialize(rawJobData).toBytes();
@@ -195,16 +220,16 @@ export function serializeJobData(jobData: JobData): Uint8Array {
  */
 export interface ProcessedCommitments {
   oldCommitment: {
-    actionsCommitment: Fr.Canonical.provable;
-    stateCommitment: Fr.Canonical.provable;
+    actionsCommitment: CanonicalElement;
+    stateCommitment: CanonicalElement;
     actionsSequence: UInt64;
-    actionsRPower: Fr.Canonical.provable;
+    actionsRPower: CanonicalElement;
   };
   newCommitment: {
-    actionsCommitment: Fr.Canonical.provable;
-    stateCommitment: Fr.Canonical.provable;
+    actionsCommitment: CanonicalElement;
+    stateCommitment: CanonicalElement;
     actionsSequence: UInt64;
-    actionsRPower: Fr.Canonical.provable;
+    actionsRPower: CanonicalElement;
   };
 }
 
@@ -216,26 +241,26 @@ export interface ProcessedCommitments {
 export function processCommitments(jobData: JobData): ProcessedCommitments {
   return {
     oldCommitment: {
-      actionsCommitment: jobData.old_actions_commitment,
-      stateCommitment: jobData.old_state_commitment,
-      actionsSequence: UInt64.from(jobData.old_actions_sequence),
-      actionsRPower: rScalarPow(BigInt(jobData.old_actions_sequence)),
+      actionsCommitment: jobData.old_commitment.actions_commitment,
+      stateCommitment: jobData.old_commitment.state_commitment,
+      actionsSequence: UInt64.from(jobData.old_commitment.actions_sequence),
+      actionsRPower: rScalarPow(jobData.old_commitment.actions_sequence),
     },
     newCommitment: {
-      actionsCommitment: jobData.new_actions_commitment,
-      stateCommitment: jobData.new_state_commitment,
-      actionsSequence: UInt64.from(jobData.new_actions_sequence),
-      actionsRPower: rScalarPow(BigInt(jobData.new_actions_sequence)),
+      actionsCommitment: jobData.new_commitment.actions_commitment,
+      stateCommitment: jobData.new_commitment.state_commitment,
+      actionsSequence: UInt64.from(jobData.new_commitment.actions_sequence),
+      actionsRPower: rScalarPow(jobData.new_commitment.actions_sequence),
     },
   };
 }
 
 /**
- * Helper function to convert CanonicalElement to hex string
- * @param element - CanonicalElement (bigint) representing an Element<Scalar>
+ * Helper function to convert bigint to hex string
+ * @param element - bigint (bigint) representing an Element<Scalar>
  * @returns Hex string representation
  */
-export function elementToHex(element: CanonicalElement | number[]): string {
+export function elementToHex(element: bigint | number[]): string {
   if (typeof element === "bigint") {
     // Convert bigint to hex with proper padding
     return "0x" + element.toString(16).padStart(64, "0");
@@ -246,11 +271,11 @@ export function elementToHex(element: CanonicalElement | number[]): string {
 }
 
 /**
- * Helper function to convert hex string to CanonicalElement
+ * Helper function to convert hex string to bigint
  * @param hex - Hex string (with or without 0x prefix)
- * @returns CanonicalElement (bigint)
+ * @returns bigint (bigint)
  */
-export function hexToElement(hex: string): CanonicalElement {
+export function hexToElement(hex: string): bigint {
   const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
   if (cleanHex.length !== 64) {
     throw new Error("Element<Scalar> hex must be 64 characters (32 bytes)");
@@ -263,7 +288,7 @@ export function hexToElement(hex: string): CanonicalElement {
  * Legacy helper function to convert Element<Scalar> bytes to hex string
  * @param elementBytes - 32 bytes representing an Element<Scalar> (as number[] from BCS)
  * @returns Hex string representation
- * @deprecated Use elementToHex with CanonicalElement instead
+ * @deprecated Use elementToHex with bigint instead
  */
 export function elementBytesToHex(elementBytes: number[]): string {
   return (
@@ -275,7 +300,7 @@ export function elementBytesToHex(elementBytes: number[]): string {
  * Legacy helper function to convert hex string to Element<Scalar> bytes
  * @param hex - Hex string (with or without 0x prefix)
  * @returns 32-byte number array (for BCS compatibility)
- * @deprecated Use hexToElement with CanonicalElement instead
+ * @deprecated Use hexToElement with bigint instead
  */
 export function hexToElementBytes(hex: string): number[] {
   const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;

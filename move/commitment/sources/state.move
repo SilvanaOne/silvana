@@ -65,6 +65,12 @@ public struct StateElementUpdatedEvent has copy, drop {
     new_commitment: Element<Scalar>,
 }
 
+public struct CommitmentData has copy, drop {
+    actions_commitment: Element<Scalar>,
+    actions_sequence: u64,
+    state_commitment: Element<Scalar>,
+}
+
 /// Create a new AppState
 public fun create_app_state(ctx: &mut TxContext): AppState {
     let app_state_id = object::new(ctx);
@@ -254,4 +260,24 @@ public fun get_state_update_new_state(
     state_update: &StateUpdate,
 ): &vector<u256> {
     &state_update.new_state
+}
+
+public fun get_commitment_data(app_state: &AppState): CommitmentData {
+    CommitmentData {
+        actions_commitment: app_state.actions_commitment.get_commitment(),
+        actions_sequence: app_state.actions_commitment.get_sequence(),
+        state_commitment: app_state.state_commitment,
+    }
+}
+
+public fun get_commitment_data_actions_commitment(commitment_data: &CommitmentData): Element<Scalar> {
+    commitment_data.actions_commitment
+}
+
+public fun get_commitment_data_actions_sequence(commitment_data: &CommitmentData): u64 {
+    commitment_data.actions_sequence
+}
+
+public fun get_commitment_data_state_commitment(commitment_data: &CommitmentData): Element<Scalar> {
+    commitment_data.state_commitment
 }
