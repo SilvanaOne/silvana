@@ -16,24 +16,18 @@ ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=gcc
 # Set working directory
 WORKDIR /app
 
-# Limited number of crates
-COPY docker/rpc/Cargo.toml ./
-
-# Copy dependency lock file
+# Copy workspace root files
+COPY Cargo.toml ./
 COPY Cargo.lock ./
 
 # Copy proto files (needed by proto crate build script)
 COPY proto/ ./proto/
 
-# Copy all required crates
-COPY crates/proto/ ./crates/proto/
-COPY crates/tidb/ ./crates/tidb/
-COPY crates/rpc/ ./crates/rpc/
-COPY crates/monitoring/ ./crates/monitoring/
-COPY crates/buffer/ ./crates/buffer/
-COPY crates/nats/ ./crates/nats/
-COPY crates/db/ ./crates/db/
-COPY crates/kms/ ./crates/kms/
+# Copy all crates
+COPY crates/ ./crates/
+
+# Copy xtask crate (required by workspace)
+COPY xtask/ ./xtask/
 
 # Build the RPC server in release mode for ARM64
 RUN cargo build --release --target aarch64-unknown-linux-gnu -p rpc
