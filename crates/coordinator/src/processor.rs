@@ -277,7 +277,7 @@ impl EventProcessor {
                 self.process_coordination_event(event).await?;
             }
 
-            if checkpoint_count % 100 == 0 {
+            if checkpoint_count % 10000 == 0 {
                 info!("Processed {} checkpoints so far...", checkpoint_count);
             }
         }

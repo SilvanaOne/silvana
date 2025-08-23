@@ -2,8 +2,18 @@
 // @generated from file silvana/events/v1/events.proto (package silvana.events.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type {
+  GenEnum,
+  GenFile,
+  GenMessage,
+  GenService,
+} from "@bufbuild/protobuf/codegenv2";
+import {
+  enumDesc,
+  fileDesc,
+  messageDesc,
+  serviceDesc,
+} from "@bufbuild/protobuf/codegenv2";
 import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
 import { file_silvana_options_v1_options } from "../../options/v1/options_pb.js";
 import type { Message } from "@bufbuild/protobuf";
@@ -11,276 +21,292 @@ import type { Message } from "@bufbuild/protobuf";
 /**
  * Describes the file silvana/events/v1/events.proto.
  */
-export const file_silvana_events_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("Ch5zaWx2YW5hL2V2ZW50cy92MS9ldmVudHMucHJvdG8SEXNpbHZhbmEuZXZlbnRzLnYxIocBChdDb29yZGluYXRvclN0YXJ0ZWRFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIYChBldGhlcmV1bV9hZGRyZXNzGAIgASgJEhsKE3N1aV9lZDI1NTE5X2FkZHJlc3MYAyABKAkSFwoPZXZlbnRfdGltZXN0YW1wGAQgASgEIqoBChRBZ2VudFN0YXJ0ZWRKb2JFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESEQoDYXBwGAQgASgJQgT4jxsBEhoKDGpvYl9zZXF1ZW5jZRgFIAEoCUIE+I8bARIXCg9ldmVudF90aW1lc3RhbXAYBiABKAQivQEKFUFnZW50RmluaXNoZWRKb2JFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESEQoDYXBwGAQgASgJQgT4jxsBEhoKDGpvYl9zZXF1ZW5jZRgFIAEoCUIE+I8bARIQCghkdXJhdGlvbhgGIAEoBBIXCg9ldmVudF90aW1lc3RhbXAYByABKAQi1AEKE0Nvb3JkaW5hdGlvblR4RXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoJZGV2ZWxvcGVyGAIgASgJQgT4jxsBEhMKBWFnZW50GAMgASgJQgT4jxsBEhEKA2FwcBgEIAEoCUIE+I8bARIaCgxqb2Jfc2VxdWVuY2UYBSABKAlCBPiPGwESEgoEbWVtbxgGIAEoCUIE+I8bARIVCgd0eF9oYXNoGAcgASgJQgT4jxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgIIAEoBCKTAQoXQ29vcmRpbmF0b3JNZXNzYWdlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAIgASgEEioKBWxldmVsGAMgASgOMhsuc2lsdmFuYS5ldmVudHMudjEuTG9nTGV2ZWwSFQoHbWVzc2FnZRgEIAEoCUIE+I8bASL4AQoWQ2xpZW50VHJhbnNhY3Rpb25FdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESEQoDYXBwGAQgASgJQgT4jxsBEhkKEWNsaWVudF9pcF9hZGRyZXNzGAUgASgJEhQKBm1ldGhvZBgGIAEoCUIE+I8bARIMCgRkYXRhGAcgASgMEhUKB3R4X2hhc2gYCCABKAlCBPiPGwESEAoIc2VxdWVuY2UYCSABKAQSFwoPZXZlbnRfdGltZXN0YW1wGAogASgEIskDChBDb29yZGluYXRvckV2ZW50EkkKE2Nvb3JkaW5hdG9yX3N0YXJ0ZWQYASABKAsyKi5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvclN0YXJ0ZWRFdmVudEgAEkQKEWFnZW50X3N0YXJ0ZWRfam9iGAIgASgLMicuc2lsdmFuYS5ldmVudHMudjEuQWdlbnRTdGFydGVkSm9iRXZlbnRIABJGChJhZ2VudF9maW5pc2hlZF9qb2IYAyABKAsyKC5zaWx2YW5hLmV2ZW50cy52MS5BZ2VudEZpbmlzaGVkSm9iRXZlbnRIABJBCg9jb29yZGluYXRpb25fdHgYBCABKAsyJi5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRpb25UeEV2ZW50SAASRwoRY29vcmRpbmF0b3JfZXJyb3IYBSABKAsyKi5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvck1lc3NhZ2VFdmVudEgAEkcKEmNsaWVudF90cmFuc2FjdGlvbhgGIAEoCzIpLnNpbHZhbmEuZXZlbnRzLnYxLkNsaWVudFRyYW5zYWN0aW9uRXZlbnRIAEIHCgVldmVudCKDAgoRQWdlbnRNZXNzYWdlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoJZGV2ZWxvcGVyGAIgASgJQgT4jxsBEhMKBWFnZW50GAMgASgJQgT4jxsBEhEKA2FwcBgEIAEoCUIE+I8bARIaCgxqb2Jfc2VxdWVuY2UYBSABKAlCBPiPGwESFwoJc2VxdWVuY2VzGAYgAygEQgTwjxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgHIAEoBBIqCgVsZXZlbBgIIAEoDjIbLnNpbHZhbmEuZXZlbnRzLnYxLkxvZ0xldmVsEhUKB21lc3NhZ2UYCSABKAlCBPiPGwEi3AIKFUFnZW50VHJhbnNhY3Rpb25FdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIVCgd0eF90eXBlGAIgASgJQgT4jxsBEhcKCWRldmVsb3BlchgDIAEoCUIE+I8bARITCgVhZ2VudBgEIAEoCUIE+I8bARIRCgNhcHAYBSABKAlCBPiPGwESGgoMam9iX3NlcXVlbmNlGAYgASgJQgT4jxsBEhcKCXNlcXVlbmNlcxgHIAMoBEIE8I8bARIXCg9ldmVudF90aW1lc3RhbXAYCCABKAQSFQoHdHhfaGFzaBgJIAEoCUIE+I8bARITCgVjaGFpbhgKIAEoCUIE+I8bARIVCgduZXR3b3JrGAsgASgJQgT4jxsBEhIKBG1lbW8YDCABKAlCBPiPGwESGwoIbWV0YWRhdGEYDSABKAlCBPiPGwFIAIgBAUILCglfbWV0YWRhdGEijwEKCkFnZW50RXZlbnQSNwoHbWVzc2FnZRgBIAEoCzIkLnNpbHZhbmEuZXZlbnRzLnYxLkFnZW50TWVzc2FnZUV2ZW50SAASPwoLdHJhbnNhY3Rpb24YAiABKAsyKC5zaWx2YW5hLmV2ZW50cy52MS5BZ2VudFRyYW5zYWN0aW9uRXZlbnRIAEIHCgVldmVudCKBAQoFRXZlbnQSOgoLY29vcmRpbmF0b3IYASABKAsyIy5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvckV2ZW50SAASLgoFYWdlbnQYAiABKAsyHS5zaWx2YW5hLmV2ZW50cy52MS5BZ2VudEV2ZW50SABCDAoKZXZlbnRfdHlwZSI/ChNTdWJtaXRFdmVudHNSZXF1ZXN0EigKBmV2ZW50cxgBIAMoCzIYLnNpbHZhbmEuZXZlbnRzLnYxLkV2ZW50IlEKFFN1Ym1pdEV2ZW50c1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIXCg9wcm9jZXNzZWRfY291bnQYAyABKA0iPQoSU3VibWl0RXZlbnRSZXF1ZXN0EicKBWV2ZW50GAEgASgLMhguc2lsdmFuYS5ldmVudHMudjEuRXZlbnQiUAoTU3VibWl0RXZlbnRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFwoPcHJvY2Vzc2VkX2NvdW50GAMgASgNIooCCipHZXRBZ2VudFRyYW5zYWN0aW9uRXZlbnRzQnlTZXF1ZW5jZVJlcXVlc3QSEAoIc2VxdWVuY2UYASABKAQSEgoFbGltaXQYAiABKA1IAIgBARITCgZvZmZzZXQYAyABKA1IAYgBARIbCg5jb29yZGluYXRvcl9pZBgEIAEoCUgCiAEBEhYKCWRldmVsb3BlchgFIAEoCUgDiAEBEhIKBWFnZW50GAYgASgJSASIAQESEAoDYXBwGAcgASgJSAWIAQFCCAoGX2xpbWl0QgkKB19vZmZzZXRCEQoPX2Nvb3JkaW5hdG9yX2lkQgwKCl9kZXZlbG9wZXJCCAoGX2FnZW50QgYKBF9hcHAisgIKG0FnZW50VHJhbnNhY3Rpb25FdmVudFdpdGhJZBIKCgJpZBgBIAEoAxIWCg5jb29yZGluYXRvcl9pZBgCIAEoCRIPCgd0eF90eXBlGAMgASgJEhEKCWRldmVsb3BlchgEIAEoCRINCgVhZ2VudBgFIAEoCRILCgNhcHAYBiABKAkSFAoMam9iX3NlcXVlbmNlGAcgASgJEhEKCXNlcXVlbmNlcxgIIAMoBBIXCg9ldmVudF90aW1lc3RhbXAYCSABKAQSDwoHdHhfaGFzaBgKIAEoCRINCgVjaGFpbhgLIAEoCRIPCgduZXR3b3JrGAwgASgJEgwKBG1lbW8YDSABKAkSEAoIbWV0YWRhdGEYDiABKAkSHAoUY3JlYXRlZF9hdF90aW1lc3RhbXAYDyABKAMivAEKK0dldEFnZW50VHJhbnNhY3Rpb25FdmVudHNCeVNlcXVlbmNlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEj4KBmV2ZW50cxgDIAMoCzIuLnNpbHZhbmEuZXZlbnRzLnYxLkFnZW50VHJhbnNhY3Rpb25FdmVudFdpdGhJZBITCgt0b3RhbF9jb3VudBgEIAEoDRIWCg5yZXR1cm5lZF9jb3VudBgFIAEoDSKGAgomR2V0QWdlbnRNZXNzYWdlRXZlbnRzQnlTZXF1ZW5jZVJlcXVlc3QSEAoIc2VxdWVuY2UYASABKAQSEgoFbGltaXQYAiABKA1IAIgBARITCgZvZmZzZXQYAyABKA1IAYgBARIbCg5jb29yZGluYXRvcl9pZBgEIAEoCUgCiAEBEhYKCWRldmVsb3BlchgFIAEoCUgDiAEBEhIKBWFnZW50GAYgASgJSASIAQESEAoDYXBwGAcgASgJSAWIAQFCCAoGX2xpbWl0QgkKB19vZmZzZXRCEQoPX2Nvb3JkaW5hdG9yX2lkQgwKCl9kZXZlbG9wZXJCCAoGX2FnZW50QgYKBF9hcHAiiQIKF0FnZW50TWVzc2FnZUV2ZW50V2l0aElkEgoKAmlkGAEgASgDEhYKDmNvb3JkaW5hdG9yX2lkGAIgASgJEhEKCWRldmVsb3BlchgDIAEoCRINCgVhZ2VudBgEIAEoCRILCgNhcHAYBSABKAkSFAoMam9iX3NlcXVlbmNlGAYgASgJEhEKCXNlcXVlbmNlcxgHIAMoBBIXCg9ldmVudF90aW1lc3RhbXAYCCABKAQSKgoFbGV2ZWwYCSABKA4yGy5zaWx2YW5hLmV2ZW50cy52MS5Mb2dMZXZlbBIPCgdtZXNzYWdlGAogASgJEhwKFGNyZWF0ZWRfYXRfdGltZXN0YW1wGAsgASgDIrQBCidHZXRBZ2VudE1lc3NhZ2VFdmVudHNCeVNlcXVlbmNlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEjoKBmV2ZW50cxgDIAMoCzIqLnNpbHZhbmEuZXZlbnRzLnYxLkFnZW50TWVzc2FnZUV2ZW50V2l0aElkEhMKC3RvdGFsX2NvdW50GAQgASgNEhYKDnJldHVybmVkX2NvdW50GAUgASgNIqsBCiVTZWFyY2hDb29yZGluYXRvck1lc3NhZ2VFdmVudHNSZXF1ZXN0EhQKDHNlYXJjaF9xdWVyeRgBIAEoCRISCgVsaW1pdBgCIAEoDUgAiAEBEhMKBm9mZnNldBgDIAEoDUgBiAEBEhsKDmNvb3JkaW5hdG9yX2lkGAQgASgJSAKIAQFCCAoGX2xpbWl0QgkKB19vZmZzZXRCEQoPX2Nvb3JkaW5hdG9yX2lkItcBCiRDb29yZGluYXRvck1lc3NhZ2VFdmVudFdpdGhSZWxldmFuY2USCgoCaWQYASABKAMSFgoOY29vcmRpbmF0b3JfaWQYAiABKAkSFwoPZXZlbnRfdGltZXN0YW1wGAMgASgEEioKBWxldmVsGAQgASgOMhsuc2lsdmFuYS5ldmVudHMudjEuTG9nTGV2ZWwSDwoHbWVzc2FnZRgFIAEoCRIcChRjcmVhdGVkX2F0X3RpbWVzdGFtcBgGIAEoAxIXCg9yZWxldmFuY2Vfc2NvcmUYByABKAEiwAEKJlNlYXJjaENvb3JkaW5hdG9yTWVzc2FnZUV2ZW50c1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRJHCgZldmVudHMYAyADKAsyNy5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvck1lc3NhZ2VFdmVudFdpdGhSZWxldmFuY2USEwoLdG90YWxfY291bnQYBCABKA0SFgoOcmV0dXJuZWRfY291bnQYBSABKA0ilQEKD1NlY3JldFJlZmVyZW5jZRIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSEAoDYXBwGAMgASgJSACIAQESGQoMYXBwX2luc3RhbmNlGAQgASgJSAGIAQESEQoEbmFtZRgFIAEoCUgCiAEBQgYKBF9hcHBCDwoNX2FwcF9pbnN0YW5jZUIHCgVfbmFtZSJ0ChJTdG9yZVNlY3JldFJlcXVlc3QSNQoJcmVmZXJlbmNlGAEgASgLMiIuc2lsdmFuYS5ldmVudHMudjEuU2VjcmV0UmVmZXJlbmNlEhQKDHNlY3JldF92YWx1ZRgCIAEoCRIRCglzaWduYXR1cmUYAyABKAwiNwoTU3RvcmVTZWNyZXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiYQoVUmV0cmlldmVTZWNyZXRSZXF1ZXN0EjUKCXJlZmVyZW5jZRgBIAEoCzIiLnNpbHZhbmEuZXZlbnRzLnYxLlNlY3JldFJlZmVyZW5jZRIRCglzaWduYXR1cmUYAiABKAwiUAoWUmV0cmlldmVTZWNyZXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFAoMc2VjcmV0X3ZhbHVlGAMgASgJKowBCghMb2dMZXZlbBIZChVMT0dfTEVWRUxfVU5TUEVDSUZJRUQQABITCg9MT0dfTEVWRUxfREVCVUcQARISCg5MT0dfTEVWRUxfSU5GTxACEhIKDkxPR19MRVZFTF9XQVJOEAMSEwoPTE9HX0xFVkVMX0VSUk9SEAQSEwoPTE9HX0xFVkVMX0ZBVEFMEAUy9AYKFFNpbHZhbmFFdmVudHNTZXJ2aWNlEl8KDFN1Ym1pdEV2ZW50cxImLnNpbHZhbmEuZXZlbnRzLnYxLlN1Ym1pdEV2ZW50c1JlcXVlc3QaJy5zaWx2YW5hLmV2ZW50cy52MS5TdWJtaXRFdmVudHNSZXNwb25zZRJcCgtTdWJtaXRFdmVudBIlLnNpbHZhbmEuZXZlbnRzLnYxLlN1Ym1pdEV2ZW50UmVxdWVzdBomLnNpbHZhbmEuZXZlbnRzLnYxLlN1Ym1pdEV2ZW50UmVzcG9uc2USpAEKI0dldEFnZW50VHJhbnNhY3Rpb25FdmVudHNCeVNlcXVlbmNlEj0uc2lsdmFuYS5ldmVudHMudjEuR2V0QWdlbnRUcmFuc2FjdGlvbkV2ZW50c0J5U2VxdWVuY2VSZXF1ZXN0Gj4uc2lsdmFuYS5ldmVudHMudjEuR2V0QWdlbnRUcmFuc2FjdGlvbkV2ZW50c0J5U2VxdWVuY2VSZXNwb25zZRKYAQofR2V0QWdlbnRNZXNzYWdlRXZlbnRzQnlTZXF1ZW5jZRI5LnNpbHZhbmEuZXZlbnRzLnYxLkdldEFnZW50TWVzc2FnZUV2ZW50c0J5U2VxdWVuY2VSZXF1ZXN0Gjouc2lsdmFuYS5ldmVudHMudjEuR2V0QWdlbnRNZXNzYWdlRXZlbnRzQnlTZXF1ZW5jZVJlc3BvbnNlEpUBCh5TZWFyY2hDb29yZGluYXRvck1lc3NhZ2VFdmVudHMSOC5zaWx2YW5hLmV2ZW50cy52MS5TZWFyY2hDb29yZGluYXRvck1lc3NhZ2VFdmVudHNSZXF1ZXN0Gjkuc2lsdmFuYS5ldmVudHMudjEuU2VhcmNoQ29vcmRpbmF0b3JNZXNzYWdlRXZlbnRzUmVzcG9uc2USXAoLU3RvcmVTZWNyZXQSJS5zaWx2YW5hLmV2ZW50cy52MS5TdG9yZVNlY3JldFJlcXVlc3QaJi5zaWx2YW5hLmV2ZW50cy52MS5TdG9yZVNlY3JldFJlc3BvbnNlEmUKDlJldHJpZXZlU2VjcmV0Eiguc2lsdmFuYS5ldmVudHMudjEuUmV0cmlldmVTZWNyZXRSZXF1ZXN0Gikuc2lsdmFuYS5ldmVudHMudjEuUmV0cmlldmVTZWNyZXRSZXNwb25zZUI+WjxnaXRodWIuY29tL1NpbHZhbmFPbmUvemstdGVzdHMvcGFja2FnZXMvYXZzL3JwYy9wcm90bztldmVudHNiBnByb3RvMw", [file_google_protobuf_descriptor, file_silvana_options_v1_options]);
+export const file_silvana_events_v1_events: GenFile =
+  /*@__PURE__*/
+  fileDesc(
+    "Ch5zaWx2YW5hL2V2ZW50cy92MS9ldmVudHMucHJvdG8SEXNpbHZhbmEuZXZlbnRzLnYxIocBChdDb29yZGluYXRvclN0YXJ0ZWRFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIYChBldGhlcmV1bV9hZGRyZXNzGAIgASgJEhsKE3N1aV9lZDI1NTE5X2FkZHJlc3MYAyABKAkSFwoPZXZlbnRfdGltZXN0YW1wGAQgASgEIqoBChRBZ2VudFN0YXJ0ZWRKb2JFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESEQoDYXBwGAQgASgJQgT4jxsBEhoKDGpvYl9zZXF1ZW5jZRgFIAEoCUIE+I8bARIXCg9ldmVudF90aW1lc3RhbXAYBiABKAQivQEKFUFnZW50RmluaXNoZWRKb2JFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESEQoDYXBwGAQgASgJQgT4jxsBEhoKDGpvYl9zZXF1ZW5jZRgFIAEoCUIE+I8bARIQCghkdXJhdGlvbhgGIAEoBBIXCg9ldmVudF90aW1lc3RhbXAYByABKAQi1AEKE0Nvb3JkaW5hdGlvblR4RXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoJZGV2ZWxvcGVyGAIgASgJQgT4jxsBEhMKBWFnZW50GAMgASgJQgT4jxsBEhEKA2FwcBgEIAEoCUIE+I8bARIaCgxqb2Jfc2VxdWVuY2UYBSABKAlCBPiPGwESEgoEbWVtbxgGIAEoCUIE+I8bARIVCgd0eF9oYXNoGAcgASgJQgT4jxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgIIAEoBCKTAQoXQ29vcmRpbmF0b3JNZXNzYWdlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAIgASgEEioKBWxldmVsGAMgASgOMhsuc2lsdmFuYS5ldmVudHMudjEuTG9nTGV2ZWwSFQoHbWVzc2FnZRgEIAEoCUIE+I8bASL4AQoWQ2xpZW50VHJhbnNhY3Rpb25FdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESEQoDYXBwGAQgASgJQgT4jxsBEhkKEWNsaWVudF9pcF9hZGRyZXNzGAUgASgJEhQKBm1ldGhvZBgGIAEoCUIE+I8bARIMCgRkYXRhGAcgASgMEhUKB3R4X2hhc2gYCCABKAlCBPiPGwESEAoIc2VxdWVuY2UYCSABKAQSFwoPZXZlbnRfdGltZXN0YW1wGAogASgEIskDChBDb29yZGluYXRvckV2ZW50EkkKE2Nvb3JkaW5hdG9yX3N0YXJ0ZWQYASABKAsyKi5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvclN0YXJ0ZWRFdmVudEgAEkQKEWFnZW50X3N0YXJ0ZWRfam9iGAIgASgLMicuc2lsdmFuYS5ldmVudHMudjEuQWdlbnRTdGFydGVkSm9iRXZlbnRIABJGChJhZ2VudF9maW5pc2hlZF9qb2IYAyABKAsyKC5zaWx2YW5hLmV2ZW50cy52MS5BZ2VudEZpbmlzaGVkSm9iRXZlbnRIABJBCg9jb29yZGluYXRpb25fdHgYBCABKAsyJi5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRpb25UeEV2ZW50SAASRwoRY29vcmRpbmF0b3JfZXJyb3IYBSABKAsyKi5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvck1lc3NhZ2VFdmVudEgAEkcKEmNsaWVudF90cmFuc2FjdGlvbhgGIAEoCzIpLnNpbHZhbmEuZXZlbnRzLnYxLkNsaWVudFRyYW5zYWN0aW9uRXZlbnRIAEIHCgVldmVudCKDAgoRQWdlbnRNZXNzYWdlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoJZGV2ZWxvcGVyGAIgASgJQgT4jxsBEhMKBWFnZW50GAMgASgJQgT4jxsBEhEKA2FwcBgEIAEoCUIE+I8bARIaCgxqb2Jfc2VxdWVuY2UYBSABKAlCBPiPGwESFwoJc2VxdWVuY2VzGAYgAygEQgTwjxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgHIAEoBBIqCgVsZXZlbBgIIAEoDjIbLnNpbHZhbmEuZXZlbnRzLnYxLkxvZ0xldmVsEhUKB21lc3NhZ2UYCSABKAlCBPiPGwEi3AIKFUFnZW50VHJhbnNhY3Rpb25FdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIVCgd0eF90eXBlGAIgASgJQgT4jxsBEhcKCWRldmVsb3BlchgDIAEoCUIE+I8bARITCgVhZ2VudBgEIAEoCUIE+I8bARIRCgNhcHAYBSABKAlCBPiPGwESGgoMam9iX3NlcXVlbmNlGAYgASgJQgT4jxsBEhcKCXNlcXVlbmNlcxgHIAMoBEIE8I8bARIXCg9ldmVudF90aW1lc3RhbXAYCCABKAQSFQoHdHhfaGFzaBgJIAEoCUIE+I8bARITCgVjaGFpbhgKIAEoCUIE+I8bARIVCgduZXR3b3JrGAsgASgJQgT4jxsBEhIKBG1lbW8YDCABKAlCBPiPGwESGwoIbWV0YWRhdGEYDSABKAlCBPiPGwFIAIgBAUILCglfbWV0YWRhdGEijwEKCkFnZW50RXZlbnQSNwoHbWVzc2FnZRgBIAEoCzIkLnNpbHZhbmEuZXZlbnRzLnYxLkFnZW50TWVzc2FnZUV2ZW50SAASPwoLdHJhbnNhY3Rpb24YAiABKAsyKC5zaWx2YW5hLmV2ZW50cy52MS5BZ2VudFRyYW5zYWN0aW9uRXZlbnRIAEIHCgVldmVudCKBAQoFRXZlbnQSOgoLY29vcmRpbmF0b3IYASABKAsyIy5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvckV2ZW50SAASLgoFYWdlbnQYAiABKAsyHS5zaWx2YW5hLmV2ZW50cy52MS5BZ2VudEV2ZW50SABCDAoKZXZlbnRfdHlwZSI/ChNTdWJtaXRFdmVudHNSZXF1ZXN0EigKBmV2ZW50cxgBIAMoCzIYLnNpbHZhbmEuZXZlbnRzLnYxLkV2ZW50IlEKFFN1Ym1pdEV2ZW50c1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIXCg9wcm9jZXNzZWRfY291bnQYAyABKA0iPQoSU3VibWl0RXZlbnRSZXF1ZXN0EicKBWV2ZW50GAEgASgLMhguc2lsdmFuYS5ldmVudHMudjEuRXZlbnQiUAoTU3VibWl0RXZlbnRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFwoPcHJvY2Vzc2VkX2NvdW50GAMgASgNIooCCipHZXRBZ2VudFRyYW5zYWN0aW9uRXZlbnRzQnlTZXF1ZW5jZVJlcXVlc3QSEAoIc2VxdWVuY2UYASABKAQSEgoFbGltaXQYAiABKA1IAIgBARITCgZvZmZzZXQYAyABKA1IAYgBARIbCg5jb29yZGluYXRvcl9pZBgEIAEoCUgCiAEBEhYKCWRldmVsb3BlchgFIAEoCUgDiAEBEhIKBWFnZW50GAYgASgJSASIAQESEAoDYXBwGAcgASgJSAWIAQFCCAoGX2xpbWl0QgkKB19vZmZzZXRCEQoPX2Nvb3JkaW5hdG9yX2lkQgwKCl9kZXZlbG9wZXJCCAoGX2FnZW50QgYKBF9hcHAisgIKG0FnZW50VHJhbnNhY3Rpb25FdmVudFdpdGhJZBIKCgJpZBgBIAEoAxIWCg5jb29yZGluYXRvcl9pZBgCIAEoCRIPCgd0eF90eXBlGAMgASgJEhEKCWRldmVsb3BlchgEIAEoCRINCgVhZ2VudBgFIAEoCRILCgNhcHAYBiABKAkSFAoMam9iX3NlcXVlbmNlGAcgASgJEhEKCXNlcXVlbmNlcxgIIAMoBBIXCg9ldmVudF90aW1lc3RhbXAYCSABKAQSDwoHdHhfaGFzaBgKIAEoCRINCgVjaGFpbhgLIAEoCRIPCgduZXR3b3JrGAwgASgJEgwKBG1lbW8YDSABKAkSEAoIbWV0YWRhdGEYDiABKAkSHAoUY3JlYXRlZF9hdF90aW1lc3RhbXAYDyABKAMivAEKK0dldEFnZW50VHJhbnNhY3Rpb25FdmVudHNCeVNlcXVlbmNlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEj4KBmV2ZW50cxgDIAMoCzIuLnNpbHZhbmEuZXZlbnRzLnYxLkFnZW50VHJhbnNhY3Rpb25FdmVudFdpdGhJZBITCgt0b3RhbF9jb3VudBgEIAEoDRIWCg5yZXR1cm5lZF9jb3VudBgFIAEoDSKGAgomR2V0QWdlbnRNZXNzYWdlRXZlbnRzQnlTZXF1ZW5jZVJlcXVlc3QSEAoIc2VxdWVuY2UYASABKAQSEgoFbGltaXQYAiABKA1IAIgBARITCgZvZmZzZXQYAyABKA1IAYgBARIbCg5jb29yZGluYXRvcl9pZBgEIAEoCUgCiAEBEhYKCWRldmVsb3BlchgFIAEoCUgDiAEBEhIKBWFnZW50GAYgASgJSASIAQESEAoDYXBwGAcgASgJSAWIAQFCCAoGX2xpbWl0QgkKB19vZmZzZXRCEQoPX2Nvb3JkaW5hdG9yX2lkQgwKCl9kZXZlbG9wZXJCCAoGX2FnZW50QgYKBF9hcHAiiQIKF0FnZW50TWVzc2FnZUV2ZW50V2l0aElkEgoKAmlkGAEgASgDEhYKDmNvb3JkaW5hdG9yX2lkGAIgASgJEhEKCWRldmVsb3BlchgDIAEoCRINCgVhZ2VudBgEIAEoCRILCgNhcHAYBSABKAkSFAoMam9iX3NlcXVlbmNlGAYgASgJEhEKCXNlcXVlbmNlcxgHIAMoBBIXCg9ldmVudF90aW1lc3RhbXAYCCABKAQSKgoFbGV2ZWwYCSABKA4yGy5zaWx2YW5hLmV2ZW50cy52MS5Mb2dMZXZlbBIPCgdtZXNzYWdlGAogASgJEhwKFGNyZWF0ZWRfYXRfdGltZXN0YW1wGAsgASgDIrQBCidHZXRBZ2VudE1lc3NhZ2VFdmVudHNCeVNlcXVlbmNlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEjoKBmV2ZW50cxgDIAMoCzIqLnNpbHZhbmEuZXZlbnRzLnYxLkFnZW50TWVzc2FnZUV2ZW50V2l0aElkEhMKC3RvdGFsX2NvdW50GAQgASgNEhYKDnJldHVybmVkX2NvdW50GAUgASgNIqsBCiVTZWFyY2hDb29yZGluYXRvck1lc3NhZ2VFdmVudHNSZXF1ZXN0EhQKDHNlYXJjaF9xdWVyeRgBIAEoCRISCgVsaW1pdBgCIAEoDUgAiAEBEhMKBm9mZnNldBgDIAEoDUgBiAEBEhsKDmNvb3JkaW5hdG9yX2lkGAQgASgJSAKIAQFCCAoGX2xpbWl0QgkKB19vZmZzZXRCEQoPX2Nvb3JkaW5hdG9yX2lkItcBCiRDb29yZGluYXRvck1lc3NhZ2VFdmVudFdpdGhSZWxldmFuY2USCgoCaWQYASABKAMSFgoOY29vcmRpbmF0b3JfaWQYAiABKAkSFwoPZXZlbnRfdGltZXN0YW1wGAMgASgEEioKBWxldmVsGAQgASgOMhsuc2lsdmFuYS5ldmVudHMudjEuTG9nTGV2ZWwSDwoHbWVzc2FnZRgFIAEoCRIcChRjcmVhdGVkX2F0X3RpbWVzdGFtcBgGIAEoAxIXCg9yZWxldmFuY2Vfc2NvcmUYByABKAEiwAEKJlNlYXJjaENvb3JkaW5hdG9yTWVzc2FnZUV2ZW50c1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRJHCgZldmVudHMYAyADKAsyNy5zaWx2YW5hLmV2ZW50cy52MS5Db29yZGluYXRvck1lc3NhZ2VFdmVudFdpdGhSZWxldmFuY2USEwoLdG90YWxfY291bnQYBCABKA0SFgoOcmV0dXJuZWRfY291bnQYBSABKA0ilQEKD1NlY3JldFJlZmVyZW5jZRIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSEAoDYXBwGAMgASgJSACIAQESGQoMYXBwX2luc3RhbmNlGAQgASgJSAGIAQESEQoEbmFtZRgFIAEoCUgCiAEBQgYKBF9hcHBCDwoNX2FwcF9pbnN0YW5jZUIHCgVfbmFtZSJ0ChJTdG9yZVNlY3JldFJlcXVlc3QSNQoJcmVmZXJlbmNlGAEgASgLMiIuc2lsdmFuYS5ldmVudHMudjEuU2VjcmV0UmVmZXJlbmNlEhQKDHNlY3JldF92YWx1ZRgCIAEoCRIRCglzaWduYXR1cmUYAyABKAwiNwoTU3RvcmVTZWNyZXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiYQoVUmV0cmlldmVTZWNyZXRSZXF1ZXN0EjUKCXJlZmVyZW5jZRgBIAEoCzIiLnNpbHZhbmEuZXZlbnRzLnYxLlNlY3JldFJlZmVyZW5jZRIRCglzaWduYXR1cmUYAiABKAwiUAoWUmV0cmlldmVTZWNyZXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFAoMc2VjcmV0X3ZhbHVlGAMgASgJKowBCghMb2dMZXZlbBIZChVMT0dfTEVWRUxfVU5TUEVDSUZJRUQQABITCg9MT0dfTEVWRUxfREVCVUcQARISCg5MT0dfTEVWRUxfSU5GTxACEhIKDkxPR19MRVZFTF9XQVJOEAMSEwoPTE9HX0xFVkVMX0VSUk9SEAQSEwoPTE9HX0xFVkVMX0ZBVEFMEAUy9AYKFFNpbHZhbmFFdmVudHNTZXJ2aWNlEl8KDFN1Ym1pdEV2ZW50cxImLnNpbHZhbmEuZXZlbnRzLnYxLlN1Ym1pdEV2ZW50c1JlcXVlc3QaJy5zaWx2YW5hLmV2ZW50cy52MS5TdWJtaXRFdmVudHNSZXNwb25zZRJcCgtTdWJtaXRFdmVudBIlLnNpbHZhbmEuZXZlbnRzLnYxLlN1Ym1pdEV2ZW50UmVxdWVzdBomLnNpbHZhbmEuZXZlbnRzLnYxLlN1Ym1pdEV2ZW50UmVzcG9uc2USpAEKI0dldEFnZW50VHJhbnNhY3Rpb25FdmVudHNCeVNlcXVlbmNlEj0uc2lsdmFuYS5ldmVudHMudjEuR2V0QWdlbnRUcmFuc2FjdGlvbkV2ZW50c0J5U2VxdWVuY2VSZXF1ZXN0Gj4uc2lsdmFuYS5ldmVudHMudjEuR2V0QWdlbnRUcmFuc2FjdGlvbkV2ZW50c0J5U2VxdWVuY2VSZXNwb25zZRKYAQofR2V0QWdlbnRNZXNzYWdlRXZlbnRzQnlTZXF1ZW5jZRI5LnNpbHZhbmEuZXZlbnRzLnYxLkdldEFnZW50TWVzc2FnZUV2ZW50c0J5U2VxdWVuY2VSZXF1ZXN0Gjouc2lsdmFuYS5ldmVudHMudjEuR2V0QWdlbnRNZXNzYWdlRXZlbnRzQnlTZXF1ZW5jZVJlc3BvbnNlEpUBCh5TZWFyY2hDb29yZGluYXRvck1lc3NhZ2VFdmVudHMSOC5zaWx2YW5hLmV2ZW50cy52MS5TZWFyY2hDb29yZGluYXRvck1lc3NhZ2VFdmVudHNSZXF1ZXN0Gjkuc2lsdmFuYS5ldmVudHMudjEuU2VhcmNoQ29vcmRpbmF0b3JNZXNzYWdlRXZlbnRzUmVzcG9uc2USXAoLU3RvcmVTZWNyZXQSJS5zaWx2YW5hLmV2ZW50cy52MS5TdG9yZVNlY3JldFJlcXVlc3QaJi5zaWx2YW5hLmV2ZW50cy52MS5TdG9yZVNlY3JldFJlc3BvbnNlEmUKDlJldHJpZXZlU2VjcmV0Eiguc2lsdmFuYS5ldmVudHMudjEuUmV0cmlldmVTZWNyZXRSZXF1ZXN0Gikuc2lsdmFuYS5ldmVudHMudjEuUmV0cmlldmVTZWNyZXRSZXNwb25zZUI+WjxnaXRodWIuY29tL1NpbHZhbmFPbmUvemstdGVzdHMvcGFja2FnZXMvYXZzL3JwYy9wcm90bztldmVudHNiBnByb3RvMw",
+    [file_google_protobuf_descriptor, file_silvana_options_v1_options]
+  );
 
 /**
  * Coordinator Events
  *
  * @generated from message silvana.events.v1.CoordinatorStartedEvent
  */
-export type CoordinatorStartedEvent = Message<"silvana.events.v1.CoordinatorStartedEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type CoordinatorStartedEvent =
+  Message<"silvana.events.v1.CoordinatorStartedEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string ethereum_address = 2;
-   */
-  ethereumAddress: string;
+    /**
+     * @generated from field: string ethereum_address = 2;
+     */
+    ethereumAddress: string;
 
-  /**
-   * @generated from field: string sui_ed25519_address = 3;
-   */
-  suiEd25519Address: string;
+    /**
+     * @generated from field: string sui_ed25519_address = 3;
+     */
+    suiEd25519Address: string;
 
-  /**
-   * @generated from field: uint64 event_timestamp = 4;
-   */
-  eventTimestamp: bigint;
-};
+    /**
+     * @generated from field: uint64 event_timestamp = 4;
+     */
+    eventTimestamp: bigint;
+  };
 
 /**
  * Describes the message silvana.events.v1.CoordinatorStartedEvent.
  * Use `create(CoordinatorStartedEventSchema)` to create a new message.
  */
-export const CoordinatorStartedEventSchema: GenMessage<CoordinatorStartedEvent> = /*@__PURE__*/
+export const CoordinatorStartedEventSchema: GenMessage<CoordinatorStartedEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 0);
 
 /**
  * @generated from message silvana.events.v1.AgentStartedJobEvent
  */
-export type AgentStartedJobEvent = Message<"silvana.events.v1.AgentStartedJobEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type AgentStartedJobEvent =
+  Message<"silvana.events.v1.AgentStartedJobEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string developer = 2;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 2;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 3;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 3;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 4;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 4;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string job_sequence = 5;
-   */
-  jobSequence: string;
+    /**
+     * @generated from field: string job_sequence = 5;
+     */
+    jobSequence: string;
 
-  /**
-   * @generated from field: uint64 event_timestamp = 6;
-   */
-  eventTimestamp: bigint;
-};
+    /**
+     * @generated from field: uint64 event_timestamp = 6;
+     */
+    eventTimestamp: bigint;
+  };
 
 /**
  * Describes the message silvana.events.v1.AgentStartedJobEvent.
  * Use `create(AgentStartedJobEventSchema)` to create a new message.
  */
-export const AgentStartedJobEventSchema: GenMessage<AgentStartedJobEvent> = /*@__PURE__*/
+export const AgentStartedJobEventSchema: GenMessage<AgentStartedJobEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 1);
 
 /**
  * @generated from message silvana.events.v1.AgentFinishedJobEvent
  */
-export type AgentFinishedJobEvent = Message<"silvana.events.v1.AgentFinishedJobEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type AgentFinishedJobEvent =
+  Message<"silvana.events.v1.AgentFinishedJobEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string developer = 2;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 2;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 3;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 3;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 4;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 4;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string job_sequence = 5;
-   */
-  jobSequence: string;
+    /**
+     * @generated from field: string job_sequence = 5;
+     */
+    jobSequence: string;
 
-  /**
-   * @generated from field: uint64 duration = 6;
-   */
-  duration: bigint;
+    /**
+     * @generated from field: uint64 duration = 6;
+     */
+    duration: bigint;
 
-  /**
-   * @generated from field: uint64 event_timestamp = 7;
-   */
-  eventTimestamp: bigint;
-};
+    /**
+     * @generated from field: uint64 event_timestamp = 7;
+     */
+    eventTimestamp: bigint;
+  };
 
 /**
  * Describes the message silvana.events.v1.AgentFinishedJobEvent.
  * Use `create(AgentFinishedJobEventSchema)` to create a new message.
  */
-export const AgentFinishedJobEventSchema: GenMessage<AgentFinishedJobEvent> = /*@__PURE__*/
+export const AgentFinishedJobEventSchema: GenMessage<AgentFinishedJobEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 2);
 
 /**
  * @generated from message silvana.events.v1.CoordinationTxEvent
  */
-export type CoordinationTxEvent = Message<"silvana.events.v1.CoordinationTxEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type CoordinationTxEvent =
+  Message<"silvana.events.v1.CoordinationTxEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string developer = 2;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 2;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 3;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 3;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 4;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 4;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string job_sequence = 5;
-   */
-  jobSequence: string;
+    /**
+     * @generated from field: string job_sequence = 5;
+     */
+    jobSequence: string;
 
-  /**
-   * @generated from field: string memo = 6;
-   */
-  memo: string;
+    /**
+     * @generated from field: string memo = 6;
+     */
+    memo: string;
 
-  /**
-   * @generated from field: string tx_hash = 7;
-   */
-  txHash: string;
+    /**
+     * @generated from field: string tx_hash = 7;
+     */
+    txHash: string;
 
-  /**
-   * @generated from field: uint64 event_timestamp = 8;
-   */
-  eventTimestamp: bigint;
-};
+    /**
+     * @generated from field: uint64 event_timestamp = 8;
+     */
+    eventTimestamp: bigint;
+  };
 
 /**
  * Describes the message silvana.events.v1.CoordinationTxEvent.
  * Use `create(CoordinationTxEventSchema)` to create a new message.
  */
-export const CoordinationTxEventSchema: GenMessage<CoordinationTxEvent> = /*@__PURE__*/
+export const CoordinationTxEventSchema: GenMessage<CoordinationTxEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 3);
 
 /**
  * @generated from message silvana.events.v1.CoordinatorMessageEvent
  */
-export type CoordinatorMessageEvent = Message<"silvana.events.v1.CoordinatorMessageEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type CoordinatorMessageEvent =
+  Message<"silvana.events.v1.CoordinatorMessageEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: uint64 event_timestamp = 2;
-   */
-  eventTimestamp: bigint;
+    /**
+     * @generated from field: uint64 event_timestamp = 2;
+     */
+    eventTimestamp: bigint;
 
-  /**
-   * @generated from field: silvana.events.v1.LogLevel level = 3;
-   */
-  level: LogLevel;
+    /**
+     * @generated from field: silvana.events.v1.LogLevel level = 3;
+     */
+    level: LogLevel;
 
-  /**
-   * @generated from field: string message = 4;
-   */
-  message: string;
-};
+    /**
+     * @generated from field: string message = 4;
+     */
+    message: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.CoordinatorMessageEvent.
  * Use `create(CoordinatorMessageEventSchema)` to create a new message.
  */
-export const CoordinatorMessageEventSchema: GenMessage<CoordinatorMessageEvent> = /*@__PURE__*/
+export const CoordinatorMessageEventSchema: GenMessage<CoordinatorMessageEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 4);
 
 /**
  * @generated from message silvana.events.v1.ClientTransactionEvent
  */
-export type ClientTransactionEvent = Message<"silvana.events.v1.ClientTransactionEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type ClientTransactionEvent =
+  Message<"silvana.events.v1.ClientTransactionEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string developer = 2;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 2;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 3;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 3;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 4;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 4;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string client_ip_address = 5;
-   */
-  clientIpAddress: string;
+    /**
+     * @generated from field: string client_ip_address = 5;
+     */
+    clientIpAddress: string;
 
-  /**
-   * @generated from field: string method = 6;
-   */
-  method: string;
+    /**
+     * @generated from field: string method = 6;
+     */
+    method: string;
 
-  /**
-   * @generated from field: bytes data = 7;
-   */
-  data: Uint8Array;
+    /**
+     * @generated from field: bytes data = 7;
+     */
+    data: Uint8Array;
 
-  /**
-   * @generated from field: string tx_hash = 8;
-   */
-  txHash: string;
+    /**
+     * @generated from field: string tx_hash = 8;
+     */
+    txHash: string;
 
-  /**
-   * @generated from field: uint64 sequence = 9;
-   */
-  sequence: bigint;
+    /**
+     * @generated from field: uint64 sequence = 9;
+     */
+    sequence: bigint;
 
-  /**
-   * @generated from field: uint64 event_timestamp = 10;
-   */
-  eventTimestamp: bigint;
-};
+    /**
+     * @generated from field: uint64 event_timestamp = 10;
+     */
+    eventTimestamp: bigint;
+  };
 
 /**
  * Describes the message silvana.events.v1.ClientTransactionEvent.
  * Use `create(ClientTransactionEventSchema)` to create a new message.
  */
-export const ClientTransactionEventSchema: GenMessage<ClientTransactionEvent> = /*@__PURE__*/
+export const ClientTransactionEventSchema: GenMessage<ClientTransactionEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 5);
 
 /**
@@ -292,50 +318,58 @@ export type CoordinatorEvent = Message<"silvana.events.v1.CoordinatorEvent"> & {
   /**
    * @generated from oneof silvana.events.v1.CoordinatorEvent.event
    */
-  event: {
-    /**
-     * @generated from field: silvana.events.v1.CoordinatorStartedEvent coordinator_started = 1;
-     */
-    value: CoordinatorStartedEvent;
-    case: "coordinatorStarted";
-  } | {
-    /**
-     * @generated from field: silvana.events.v1.AgentStartedJobEvent agent_started_job = 2;
-     */
-    value: AgentStartedJobEvent;
-    case: "agentStartedJob";
-  } | {
-    /**
-     * @generated from field: silvana.events.v1.AgentFinishedJobEvent agent_finished_job = 3;
-     */
-    value: AgentFinishedJobEvent;
-    case: "agentFinishedJob";
-  } | {
-    /**
-     * @generated from field: silvana.events.v1.CoordinationTxEvent coordination_tx = 4;
-     */
-    value: CoordinationTxEvent;
-    case: "coordinationTx";
-  } | {
-    /**
-     * @generated from field: silvana.events.v1.CoordinatorMessageEvent coordinator_error = 5;
-     */
-    value: CoordinatorMessageEvent;
-    case: "coordinatorError";
-  } | {
-    /**
-     * @generated from field: silvana.events.v1.ClientTransactionEvent client_transaction = 6;
-     */
-    value: ClientTransactionEvent;
-    case: "clientTransaction";
-  } | { case: undefined; value?: undefined };
+  event:
+    | {
+        /**
+         * @generated from field: silvana.events.v1.CoordinatorStartedEvent coordinator_started = 1;
+         */
+        value: CoordinatorStartedEvent;
+        case: "coordinatorStarted";
+      }
+    | {
+        /**
+         * @generated from field: silvana.events.v1.AgentStartedJobEvent agent_started_job = 2;
+         */
+        value: AgentStartedJobEvent;
+        case: "agentStartedJob";
+      }
+    | {
+        /**
+         * @generated from field: silvana.events.v1.AgentFinishedJobEvent agent_finished_job = 3;
+         */
+        value: AgentFinishedJobEvent;
+        case: "agentFinishedJob";
+      }
+    | {
+        /**
+         * @generated from field: silvana.events.v1.CoordinationTxEvent coordination_tx = 4;
+         */
+        value: CoordinationTxEvent;
+        case: "coordinationTx";
+      }
+    | {
+        /**
+         * @generated from field: silvana.events.v1.CoordinatorMessageEvent coordinator_error = 5;
+         */
+        value: CoordinatorMessageEvent;
+        case: "coordinatorError";
+      }
+    | {
+        /**
+         * @generated from field: silvana.events.v1.ClientTransactionEvent client_transaction = 6;
+         */
+        value: ClientTransactionEvent;
+        case: "clientTransaction";
+      }
+    | { case: undefined; value?: undefined };
 };
 
 /**
  * Describes the message silvana.events.v1.CoordinatorEvent.
  * Use `create(CoordinatorEventSchema)` to create a new message.
  */
-export const CoordinatorEventSchema: GenMessage<CoordinatorEvent> = /*@__PURE__*/
+export const CoordinatorEventSchema: GenMessage<CoordinatorEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 6);
 
 /**
@@ -343,137 +377,141 @@ export const CoordinatorEventSchema: GenMessage<CoordinatorEvent> = /*@__PURE__*
  *
  * @generated from message silvana.events.v1.AgentMessageEvent
  */
-export type AgentMessageEvent = Message<"silvana.events.v1.AgentMessageEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type AgentMessageEvent =
+  Message<"silvana.events.v1.AgentMessageEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string developer = 2;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 2;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 3;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 3;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 4;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 4;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string job_sequence = 5;
-   */
-  jobSequence: string;
+    /**
+     * @generated from field: string job_sequence = 5;
+     */
+    jobSequence: string;
 
-  /**
-   * @generated from field: repeated uint64 sequences = 6;
-   */
-  sequences: bigint[];
+    /**
+     * @generated from field: repeated uint64 sequences = 6;
+     */
+    sequences: bigint[];
 
-  /**
-   * @generated from field: uint64 event_timestamp = 7;
-   */
-  eventTimestamp: bigint;
+    /**
+     * @generated from field: uint64 event_timestamp = 7;
+     */
+    eventTimestamp: bigint;
 
-  /**
-   * @generated from field: silvana.events.v1.LogLevel level = 8;
-   */
-  level: LogLevel;
+    /**
+     * @generated from field: silvana.events.v1.LogLevel level = 8;
+     */
+    level: LogLevel;
 
-  /**
-   * @generated from field: string message = 9;
-   */
-  message: string;
-};
+    /**
+     * @generated from field: string message = 9;
+     */
+    message: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.AgentMessageEvent.
  * Use `create(AgentMessageEventSchema)` to create a new message.
  */
-export const AgentMessageEventSchema: GenMessage<AgentMessageEvent> = /*@__PURE__*/
+export const AgentMessageEventSchema: GenMessage<AgentMessageEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 7);
 
 /**
  * @generated from message silvana.events.v1.AgentTransactionEvent
  */
-export type AgentTransactionEvent = Message<"silvana.events.v1.AgentTransactionEvent"> & {
-  /**
-   * @generated from field: string coordinator_id = 1;
-   */
-  coordinatorId: string;
+export type AgentTransactionEvent =
+  Message<"silvana.events.v1.AgentTransactionEvent"> & {
+    /**
+     * @generated from field: string coordinator_id = 1;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string tx_type = 2;
-   */
-  txType: string;
+    /**
+     * @generated from field: string tx_type = 2;
+     */
+    txType: string;
 
-  /**
-   * @generated from field: string developer = 3;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 3;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 4;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 4;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 5;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 5;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string job_sequence = 6;
-   */
-  jobSequence: string;
+    /**
+     * @generated from field: string job_sequence = 6;
+     */
+    jobSequence: string;
 
-  /**
-   * @generated from field: repeated uint64 sequences = 7;
-   */
-  sequences: bigint[];
+    /**
+     * @generated from field: repeated uint64 sequences = 7;
+     */
+    sequences: bigint[];
 
-  /**
-   * @generated from field: uint64 event_timestamp = 8;
-   */
-  eventTimestamp: bigint;
+    /**
+     * @generated from field: uint64 event_timestamp = 8;
+     */
+    eventTimestamp: bigint;
 
-  /**
-   * @generated from field: string tx_hash = 9;
-   */
-  txHash: string;
+    /**
+     * @generated from field: string tx_hash = 9;
+     */
+    txHash: string;
 
-  /**
-   * @generated from field: string chain = 10;
-   */
-  chain: string;
+    /**
+     * @generated from field: string chain = 10;
+     */
+    chain: string;
 
-  /**
-   * @generated from field: string network = 11;
-   */
-  network: string;
+    /**
+     * @generated from field: string network = 11;
+     */
+    network: string;
 
-  /**
-   * @generated from field: string memo = 12;
-   */
-  memo: string;
+    /**
+     * @generated from field: string memo = 12;
+     */
+    memo: string;
 
-  /**
-   * JSON string
-   *
-   * @generated from field: optional string metadata = 13;
-   */
-  metadata?: string;
-};
+    /**
+     * JSON string
+     *
+     * @generated from field: optional string metadata = 13;
+     */
+    metadata?: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.AgentTransactionEvent.
  * Use `create(AgentTransactionEventSchema)` to create a new message.
  */
-export const AgentTransactionEventSchema: GenMessage<AgentTransactionEvent> = /*@__PURE__*/
+export const AgentTransactionEventSchema: GenMessage<AgentTransactionEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 8);
 
 /**
@@ -485,26 +523,30 @@ export type AgentEvent = Message<"silvana.events.v1.AgentEvent"> & {
   /**
    * @generated from oneof silvana.events.v1.AgentEvent.event
    */
-  event: {
-    /**
-     * @generated from field: silvana.events.v1.AgentMessageEvent message = 1;
-     */
-    value: AgentMessageEvent;
-    case: "message";
-  } | {
-    /**
-     * @generated from field: silvana.events.v1.AgentTransactionEvent transaction = 2;
-     */
-    value: AgentTransactionEvent;
-    case: "transaction";
-  } | { case: undefined; value?: undefined };
+  event:
+    | {
+        /**
+         * @generated from field: silvana.events.v1.AgentMessageEvent message = 1;
+         */
+        value: AgentMessageEvent;
+        case: "message";
+      }
+    | {
+        /**
+         * @generated from field: silvana.events.v1.AgentTransactionEvent transaction = 2;
+         */
+        value: AgentTransactionEvent;
+        case: "transaction";
+      }
+    | { case: undefined; value?: undefined };
 };
 
 /**
  * Describes the message silvana.events.v1.AgentEvent.
  * Use `create(AgentEventSchema)` to create a new message.
  */
-export const AgentEventSchema: GenMessage<AgentEvent> = /*@__PURE__*/
+export const AgentEventSchema: GenMessage<AgentEvent> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 9);
 
 /**
@@ -516,26 +558,30 @@ export type Event = Message<"silvana.events.v1.Event"> & {
   /**
    * @generated from oneof silvana.events.v1.Event.event_type
    */
-  eventType: {
-    /**
-     * @generated from field: silvana.events.v1.CoordinatorEvent coordinator = 1;
-     */
-    value: CoordinatorEvent;
-    case: "coordinator";
-  } | {
-    /**
-     * @generated from field: silvana.events.v1.AgentEvent agent = 2;
-     */
-    value: AgentEvent;
-    case: "agent";
-  } | { case: undefined; value?: undefined };
+  eventType:
+    | {
+        /**
+         * @generated from field: silvana.events.v1.CoordinatorEvent coordinator = 1;
+         */
+        value: CoordinatorEvent;
+        case: "coordinator";
+      }
+    | {
+        /**
+         * @generated from field: silvana.events.v1.AgentEvent agent = 2;
+         */
+        value: AgentEvent;
+        case: "agent";
+      }
+    | { case: undefined; value?: undefined };
 };
 
 /**
  * Describes the message silvana.events.v1.Event.
  * Use `create(EventSchema)` to create a new message.
  */
-export const EventSchema: GenMessage<Event> = /*@__PURE__*/
+export const EventSchema: GenMessage<Event> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 10);
 
 /**
@@ -543,45 +589,49 @@ export const EventSchema: GenMessage<Event> = /*@__PURE__*/
  *
  * @generated from message silvana.events.v1.SubmitEventsRequest
  */
-export type SubmitEventsRequest = Message<"silvana.events.v1.SubmitEventsRequest"> & {
-  /**
-   * @generated from field: repeated silvana.events.v1.Event events = 1;
-   */
-  events: Event[];
-};
+export type SubmitEventsRequest =
+  Message<"silvana.events.v1.SubmitEventsRequest"> & {
+    /**
+     * @generated from field: repeated silvana.events.v1.Event events = 1;
+     */
+    events: Event[];
+  };
 
 /**
  * Describes the message silvana.events.v1.SubmitEventsRequest.
  * Use `create(SubmitEventsRequestSchema)` to create a new message.
  */
-export const SubmitEventsRequestSchema: GenMessage<SubmitEventsRequest> = /*@__PURE__*/
+export const SubmitEventsRequestSchema: GenMessage<SubmitEventsRequest> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 11);
 
 /**
  * @generated from message silvana.events.v1.SubmitEventsResponse
  */
-export type SubmitEventsResponse = Message<"silvana.events.v1.SubmitEventsResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
+export type SubmitEventsResponse =
+  Message<"silvana.events.v1.SubmitEventsResponse"> & {
+    /**
+     * @generated from field: bool success = 1;
+     */
+    success: boolean;
 
-  /**
-   * @generated from field: string message = 2;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 2;
+     */
+    message: string;
 
-  /**
-   * @generated from field: uint32 processed_count = 3;
-   */
-  processedCount: number;
-};
+    /**
+     * @generated from field: uint32 processed_count = 3;
+     */
+    processedCount: number;
+  };
 
 /**
  * Describes the message silvana.events.v1.SubmitEventsResponse.
  * Use `create(SubmitEventsResponseSchema)` to create a new message.
  */
-export const SubmitEventsResponseSchema: GenMessage<SubmitEventsResponse> = /*@__PURE__*/
+export const SubmitEventsResponseSchema: GenMessage<SubmitEventsResponse> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 12);
 
 /**
@@ -589,45 +639,49 @@ export const SubmitEventsResponseSchema: GenMessage<SubmitEventsResponse> = /*@_
  *
  * @generated from message silvana.events.v1.SubmitEventRequest
  */
-export type SubmitEventRequest = Message<"silvana.events.v1.SubmitEventRequest"> & {
-  /**
-   * @generated from field: silvana.events.v1.Event event = 1;
-   */
-  event?: Event;
-};
+export type SubmitEventRequest =
+  Message<"silvana.events.v1.SubmitEventRequest"> & {
+    /**
+     * @generated from field: silvana.events.v1.Event event = 1;
+     */
+    event?: Event;
+  };
 
 /**
  * Describes the message silvana.events.v1.SubmitEventRequest.
  * Use `create(SubmitEventRequestSchema)` to create a new message.
  */
-export const SubmitEventRequestSchema: GenMessage<SubmitEventRequest> = /*@__PURE__*/
+export const SubmitEventRequestSchema: GenMessage<SubmitEventRequest> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 13);
 
 /**
  * @generated from message silvana.events.v1.SubmitEventResponse
  */
-export type SubmitEventResponse = Message<"silvana.events.v1.SubmitEventResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
+export type SubmitEventResponse =
+  Message<"silvana.events.v1.SubmitEventResponse"> & {
+    /**
+     * @generated from field: bool success = 1;
+     */
+    success: boolean;
 
-  /**
-   * @generated from field: string message = 2;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 2;
+     */
+    message: string;
 
-  /**
-   * @generated from field: uint32 processed_count = 3;
-   */
-  processedCount: number;
-};
+    /**
+     * @generated from field: uint32 processed_count = 3;
+     */
+    processedCount: number;
+  };
 
 /**
  * Describes the message silvana.events.v1.SubmitEventResponse.
  * Use `create(SubmitEventResponseSchema)` to create a new message.
  */
-export const SubmitEventResponseSchema: GenMessage<SubmitEventResponse> = /*@__PURE__*/
+export const SubmitEventResponseSchema: GenMessage<SubmitEventResponse> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 14);
 
 /**
@@ -635,194 +689,200 @@ export const SubmitEventResponseSchema: GenMessage<SubmitEventResponse> = /*@__P
  *
  * @generated from message silvana.events.v1.GetAgentTransactionEventsBySequenceRequest
  */
-export type GetAgentTransactionEventsBySequenceRequest = Message<"silvana.events.v1.GetAgentTransactionEventsBySequenceRequest"> & {
-  /**
-   * @generated from field: uint64 sequence = 1;
-   */
-  sequence: bigint;
+export type GetAgentTransactionEventsBySequenceRequest =
+  Message<"silvana.events.v1.GetAgentTransactionEventsBySequenceRequest"> & {
+    /**
+     * @generated from field: uint64 sequence = 1;
+     */
+    sequence: bigint;
 
-  /**
-   * Optional pagination limit
-   *
-   * @generated from field: optional uint32 limit = 2;
-   */
-  limit?: number;
+    /**
+     * Optional pagination limit
+     *
+     * @generated from field: optional uint32 limit = 2;
+     */
+    limit?: number;
 
-  /**
-   * Optional pagination offset
-   *
-   * @generated from field: optional uint32 offset = 3;
-   */
-  offset?: number;
+    /**
+     * Optional pagination offset
+     *
+     * @generated from field: optional uint32 offset = 3;
+     */
+    offset?: number;
 
-  /**
-   * Optional filter by coordinator
-   *
-   * @generated from field: optional string coordinator_id = 4;
-   */
-  coordinatorId?: string;
+    /**
+     * Optional filter by coordinator
+     *
+     * @generated from field: optional string coordinator_id = 4;
+     */
+    coordinatorId?: string;
 
-  /**
-   * Optional filter by developer
-   *
-   * @generated from field: optional string developer = 5;
-   */
-  developer?: string;
+    /**
+     * Optional filter by developer
+     *
+     * @generated from field: optional string developer = 5;
+     */
+    developer?: string;
 
-  /**
-   * Optional filter by agent
-   *
-   * @generated from field: optional string agent = 6;
-   */
-  agent?: string;
+    /**
+     * Optional filter by agent
+     *
+     * @generated from field: optional string agent = 6;
+     */
+    agent?: string;
 
-  /**
-   * Optional filter by app
-   *
-   * @generated from field: optional string app = 7;
-   */
-  app?: string;
-};
+    /**
+     * Optional filter by app
+     *
+     * @generated from field: optional string app = 7;
+     */
+    app?: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.GetAgentTransactionEventsBySequenceRequest.
  * Use `create(GetAgentTransactionEventsBySequenceRequestSchema)` to create a new message.
  */
-export const GetAgentTransactionEventsBySequenceRequestSchema: GenMessage<GetAgentTransactionEventsBySequenceRequest> = /*@__PURE__*/
+export const GetAgentTransactionEventsBySequenceRequestSchema: GenMessage<GetAgentTransactionEventsBySequenceRequest> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 15);
 
 /**
  * @generated from message silvana.events.v1.AgentTransactionEventWithId
  */
-export type AgentTransactionEventWithId = Message<"silvana.events.v1.AgentTransactionEventWithId"> & {
-  /**
-   * Database ID
-   *
-   * @generated from field: int64 id = 1;
-   */
-  id: bigint;
+export type AgentTransactionEventWithId =
+  Message<"silvana.events.v1.AgentTransactionEventWithId"> & {
+    /**
+     * Database ID
+     *
+     * @generated from field: int64 id = 1;
+     */
+    id: bigint;
 
-  /**
-   * @generated from field: string coordinator_id = 2;
-   */
-  coordinatorId: string;
+    /**
+     * @generated from field: string coordinator_id = 2;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string tx_type = 3;
-   */
-  txType: string;
+    /**
+     * @generated from field: string tx_type = 3;
+     */
+    txType: string;
 
-  /**
-   * @generated from field: string developer = 4;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 4;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 5;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 5;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 6;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 6;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string job_sequence = 7;
-   */
-  jobSequence: string;
+    /**
+     * @generated from field: string job_sequence = 7;
+     */
+    jobSequence: string;
 
-  /**
-   * All sequences for this event
-   *
-   * @generated from field: repeated uint64 sequences = 8;
-   */
-  sequences: bigint[];
+    /**
+     * All sequences for this event
+     *
+     * @generated from field: repeated uint64 sequences = 8;
+     */
+    sequences: bigint[];
 
-  /**
-   * @generated from field: uint64 event_timestamp = 9;
-   */
-  eventTimestamp: bigint;
+    /**
+     * @generated from field: uint64 event_timestamp = 9;
+     */
+    eventTimestamp: bigint;
 
-  /**
-   * @generated from field: string tx_hash = 10;
-   */
-  txHash: string;
+    /**
+     * @generated from field: string tx_hash = 10;
+     */
+    txHash: string;
 
-  /**
-   * @generated from field: string chain = 11;
-   */
-  chain: string;
+    /**
+     * @generated from field: string chain = 11;
+     */
+    chain: string;
 
-  /**
-   * @generated from field: string network = 12;
-   */
-  network: string;
+    /**
+     * @generated from field: string network = 12;
+     */
+    network: string;
 
-  /**
-   * @generated from field: string memo = 13;
-   */
-  memo: string;
+    /**
+     * @generated from field: string memo = 13;
+     */
+    memo: string;
 
-  /**
-   * @generated from field: string metadata = 14;
-   */
-  metadata: string;
+    /**
+     * @generated from field: string metadata = 14;
+     */
+    metadata: string;
 
-  /**
-   * Database timestamp
-   *
-   * @generated from field: int64 created_at_timestamp = 15;
-   */
-  createdAtTimestamp: bigint;
-};
+    /**
+     * Database timestamp
+     *
+     * @generated from field: int64 created_at_timestamp = 15;
+     */
+    createdAtTimestamp: bigint;
+  };
 
 /**
  * Describes the message silvana.events.v1.AgentTransactionEventWithId.
  * Use `create(AgentTransactionEventWithIdSchema)` to create a new message.
  */
-export const AgentTransactionEventWithIdSchema: GenMessage<AgentTransactionEventWithId> = /*@__PURE__*/
+export const AgentTransactionEventWithIdSchema: GenMessage<AgentTransactionEventWithId> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 16);
 
 /**
  * @generated from message silvana.events.v1.GetAgentTransactionEventsBySequenceResponse
  */
-export type GetAgentTransactionEventsBySequenceResponse = Message<"silvana.events.v1.GetAgentTransactionEventsBySequenceResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
+export type GetAgentTransactionEventsBySequenceResponse =
+  Message<"silvana.events.v1.GetAgentTransactionEventsBySequenceResponse"> & {
+    /**
+     * @generated from field: bool success = 1;
+     */
+    success: boolean;
 
-  /**
-   * @generated from field: string message = 2;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 2;
+     */
+    message: string;
 
-  /**
-   * @generated from field: repeated silvana.events.v1.AgentTransactionEventWithId events = 3;
-   */
-  events: AgentTransactionEventWithId[];
+    /**
+     * @generated from field: repeated silvana.events.v1.AgentTransactionEventWithId events = 3;
+     */
+    events: AgentTransactionEventWithId[];
 
-  /**
-   * Total matching events (for pagination)
-   *
-   * @generated from field: uint32 total_count = 4;
-   */
-  totalCount: number;
+    /**
+     * Total matching events (for pagination)
+     *
+     * @generated from field: uint32 total_count = 4;
+     */
+    totalCount: number;
 
-  /**
-   * Number of events in this response
-   *
-   * @generated from field: uint32 returned_count = 5;
-   */
-  returnedCount: number;
-};
+    /**
+     * Number of events in this response
+     *
+     * @generated from field: uint32 returned_count = 5;
+     */
+    returnedCount: number;
+  };
 
 /**
  * Describes the message silvana.events.v1.GetAgentTransactionEventsBySequenceResponse.
  * Use `create(GetAgentTransactionEventsBySequenceResponseSchema)` to create a new message.
  */
-export const GetAgentTransactionEventsBySequenceResponseSchema: GenMessage<GetAgentTransactionEventsBySequenceResponse> = /*@__PURE__*/
+export const GetAgentTransactionEventsBySequenceResponseSchema: GenMessage<GetAgentTransactionEventsBySequenceResponse> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 17);
 
 /**
@@ -830,152 +890,158 @@ export const GetAgentTransactionEventsBySequenceResponseSchema: GenMessage<GetAg
  *
  * @generated from message silvana.events.v1.GetAgentMessageEventsBySequenceRequest
  */
-export type GetAgentMessageEventsBySequenceRequest = Message<"silvana.events.v1.GetAgentMessageEventsBySequenceRequest"> & {
-  /**
-   * @generated from field: uint64 sequence = 1;
-   */
-  sequence: bigint;
+export type GetAgentMessageEventsBySequenceRequest =
+  Message<"silvana.events.v1.GetAgentMessageEventsBySequenceRequest"> & {
+    /**
+     * @generated from field: uint64 sequence = 1;
+     */
+    sequence: bigint;
 
-  /**
-   * @generated from field: optional uint32 limit = 2;
-   */
-  limit?: number;
+    /**
+     * @generated from field: optional uint32 limit = 2;
+     */
+    limit?: number;
 
-  /**
-   * @generated from field: optional uint32 offset = 3;
-   */
-  offset?: number;
+    /**
+     * @generated from field: optional uint32 offset = 3;
+     */
+    offset?: number;
 
-  /**
-   * @generated from field: optional string coordinator_id = 4;
-   */
-  coordinatorId?: string;
+    /**
+     * @generated from field: optional string coordinator_id = 4;
+     */
+    coordinatorId?: string;
 
-  /**
-   * @generated from field: optional string developer = 5;
-   */
-  developer?: string;
+    /**
+     * @generated from field: optional string developer = 5;
+     */
+    developer?: string;
 
-  /**
-   * @generated from field: optional string agent = 6;
-   */
-  agent?: string;
+    /**
+     * @generated from field: optional string agent = 6;
+     */
+    agent?: string;
 
-  /**
-   * @generated from field: optional string app = 7;
-   */
-  app?: string;
-};
+    /**
+     * @generated from field: optional string app = 7;
+     */
+    app?: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.GetAgentMessageEventsBySequenceRequest.
  * Use `create(GetAgentMessageEventsBySequenceRequestSchema)` to create a new message.
  */
-export const GetAgentMessageEventsBySequenceRequestSchema: GenMessage<GetAgentMessageEventsBySequenceRequest> = /*@__PURE__*/
+export const GetAgentMessageEventsBySequenceRequestSchema: GenMessage<GetAgentMessageEventsBySequenceRequest> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 18);
 
 /**
  * @generated from message silvana.events.v1.AgentMessageEventWithId
  */
-export type AgentMessageEventWithId = Message<"silvana.events.v1.AgentMessageEventWithId"> & {
-  /**
-   * @generated from field: int64 id = 1;
-   */
-  id: bigint;
+export type AgentMessageEventWithId =
+  Message<"silvana.events.v1.AgentMessageEventWithId"> & {
+    /**
+     * @generated from field: int64 id = 1;
+     */
+    id: bigint;
 
-  /**
-   * @generated from field: string coordinator_id = 2;
-   */
-  coordinatorId: string;
+    /**
+     * @generated from field: string coordinator_id = 2;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: string developer = 3;
-   */
-  developer: string;
+    /**
+     * @generated from field: string developer = 3;
+     */
+    developer: string;
 
-  /**
-   * @generated from field: string agent = 4;
-   */
-  agent: string;
+    /**
+     * @generated from field: string agent = 4;
+     */
+    agent: string;
 
-  /**
-   * @generated from field: string app = 5;
-   */
-  app: string;
+    /**
+     * @generated from field: string app = 5;
+     */
+    app: string;
 
-  /**
-   * @generated from field: string job_sequence = 6;
-   */
-  jobSequence: string;
+    /**
+     * @generated from field: string job_sequence = 6;
+     */
+    jobSequence: string;
 
-  /**
-   * @generated from field: repeated uint64 sequences = 7;
-   */
-  sequences: bigint[];
+    /**
+     * @generated from field: repeated uint64 sequences = 7;
+     */
+    sequences: bigint[];
 
-  /**
-   * @generated from field: uint64 event_timestamp = 8;
-   */
-  eventTimestamp: bigint;
+    /**
+     * @generated from field: uint64 event_timestamp = 8;
+     */
+    eventTimestamp: bigint;
 
-  /**
-   * @generated from field: silvana.events.v1.LogLevel level = 9;
-   */
-  level: LogLevel;
+    /**
+     * @generated from field: silvana.events.v1.LogLevel level = 9;
+     */
+    level: LogLevel;
 
-  /**
-   * @generated from field: string message = 10;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 10;
+     */
+    message: string;
 
-  /**
-   * @generated from field: int64 created_at_timestamp = 11;
-   */
-  createdAtTimestamp: bigint;
-};
+    /**
+     * @generated from field: int64 created_at_timestamp = 11;
+     */
+    createdAtTimestamp: bigint;
+  };
 
 /**
  * Describes the message silvana.events.v1.AgentMessageEventWithId.
  * Use `create(AgentMessageEventWithIdSchema)` to create a new message.
  */
-export const AgentMessageEventWithIdSchema: GenMessage<AgentMessageEventWithId> = /*@__PURE__*/
+export const AgentMessageEventWithIdSchema: GenMessage<AgentMessageEventWithId> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 19);
 
 /**
  * @generated from message silvana.events.v1.GetAgentMessageEventsBySequenceResponse
  */
-export type GetAgentMessageEventsBySequenceResponse = Message<"silvana.events.v1.GetAgentMessageEventsBySequenceResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
+export type GetAgentMessageEventsBySequenceResponse =
+  Message<"silvana.events.v1.GetAgentMessageEventsBySequenceResponse"> & {
+    /**
+     * @generated from field: bool success = 1;
+     */
+    success: boolean;
 
-  /**
-   * @generated from field: string message = 2;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 2;
+     */
+    message: string;
 
-  /**
-   * @generated from field: repeated silvana.events.v1.AgentMessageEventWithId events = 3;
-   */
-  events: AgentMessageEventWithId[];
+    /**
+     * @generated from field: repeated silvana.events.v1.AgentMessageEventWithId events = 3;
+     */
+    events: AgentMessageEventWithId[];
 
-  /**
-   * @generated from field: uint32 total_count = 4;
-   */
-  totalCount: number;
+    /**
+     * @generated from field: uint32 total_count = 4;
+     */
+    totalCount: number;
 
-  /**
-   * @generated from field: uint32 returned_count = 5;
-   */
-  returnedCount: number;
-};
+    /**
+     * @generated from field: uint32 returned_count = 5;
+     */
+    returnedCount: number;
+  };
 
 /**
  * Describes the message silvana.events.v1.GetAgentMessageEventsBySequenceResponse.
  * Use `create(GetAgentMessageEventsBySequenceResponseSchema)` to create a new message.
  */
-export const GetAgentMessageEventsBySequenceResponseSchema: GenMessage<GetAgentMessageEventsBySequenceResponse> = /*@__PURE__*/
+export const GetAgentMessageEventsBySequenceResponseSchema: GenMessage<GetAgentMessageEventsBySequenceResponse> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 20);
 
 /**
@@ -983,135 +1049,141 @@ export const GetAgentMessageEventsBySequenceResponseSchema: GenMessage<GetAgentM
  *
  * @generated from message silvana.events.v1.SearchCoordinatorMessageEventsRequest
  */
-export type SearchCoordinatorMessageEventsRequest = Message<"silvana.events.v1.SearchCoordinatorMessageEventsRequest"> & {
-  /**
-   * Search terms for full-text search
-   *
-   * @generated from field: string search_query = 1;
-   */
-  searchQuery: string;
+export type SearchCoordinatorMessageEventsRequest =
+  Message<"silvana.events.v1.SearchCoordinatorMessageEventsRequest"> & {
+    /**
+     * Search terms for full-text search
+     *
+     * @generated from field: string search_query = 1;
+     */
+    searchQuery: string;
 
-  /**
-   * Optional pagination limit
-   *
-   * @generated from field: optional uint32 limit = 2;
-   */
-  limit?: number;
+    /**
+     * Optional pagination limit
+     *
+     * @generated from field: optional uint32 limit = 2;
+     */
+    limit?: number;
 
-  /**
-   * Optional pagination offset
-   *
-   * @generated from field: optional uint32 offset = 3;
-   */
-  offset?: number;
+    /**
+     * Optional pagination offset
+     *
+     * @generated from field: optional uint32 offset = 3;
+     */
+    offset?: number;
 
-  /**
-   * Optional filter by coordinator
-   *
-   * @generated from field: optional string coordinator_id = 4;
-   */
-  coordinatorId?: string;
-};
+    /**
+     * Optional filter by coordinator
+     *
+     * @generated from field: optional string coordinator_id = 4;
+     */
+    coordinatorId?: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.SearchCoordinatorMessageEventsRequest.
  * Use `create(SearchCoordinatorMessageEventsRequestSchema)` to create a new message.
  */
-export const SearchCoordinatorMessageEventsRequestSchema: GenMessage<SearchCoordinatorMessageEventsRequest> = /*@__PURE__*/
+export const SearchCoordinatorMessageEventsRequestSchema: GenMessage<SearchCoordinatorMessageEventsRequest> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 21);
 
 /**
  * @generated from message silvana.events.v1.CoordinatorMessageEventWithRelevance
  */
-export type CoordinatorMessageEventWithRelevance = Message<"silvana.events.v1.CoordinatorMessageEventWithRelevance"> & {
-  /**
-   * Database ID
-   *
-   * @generated from field: int64 id = 1;
-   */
-  id: bigint;
+export type CoordinatorMessageEventWithRelevance =
+  Message<"silvana.events.v1.CoordinatorMessageEventWithRelevance"> & {
+    /**
+     * Database ID
+     *
+     * @generated from field: int64 id = 1;
+     */
+    id: bigint;
 
-  /**
-   * @generated from field: string coordinator_id = 2;
-   */
-  coordinatorId: string;
+    /**
+     * @generated from field: string coordinator_id = 2;
+     */
+    coordinatorId: string;
 
-  /**
-   * @generated from field: uint64 event_timestamp = 3;
-   */
-  eventTimestamp: bigint;
+    /**
+     * @generated from field: uint64 event_timestamp = 3;
+     */
+    eventTimestamp: bigint;
 
-  /**
-   * @generated from field: silvana.events.v1.LogLevel level = 4;
-   */
-  level: LogLevel;
+    /**
+     * @generated from field: silvana.events.v1.LogLevel level = 4;
+     */
+    level: LogLevel;
 
-  /**
-   * @generated from field: string message = 5;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 5;
+     */
+    message: string;
 
-  /**
-   * Database timestamp
-   *
-   * @generated from field: int64 created_at_timestamp = 6;
-   */
-  createdAtTimestamp: bigint;
+    /**
+     * Database timestamp
+     *
+     * @generated from field: int64 created_at_timestamp = 6;
+     */
+    createdAtTimestamp: bigint;
 
-  /**
-   * TiDB FTS relevance score (BM25)
-   *
-   * @generated from field: double relevance_score = 7;
-   */
-  relevanceScore: number;
-};
+    /**
+     * TiDB FTS relevance score (BM25)
+     *
+     * @generated from field: double relevance_score = 7;
+     */
+    relevanceScore: number;
+  };
 
 /**
  * Describes the message silvana.events.v1.CoordinatorMessageEventWithRelevance.
  * Use `create(CoordinatorMessageEventWithRelevanceSchema)` to create a new message.
  */
-export const CoordinatorMessageEventWithRelevanceSchema: GenMessage<CoordinatorMessageEventWithRelevance> = /*@__PURE__*/
+export const CoordinatorMessageEventWithRelevanceSchema: GenMessage<CoordinatorMessageEventWithRelevance> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 22);
 
 /**
  * @generated from message silvana.events.v1.SearchCoordinatorMessageEventsResponse
  */
-export type SearchCoordinatorMessageEventsResponse = Message<"silvana.events.v1.SearchCoordinatorMessageEventsResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
+export type SearchCoordinatorMessageEventsResponse =
+  Message<"silvana.events.v1.SearchCoordinatorMessageEventsResponse"> & {
+    /**
+     * @generated from field: bool success = 1;
+     */
+    success: boolean;
 
-  /**
-   * @generated from field: string message = 2;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 2;
+     */
+    message: string;
 
-  /**
-   * @generated from field: repeated silvana.events.v1.CoordinatorMessageEventWithRelevance events = 3;
-   */
-  events: CoordinatorMessageEventWithRelevance[];
+    /**
+     * @generated from field: repeated silvana.events.v1.CoordinatorMessageEventWithRelevance events = 3;
+     */
+    events: CoordinatorMessageEventWithRelevance[];
 
-  /**
-   * Total matching events (for pagination)
-   *
-   * @generated from field: uint32 total_count = 4;
-   */
-  totalCount: number;
+    /**
+     * Total matching events (for pagination)
+     *
+     * @generated from field: uint32 total_count = 4;
+     */
+    totalCount: number;
 
-  /**
-   * Number of events in this response
-   *
-   * @generated from field: uint32 returned_count = 5;
-   */
-  returnedCount: number;
-};
+    /**
+     * Number of events in this response
+     *
+     * @generated from field: uint32 returned_count = 5;
+     */
+    returnedCount: number;
+  };
 
 /**
  * Describes the message silvana.events.v1.SearchCoordinatorMessageEventsResponse.
  * Use `create(SearchCoordinatorMessageEventsResponseSchema)` to create a new message.
  */
-export const SearchCoordinatorMessageEventsResponseSchema: GenMessage<SearchCoordinatorMessageEventsResponse> = /*@__PURE__*/
+export const SearchCoordinatorMessageEventsResponseSchema: GenMessage<SearchCoordinatorMessageEventsResponse> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 23);
 
 /**
@@ -1150,111 +1222,120 @@ export type SecretReference = Message<"silvana.events.v1.SecretReference"> & {
  * Describes the message silvana.events.v1.SecretReference.
  * Use `create(SecretReferenceSchema)` to create a new message.
  */
-export const SecretReferenceSchema: GenMessage<SecretReference> = /*@__PURE__*/
+export const SecretReferenceSchema: GenMessage<SecretReference> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 24);
 
 /**
  * @generated from message silvana.events.v1.StoreSecretRequest
  */
-export type StoreSecretRequest = Message<"silvana.events.v1.StoreSecretRequest"> & {
-  /**
-   * @generated from field: silvana.events.v1.SecretReference reference = 1;
-   */
-  reference?: SecretReference;
+export type StoreSecretRequest =
+  Message<"silvana.events.v1.StoreSecretRequest"> & {
+    /**
+     * @generated from field: silvana.events.v1.SecretReference reference = 1;
+     */
+    reference?: SecretReference;
 
-  /**
-   * @generated from field: string secret_value = 2;
-   */
-  secretValue: string;
+    /**
+     * @generated from field: string secret_value = 2;
+     */
+    secretValue: string;
 
-  /**
-   * Developer signature (not validated yet)
-   *
-   * @generated from field: bytes signature = 3;
-   */
-  signature: Uint8Array;
-};
+    /**
+     * Developer signature (not validated yet)
+     *
+     * @generated from field: bytes signature = 3;
+     */
+    signature: Uint8Array;
+  };
 
 /**
  * Describes the message silvana.events.v1.StoreSecretRequest.
  * Use `create(StoreSecretRequestSchema)` to create a new message.
  */
-export const StoreSecretRequestSchema: GenMessage<StoreSecretRequest> = /*@__PURE__*/
+export const StoreSecretRequestSchema: GenMessage<StoreSecretRequest> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 25);
 
 /**
  * @generated from message silvana.events.v1.StoreSecretResponse
  */
-export type StoreSecretResponse = Message<"silvana.events.v1.StoreSecretResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
+export type StoreSecretResponse =
+  Message<"silvana.events.v1.StoreSecretResponse"> & {
+    /**
+     * @generated from field: bool success = 1;
+     */
+    success: boolean;
 
-  /**
-   * @generated from field: string message = 2;
-   */
-  message: string;
-};
+    /**
+     * @generated from field: string message = 2;
+     */
+    message: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.StoreSecretResponse.
  * Use `create(StoreSecretResponseSchema)` to create a new message.
  */
-export const StoreSecretResponseSchema: GenMessage<StoreSecretResponse> = /*@__PURE__*/
+export const StoreSecretResponseSchema: GenMessage<StoreSecretResponse> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 26);
 
 /**
  * @generated from message silvana.events.v1.RetrieveSecretRequest
  */
-export type RetrieveSecretRequest = Message<"silvana.events.v1.RetrieveSecretRequest"> & {
-  /**
-   * @generated from field: silvana.events.v1.SecretReference reference = 1;
-   */
-  reference?: SecretReference;
+export type RetrieveSecretRequest =
+  Message<"silvana.events.v1.RetrieveSecretRequest"> & {
+    /**
+     * @generated from field: silvana.events.v1.SecretReference reference = 1;
+     */
+    reference?: SecretReference;
 
-  /**
-   * Coordinator signature (not validated yet)
-   *
-   * @generated from field: bytes signature = 2;
-   */
-  signature: Uint8Array;
-};
+    /**
+     * Coordinator signature (not validated yet)
+     *
+     * @generated from field: bytes signature = 2;
+     */
+    signature: Uint8Array;
+  };
 
 /**
  * Describes the message silvana.events.v1.RetrieveSecretRequest.
  * Use `create(RetrieveSecretRequestSchema)` to create a new message.
  */
-export const RetrieveSecretRequestSchema: GenMessage<RetrieveSecretRequest> = /*@__PURE__*/
+export const RetrieveSecretRequestSchema: GenMessage<RetrieveSecretRequest> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 27);
 
 /**
  * @generated from message silvana.events.v1.RetrieveSecretResponse
  */
-export type RetrieveSecretResponse = Message<"silvana.events.v1.RetrieveSecretResponse"> & {
-  /**
-   * @generated from field: bool success = 1;
-   */
-  success: boolean;
+export type RetrieveSecretResponse =
+  Message<"silvana.events.v1.RetrieveSecretResponse"> & {
+    /**
+     * @generated from field: bool success = 1;
+     */
+    success: boolean;
 
-  /**
-   * @generated from field: string message = 2;
-   */
-  message: string;
+    /**
+     * @generated from field: string message = 2;
+     */
+    message: string;
 
-  /**
-   * Only returned if success is true
-   *
-   * @generated from field: string secret_value = 3;
-   */
-  secretValue: string;
-};
+    /**
+     * Only returned if success is true
+     *
+     * @generated from field: string secret_value = 3;
+     */
+    secretValue: string;
+  };
 
 /**
  * Describes the message silvana.events.v1.RetrieveSecretResponse.
  * Use `create(RetrieveSecretResponseSchema)` to create a new message.
  */
-export const RetrieveSecretResponseSchema: GenMessage<RetrieveSecretResponse> = /*@__PURE__*/
+export const RetrieveSecretResponseSchema: GenMessage<RetrieveSecretResponse> =
+  /*@__PURE__*/
   messageDesc(file_silvana_events_v1_events, 28);
 
 /**
@@ -1297,7 +1378,8 @@ export enum LogLevel {
 /**
  * Describes the enum silvana.events.v1.LogLevel.
  */
-export const LogLevelSchema: GenEnum<LogLevel> = /*@__PURE__*/
+export const LogLevelSchema: GenEnum<LogLevel> =
+  /*@__PURE__*/
   enumDesc(file_silvana_events_v1_events, 0);
 
 /**
@@ -1313,7 +1395,7 @@ export const SilvanaEventsService: GenService<{
     methodKind: "unary";
     input: typeof SubmitEventsRequestSchema;
     output: typeof SubmitEventsResponseSchema;
-  },
+  };
   /**
    * @generated from rpc silvana.events.v1.SilvanaEventsService.SubmitEvent
    */
@@ -1321,7 +1403,7 @@ export const SilvanaEventsService: GenService<{
     methodKind: "unary";
     input: typeof SubmitEventRequestSchema;
     output: typeof SubmitEventResponseSchema;
-  },
+  };
   /**
    * Query methods for retrieving events by sequence
    *
@@ -1331,7 +1413,7 @@ export const SilvanaEventsService: GenService<{
     methodKind: "unary";
     input: typeof GetAgentTransactionEventsBySequenceRequestSchema;
     output: typeof GetAgentTransactionEventsBySequenceResponseSchema;
-  },
+  };
   /**
    * @generated from rpc silvana.events.v1.SilvanaEventsService.GetAgentMessageEventsBySequence
    */
@@ -1339,7 +1421,7 @@ export const SilvanaEventsService: GenService<{
     methodKind: "unary";
     input: typeof GetAgentMessageEventsBySequenceRequestSchema;
     output: typeof GetAgentMessageEventsBySequenceResponseSchema;
-  },
+  };
   /**
    * Full-text search methods
    *
@@ -1349,7 +1431,7 @@ export const SilvanaEventsService: GenService<{
     methodKind: "unary";
     input: typeof SearchCoordinatorMessageEventsRequestSchema;
     output: typeof SearchCoordinatorMessageEventsResponseSchema;
-  },
+  };
   /**
    * Secrets storage methods
    *
@@ -1359,7 +1441,7 @@ export const SilvanaEventsService: GenService<{
     methodKind: "unary";
     input: typeof StoreSecretRequestSchema;
     output: typeof StoreSecretResponseSchema;
-  },
+  };
   /**
    * @generated from rpc silvana.events.v1.SilvanaEventsService.RetrieveSecret
    */
@@ -1367,7 +1449,5 @@ export const SilvanaEventsService: GenService<{
     methodKind: "unary";
     input: typeof RetrieveSecretRequestSchema;
     output: typeof RetrieveSecretResponseSchema;
-  },
-}> = /*@__PURE__*/
-  serviceDesc(file_silvana_events_v1_events, 0);
-
+  };
+}> = /*@__PURE__*/ serviceDesc(file_silvana_events_v1_events, 0);

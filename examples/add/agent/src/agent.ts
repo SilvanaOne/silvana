@@ -5,8 +5,10 @@ import {
   GetJobRequestSchema,
   CompleteJobRequestSchema,
   FailJobRequestSchema,
+  GetSequenceStatesRequestSchema,
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
+import { deserializeTransitionData } from "./transition.js";
 
 async function agent() {
   console.time("Agent runtime");
@@ -51,8 +53,29 @@ async function agent() {
         console.log(`Received job ${jobCount}: ID=${response.job.jobSequence}, job_id=${response.job.jobId}`);
         
         try {
-          // Simulate job processing for 5 seconds
+          // Deserialize the job data to get TransitionData with sequence
           console.log("Processing job...");
+          console.log(`Job data length: ${response.job.data.length}`);
+          console.log(`Job data first 20 bytes: ${Array.from(response.job.data.slice(0, 20))}`);
+          const transitionData = deserializeTransitionData(Array.from(response.job.data));
+          console.log(`Job ${response.job.jobSequence} has transition data with sequence: ${transitionData.sequence}`);
+          
+          // Query sequence states using the sequence from TransitionData
+          const sequenceStatesRequest = create(GetSequenceStatesRequestSchema, {
+            sessionId: sessionId,
+            jobId: response.job.jobId,
+            sequence: transitionData.sequence,
+          });
+          
+          console.log(`Querying sequence states for sequence ${transitionData.sequence}...`);
+          const sequenceStatesResponse = await client.getSequenceStates(sequenceStatesRequest);
+          
+          console.log(`Retrieved ${sequenceStatesResponse.states.length} sequence states:`);
+          sequenceStatesResponse.states.forEach((state, index) => {
+            console.log(`  State ${index + 1}: sequence=${state.sequence}, has_state=${!!state.state}, has_data_availability=${!!state.dataAvailability}`);
+          });
+          
+          // Simulate job processing for 5 seconds
           await sleep(5000);
           
           // Complete the job

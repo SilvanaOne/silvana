@@ -86,10 +86,32 @@ message SubmitProofResponse {
   string da_hash = 2;
 }
 
+// Sequence state message matching the Move SequenceState struct
+message SequenceState {
+  uint64 sequence = 1;
+  optional bytes state = 2;
+  optional string data_availability = 3;
+  bytes optimistic_state = 4;
+  bytes transition_data = 5;
+}
+
+// Request message for querying sequence states
+message GetSequenceStatesRequest {
+  string session_id = 1;
+  string job_id = 2;
+  uint64 sequence = 3;
+}
+
+// Response message for sequence states query
+message GetSequenceStatesResponse {
+  repeated SequenceState states = 1;
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
   rpc FailJob(FailJobRequest) returns (FailJobResponse);
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
 }

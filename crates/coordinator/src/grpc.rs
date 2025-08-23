@@ -6,6 +6,7 @@ use std::path::Path;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::{transport::Server, Request, Response, Status};
+use tracing::debug;
 
 pub mod coordinator {
     tonic::include_proto!("silvana.coordinator.v1");
@@ -17,6 +18,7 @@ use coordinator::{
     CompleteJobRequest, CompleteJobResponse,
     FailJobRequest, FailJobResponse,
     SubmitProofRequest, SubmitProofResponse,
+    GetSequenceStatesRequest, GetSequenceStatesResponse, SequenceState,
 };
 
 #[derive(Clone)]
@@ -466,6 +468,84 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Err(e) => {
                 tracing::error!("Failed to submit proof for job {} on blockchain: {}", req.job_id, e);
                 Err(Status::internal(format!("Failed to submit proof transaction: {}", e)))
+            }
+        }
+    }
+
+    async fn get_sequence_states(
+        &self,
+        request: Request<GetSequenceStatesRequest>,
+    ) -> Result<Response<GetSequenceStatesResponse>, Status> {
+        let req = request.into_inner();
+        
+        tracing::info!(
+            session_id = %req.session_id,
+            job_id = %req.job_id,
+            sequence = %req.sequence,
+            "Received GetSequenceStates request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance
+        debug!("Looking up job_id: {} in agent database", req.job_id);
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => {
+                debug!(
+                    "Found job: job_id={}, job_sequence={}, app_instance={}, developer={}/{}/{}",
+                    req.job_id, job.job_sequence, job.app_instance, job.developer, job.agent, job.agent_method
+                );
+                job
+            }
+            None => {
+                tracing::warn!("GetSequenceStates request for unknown job_id: {}", req.job_id);
+                return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer 
+                || current.agent != agent_job.agent 
+                || current.agent_method != agent_job.agent_method {
+                tracing::warn!(
+                    "GetSequenceStates request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer, agent_job.agent, agent_job.agent_method,
+                    current.developer, current.agent, current.agent_method
+                );
+                return Err(Status::permission_denied("Job does not belong to requesting session"));
+            }
+        } else {
+            tracing::warn!("GetSequenceStates request from unknown session: {}", req.session_id);
+            return Err(Status::unauthenticated("Invalid session ID"));
+        }
+
+        // Query sequence states from the coordinator fetch module
+        debug!("Querying sequence states for app_instance={}, sequence={}", agent_job.app_instance, req.sequence);
+        let mut sui_client = self.state.get_sui_client();
+        
+        match crate::fetch::query_sequence_states(&mut sui_client, &agent_job.app_instance, req.sequence).await {
+            Ok(fetch_states) => {
+                // Convert fetch SequenceState to protobuf SequenceState
+                let proto_states: Vec<SequenceState> = fetch_states
+                    .into_iter()
+                    .map(|state| SequenceState {
+                        sequence: state.sequence,
+                        state: state.state,
+                        data_availability: state.data_availability,
+                        optimistic_state: state.optimistic_state,
+                        transition_data: state.transition_data,
+                    })
+                    .collect();
+
+                tracing::info!("Successfully retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence);
+                
+                Ok(Response::new(GetSequenceStatesResponse {
+                    states: proto_states,
+                }))
+            }
+            Err(e) => {
+                tracing::error!("Failed to query sequence states for sequence {}: {}", req.sequence, e);
+                Err(Status::internal(format!("Failed to query sequence states: {}", e)))
             }
         }
     }

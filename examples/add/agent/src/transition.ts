@@ -15,10 +15,10 @@ import type { CanonicalElement } from "@silvana-one/mina-utils";
  */
 
 /**
- * JobData struct matching the Move definition in main.move
+ * TransitionData struct matching the Move definition in main.move
  *
  * Move struct:
- * public struct JobData has copy, drop {
+ * public struct TransitionData has copy, drop {
  *     index: u32,
  *     value: u256,
  *     old_value: u256,
@@ -40,7 +40,7 @@ export const CommitmentDataBcs = bcs.struct("CommitmentData", {
   state_commitment: ElementScalar,
 });
 
-export const JobDataBcs = bcs.struct("JobData", {
+export const TransitionDataBcs = bcs.struct("TransitionData", {
   index: bcs.u32(),
   value: bcs.u256(),
   old_value: bcs.u256(),
@@ -60,9 +60,9 @@ export interface RawCommitmentData {
 }
 
 /**
- * Raw JobData as returned by BCS deserialization
+ * Raw TransitionData as returned by BCS deserialization
  */
-export interface RawJobData {
+export interface RawTransitionData {
   index: number;
   value: string; // BCS returns u256 as string
   old_value: string; // BCS returns u256 as string
@@ -82,9 +82,9 @@ export interface CommitmentData {
 }
 
 /**
- * Processed JobData with provable commitment representations
+ * Processed TransitionData with provable commitment representations
  */
-export interface JobData {
+export interface TransitionData {
   index: number;
   value: bigint; // u256 as bigint for numeric operations
   old_value: bigint; // u256 as bigint for numeric operations
@@ -126,47 +126,47 @@ export function bigIntToCommitmentArray(value: bigint): number[] {
 }
 
 /**
- * Deserializes raw JobData from BCS bytes
+ * Deserializes raw TransitionData from BCS bytes
  * @param data - The BCS serialized data as byte array or Uint8Array
- * @returns Raw JobData object (with number[] commitments)
+ * @returns Raw TransitionData object (with number[] commitments)
  */
-export function deserializeRawJobData(data: number[] | Uint8Array): RawJobData {
+export function deserializeRawTransitionData(data: number[] | Uint8Array): RawTransitionData {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-  return JobDataBcs.parse(bytes);
+  return TransitionDataBcs.parse(bytes);
 }
 
 /**
- * Deserializes JobData from BCS bytes and converts commitments to provable form
+ * Deserializes TransitionData from BCS bytes and converts commitments to provable form
  * @param data - The BCS serialized data as byte array or Uint8Array
- * @returns Processed JobData object with Fr.Canonical.provable commitments
+ * @returns Processed TransitionData object with Fr.Canonical.provable commitments
  */
-export function deserializeJobData(data: number[] | Uint8Array): JobData {
-  const rawJobData = deserializeRawJobData(data);
+export function deserializeTransitionData(data: number[] | Uint8Array): TransitionData {
+  const rawTransitionData = deserializeRawTransitionData(data);
 
   return {
-    index: rawJobData.index,
-    value: BigInt(rawJobData.value),
-    old_value: BigInt(rawJobData.old_value),
+    index: rawTransitionData.index,
+    value: BigInt(rawTransitionData.value),
+    old_value: BigInt(rawTransitionData.old_value),
     old_commitment: {
       actions_commitment: scalar(
-        commitmentArrayToBigInt(rawJobData.old_commitment.actions_commitment.bytes)
+        commitmentArrayToBigInt(rawTransitionData.old_commitment.actions_commitment.bytes)
       ),
-      actions_sequence: BigInt(rawJobData.old_commitment.actions_sequence),
+      actions_sequence: BigInt(rawTransitionData.old_commitment.actions_sequence),
       state_commitment: scalar(
-        commitmentArrayToBigInt(rawJobData.old_commitment.state_commitment.bytes)
+        commitmentArrayToBigInt(rawTransitionData.old_commitment.state_commitment.bytes)
       ),
     },
     new_commitment: {
       actions_commitment: scalar(
-        commitmentArrayToBigInt(rawJobData.new_commitment.actions_commitment.bytes)
+        commitmentArrayToBigInt(rawTransitionData.new_commitment.actions_commitment.bytes)
       ),
-      actions_sequence: BigInt(rawJobData.new_commitment.actions_sequence),
+      actions_sequence: BigInt(rawTransitionData.new_commitment.actions_sequence),
       state_commitment: scalar(
-        commitmentArrayToBigInt(rawJobData.new_commitment.state_commitment.bytes)
+        commitmentArrayToBigInt(rawTransitionData.new_commitment.state_commitment.bytes)
       ),
     },
-    block_number: BigInt(rawJobData.block_number),
-    sequence: BigInt(rawJobData.sequence),
+    block_number: BigInt(rawTransitionData.block_number),
+    sequence: BigInt(rawTransitionData.sequence),
   };
 }
 
@@ -180,43 +180,43 @@ function provableToBigInt(provable: CanonicalElement): bigint {
 }
 
 /**
- * Serializes JobData to BCS bytes
- * @param jobData - The JobData object to serialize
+ * Serializes TransitionData to BCS bytes
+ * @param transitionData - The TransitionData object to serialize
  * @returns BCS serialized bytes
  */
-export function serializeJobData(jobData: JobData): Uint8Array {
+export function serializeTransitionData(transitionData: TransitionData): Uint8Array {
   // Convert back to raw format for serialization
-  const rawJobData: RawJobData = {
-    index: jobData.index,
-    value: jobData.value.toString(),
-    old_value: jobData.old_value.toString(),
+  const rawTransitionData: RawTransitionData = {
+    index: transitionData.index,
+    value: transitionData.value.toString(),
+    old_value: transitionData.old_value.toString(),
     old_commitment: {
       actions_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(jobData.old_commitment.actions_commitment)
+        provableToBigInt(transitionData.old_commitment.actions_commitment)
       ) },
-      actions_sequence: jobData.old_commitment.actions_sequence.toString(),
+      actions_sequence: transitionData.old_commitment.actions_sequence.toString(),
       state_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(jobData.old_commitment.state_commitment)
+        provableToBigInt(transitionData.old_commitment.state_commitment)
       ) },
     },
     new_commitment: {
       actions_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(jobData.new_commitment.actions_commitment)
+        provableToBigInt(transitionData.new_commitment.actions_commitment)
       ) },
-      actions_sequence: jobData.new_commitment.actions_sequence.toString(),
+      actions_sequence: transitionData.new_commitment.actions_sequence.toString(),
       state_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(jobData.new_commitment.state_commitment)
+        provableToBigInt(transitionData.new_commitment.state_commitment)
       ) },
     },
-    block_number: jobData.block_number.toString(),
-    sequence: jobData.sequence.toString(),
+    block_number: transitionData.block_number.toString(),
+    sequence: transitionData.sequence.toString(),
   };
 
-  return JobDataBcs.serialize(rawJobData).toBytes();
+  return TransitionDataBcs.serialize(rawTransitionData).toBytes();
 }
 
 /**
- * Create AddProgramCommitment objects from JobData
+ * Create AddProgramCommitment objects from TransitionData
  */
 export interface ProcessedCommitments {
   oldCommitment: {
@@ -234,23 +234,23 @@ export interface ProcessedCommitments {
 }
 
 /**
- * Process JobData into commitment objects ready for AddProgram
- * @param jobData - Deserialized JobData with provable commitments
+ * Process TransitionData into commitment objects ready for AddProgram
+ * @param transitionData - Deserialized TransitionData with provable commitments
  * @returns Processed commitment objects
  */
-export function processCommitments(jobData: JobData): ProcessedCommitments {
+export function processCommitments(transitionData: TransitionData): ProcessedCommitments {
   return {
     oldCommitment: {
-      actionsCommitment: jobData.old_commitment.actions_commitment,
-      stateCommitment: jobData.old_commitment.state_commitment,
-      actionsSequence: UInt64.from(jobData.old_commitment.actions_sequence),
-      actionsRPower: rScalarPow(jobData.old_commitment.actions_sequence),
+      actionsCommitment: transitionData.old_commitment.actions_commitment,
+      stateCommitment: transitionData.old_commitment.state_commitment,
+      actionsSequence: UInt64.from(transitionData.old_commitment.actions_sequence),
+      actionsRPower: rScalarPow(transitionData.old_commitment.actions_sequence),
     },
     newCommitment: {
-      actionsCommitment: jobData.new_commitment.actions_commitment,
-      stateCommitment: jobData.new_commitment.state_commitment,
-      actionsSequence: UInt64.from(jobData.new_commitment.actions_sequence),
-      actionsRPower: rScalarPow(jobData.new_commitment.actions_sequence),
+      actionsCommitment: transitionData.new_commitment.actions_commitment,
+      stateCommitment: transitionData.new_commitment.state_commitment,
+      actionsSequence: UInt64.from(transitionData.new_commitment.actions_sequence),
+      actionsRPower: rScalarPow(transitionData.new_commitment.actions_sequence),
     },
   };
 }

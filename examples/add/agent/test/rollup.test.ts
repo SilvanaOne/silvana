@@ -20,7 +20,7 @@ import {
 } from "o1js";
 import { getSum } from "./helpers/sum.js";
 import { getState } from "./helpers/state.js";
-import { deserializeJobData, processCommitments } from "../src/jobdata.js";
+import { deserializeTransitionData, processCommitments } from "../src/transition.js";
 // Removed unused imports - scalar, R, rScalarPow now come from processCommitments
 
 let appID: string | undefined = undefined;
@@ -121,18 +121,18 @@ describe("Add Rollup", async () => {
 
     console.time("add proof");
 
-    // Deserialize JobData from the event
-    const jobData = deserializeJobData(result.jobCreatedEvent.data);
+    // Deserialize TransitionData from the event
+    const transitionData = deserializeTransitionData(result.jobCreatedEvent.data);
 
-    // Process commitments with all calculations done in jobdata.ts
-    const commitments = processCommitments(jobData);
+    // Process commitments with all calculations done in transition.ts
+    const commitments = processCommitments(transitionData);
 
     // Calculate proof using processed commitments
     const proofResult = await AddProgram.add(
       state, // Current circuit state (maintained between operations)
-      UInt32.from(jobData.index),
-      Field(jobData.old_value),
-      Field(jobData.value),
+      UInt32.from(transitionData.index),
+      Field(transitionData.old_value),
+      Field(transitionData.value),
       map, // Current map state (maintained between operations)
       new AddProgramCommitment(commitments.oldCommitment),
       new AddProgramCommitment(commitments.newCommitment)
@@ -177,20 +177,20 @@ describe("Add Rollup", async () => {
 
     console.time("multiply proof from JobCreatedEvent");
 
-    // Deserialize JobData from the event
-    const jobData = deserializeJobData(result.jobCreatedEvent.data);
+    // Deserialize TransitionData from the event
+    const transitionData = deserializeTransitionData(result.jobCreatedEvent.data);
 
-    // Process commitments with all calculations done in jobdata.ts
-    const commitments = processCommitments(jobData);
+    // Process commitments with all calculations done in transition.ts
+    const commitments = processCommitments(transitionData);
 
     const serializedState = state.serialize(map);
     const { state: deserializedState, map: deserializedMap } =
       AddProgramState.deserialize(serializedState);
     const proofResult = await AddProgram.multiply(
       deserializedState,
-      UInt32.from(jobData.index),
-      Field(jobData.old_value),
-      Field(jobData.value),
+      UInt32.from(transitionData.index),
+      Field(transitionData.old_value),
+      Field(transitionData.value),
       deserializedMap,
       new AddProgramCommitment(commitments.oldCommitment),
       new AddProgramCommitment(commitments.newCommitment)
