@@ -26,7 +26,10 @@ describe("Deploy App for Coordinator", async () => {
 
     // Get registry info - if it was created during the test, it will be in the environment
     // The createApp function sets it if it creates a new registry
-    const registryAddress = process.env.SILVANA_REGISTRY || process.env.TEST_REGISTRY_ADDRESS || "[Registry was created during test]";
+    const registryAddress =
+      process.env.SILVANA_REGISTRY ||
+      process.env.TEST_REGISTRY_ADDRESS ||
+      "[Registry was created during test]";
     const registryPackageID = process.env.SILVANA_REGISTRY_PACKAGE || "";
     const appInstanceID = process.env.APP_INSTANCE_ID || "";
 
@@ -67,7 +70,7 @@ describe("Deploy App for Coordinator", async () => {
     console.log("2. Start the coordinator: cargo run --bin coordinator");
     console.log("3. Run send.test.ts to generate events");
     console.log("\n📦 Registry Details:");
-    console.log(`   SILVANA_REGISTRY=${registryAddress}`);
-    console.log(`   SILVANA_REGISTRY_PACKAGE=${registryPackageID}`);
+    console.log(`SILVANA_REGISTRY=${registryAddress}`);
+    console.log(`SILVANA_REGISTRY_PACKAGE=${registryPackageID}`);
   });
 });

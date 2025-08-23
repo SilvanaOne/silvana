@@ -17,6 +17,7 @@
     "purge": "npm run test test/purge.test.ts",
     "rollup": "npm run test test/rollup.test.ts",
     "commitment": "npm run test test/commitment.test.ts",
+    "jobdata": "npm run test test/jobdata.test.ts",
     "deploy": "npm run test test/deploy.test.ts",
     "send": "npm run test test/send.test.ts",
     "compile": "npm run test test/compile.test.ts",

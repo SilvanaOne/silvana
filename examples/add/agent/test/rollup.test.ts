@@ -108,6 +108,33 @@ describe("Add Rollup", async () => {
       appInstanceID,
     });
     console.log("add result", result);
+    
+    // Print all JobData parameters for later use in jobdata.test.ts assertions
+    console.log("\n=== JobData Parameters from Sui ===");
+    console.log("index:", result.index);
+    console.log("value:", result.value);
+    console.log("old_value:", result.old_value);
+    console.log("old_actions_commitment:", result.old_actions_commitment);
+    console.log("old_state_commitment:", result.old_state_commitment);
+    console.log("old_actions_sequence:", result.old_actions_sequence);
+    console.log("new_actions_commitment:", result.new_actions_commitment);
+    console.log("new_state_commitment:", result.new_state_commitment);
+    console.log("new_actions_sequence:", result.new_actions_sequence);
+    // Note: block_number and sequence are not in the action result, they come from the app instance
+    console.log("app_instance.block_number: [will be retrieved from instance]");
+    console.log("app_instance.sequence: [will be retrieved from instance]");
+    console.log("=====================================\n");
+    
+    // Print JobCreatedEvent if it exists
+    if (result.jobCreatedEvent) {
+      console.log("\n=== JobCreatedEvent from Sui ===");
+      console.log("JobCreatedEvent:", JSON.stringify(result.jobCreatedEvent, null, 2));
+      console.log("JobCreatedEvent data length:", result.jobCreatedEvent.data.length);
+      console.log("JobCreatedEvent data (first 20 bytes):", result.jobCreatedEvent.data.slice(0, 20));
+      console.log("=====================================\n");
+    } else {
+      console.log("⚠️  No JobCreatedEvent found in transaction events");
+    }
     assert.ok(result.index === 1, "index is not 1");
     assert.ok(result.new_sum === 1n, "new_sum is not 1");
     assert.ok(result.new_value === 1n, "new_value is not 1");
@@ -126,27 +153,70 @@ describe("Add Rollup", async () => {
     // assert.ok(newState.length === 2, "newState length is not 2");
     // assert.ok(newState[0] === 1n, "newState[0] is not 1");
     // assert.ok(newState[1] === 1n, "newState[1] is not 1");
-    console.time("add proof");
+    
+    // COMMENTED OUT: Old proof calculation using direct variables
+    // console.time("add proof");
+    // const proofResult = await AddProgram.add(
+    //   state,
+    //   UInt32.from(result.index),
+    //   Field(result.old_value),
+    //   Field(result.value),
+    //   map,
+    //   new AddProgramCommitment({
+    //     actionsCommitment: scalar(result.old_actions_commitment),
+    //     stateCommitment: scalar(result.old_state_commitment),
+    //     actionsSequence: UInt64.from(result.old_actions_sequence),
+    //     actionsRPower: rScalarPow(result.old_actions_sequence),
+    //   }),
+    //   new AddProgramCommitment({
+    //     actionsCommitment: scalar(result.new_actions_commitment),
+    //     stateCommitment: scalar(result.new_state_commitment),
+    //     actionsSequence: UInt64.from(result.new_actions_sequence),
+    //     actionsRPower: rScalarPow(result.new_actions_sequence),
+    //   })
+    // );
+    // console.timeEnd("add proof");
+    
+    // NEW: Proof calculation using ONLY JobCreatedEvent deserialized data
+    if (!result.jobCreatedEvent) {
+      throw new Error("JobCreatedEvent is required for proof calculation");
+    }
+    
+    console.time("add proof from JobCreatedEvent");
+    
+    // Deserialize JobData from the event
+    const { deserializeJobData, processCommitments } = await import("../src/jobdata.js");
+    const jobData = deserializeJobData(result.jobCreatedEvent.data);
+    
+    console.log("Deserialized JobData from event:");
+    console.log("- index:", jobData.index);
+    console.log("- value:", jobData.value);
+    console.log("- old_value:", jobData.old_value);
+    console.log("- old_actions_sequence:", jobData.old_actions_sequence);
+    console.log("- new_actions_sequence:", jobData.new_actions_sequence);
+    console.log("- block_number:", jobData.block_number);
+    console.log("- sequence:", jobData.sequence);
+    console.log("- old_actions_commitment:", jobData.old_actions_commitment.toBigInt().toString());
+    console.log("- old_state_commitment:", jobData.old_state_commitment.toBigInt().toString());
+    console.log("- new_actions_commitment:", jobData.new_actions_commitment.toBigInt().toString());
+    console.log("- new_state_commitment:", jobData.new_state_commitment.toBigInt().toString());
+    
+    // Process commitments with all calculations done in jobdata.ts
+    const commitments = processCommitments(jobData);
+    
+    // Calculate proof using processed commitments
     const proofResult = await AddProgram.add(
-      state,
-      UInt32.from(result.index),
-      Field(result.old_value),
-      Field(result.value),
-      map,
-      new AddProgramCommitment({
-        actionsCommitment: scalar(result.old_actions_commitment),
-        stateCommitment: scalar(result.old_state_commitment),
-        actionsSequence: UInt64.from(result.old_actions_sequence),
-        actionsRPower: rScalarPow(result.old_actions_sequence),
-      }),
-      new AddProgramCommitment({
-        actionsCommitment: scalar(result.new_actions_commitment),
-        stateCommitment: scalar(result.new_state_commitment),
-        actionsSequence: UInt64.from(result.new_actions_sequence),
-        actionsRPower: rScalarPow(result.new_actions_sequence),
-      })
+      state, // Current circuit state (maintained between operations)
+      UInt32.from(jobData.index),
+      Field(jobData.old_value),
+      Field(jobData.value),
+      map, // Current map state (maintained between operations)
+      new AddProgramCommitment(commitments.oldCommitment),
+      new AddProgramCommitment(commitments.newCommitment)
     );
-    console.timeEnd("add proof");
+    
+    console.timeEnd("add proof from JobCreatedEvent");
+    console.log("✅ Proof calculated successfully using only JobCreatedEvent data!");
     proofs.push(proofResult.proof);
     const publicOutput = proofResult.proof.publicOutput;
 
@@ -247,6 +317,10 @@ describe("Add Rollup", async () => {
     );
     console.timeEnd("merge proofs");
     assert.ok(mergedProof !== undefined, "mergedProof is not set");
+    assert.ok(
+      mergedProof.proof.publicOutput.sum.toBigInt() === 2n,
+      "mergedProof sum is not 2"
+    );
   });
   it("should purge", async () => {
     const appInstanceID = process.env.APP_INSTANCE_ID;

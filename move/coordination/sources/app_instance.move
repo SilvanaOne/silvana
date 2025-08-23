@@ -49,6 +49,29 @@ public struct AppInstanceCreatedEvent has copy, drop {
     created_at: u64,
 }
 
+public struct BlockCreatedEvent has copy, drop {
+    app_instance_address: address,
+    block_number: u64,
+    start_sequence: u64,
+    end_sequence: u64,
+    timestamp: u64,
+}
+
+public struct NoNewSequencesEvent has copy, drop {
+    app_instance_address: address,
+    current_sequence: u64,
+    previous_block_last_sequence: u64,
+    timestamp: u64,
+}
+
+public struct InsufficientTimeForBlockEvent has copy, drop {
+    app_instance_address: address,
+    current_time: u64,
+    previous_block_timestamp: u64,
+    time_since_last_block: u64,
+    min_time_required: u64,
+}
+
 public struct APP_INSTANCE has drop {}
 
 fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
@@ -172,18 +195,46 @@ public(package) fun not_paused(app_instance: &AppInstance) {
 
 const MIN_TIME_BETWEEN_BLOCKS: u64 = 60_000;
 
-public fun try_create_block(
+public fun increase_sequence(
     app_instance: &mut AppInstance,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    app_instance.sequence = app_instance.sequence + 1;
+    try_create_block(app_instance, clock, ctx);
+}
+
+fun try_create_block(
+    app_instance: &mut AppInstance,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let current_time = clock.timestamp_ms();
+    
     if (
         (app_instance.previous_block_last_sequence + 1) == app_instance.sequence
-    ) return;
-    let current_time = clock.timestamp_ms();
+    ) {
+        event::emit(NoNewSequencesEvent {
+            app_instance_address: app_instance.id.to_address(),
+            current_sequence: app_instance.sequence,
+            previous_block_last_sequence: app_instance.previous_block_last_sequence,
+            timestamp: current_time,
+        });
+        return
+    };
+    
     if (
         current_time - app_instance.previous_block_timestamp <= MIN_TIME_BETWEEN_BLOCKS
-    ) return;
+    ) {
+        event::emit(InsufficientTimeForBlockEvent {
+            app_instance_address: app_instance.id.to_address(),
+            current_time,
+            previous_block_timestamp: app_instance.previous_block_timestamp,
+            time_since_last_block: current_time - app_instance.previous_block_timestamp,
+            min_time_required: MIN_TIME_BETWEEN_BLOCKS,
+        });
+        return
+    };
     let mut block_number = app_instance.block_number;
     let start_sequence = app_instance.previous_block_last_sequence + 1;
     let end_sequence = app_instance.sequence - 1;
@@ -237,6 +288,14 @@ public fun try_create_block(
         block_number,
         new_proof_calculation,
     );
+    
+    event::emit(BlockCreatedEvent {
+        app_instance_address: app_instance.id.to_address(),
+        block_number: app_instance.block_number - 1, // Use the created block number, not the new one
+        start_sequence,
+        end_sequence,
+        timestamp,
+    });
 }
 
 public fun start_proving(

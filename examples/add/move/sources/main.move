@@ -7,7 +7,7 @@ use commitment::state::{
     get_state_element,
     has_state_element
 };
-use coordination::app_instance::{AppInstance, AppInstanceCap, try_create_block};
+use coordination::app_instance::{AppInstance, AppInstanceCap};
 use coordination::registry::{
     SilvanaRegistry,
     create_app_instance_from_registry
@@ -77,6 +77,15 @@ const SUM_INDEX: u32 = 0;
 public struct JobData has copy, drop {
     index: u32,
     value: u256,
+    old_value: u256,
+    old_actions_commitment: Element<Scalar>,
+    old_state_commitment: Element<Scalar>,
+    old_actions_sequence: u64,
+    new_actions_commitment: Element<Scalar>,
+    new_state_commitment: Element<Scalar>,
+    new_actions_sequence: u64,
+    block_number: u64,
+    sequence: u64,
 }
 
 public fun create_app(
@@ -178,7 +187,19 @@ public fun add(
     let new_state_commitment = state.get_state_commitment();
 
     // Create job for this add operation
-    let job_data_struct = JobData { index, value };
+    let job_data_struct = JobData { 
+        index, 
+        value,
+        old_value,
+        old_actions_commitment,
+        old_state_commitment,
+        old_actions_sequence,
+        new_actions_commitment,
+        new_state_commitment,
+        new_actions_sequence,
+        block_number: instance.block_number(),
+        sequence: instance.sequence(),
+    };
     let job_data = bcs::to_bytes(&job_data_struct);
     coordination::app_instance::create_app_job(
         instance,
@@ -206,7 +227,7 @@ public fun add(
         new_actions_sequence,
         new_state_commitment,
     });
-    try_create_block(instance, clock, ctx);
+    coordination::app_instance::increase_sequence(instance, clock, ctx);
 }
 
 public fun multiply(
@@ -254,7 +275,19 @@ public fun multiply(
     let new_state_commitment = state.get_state_commitment();
 
     // Create job for this multiply operation
-    let job_data_struct = JobData { index, value };
+    let job_data_struct = JobData { 
+        index, 
+        value,
+        old_value,
+        old_actions_commitment,
+        old_state_commitment,
+        old_actions_sequence,
+        new_actions_commitment,
+        new_state_commitment,
+        new_actions_sequence,
+        block_number: instance.block_number(),
+        sequence: instance.sequence(),
+    };
     let job_data = bcs::to_bytes(&job_data_struct);
     coordination::app_instance::create_app_job(
         instance,
@@ -282,7 +315,7 @@ public fun multiply(
         new_actions_sequence,
         new_state_commitment,
     });
-    try_create_block(instance, clock, ctx);
+    coordination::app_instance::increase_sequence(instance, clock, ctx);
 }
 
 public fun get_value(instance: &AppInstance, index: u32): u256 {

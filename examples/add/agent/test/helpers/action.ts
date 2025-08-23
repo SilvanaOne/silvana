@@ -4,6 +4,24 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getSuiAddress } from "./key.js";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
+interface JobCreatedEvent {
+  agent: string;
+  agent_method: string;
+  app: string;
+  app_instance: string;
+  app_instance_method: string;
+  created_at: string;
+  data: number[];
+  description: string;
+  developer: string;
+  job_sequence: string;
+  sequences: any;
+  status: {
+    variant: string;
+    fields: any;
+  };
+}
+
 interface ActionResult {
   index: number;
   value: bigint;
@@ -17,6 +35,7 @@ interface ActionResult {
   new_actions_commitment: bigint;
   old_actions_sequence: bigint;
   new_actions_sequence: bigint;
+  jobCreatedEvent?: JobCreatedEvent;
 }
 
 export async function action(params: {
@@ -98,6 +117,10 @@ export async function action(params: {
     throw new Error("No events found");
   }
   //console.log("Events:", events);
+  
+  let actionResult: ActionResult | null = null;
+  let jobCreatedEvent: JobCreatedEvent | null = null;
+  
   for (const event of events) {
     if (
       event.type.endsWith("::main::ValueAddedEvent") ||
@@ -105,7 +128,7 @@ export async function action(params: {
     ) {
       const json = event.parsedJson as any;
       //console.log("json", json);
-      return {
+      actionResult = {
         index: json.index,
         value: BigInt(json.amount_added || json.multiplier),
         new_sum: BigInt(json.new_sum),
@@ -119,9 +142,21 @@ export async function action(params: {
         old_actions_sequence: BigInt(json.old_actions_sequence),
         new_actions_sequence: BigInt(json.new_actions_sequence),
       };
+    } else if (event.type.endsWith("::jobs::JobCreatedEvent")) {
+      jobCreatedEvent = event.parsedJson as JobCreatedEvent;
     }
   }
-  throw new Error("No events found");
+  
+  if (!actionResult) {
+    throw new Error("No ValueAddedEvent or ValueMultipliedEvent found");
+  }
+  
+  // Add JobCreatedEvent to the result if found
+  if (jobCreatedEvent) {
+    actionResult.jobCreatedEvent = jobCreatedEvent;
+  }
+  
+  return actionResult;
 }
 
 function convertCommitment(data: { bytes: Uint8Array }): bigint {
