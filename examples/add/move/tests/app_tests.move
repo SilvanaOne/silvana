@@ -30,6 +30,20 @@ fun setup_test_registry_and_app(
     );
     
     // Add methods to the app
+    let init_method = coordination::app_method::new(
+        option::none(),
+        b"Developer".to_string(),
+        b"Agent".to_string(),
+        b"init".to_string(),
+    );
+    coordination::registry::add_method_to_app(
+        &mut registry,
+        b"test_app".to_string(),
+        b"init".to_string(),
+        init_method,
+        test::ctx(scenario),
+    );
+    
     let add_method = coordination::app_method::new(
         option::none(),
         b"Developer".to_string(),
@@ -78,7 +92,7 @@ fun test_create_app() {
     let mut instance = test::take_shared<AppInstance>(&scenario);
     
     // Initialize the app state
-    init_app_with_instance(&app, &mut instance, test::ctx(&mut scenario));
+    init_app_with_instance(&app, &mut instance, &clock, test::ctx(&mut scenario));
 
     // Initial sum should be 0 since no elements exist yet
     assert!(get_sum(&instance) == 0, 0);
@@ -106,7 +120,7 @@ fun test_add_function_single_index() {
     
     test::next_tx(&mut scenario, @0x1);
     let mut instance = test::take_shared<AppInstance>(&scenario);
-    init_app_with_instance(&app, &mut instance, test::ctx(&mut scenario));
+    init_app_with_instance(&app, &mut instance, &clock, test::ctx(&mut scenario));
 
     // Initial state is 0 at index 1, add 5 should make it 5
     add(&mut app, &mut instance, 1, 5, &clock, test::ctx(&mut scenario));
@@ -142,7 +156,7 @@ fun test_multiply_function_single_index() {
     
     test::next_tx(&mut scenario, @0x1);
     let mut instance = test::take_shared<AppInstance>(&scenario);
-    init_app_with_instance(&app, &mut instance, test::ctx(&mut scenario));
+    init_app_with_instance(&app, &mut instance, &clock, test::ctx(&mut scenario));
 
     // Initial state is 0 at index 1, multiply by 3 should still be 0 (0 * 3 = 0)
     multiply(&mut app, &mut instance, 1, 3, &clock, test::ctx(&mut scenario));
@@ -178,7 +192,7 @@ fun test_multiple_indexes_sequential() {
     
     test::next_tx(&mut scenario, @0x1);
     let mut instance = test::take_shared<AppInstance>(&scenario);
-    init_app_with_instance(&app, &mut instance, test::ctx(&mut scenario));
+    init_app_with_instance(&app, &mut instance, &clock, test::ctx(&mut scenario));
 
     // Test sequential indexes 1, 2, 3, 4 (index 0 is reserved)
     add(&mut app, &mut instance, 1, 10, &clock, test::ctx(&mut scenario));
@@ -235,7 +249,7 @@ fun test_add_reserved_index_0() {
     
     test::next_tx(&mut scenario, @0x1);
     let mut instance = test::take_shared<AppInstance>(&scenario);
-    init_app_with_instance(&app, &mut instance, test::ctx(&mut scenario));
+    init_app_with_instance(&app, &mut instance, &clock, test::ctx(&mut scenario));
 
     // This should fail as index 0 is reserved
     add(&mut app, &mut instance, 0, 5, &clock, test::ctx(&mut scenario));
@@ -261,7 +275,7 @@ fun test_add_invalid_value_100() {
     
     test::next_tx(&mut scenario, @0x1);
     let mut instance = test::take_shared<AppInstance>(&scenario);
-    init_app_with_instance(&app, &mut instance, test::ctx(&mut scenario));
+    init_app_with_instance(&app, &mut instance, &clock, test::ctx(&mut scenario));
 
     // This should fail as value >= 100
     add(&mut app, &mut instance, 1, 100, &clock, test::ctx(&mut scenario));
@@ -286,7 +300,7 @@ fun test_zero_operations() {
     
     test::next_tx(&mut scenario, @0x1);
     let mut instance = test::take_shared<AppInstance>(&scenario);
-    init_app_with_instance(&app, &mut instance, test::ctx(&mut scenario));
+    init_app_with_instance(&app, &mut instance, &clock, test::ctx(&mut scenario));
 
     // Adding 0 should not change the state
     add(&mut app, &mut instance, 1, 0, &clock, test::ctx(&mut scenario));

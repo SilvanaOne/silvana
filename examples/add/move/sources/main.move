@@ -67,8 +67,8 @@ public struct ValueMultipliedEvent has copy, drop {
 
 const SUM_INDEX: u32 = 0;
 
-// Struct for serializing job data
-public struct JobData has copy, drop {
+// Struct for serializing transition data
+public struct TransitionData has copy, drop {
     index: u32,
     value: u256,
     old_value: u256,
@@ -76,6 +76,12 @@ public struct JobData has copy, drop {
     new_commitment: CommitmentData,
     block_number: u64,
     sequence: u64,
+}
+
+// Struct for optimistic state
+public struct OptimisticState has copy, drop {
+    sum: u256,
+    commitment: CommitmentData,
 }
 
 public fun create_app(
@@ -117,6 +123,7 @@ public fun create_app(
 public fun init_app_with_instance(
     app: &App,
     instance: &mut AppInstance,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
     // Initialize with sum equal to 0 as there are no elements yet
@@ -125,6 +132,41 @@ public fun init_app_with_instance(
     instance
         .state_mut(&app.instance_cap)
         .commit_action(action, &vector[state_update], ctx);
+    
+    // Get initial commitment data for sequence 0
+    let state = instance.state_mut(&app.instance_cap);
+    let initial_commitment = get_commitment_data(state);
+    
+    // Create optimistic state for sequence 0
+    let optimistic_state_struct = OptimisticState {
+        sum: 0u256,
+        commitment: initial_commitment,
+    };
+    let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
+    
+    // Create job for init method
+    coordination::app_instance::create_app_job(
+        instance,
+        b"init".to_string(),
+        option::some(b"Initialize app state job".to_string()),
+        option::some(vector[0u64]), // sequence 0
+        vector[], // empty transition data for initial state
+        clock,
+        ctx,
+    );
+    
+    // Add sequence 0 state to the sequence state manager
+    // No transition data for initial state, so use empty vector
+    coordination::app_instance::add_state_for_sequence(
+        instance,
+        0u64,
+        option::none(), // state is None initially, calculated off-chain
+        option::none(), // data_availability is None initially
+        optimistic_state_bytes,
+        vector[], // empty transition data for initial state
+        clock,
+        ctx,
+    );
 }
 
 const EInvalidValue: u64 = 0;
@@ -170,23 +212,31 @@ public fun add(
     // Get new commitment data
     let new_commitment = get_commitment_data(state);
 
-    // Create job for this add operation
-    let job_data_struct = JobData { 
+    // Create optimistic state and transition data
+    let optimistic_state_struct = OptimisticState {
+        sum: new_sum,
+        commitment: new_commitment,
+    };
+    let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
+    
+    let sequence = instance.sequence();
+    let transition_data_struct = TransitionData { 
         index, 
         value,
         old_value,
         old_commitment,
         new_commitment,
         block_number: instance.block_number(),
-        sequence: instance.sequence(),
+        sequence,
     };
-    let job_data = bcs::to_bytes(&job_data_struct);
+    let transition_data_bytes = bcs::to_bytes(&transition_data_struct);
+    
     coordination::app_instance::create_app_job(
         instance,
         b"add".to_string(),
         option::some(b"Add operation job".to_string()),
-        option::none(),
-        job_data,
+        option::some(vector[sequence]),
+        transition_data_bytes,
         clock,
         ctx,
     );
@@ -203,7 +253,13 @@ public fun add(
         old_commitment,
         new_commitment,
     });
-    coordination::app_instance::increase_sequence(instance, clock, ctx);
+    coordination::app_instance::increase_sequence(
+        instance,
+        optimistic_state_bytes,
+        transition_data_bytes,
+        clock,
+        ctx,
+    );
 }
 
 public fun multiply(
@@ -244,23 +300,31 @@ public fun multiply(
     // Get new commitment data
     let new_commitment = get_commitment_data(state);
 
-    // Create job for this multiply operation
-    let job_data_struct = JobData { 
+    // Create optimistic state and transition data
+    let optimistic_state_struct = OptimisticState {
+        sum: new_sum,
+        commitment: new_commitment,
+    };
+    let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
+    
+    let sequence = instance.sequence();
+    let transition_data_struct = TransitionData { 
         index, 
         value,
         old_value,
         old_commitment,
         new_commitment,
         block_number: instance.block_number(),
-        sequence: instance.sequence(),
+        sequence,
     };
-    let job_data = bcs::to_bytes(&job_data_struct);
+    let transition_data_bytes = bcs::to_bytes(&transition_data_struct);
+    
     coordination::app_instance::create_app_job(
         instance,
         b"multiply".to_string(),
         option::some(b"Multiply operation job".to_string()),
-        option::none(),
-        job_data,
+        option::some(vector[sequence]),
+        transition_data_bytes,
         clock,
         ctx,
     );
@@ -277,7 +341,13 @@ public fun multiply(
         old_commitment,
         new_commitment,
     });
-    coordination::app_instance::increase_sequence(instance, clock, ctx);
+    coordination::app_instance::increase_sequence(
+        instance,
+        optimistic_state_bytes,
+        transition_data_bytes,
+        clock,
+        ctx,
+    );
 }
 
 public fun get_value(instance: &AppInstance, index: u32): u256 {
@@ -309,8 +379,15 @@ public fun purge_rollback_records(
     app: &mut App,
     instance: &mut AppInstance,
     proved_sequence: u64,
+    clock: &Clock,
 ) {
     let state = instance.state_mut(&app.instance_cap);
     let rollback = state.get_rollback_mut();
     commitment::rollback::purge_records(rollback, proved_sequence);
+    
+    // Purge sequence states for sequences older than proved_sequence - 10
+    if (proved_sequence > 10) {
+        let threshold_sequence = proved_sequence - 10;
+        coordination::app_instance::purge_sequences_below(instance, threshold_sequence, clock);
+    };
 }

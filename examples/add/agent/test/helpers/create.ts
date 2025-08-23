@@ -83,6 +83,32 @@ export async function createApp(): Promise<string> {
     });
 
     console.log("Adding methods to app in registry...");
+    
+    // Create and add the 'init' method
+    const initAppMethod = methodTx.moveCall({
+      target: `${
+        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+      }::app_method::new`,
+      arguments: [
+        methodTx.pure.option("string", "Initialize app state"), 
+        methodTx.pure.string(developerName),
+        methodTx.pure.string(agentName),
+        methodTx.pure.string("prove"),
+      ],
+    });
+
+    methodTx.moveCall({
+      target: `${
+        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+      }::registry::add_method_to_app`,
+      arguments: [
+        methodTx.object(registryAddress),
+        methodTx.pure.string("test_app"),
+        methodTx.pure.string("init"),
+        initAppMethod,
+      ],
+    });
+
     // Create and add the 'add' method
     const addAppMethod = methodTx.moveCall({
       target: `${
@@ -235,10 +261,10 @@ export async function createApp(): Promise<string> {
   console.log("Initializing app with instance...");
   const initTx = new Transaction();
 
-  // public fun init_app_with_instance(app: &App, instance: &mut AppInstance, ctx: &mut TxContext)
+  // public fun init_app_with_instance(app: &App, instance: &mut AppInstance, clock: &Clock, ctx: &mut TxContext)
   initTx.moveCall({
     target: `${packageID}::main::init_app_with_instance`,
-    arguments: [initTx.object(appID), initTx.object(appInstanceID)],
+    arguments: [initTx.object(appID), initTx.object(appInstanceID), initTx.object(SUI_CLOCK_OBJECT_ID)],
   });
 
   initTx.setSender(address);

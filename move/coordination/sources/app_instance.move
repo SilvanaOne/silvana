@@ -6,6 +6,7 @@ use coordination::block::{Self, Block};
 use coordination::jobs::{Self, Jobs};
 use coordination::prover::{Self, ProofCalculation};
 use coordination::silvana_app::{Self, SilvanaApp};
+use coordination::sequence_state::{Self, SequenceState, SequenceStateManager};
 use std::string::String;
 use sui::bls12381::{Scalar, scalar_zero};
 use sui::clock::{timestamp_ms, Clock};
@@ -25,6 +26,7 @@ public struct AppInstance has key, store {
     state: AppState,
     blocks: ObjectTable<u64, Block>,
     proof_calculations: ObjectTable<u64, ProofCalculation>,
+    sequence_state_manager: SequenceStateManager,
     jobs: Jobs,
     sequence: u64,
     admin: address,
@@ -72,6 +74,7 @@ public struct InsufficientTimeForBlockEvent has copy, drop {
     min_time_required: u64,
 }
 
+
 public struct APP_INSTANCE has drop {}
 
 fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
@@ -116,6 +119,8 @@ public fun create_app_instance(
     >(ctx);
     proof_calculations.add(1u64, proof_calculation_block_1);
 
+    let sequence_state_manager = sequence_state::create_sequence_state_manager(ctx);
+
     let state = create_app_state(ctx);
     let jobs = jobs::create_jobs(option::none(), ctx);
 
@@ -134,8 +139,9 @@ public fun create_app_instance(
         state,
         blocks,
         proof_calculations,
+        sequence_state_manager,
         jobs,
-        sequence: 1u64,
+        sequence: 0u64,
         admin: ctx.sender(),
         block_number: 1u64,
         previous_block_timestamp: timestamp,
@@ -197,10 +203,25 @@ const MIN_TIME_BETWEEN_BLOCKS: u64 = 60_000;
 
 public fun increase_sequence(
     app_instance: &mut AppInstance,
+    optimistic_state: vector<u8>,
+    transition_data: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
     app_instance.sequence = app_instance.sequence + 1;
+    
+    // Add new sequence state
+    sequence_state::add_state_for_sequence(
+        &mut app_instance.sequence_state_manager,
+        app_instance.sequence,
+        option::none(), // state is None initially
+        option::none(), // data_availability is None initially
+        optimistic_state,
+        transition_data,
+        clock,
+        ctx,
+    );
+    
     try_create_block(app_instance, clock, ctx);
 }
 
@@ -529,6 +550,7 @@ public fun update_block_mina_tx_hash(
 #[error]
 const EBlockNotSentToMina: vector<u8> = b"Block not sent to Mina";
 
+
 public fun update_block_mina_tx_included_in_block(
     app_instance: &mut AppInstance,
     block_number: u64,
@@ -772,4 +794,76 @@ public fun get_app_pending_jobs_count(app_instance: &AppInstance): u64 {
 
 public fun get_next_pending_app_job(app_instance: &AppInstance): Option<u64> {
     jobs::get_next_pending_job(&app_instance.jobs)
+}
+
+// Sequence state management wrapper functions
+public fun add_state_for_sequence(
+    app_instance: &mut AppInstance,
+    sequence: u64,
+    state_data: Option<vector<u8>>,
+    data_availability_hash: Option<String>,
+    optimistic_state: vector<u8>,
+    transition_data: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    sequence_state::add_state_for_sequence(
+        &mut app_instance.sequence_state_manager,
+        sequence,
+        state_data,
+        data_availability_hash,
+        optimistic_state,
+        transition_data,
+        clock,
+        ctx,
+    );
+}
+
+public fun update_state_for_sequence(
+    app_instance: &mut AppInstance,
+    sequence: u64,
+    new_state_data: Option<vector<u8>>,
+    new_data_availability_hash: Option<String>,
+    clock: &Clock,
+) {
+    sequence_state::update_state_for_sequence(
+        &mut app_instance.sequence_state_manager,
+        sequence,
+        new_state_data,
+        new_data_availability_hash,
+        clock,
+    );
+}
+
+public fun purge_sequences_below(
+    app_instance: &mut AppInstance,
+    threshold_sequence: u64,
+    clock: &Clock,
+) {
+    sequence_state::purge(
+        &mut app_instance.sequence_state_manager,
+        threshold_sequence,
+        clock,
+    );
+}
+
+// Getter functions
+public fun lowest_sequence(app_instance: &AppInstance): Option<u64> {
+    sequence_state::lowest_sequence(&app_instance.sequence_state_manager)
+}
+
+public fun highest_sequence(app_instance: &AppInstance): Option<u64> {
+    sequence_state::highest_sequence(&app_instance.sequence_state_manager)
+}
+
+public(package) fun has_sequence_state(app_instance: &AppInstance, sequence: u64): bool {
+    sequence_state::has_sequence_state(&app_instance.sequence_state_manager, sequence)
+}
+
+public(package) fun borrow_sequence_state(app_instance: &AppInstance, sequence: u64): &SequenceState {
+    sequence_state::borrow_sequence_state(&app_instance.sequence_state_manager, sequence)
+}
+
+public(package) fun borrow_sequence_state_mut(app_instance: &mut AppInstance, sequence: u64): &mut SequenceState {
+    sequence_state::borrow_sequence_state_mut(&mut app_instance.sequence_state_manager, sequence)
 }
