@@ -1,5 +1,6 @@
-use crate::coordination::{ProofCalculation, ProofMergeData};
+use crate::coordination::ProofCalculation;
 use crate::fetch::{fetch_block_info, fetch_proof_calculations};
+use crate::block::settle;
 use anyhow::Result;
 use tracing::{info, warn, error};
 
@@ -7,11 +8,13 @@ use tracing::{info, warn, error};
 pub struct ProofInfo {
     pub sequences: Vec<u64>,
     pub status: ProofStatus,
+    #[allow(dead_code)]
     pub da_hash: Option<String>,
     pub timestamp: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum ProofStatus {
     Started,
     Calculated,
@@ -22,6 +25,7 @@ pub enum ProofStatus {
 
 #[derive(Debug, Clone)]
 pub struct BlockProofs {
+    #[allow(dead_code)]
     pub block_number: u64,
     pub start_sequence: Option<u64>,
     pub end_sequence: Option<u64>,
@@ -33,6 +37,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     proof_calc: &ProofCalculation,
     app_instance: &str,
     client: &mut sui_rpc::Client,
+    da_hash: &str,
 ) -> Result<()> {
     info!("🔍 Analyzing proof calculation for block {} with sequences: {:?}", 
         proof_calc.block_number, proof_calc.sequences);
@@ -115,6 +120,24 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     info!("  Total proofs available: {} (including current)", block_proofs.proofs.len());
     info!("  Current proof covers: sequences {:?}", proof_calc.sequences);
 
+    // Check if the current proof covers the entire block
+    if let (Some(start_seq), Some(end_seq)) = (block_proofs.start_sequence, block_proofs.end_sequence) {
+        // Generate the complete sequence range for the block
+        let complete_block_sequences: Vec<u64> = (start_seq..=end_seq).collect();
+        
+        // Check if current proof contains all sequences for the block
+        if proof_calc.sequences == complete_block_sequences {
+            info!("🎉 Current proof covers the entire block {} (sequences {} to {})", 
+                proof_calc.block_number, start_seq, end_seq);
+            info!("🔒 Settling block {} as complete", proof_calc.block_number);
+            
+            // Call settle for the complete block with the DA hash
+            settle(proof_calc.clone(), da_hash.to_string()).await?;
+            
+            return Ok(());
+        }
+    }
+
     // Find proofs that can be merged using the same logic as TypeScript
     if let Some(merge_request) = find_proofs_to_merge(&block_proofs) {
         info!("✨ Found merge opportunity:");
@@ -125,7 +148,9 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         create_merge_job(
             merge_request.sequences1,
             merge_request.sequences2,
-            proof_calc.block_number
+            proof_calc.block_number,
+            app_instance,
+            client,
         ).await?;
     } else {
         info!("🚫 No merge opportunities found for block {}", proof_calc.block_number);
@@ -135,12 +160,14 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 }
 
 // Main entry point - always use blockchain data
+#[allow(dead_code)]
 pub async fn analyze_and_create_merge_jobs(
     proof_calc: &ProofCalculation,
     app_instance: &str,
     client: &mut sui_rpc::Client,
+    da_hash: &str,
 ) -> Result<()> {
-    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client).await
+    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client, da_hash).await
 }
 
 #[derive(Debug, Clone)]
@@ -261,32 +288,51 @@ fn is_proof_active_or_completed(proof: &ProofInfo, current_time: u64) -> bool {
 }
 
 
-async fn create_merge_job(sequences1: Vec<u64>, sequences2: Vec<u64>, block_number: u64) -> Result<()> {
-    // Create ProofMergeData
-    let merge_data = ProofMergeData {
-        block_number,
-        sequences1: sequences1.clone(),
-        sequences2: sequences2.clone(),
-    };
-
-    // Serialize the merge data
-    let serialized_data = serde_json::to_vec(&merge_data)?;
-    
+async fn create_merge_job(
+    sequences1: Vec<u64>, 
+    sequences2: Vec<u64>, 
+    block_number: u64,
+    app_instance: &str,
+    client: &mut sui_rpc::Client,
+) -> Result<()> {
     info!(
         "Creating merge job for block {} with sequences1: {:?}, sequences2: {:?}",
         block_number, sequences1, sequences2
     );
 
-    // TODO: Create actual Sui transaction to create merge job
-    // This would involve:
-    // 1. Creating a job with the serialized ProofMergeData
-    // 2. Setting proper metadata (developer, agent, agent_method, etc.)
-    // 3. Submitting to the blockchain
-    
-    // For now, just log the action
-    info!("Merge job data prepared (size: {} bytes)", serialized_data.len());
+    // Create SuiJobInterface following the same pattern as submit_proof in grpc.rs
+    let sui_client = client.clone(); // Clone the client  
+    let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
 
-    Ok(())
+    // Create job description
+    let job_description = Some(format!(
+        "Merge proof job for block {} - merging sequences {:?} with {:?}", 
+        block_number, sequences1, sequences2
+    ));
+
+    // Call the SuiJobInterface to create the merge job
+    match sui_interface.create_merge_job(
+        app_instance,
+        block_number,
+        sequences1.clone(),
+        sequences2.clone(),
+        job_description,
+    ).await {
+        Ok(tx_digest) => {
+            info!(
+                "✅ Successfully created merge job for block {} - Transaction: {}",
+                block_number, tx_digest
+            );
+            Ok(())
+        }
+        Err(e) => {
+            error!(
+                "❌ Failed to create merge job for block {}: {}",
+                block_number, e
+            );
+            Err(anyhow::anyhow!("Failed to create merge job: {}", e))
+        }
+    }
 }
 
 #[cfg(test)]

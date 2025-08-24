@@ -791,6 +791,237 @@ pub async fn update_state_for_sequence_tx(
     Ok(tx_digest)
 }
 
+/// Create and submit a transaction to create an app job
+/// This is a general function that can create any type of job by specifying method_name and data
+pub async fn create_app_job_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    method_name: String,
+    job_description: Option<String>,
+    sequences: Option<Vec<u64>>,
+    data: Vec<u8>,
+) -> Result<String> {
+    info!("Creating app job transaction for method: {}, data size: {} bytes", 
+        method_name, data.len());
+    
+    // Parse IDs
+    let package_id = get_coordination_package_id()
+        .context("Failed to get coordination package ID")?;
+    let app_instance_id = get_app_instance_id(app_instance_str)
+        .context("Failed to parse app instance ID")?;
+    let clock_object_id = get_clock_object_id();
+
+    // Parse sender and secret key
+    let (sender, sk) = load_sender_from_env()?;
+
+    // Build transaction using TransactionBuilder
+    let mut tb = sui_transaction_builder::TransactionBuilder::new();
+    tb.set_sender(sender);
+    tb.set_gas_budget(100_000_000); // 0.1 SUI
+
+    // Get gas price and gas coin using provided client
+    let gas_price = get_reference_gas_price(client).await?;
+    tb.set_gas_price(gas_price);
+
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
+    let gas_input = sui_transaction_builder::unresolved::Input::owned(
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
+    );
+    tb.add_gas_objects(vec![gas_input]);
+
+    // Get current version and ownership info of app_instance object
+    let (app_instance_ref, initial_shared_version) = get_object_details(client, app_instance_id).await
+        .context("Failed to get app instance details")?;
+    
+    // Create input based on whether object is shared or owned
+    let app_instance_input = if let Some(shared_version) = initial_shared_version {
+        debug!("Using shared object input for app_instance (create_app_job) with initial_shared_version={}", shared_version);
+        sui_transaction_builder::unresolved::Input::shared(
+            app_instance_id,
+            shared_version,
+            true // mutable
+        )
+    } else {
+        debug!("Using owned object input for app_instance (create_app_job)");
+        sui_transaction_builder::unresolved::Input::owned(
+            *app_instance_ref.object_id(),
+            app_instance_ref.version(),
+            *app_instance_ref.digest(),
+        )
+    };
+    let app_instance_arg = tb.input(app_instance_input);
+
+    // Arguments for create_app_job (following the Move function signature exactly)
+    let method_name_arg = tb.input(sui_transaction_builder::Serialized(&method_name));
+    let job_description_arg = tb.input(sui_transaction_builder::Serialized(&job_description));
+    let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
+    let data_arg = tb.input(sui_transaction_builder::Serialized(&data));
+
+    // Clock object (shared)
+    let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
+    let clock_arg = tb.input(clock_input);
+
+    // Function call: coordination::app_instance::create_app_job
+    let func = sui_transaction_builder::Function::new(
+        package_id,
+        "app_instance".parse()
+            .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+        "create_app_job".parse()
+            .map_err(|e| anyhow!("Failed to parse function name 'create_app_job': {}", e))?,
+        vec![],
+    );
+    tb.move_call(func, vec![
+        app_instance_arg,
+        method_name_arg,
+        job_description_arg,
+        sequences_arg,
+        data_arg,
+        clock_arg,
+    ]);
+
+    // Finalize and sign
+    let tx = tb.finish()?;
+    let sig = sk.sign_transaction(&tx)?;
+
+    // Execute transaction using provided client
+    let mut exec = client.execution_client();
+    let req = proto::ExecuteTransactionRequest {
+        transaction: Some(tx.into()),
+        signatures: vec![sig.into()],
+        read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
+    };
+
+    debug!("Sending create_app_job transaction...");
+    let tx_start = std::time::Instant::now();
+    let exec_result = exec.execute_transaction(req).await;
+    let tx_elapsed_ms = tx_start.elapsed().as_millis();
+
+    let resp = match exec_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Transaction execution error: {:?}", e);
+            return Err(anyhow!("Failed to execute transaction: {}", e));
+        }
+    };
+    let tx_resp = resp.into_inner();
+
+    // Debug: Log full transaction response details
+    debug!("Transaction response finality: {:?}", tx_resp.finality);
+    if let Some(ref transaction) = tx_resp.transaction {
+        debug!("Transaction digest: {:?}", transaction.digest);
+        debug!("Transaction signatures: {:?}", transaction.signatures);
+        debug!("Transaction effects: {:?}", transaction.effects);
+        
+        // Check for errors in transaction effects
+        if let Some(ref effects) = transaction.effects {
+            debug!("Effects status: {:?}", effects.status);
+            if let Some(ref status) = effects.status {
+                if status.error.is_some() {
+                    error!("Transaction failed with error: {:?}", status.error);
+                    let error_msg = status.error.as_ref().unwrap();
+                    return Err(anyhow!("Transaction failed: {:?}", error_msg));
+                }
+            }
+        }
+    }
+
+    // Check transaction was successful
+    if tx_resp.finality.is_none() {
+        error!("Transaction did not achieve finality");
+        return Err(anyhow!("Transaction did not achieve finality"));
+    }
+
+    // Check for transaction success in effects
+    let tx_successful = tx_resp.transaction
+        .as_ref()
+        .and_then(|t| t.effects.as_ref())
+        .and_then(|e| e.status.as_ref())
+        .map(|s| s.error.is_none())
+        .unwrap_or(false);
+
+    let tx_digest = tx_resp
+        .transaction
+        .as_ref()
+        .and_then(|t| t.digest.as_ref())
+        .context("Failed to get transaction digest")?
+        .to_string();
+
+    if tx_successful {
+        info!(
+            "create_app_job transaction executed successfully for method '{}': {} (took {}ms)",
+            method_name, tx_digest, tx_elapsed_ms
+        );
+    } else {
+        error!(
+            "create_app_job transaction failed for method '{}': {} (took {}ms)",
+            method_name, tx_digest, tx_elapsed_ms
+        );
+        return Err(anyhow!("Transaction failed despite being executed"));
+    }
+
+    Ok(tx_digest)
+}
+
+/// Convenience function to create a merge job
+pub async fn create_merge_job_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    block_number: u64,
+    sequences1: Vec<u64>,
+    sequences2: Vec<u64>,
+    job_description: Option<String>,
+) -> Result<String> {
+    // Create ProofMergeData and serialize it with BCS
+    use serde::{Serialize, Deserialize};
+    
+    #[derive(Serialize, Deserialize)]
+    struct ProofMergeData {
+        block_number: u64,
+        sequences1: Vec<u64>,
+        sequences2: Vec<u64>,
+    }
+    
+    let merge_data = ProofMergeData {
+        block_number,
+        sequences1: sequences1.clone(),
+        sequences2: sequences2.clone(),
+    };
+    
+    let serialized_data = bcs::to_bytes(&merge_data)
+        .context("Failed to serialize ProofMergeData")?;
+    
+    debug!("Serialized ProofMergeData size: {} bytes", serialized_data.len());
+    
+    // Combine and sort sequences from both proofs
+    let mut combined_sequences = sequences1.clone();
+    combined_sequences.extend(sequences2.clone());
+    combined_sequences.sort();
+    combined_sequences.dedup(); // Remove any duplicates
+    
+    debug!("Combined sequences for merge job: {:?}", combined_sequences);
+
+    // Call the general create_app_job_tx function
+    create_app_job_tx(
+        client,
+        app_instance_str,
+        "merge".to_string(),
+        job_description,
+        Some(combined_sequences), // Pass the combined sequences
+        serialized_data,
+    ).await
+}
+
 /// Debug function to query job status from the blockchain
 async fn query_job_status(
     client: &mut GrpcClient,

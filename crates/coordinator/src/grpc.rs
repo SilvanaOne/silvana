@@ -806,7 +806,7 @@ pub async fn start_grpc_server(socket_path: &str, state: SharedState) -> Result<
 // Helper function to analyze proof completion and determine next action
 async fn analyze_proof_completion(
     proof_calc: &ProofCalculation, 
-    _da_hash: &str,
+    da_hash: &str,
     app_instance: &str,
     client: &mut sui_rpc::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -822,7 +822,7 @@ async fn analyze_proof_completion(
     
     if !is_consecutive {
         info!("Sequences {:?} are not consecutive - analyzing for merge opportunities", sequences);
-        analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client).await?;
+        analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client, da_hash).await?;
         return Ok(());
     }
     
@@ -834,16 +834,9 @@ async fn analyze_proof_completion(
         block_number, start_sequence, end_sequence, sequences.len()
     );
     
-    // Now use blockchain data to make intelligent decisions
-    info!("🔍 Analyzing with blockchain data for merge opportunities");
-    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client).await?;
-    
-    // TODO: When block completeness check is implemented, call settle for complete blocks:
-    // if is_complete_block {
-    //     settle(proof_calc.clone(), da_hash.to_string()).await?;
-    // } else {
-    //     analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client).await?;
-    // }
+    // Now use blockchain data to make intelligent decisions (including block completeness check)
+    info!("🔍 Analyzing with blockchain data for merge opportunities or block settlement");
+    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client, da_hash).await?;
     
     Ok(())
 }

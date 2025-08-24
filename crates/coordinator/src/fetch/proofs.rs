@@ -5,6 +5,7 @@ use tracing::{debug, warn};
 
 /// Individual proof information extracted from ProofCalculation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ProofInfo {
     pub sequences: Vec<u64>,
     pub status: u8, // 0=STARTED, 1=CALCULATED, 2=REJECTED, 3=RESERVED, 4=USED
@@ -17,6 +18,7 @@ pub struct ProofInfo {
 
 /// ProofCalculation information fetched from blockchain
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ProofCalculationInfo {
     pub block_number: u64,
     pub start_sequence: u64,

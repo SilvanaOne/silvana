@@ -1,4 +1,4 @@
-use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx};
+use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx};
 use sui_rpc::Client;
 use tracing::{info, warn, error};
 
@@ -85,6 +85,92 @@ impl SuiJobInterface {
         
         error!("Failed to start job {} after {} attempts", job_sequence, max_retries);
         false
+    }
+
+    /// Create an app job on the Sui blockchain by calling the create_app_job Move function  
+    /// This is a general method that can create any type of job
+    /// Returns the transaction hash if successful, or an error if it failed
+    #[allow(dead_code)]
+    pub async fn create_app_job(
+        &mut self,
+        app_instance: &str,
+        method_name: String,
+        job_description: Option<String>,
+        sequences: Option<Vec<u64>>,
+        data: Vec<u8>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to create app job for method '{}' on Sui blockchain (data size: {} bytes)",
+            method_name, data.len()
+        );
+
+        match create_app_job_tx(
+            &mut self.client,
+            app_instance,
+            method_name.clone(),
+            job_description,
+            sequences,
+            data,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully created app job for method '{}' on blockchain, tx: {}",
+                    method_name, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to create app job for method '{}' on blockchain: {}",
+                    method_name, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Create a merge job on the Sui blockchain (convenience method)
+    /// Returns the transaction hash if successful, or an error if it failed  
+    pub async fn create_merge_job(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        sequences1: Vec<u64>,
+        sequences2: Vec<u64>,
+        job_description: Option<String>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to create merge job for block {} with sequences {:?} + {:?} on Sui blockchain",
+            block_number, sequences1, sequences2
+        );
+
+        match create_merge_job_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            sequences1.clone(),
+            sequences2.clone(),
+            job_description,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully created merge job for block {} on blockchain, tx: {}",
+                    block_number, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to create merge job for block {} on blockchain: {}",
+                    block_number, e
+                );
+                Err(e.into())
+            }
+        }
     }
 
     /// Submit a proof on the Sui blockchain by calling the submit_proof Move function

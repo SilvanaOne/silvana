@@ -159,6 +159,31 @@ export async function createApp(): Promise<string> {
       ],
     });
 
+    // Create and add the 'merge' method
+    const mergeAppMethod = methodTx.moveCall({
+      target: `${
+        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+      }::app_method::new`,
+      arguments: [
+        methodTx.pure.option("string", "Merge proofs"), 
+        methodTx.pure.string(developerName),
+        methodTx.pure.string(agentName),
+        methodTx.pure.string("prove"),
+      ],
+    });
+
+    methodTx.moveCall({
+      target: `${
+        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+      }::registry::add_method_to_app`,
+      arguments: [
+        methodTx.object(registryAddress),
+        methodTx.pure.string("test_app"),
+        methodTx.pure.string("merge"),
+        mergeAppMethod,
+      ],
+    });
+
     methodTx.setSender(keyPair.toSuiAddress());
     methodTx.setGasBudget(100_000_000);
 
