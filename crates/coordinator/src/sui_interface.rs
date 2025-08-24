@@ -298,8 +298,10 @@ impl SuiJobInterface {
                 Ok(tx_digest)
             }
             Err(e) => {
-                warn!(
-                    "Failed to reserve proofs for block {} job {} on blockchain: {}",
+                // This is expected to fail if another coordinator already reserved the proofs
+                // Log as info instead of warn to reduce noise
+                info!(
+                    "Could not reserve proofs for block {} job {} - likely already reserved by another coordinator: {}",
                     block_number, job_id, e
                 );
                 Err(e.into())

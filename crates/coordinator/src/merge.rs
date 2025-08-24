@@ -174,6 +174,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 client,
                 proof1_status,
                 proof2_status,
+                &block_proofs,
             ).await {
                 Ok(_) => {
                     info!("✅ Successfully created and reserved merge job for block {} on attempt {}", 
@@ -182,9 +183,17 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     break; // Successfully created a merge job, stop trying
                 }
                 Err(e) => {
-                    warn!("⚠️ Attempt {}/{}: Failed to create merge job for block {}: {}. Looking for other opportunities...", 
-                        attempt, MAX_MERGE_ATTEMPTS, proof_calc.block_number, e);
-                    // Continue to next iteration to try another merge opportunity
+                    info!("ℹ️ Attempt {}/{}: Could not create merge job for block {} (sequences {:?} + {:?}): {}", 
+                        attempt, MAX_MERGE_ATTEMPTS, proof_calc.block_number, 
+                        merge_request.sequences1, merge_request.sequences2, e);
+                    
+                    // Check if we should continue trying
+                    if e.to_string().contains("already reserved") {
+                        info!("   → Looking for other merge opportunities...");
+                        // Continue to next iteration to try another merge opportunity
+                    } else {
+                        warn!("   → Unexpected error, will try other opportunities: {}", e);
+                    }
                 }
             }
         } else {
@@ -247,6 +256,8 @@ fn find_proofs_to_merge_excluding(
             let proof2 = block_proofs.proofs.iter().find(|p| arrays_equal(&p.sequences, &sequence2));
             
             if let (Some(proof1), Some(proof2)) = (proof1, proof2) {
+                // For block proofs, only check CALCULATED or USED status (not RESERVED)
+                // This matches the TypeScript logic exactly
                 if (proof1.status == ProofStatus::Calculated || proof1.status == ProofStatus::Used) &&
                    (proof2.status == ProofStatus::Calculated || proof2.status == ProofStatus::Used) {
                     info!("Merging proofs to create block proof: sequences1={:?}, sequences2={:?}", 
@@ -324,13 +335,14 @@ fn is_proof_available(proof: &ProofInfo, current_time: u64) -> bool {
     match proof.status {
         ProofStatus::Calculated => true,
         ProofStatus::Reserved => {
-            // Check if timeout has expired
+            // Check if timeout has expired (RESERVED proofs can be used if timed out)
             if let Some(timestamp) = proof.timestamp {
                 current_time > timestamp + TIMEOUT_MS
             } else {
                 false
             }
         },
+        ProofStatus::Used => false, // USED proofs are NOT available for merging
         _ => false,
     }
 }
@@ -357,8 +369,9 @@ async fn create_merge_job(
     block_number: u64,
     app_instance: &str,
     client: &mut sui_rpc::Client,
-    proof1_status: &ProofStatus,
-    proof2_status: &ProofStatus,
+    _proof1_status: &ProofStatus,  // Currently unused, but kept for future use
+    _proof2_status: &ProofStatus,  // Currently unused, but kept for future use
+    block_proofs: &BlockProofs,    // Add this to check if combined proof exists
 ) -> Result<()> {
     info!(
         "Attempting to create merge job for block {} with sequences1: {:?}, sequences2: {:?}",
@@ -377,31 +390,37 @@ async fn create_merge_job(
     combined_sequences.extend(sequences2.clone());
     combined_sequences.sort();
     
-    // Step 1: Reject proofs if they're in certain states (following TypeScript logic)
-    // From TypeScript: status === ProofStatus.CALCULATED || USED || RESERVED || STARTED
-    let should_reject = matches!(
-        (proof1_status, proof2_status),
-        (ProofStatus::Calculated, _) | (ProofStatus::Used, _) | 
-        (ProofStatus::Reserved, _) | (ProofStatus::Started, _) |
-        (_, ProofStatus::Calculated) | (_, ProofStatus::Used) | 
-        (_, ProofStatus::Reserved) | (_, ProofStatus::Started)
-    );
-
-    if should_reject {
-        info!("📝 Rejecting proofs before merge for block {} sequences {:?}", block_number, combined_sequences);
+    // Step 1: Check if we need to reject an existing combined proof
+    // Look for an existing proof with the combined sequences
+    let combined_proof_exists = block_proofs.proofs.iter().any(|p| p.sequences == combined_sequences);
+    
+    if combined_proof_exists {
+        // The combined proof exists, so we might need to reject it
+        info!("📝 Found existing combined proof for block {} sequences {:?}, attempting to reject", 
+            block_number, combined_sequences);
+        
         match sui_interface.reject_proof(
             app_instance,
             block_number,
             combined_sequences.clone(),
         ).await {
             Ok(tx_digest) => {
-                info!("✅ Successfully rejected proofs for block {}, tx: {}", block_number, tx_digest);
+                info!("✅ Successfully rejected combined proof for block {}, tx: {}", block_number, tx_digest);
+                // Small delay to let the blockchain state propagate
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
             Err(e) => {
-                // Continue even if rejection fails, as the proofs might already be in the right state
-                warn!("⚠️ Failed to reject proofs for block {}: {}", block_number, e);
+                // Even though we found it in our data, it might have been modified by another coordinator
+                if e.to_string().contains("not available for consumption") {
+                    info!("ℹ️ Combined proof already modified by another coordinator - continuing anyway");
+                } else {
+                    warn!("⚠️ Failed to reject existing combined proof for block {}: {}", block_number, e);
+                }
             }
         }
+    } else {
+        // The combined proof doesn't exist yet, no need to reject
+        info!("ℹ️ No existing combined proof found for sequences {:?} - skipping rejection", combined_sequences);
     }
 
     // Step 2: Try to reserve the proofs with start_proving
@@ -416,6 +435,9 @@ async fn create_merge_job(
     ).await {
         Ok(tx_digest) => {
             info!("✅ Successfully reserved proofs for block {}, tx: {}", block_number, tx_digest);
+            
+            // The start_proving_tx function now waits for the transaction to be available in the ledger
+            // before returning, so we can proceed immediately to create the merge job
             
             // Step 3: Create the merge job only if reservation succeeded
             let job_description = Some(format!(

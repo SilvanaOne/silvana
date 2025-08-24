@@ -7,9 +7,55 @@ use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
 use sui_crypto::SuiSigner;
 use tracing::{debug, info, warn, error};
+use tokio::time::{sleep, Duration};
 
 use crate::chain::{get_reference_gas_price, load_sender_from_env};
 use crate::coin::fetch_coin;
+
+/// Wait for a transaction to be available in the ledger
+/// This polls GetTransaction until the transaction is found or timeout occurs
+async fn wait_for_transaction(
+    client: &mut GrpcClient,
+    tx_digest: &str,
+    max_wait_ms: Option<u64>,
+) -> Result<()> {
+    let timeout = max_wait_ms.unwrap_or(5000); // Default to 5000ms if not specified
+    let start = std::time::Instant::now();
+    let mut ledger = client.ledger_client();
+    
+    info!("Waiting for transaction {} to be available in ledger (max {}ms)", tx_digest, timeout);
+    
+    loop {
+        // Check if we've exceeded the maximum wait time
+        if start.elapsed().as_millis() > timeout as u128 {
+            return Err(anyhow!("Timeout waiting for transaction {} after {}ms", tx_digest, timeout));
+        }
+        
+        // Try to get the transaction - just check if it exists
+        let req = proto::GetTransactionRequest {
+            digest: Some(tx_digest.to_string()),
+            read_mask: Some(FieldMask { 
+                paths: vec!["digest".into()] // Just request minimal data to check existence
+            }),
+        };
+        
+        match ledger.get_transaction(req).await {
+            Ok(_) => {
+                // Transaction found! It's available in the ledger
+                info!("Transaction {} is now available in ledger (took {}ms)", 
+                    tx_digest, start.elapsed().as_millis());
+                return Ok(());
+            }
+            Err(e) => {
+                // Transaction not found yet, this is expected while we wait
+                debug!("Transaction {} not yet available: {}", tx_digest, e);
+            }
+        }
+        
+        // Wait before polling again
+        sleep(Duration::from_millis(200)).await;
+    }
+}
 
 /// Get the app instance object ID from the job data
 fn get_app_instance_id(app_instance_str: &str) -> Result<sui::Address> {
@@ -174,6 +220,12 @@ pub async fn start_job_tx(
         tx_digest, tx_elapsed_ms
     );
 
+    // Wait for the transaction to be available in the ledger
+    if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+        warn!("Failed to wait for submit_proof transaction to be available: {}", e);
+        // Continue anyway, the transaction was successful
+    }
+
     Ok(tx_digest)
 }
 
@@ -303,6 +355,13 @@ pub async fn complete_job_tx(
         "complete_app_job transaction executed: {} (took {}ms)",
         tx_digest, tx_elapsed_ms
     );
+    
+    // Wait for the transaction to be available in the ledger
+    // This is important for sequential operations
+    if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+        warn!("Failed to wait for complete_app_job transaction to be available: {}", e);
+        // Continue anyway, the transaction was successful
+    }
 
     Ok(tx_digest)
 }
@@ -487,6 +546,12 @@ pub async fn fail_job_tx(
         return Err(anyhow!("Transaction failed despite being executed"));
     }
 
+    // Wait for the transaction to be available in the ledger
+    if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+        warn!("Failed to wait for fail_app_job transaction to be available: {}", e);
+        // Continue anyway, the transaction was successful
+    }
+
     Ok(tx_digest)
 }
 
@@ -647,6 +712,12 @@ pub async fn submit_proof_tx(
         "submit_proof transaction executed: {} (took {}ms)",
         tx_digest, tx_elapsed_ms
     );
+
+    // Wait for the transaction to be available in the ledger
+    if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+        warn!("Failed to wait for update_state_for_sequence transaction to be available: {}", e);
+        // Continue anyway, the transaction was successful
+    }
 
     Ok(tx_digest)
 }
@@ -970,6 +1041,12 @@ pub async fn create_app_job_tx(
         return Err(anyhow!("Transaction failed despite being executed"));
     }
 
+    // Wait for the transaction to be available in the ledger
+    if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+        warn!("Failed to wait for create_app_job transaction to be available: {}", e);
+        // Continue anyway, the transaction was successful
+    }
+
     Ok(tx_digest)
 }
 
@@ -1124,6 +1201,13 @@ pub async fn reject_proof_tx(
             "reject_proof transaction executed successfully: {} (took {}ms)",
             tx_digest, tx_elapsed_ms
         );
+        
+        // Wait for the transaction to be available in the ledger
+        // This is important because start_proving might be called right after
+        if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+            warn!("Failed to wait for reject_proof transaction to be available: {}", e);
+            // Continue anyway, the transaction was successful
+        }
     } else {
         error!(
             "reject_proof transaction failed: {} (took {}ms)",
@@ -1301,6 +1385,12 @@ pub async fn start_proving_tx(
             "start_proving transaction executed successfully: {} (took {}ms)",
             tx_digest, tx_elapsed_ms
         );
+        
+        // Wait for the transaction to be available in the ledger
+        if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+            warn!("Failed to wait for start_proving transaction to be available: {}", e);
+            // Continue anyway, the transaction was successful
+        }
     } else {
         warn!(
             "start_proving transaction failed (proofs may be already reserved): {} (took {}ms)",

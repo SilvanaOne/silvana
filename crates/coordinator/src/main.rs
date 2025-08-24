@@ -43,7 +43,7 @@ struct Args {
     #[arg(long, env = "DOCKER_USE_TEE", default_value = "false")]
     use_tee: bool,
 
-    #[arg(long, env = "CONTAINER_TIMEOUT_SECS", default_value = "300")]
+    #[arg(long, env = "CONTAINER_TIMEOUT_SECS", default_value = "600")]
     container_timeout: u64,
 
     #[arg(long, env = "LOG_LEVEL", default_value = "info")]

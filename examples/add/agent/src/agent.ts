@@ -21,7 +21,8 @@ async function agent() {
   console.log("Agent arguments:", process.argv.length - 2);
 
   const startTime = Date.now();
-  const maxRunTimeMs = 5 * 60 * 1000; // 5 minutes
+  const maxRunTimeMs = 500 * 1000; // 500 seconds (8.33 minutes) - absolute maximum runtime
+  const stopAcceptingJobsMs = 400 * 1000; // 400 seconds (6.67 minutes) - stop accepting new jobs
 
   // Create gRPC client over TCP (accessible from Docker container)
   const transport = createGrpcTransport({
@@ -306,6 +307,11 @@ async function agent() {
                       `Failed to submit proof and/or state for sequence ${transitionData.sequence}:`,
                       submitError
                     );
+                    // Re-throw with a more descriptive error for the job failure
+                    const errorMessage = submitError instanceof Error 
+                      ? submitError.message 
+                      : String(submitError);
+                    throw new Error(`Failed to submit proof/state for sequence ${transitionData.sequence}: ${errorMessage}`);
                   }
                 } else {
                   console.log(
@@ -350,9 +356,21 @@ async function agent() {
 
           // Fail the job
           try {
+            // Extract a meaningful error message
+            let errorMessage = "Job processing failed";
+            if (error instanceof Error) {
+              errorMessage = `Job processing failed: ${error.message}`;
+            } else if (typeof error === 'string') {
+              errorMessage = `Job processing failed: ${error}`;
+            } else if (error && typeof error === 'object' && 'message' in error) {
+              errorMessage = `Job processing failed: ${(error as any).message}`;
+            } else {
+              errorMessage = `Job processing failed: ${JSON.stringify(error)}`;
+            }
+            
             const failRequest = create(FailJobRequestSchema, {
               jobId: response.job.jobId,
-              errorMessage: `Job processing failed: ${error}`,
+              errorMessage: errorMessage,
               sessionId: sessionId,
             });
 
@@ -380,15 +398,24 @@ async function agent() {
         break;
       }
 
-      // Check if we still have time for another job
+      // Check if we should continue accepting new jobs
       const elapsedMs = Date.now() - startTime;
       const remainingMs = maxRunTimeMs - elapsedMs;
+      const remainingForNewJobsMs = stopAcceptingJobsMs - elapsedMs;
+      
       console.log(
-        `Elapsed: ${Math.round(elapsedMs / 1000)}s, Remaining: ${Math.round(
+        `Elapsed: ${Math.round(elapsedMs / 1000)}s, Max runtime remaining: ${Math.round(
           remainingMs / 1000
-        )}s`
+        )}s, New jobs cutoff in: ${Math.round(Math.max(0, remainingForNewJobsMs / 1000))}s`
       );
 
+      // Stop accepting new jobs after 400 seconds
+      if (elapsedMs >= stopAcceptingJobsMs) {
+        console.log("Reached 400 second cutoff - not accepting new jobs");
+        break;
+      }
+
+      // Also check absolute maximum runtime
       if (remainingMs < 10000) {
         // Less than 10 seconds remaining
         console.log("Not enough time remaining for another job - exiting");
