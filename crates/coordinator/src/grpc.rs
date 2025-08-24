@@ -465,18 +465,28 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(tx_hash) => {
                 info!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
 
-                // After successful proof submission, determine if this is a complete block or needs merging
-                let mut client = self.state.get_sui_client();
-                if let Err(e) = analyze_proof_completion(
-                    &proof_calc, 
-                    &da_hash, 
-                    &agent_job.app_instance,
-                    &mut client
-                ).await {
-                    warn!("Failed to analyze proof completion: {}", e);
-                    // Don't fail the entire request if analysis fails
-                }
+                // Spawn merge analysis in background to not delay the response
+                let proof_calc_clone = proof_calc.clone();
+                let da_hash_clone = da_hash.clone();
+                let app_instance_clone = agent_job.app_instance.clone();
+                let mut client_clone = self.state.get_sui_client();
+                let job_id_clone = req.job_id.clone();
+                
+                tokio::spawn(async move {
+                    info!("🔄 Starting background merge analysis for job {}", job_id_clone);
+                    if let Err(e) = analyze_proof_completion(
+                        &proof_calc_clone, 
+                        &da_hash_clone, 
+                        &app_instance_clone,
+                        &mut client_clone
+                    ).await {
+                        warn!("Failed to analyze proof completion in background: {}", e);
+                    } else {
+                        info!("✅ Background merge analysis completed for job {}", job_id_clone);
+                    }
+                });
 
+                // Return immediately without waiting for merge analysis
                 Ok(Response::new(SubmitProofResponse {
                     tx_hash,
                     da_hash,
@@ -485,16 +495,25 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Err(e) => {
                 error!("Failed to submit proof for job {} on blockchain: {}", req.job_id, e);
                 
-                // Even after failure, analyze the proof calculation for potential merges
-                let mut client = self.state.get_sui_client();
-                if let Err(analysis_err) = analyze_proof_completion(
-                    &proof_calc, 
-                    "", 
-                    &agent_job.app_instance,
-                    &mut client
-                ).await {
-                    warn!("Failed to analyze failed proof for merge opportunities: {}", analysis_err);
-                }
+                // Even after failure, spawn merge analysis in background
+                let proof_calc_clone = proof_calc.clone();
+                let app_instance_clone = agent_job.app_instance.clone();
+                let mut client_clone = self.state.get_sui_client();
+                let job_id_clone = req.job_id.clone();
+                
+                tokio::spawn(async move {
+                    info!("🔄 Starting background merge analysis for failed job {}", job_id_clone);
+                    if let Err(analysis_err) = analyze_proof_completion(
+                        &proof_calc_clone, 
+                        "", // No DA hash for failed submission
+                        &app_instance_clone,
+                        &mut client_clone
+                    ).await {
+                        warn!("Failed to analyze failed proof for merge opportunities: {}", analysis_err);
+                    } else {
+                        info!("✅ Background merge analysis completed for failed job {}", job_id_clone);
+                    }
+                });
 
                 Err(Status::internal(format!("Failed to submit proof transaction: {}", e)))
             }

@@ -1,4 +1,4 @@
-use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx};
+use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, reject_proof_tx, start_proving_tx};
 use sui_rpc::Client;
 use tracing::{info, warn, error};
 
@@ -220,6 +220,89 @@ impl SuiJobInterface {
             Err(e) => {
                 error!("Failed to submit proof for job {} on blockchain: {}", job_id, e);
                 Err(format!("Failed to submit proof: {}", e).into())
+            }
+        }
+    }
+
+    /// Reject a proof on the Sui blockchain by calling the reject_proof Move function
+    /// Returns the transaction hash if successful, or an error if it failed
+    pub async fn reject_proof(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        sequences: Vec<u64>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to reject proof for block {} sequences {:?} on Sui blockchain",
+            block_number, sequences
+        );
+
+        match reject_proof_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            sequences.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully rejected proof for block {} on blockchain, tx: {}",
+                    block_number, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to reject proof for block {} on blockchain: {}",
+                    block_number, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Start proving (reserve proofs) on the Sui blockchain by calling the start_proving Move function
+    /// Returns the transaction hash if successful, or an error if it failed
+    /// Note: This may fail if another coordinator has already reserved the proofs
+    pub async fn start_proving(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        sequences: Vec<u64>,
+        merged_sequences_1: Option<Vec<u64>>,
+        merged_sequences_2: Option<Vec<u64>>,
+        job_id: String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to reserve proofs for block {} sequences {:?} on Sui blockchain",
+            block_number, sequences
+        );
+
+        match start_proving_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            sequences.clone(),
+            merged_sequences_1,
+            merged_sequences_2,
+            job_id.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully reserved proofs for block {} job {} on blockchain, tx: {}",
+                    block_number, job_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to reserve proofs for block {} job {} on blockchain: {}",
+                    block_number, job_id, e
+                );
+                Err(e.into())
             }
         }
     }

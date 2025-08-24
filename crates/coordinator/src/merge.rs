@@ -138,21 +138,66 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         }
     }
 
-    // Find proofs that can be merged using the same logic as TypeScript
-    if let Some(merge_request) = find_proofs_to_merge(&block_proofs) {
-        info!("✨ Found merge opportunity:");
-        info!("  Sequences1: {:?}", merge_request.sequences1);
-        info!("  Sequences2: {:?}", merge_request.sequences2);
-        info!("  Is block proof: {}", merge_request.block_proof);
-        
-        create_merge_job(
-            merge_request.sequences1,
-            merge_request.sequences2,
-            proof_calc.block_number,
-            app_instance,
-            client,
-        ).await?;
-    } else {
+    // Try to find and create merge jobs, with up to 10 attempts
+    const MAX_MERGE_ATTEMPTS: usize = 10;
+    let mut attempted_merges = Vec::new();
+    let mut merge_created = false;
+    
+    for attempt in 1..=MAX_MERGE_ATTEMPTS {
+        // Find proofs that can be merged, excluding already attempted ones
+        if let Some(merge_request) = find_proofs_to_merge_excluding(&block_proofs, &attempted_merges) {
+            info!("✨ Attempt {}/{}: Found merge opportunity:", attempt, MAX_MERGE_ATTEMPTS);
+            info!("  Sequences1: {:?}", merge_request.sequences1);
+            info!("  Sequences2: {:?}", merge_request.sequences2);
+            info!("  Is block proof: {}", merge_request.block_proof);
+            
+            // Remember this attempt
+            attempted_merges.push((merge_request.sequences1.clone(), merge_request.sequences2.clone()));
+            
+            // Find the proof statuses for the sequences to merge
+            let proof1_status = block_proofs.proofs.iter()
+                .find(|p| p.sequences == merge_request.sequences1)
+                .map(|p| &p.status)
+                .unwrap_or(&ProofStatus::Calculated);
+                
+            let proof2_status = block_proofs.proofs.iter()
+                .find(|p| p.sequences == merge_request.sequences2)
+                .map(|p| &p.status)
+                .unwrap_or(&ProofStatus::Calculated);
+            
+            // Try to create merge job with proof reservation
+            match create_merge_job(
+                merge_request.sequences1.clone(),
+                merge_request.sequences2.clone(),
+                proof_calc.block_number,
+                app_instance,
+                client,
+                proof1_status,
+                proof2_status,
+            ).await {
+                Ok(_) => {
+                    info!("✅ Successfully created and reserved merge job for block {} on attempt {}", 
+                        proof_calc.block_number, attempt);
+                    merge_created = true;
+                    break; // Successfully created a merge job, stop trying
+                }
+                Err(e) => {
+                    warn!("⚠️ Attempt {}/{}: Failed to create merge job for block {}: {}. Looking for other opportunities...", 
+                        attempt, MAX_MERGE_ATTEMPTS, proof_calc.block_number, e);
+                    // Continue to next iteration to try another merge opportunity
+                }
+            }
+        } else {
+            info!("🚫 No more merge opportunities found for block {} after {} attempt(s)", 
+                proof_calc.block_number, attempt);
+            break; // No more merge opportunities available
+        }
+    }
+    
+    if !merge_created && !attempted_merges.is_empty() {
+        warn!("❌ Failed to create any merge job for block {} after {} attempts", 
+            proof_calc.block_number, attempted_merges.len());
+    } else if !merge_created {
         info!("🚫 No merge opportunities found for block {}", proof_calc.block_number);
     }
 
@@ -179,7 +224,10 @@ pub struct MergeRequest {
 
 const TIMEOUT_MS: u64 = 2 * 60 * 1000; // 2 minutes
 
-pub fn find_proofs_to_merge(block_proofs: &BlockProofs) -> Option<MergeRequest> {
+fn find_proofs_to_merge_excluding(
+    block_proofs: &BlockProofs, 
+    excluded: &[(Vec<u64>, Vec<u64>)]
+) -> Option<MergeRequest> {
     if block_proofs.is_finished {
         return None;
     }
@@ -189,6 +237,11 @@ pub fn find_proofs_to_merge(block_proofs: &BlockProofs) -> Option<MergeRequest> 
         for i in (start_seq + 1)..=end_seq {
             let sequence1: Vec<u64> = (start_seq..i).collect();
             let sequence2: Vec<u64> = (i..=end_seq).collect();
+            
+            // Check if this pair is in the excluded list
+            if excluded.iter().any(|(s1, s2)| s1 == &sequence1 && s2 == &sequence2) {
+                continue; // Skip this pair as it was already attempted
+            }
             
             let proof1 = block_proofs.proofs.iter().find(|p| arrays_equal(&p.sequences, &sequence1));
             let proof2 = block_proofs.proofs.iter().find(|p| arrays_equal(&p.sequences, &sequence2));
@@ -227,6 +280,11 @@ pub fn find_proofs_to_merge(block_proofs: &BlockProofs) -> Option<MergeRequest> 
                 continue;
             }
             
+            // Check if this pair is in the excluded list
+            if excluded.iter().any(|(s1, s2)| s1 == &proof1.sequences && s2 == &proof2.sequences) {
+                continue; // Skip this pair as it was already attempted
+            }
+            
             // Condition 1: Check if proof1.sequences[last] + 1 == proof2.sequences[first]
             if let (Some(proof1_last), Some(proof2_first)) = (proof1.sequences.last(), proof2.sequences.first()) {
                 if *proof1_last + 1 == *proof2_first {
@@ -251,6 +309,11 @@ pub fn find_proofs_to_merge(block_proofs: &BlockProofs) -> Option<MergeRequest> 
     }
     
     None
+}
+
+#[allow(dead_code)]
+pub fn find_proofs_to_merge(block_proofs: &BlockProofs) -> Option<MergeRequest> {
+    find_proofs_to_merge_excluding(block_proofs, &[])
 }
 
 fn arrays_equal(a: &[u64], b: &[u64]) -> bool {
@@ -294,9 +357,11 @@ async fn create_merge_job(
     block_number: u64,
     app_instance: &str,
     client: &mut sui_rpc::Client,
+    proof1_status: &ProofStatus,
+    proof2_status: &ProofStatus,
 ) -> Result<()> {
     info!(
-        "Creating merge job for block {} with sequences1: {:?}, sequences2: {:?}",
+        "Attempting to create merge job for block {} with sequences1: {:?}, sequences2: {:?}",
         block_number, sequences1, sequences2
     );
 
@@ -304,33 +369,90 @@ async fn create_merge_job(
     let sui_client = client.clone(); // Clone the client  
     let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
 
-    // Create job description
-    let job_description = Some(format!(
-        "Merge proof job for block {} - merging sequences {:?} with {:?}", 
-        block_number, sequences1, sequences2
-    ));
+    // Generate a unique job ID for this merge operation
+    let job_id = format!("merge_{}_{}_{}", block_number, sequences1[0], sequences2[0]);
 
-    // Call the SuiJobInterface to create the merge job
-    match sui_interface.create_merge_job(
+    // Combine sequences for reservation
+    let mut combined_sequences = sequences1.clone();
+    combined_sequences.extend(sequences2.clone());
+    combined_sequences.sort();
+    
+    // Step 1: Reject proofs if they're in certain states (following TypeScript logic)
+    // From TypeScript: status === ProofStatus.CALCULATED || USED || RESERVED || STARTED
+    let should_reject = matches!(
+        (proof1_status, proof2_status),
+        (ProofStatus::Calculated, _) | (ProofStatus::Used, _) | 
+        (ProofStatus::Reserved, _) | (ProofStatus::Started, _) |
+        (_, ProofStatus::Calculated) | (_, ProofStatus::Used) | 
+        (_, ProofStatus::Reserved) | (_, ProofStatus::Started)
+    );
+
+    if should_reject {
+        info!("📝 Rejecting proofs before merge for block {} sequences {:?}", block_number, combined_sequences);
+        match sui_interface.reject_proof(
+            app_instance,
+            block_number,
+            combined_sequences.clone(),
+        ).await {
+            Ok(tx_digest) => {
+                info!("✅ Successfully rejected proofs for block {}, tx: {}", block_number, tx_digest);
+            }
+            Err(e) => {
+                // Continue even if rejection fails, as the proofs might already be in the right state
+                warn!("⚠️ Failed to reject proofs for block {}: {}", block_number, e);
+            }
+        }
+    }
+
+    // Step 2: Try to reserve the proofs with start_proving
+    info!("🔒 Attempting to reserve proofs for merge job: {}", job_id);
+    match sui_interface.start_proving(
         app_instance,
         block_number,
-        sequences1.clone(),
-        sequences2.clone(),
-        job_description,
+        combined_sequences.clone(),
+        Some(sequences1.clone()),
+        Some(sequences2.clone()),
+        job_id.clone(),
     ).await {
         Ok(tx_digest) => {
-            info!(
-                "✅ Successfully created merge job for block {} - Transaction: {}",
-                block_number, tx_digest
-            );
-            Ok(())
+            info!("✅ Successfully reserved proofs for block {}, tx: {}", block_number, tx_digest);
+            
+            // Step 3: Create the merge job only if reservation succeeded
+            let job_description = Some(format!(
+                "Merge proof job for block {} - merging sequences {:?} with {:?}", 
+                block_number, sequences1, sequences2
+            ));
+
+            match sui_interface.create_merge_job(
+                app_instance,
+                block_number,
+                sequences1.clone(),
+                sequences2.clone(),
+                job_description,
+            ).await {
+                Ok(tx_digest) => {
+                    info!(
+                        "✅ Successfully created merge job for block {} - Transaction: {}",
+                        block_number, tx_digest
+                    );
+                    Ok(())
+                }
+                Err(e) => {
+                    error!(
+                        "❌ Failed to create merge job for block {} after successful reservation: {}",
+                        block_number, e
+                    );
+                    Err(anyhow::anyhow!("Failed to create merge job: {}", e))
+                }
+            }
         }
         Err(e) => {
-            error!(
-                "❌ Failed to create merge job for block {}: {}",
+            warn!(
+                "⚠️ Failed to reserve proofs for block {} - another coordinator may have already reserved them: {}",
                 block_number, e
             );
-            Err(anyhow::anyhow!("Failed to create merge job: {}", e))
+            // Don't create merge job if we couldn't reserve the proofs
+            Err(anyhow::anyhow!("Failed to reserve proofs for merge: {}", e))
         }
     }
 }

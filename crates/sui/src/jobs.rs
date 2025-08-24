@@ -973,6 +973,345 @@ pub async fn create_app_job_tx(
     Ok(tx_digest)
 }
 
+/// Create and submit a transaction to reject a proof
+pub async fn reject_proof_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    block_number: u64,
+    sequences: Vec<u64>,
+) -> Result<String> {
+    info!("Creating reject_proof transaction for block_number: {}, sequences: {:?}", block_number, sequences);
+    
+    // Parse IDs
+    let package_id = get_coordination_package_id()
+        .context("Failed to get coordination package ID")?;
+    let app_instance_id = get_app_instance_id(app_instance_str)
+        .context("Failed to parse app instance ID")?;
+    let clock_object_id = get_clock_object_id();
+
+    // Parse sender and secret key
+    let (sender, sk) = load_sender_from_env()?;
+
+    // Build transaction using TransactionBuilder
+    let mut tb = sui_transaction_builder::TransactionBuilder::new();
+    tb.set_sender(sender);
+    tb.set_gas_budget(100_000_000); // 0.1 SUI
+
+    // Get gas price and gas coin using provided client
+    let gas_price = get_reference_gas_price(client).await?;
+    tb.set_gas_price(gas_price);
+
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
+    let gas_input = sui_transaction_builder::unresolved::Input::owned(
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
+    );
+    tb.add_gas_objects(vec![gas_input]);
+
+    // Get current version and ownership info of app_instance object
+    let (app_instance_ref, initial_shared_version) = get_object_details(client, app_instance_id).await
+        .context("Failed to get app instance details")?;
+    
+    // Create input based on whether object is shared or owned
+    let app_instance_input = if let Some(shared_version) = initial_shared_version {
+        debug!("Using shared object input for app_instance (reject_proof) with initial_shared_version={}", shared_version);
+        sui_transaction_builder::unresolved::Input::shared(
+            app_instance_id,
+            shared_version,
+            true // mutable
+        )
+    } else {
+        debug!("Using owned object input for app_instance (reject_proof)");
+        sui_transaction_builder::unresolved::Input::owned(
+            *app_instance_ref.object_id(),
+            app_instance_ref.version(),
+            *app_instance_ref.digest(),
+        )
+    };
+    let app_instance_arg = tb.input(app_instance_input);
+
+    // Arguments
+    let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+    let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
+
+    // Clock object (shared)
+    let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
+    let clock_arg = tb.input(clock_input);
+
+    // Function call: coordination::app_instance::reject_proof
+    let func = sui_transaction_builder::Function::new(
+        package_id,
+        "app_instance".parse()
+            .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+        "reject_proof".parse()
+            .map_err(|e| anyhow!("Failed to parse function name 'reject_proof': {}", e))?,
+        vec![],
+    );
+    tb.move_call(func, vec![app_instance_arg, block_number_arg, sequences_arg, clock_arg]);
+
+    // Finalize and sign
+    let tx = tb.finish()?;
+    let sig = sk.sign_transaction(&tx)?;
+
+    // Execute transaction using provided client
+    let mut exec = client.execution_client();
+    let req = proto::ExecuteTransactionRequest {
+        transaction: Some(tx.into()),
+        signatures: vec![sig.into()],
+        read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
+    };
+
+    debug!("Sending reject_proof transaction...");
+    let tx_start = std::time::Instant::now();
+    let exec_result = exec.execute_transaction(req).await;
+    let tx_elapsed_ms = tx_start.elapsed().as_millis();
+
+    let resp = match exec_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Transaction execution error: {:?}", e);
+            return Err(anyhow!("Failed to execute transaction: {}", e));
+        }
+    };
+    let tx_resp = resp.into_inner();
+
+    // Check for errors in transaction effects
+    if let Some(ref transaction) = tx_resp.transaction {
+        if let Some(ref effects) = transaction.effects {
+            if let Some(ref status) = effects.status {
+                if status.error.is_some() {
+                    error!("Transaction failed with error: {:?}", status.error);
+                    let error_msg = status.error.as_ref().unwrap();
+                    return Err(anyhow!("Transaction failed: {:?}", error_msg));
+                }
+            }
+        }
+    }
+
+    // Check transaction was successful
+    if tx_resp.finality.is_none() {
+        error!("Transaction did not achieve finality");
+        return Err(anyhow!("Transaction did not achieve finality"));
+    }
+
+    // Check for transaction success in effects
+    let tx_successful = tx_resp.transaction
+        .as_ref()
+        .and_then(|t| t.effects.as_ref())
+        .and_then(|e| e.status.as_ref())
+        .map(|s| s.error.is_none())
+        .unwrap_or(false);
+
+    let tx_digest = tx_resp
+        .transaction
+        .as_ref()
+        .and_then(|t| t.digest.as_ref())
+        .context("Failed to get transaction digest")?
+        .to_string();
+
+    if tx_successful {
+        info!(
+            "reject_proof transaction executed successfully: {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+    } else {
+        error!(
+            "reject_proof transaction failed: {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+        return Err(anyhow!("Transaction failed despite being executed"));
+    }
+
+    Ok(tx_digest)
+}
+
+/// Create and submit a transaction to start proving (reserve proofs)
+pub async fn start_proving_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    block_number: u64,
+    sequences: Vec<u64>,
+    merged_sequences_1: Option<Vec<u64>>,
+    merged_sequences_2: Option<Vec<u64>>,
+    job_id: String,
+) -> Result<String> {
+    info!("Creating start_proving transaction for block_number: {}, sequences: {:?}", block_number, sequences);
+    
+    // Parse IDs
+    let package_id = get_coordination_package_id()
+        .context("Failed to get coordination package ID")?;
+    let app_instance_id = get_app_instance_id(app_instance_str)
+        .context("Failed to parse app instance ID")?;
+    let clock_object_id = get_clock_object_id();
+
+    // Parse sender and secret key
+    let (sender, sk) = load_sender_from_env()?;
+
+    // Build transaction using TransactionBuilder
+    let mut tb = sui_transaction_builder::TransactionBuilder::new();
+    tb.set_sender(sender);
+    tb.set_gas_budget(100_000_000); // 0.1 SUI
+
+    // Get gas price and gas coin using provided client
+    let gas_price = get_reference_gas_price(client).await?;
+    tb.set_gas_price(gas_price);
+
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
+    let gas_input = sui_transaction_builder::unresolved::Input::owned(
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
+    );
+    tb.add_gas_objects(vec![gas_input]);
+
+    // Get current version and ownership info of app_instance object
+    let (app_instance_ref, initial_shared_version) = get_object_details(client, app_instance_id).await
+        .context("Failed to get app instance details")?;
+    
+    // Create input based on whether object is shared or owned
+    let app_instance_input = if let Some(shared_version) = initial_shared_version {
+        debug!("Using shared object input for app_instance (start_proving) with initial_shared_version={}", shared_version);
+        sui_transaction_builder::unresolved::Input::shared(
+            app_instance_id,
+            shared_version,
+            true // mutable
+        )
+    } else {
+        debug!("Using owned object input for app_instance (start_proving)");
+        sui_transaction_builder::unresolved::Input::owned(
+            *app_instance_ref.object_id(),
+            app_instance_ref.version(),
+            *app_instance_ref.digest(),
+        )
+    };
+    let app_instance_arg = tb.input(app_instance_input);
+
+    // Arguments
+    let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+    let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
+    let merged_sequences_1_arg = tb.input(sui_transaction_builder::Serialized(&merged_sequences_1));
+    let merged_sequences_2_arg = tb.input(sui_transaction_builder::Serialized(&merged_sequences_2));
+    let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
+
+    // Clock object (shared)
+    let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
+    let clock_arg = tb.input(clock_input);
+
+    // Function call: coordination::app_instance::start_proving
+    let func = sui_transaction_builder::Function::new(
+        package_id,
+        "app_instance".parse()
+            .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+        "start_proving".parse()
+            .map_err(|e| anyhow!("Failed to parse function name 'start_proving': {}", e))?,
+        vec![],
+    );
+    tb.move_call(func, vec![
+        app_instance_arg, 
+        block_number_arg, 
+        sequences_arg, 
+        merged_sequences_1_arg,
+        merged_sequences_2_arg,
+        job_id_arg,
+        clock_arg
+    ]);
+
+    // Finalize and sign
+    let tx = tb.finish()?;
+    let sig = sk.sign_transaction(&tx)?;
+
+    // Execute transaction using provided client
+    let mut exec = client.execution_client();
+    let req = proto::ExecuteTransactionRequest {
+        transaction: Some(tx.into()),
+        signatures: vec![sig.into()],
+        read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
+    };
+
+    debug!("Sending start_proving transaction...");
+    let tx_start = std::time::Instant::now();
+    let exec_result = exec.execute_transaction(req).await;
+    let tx_elapsed_ms = tx_start.elapsed().as_millis();
+
+    let resp = match exec_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Transaction execution error: {:?}", e);
+            return Err(anyhow!("Failed to execute transaction: {}", e));
+        }
+    };
+    let tx_resp = resp.into_inner();
+
+    // Check for errors in transaction effects
+    if let Some(ref transaction) = tx_resp.transaction {
+        if let Some(ref effects) = transaction.effects {
+            if let Some(ref status) = effects.status {
+                if status.error.is_some() {
+                    // This is expected if another coordinator already reserved the proofs
+                    warn!("start_proving transaction failed (may be already reserved): {:?}", status.error);
+                    let error_msg = status.error.as_ref().unwrap();
+                    return Err(anyhow!("Transaction failed: {:?}", error_msg));
+                }
+            }
+        }
+    }
+
+    // Check transaction was successful
+    if tx_resp.finality.is_none() {
+        error!("Transaction did not achieve finality");
+        return Err(anyhow!("Transaction did not achieve finality"));
+    }
+
+    // Check for transaction success in effects
+    let tx_successful = tx_resp.transaction
+        .as_ref()
+        .and_then(|t| t.effects.as_ref())
+        .and_then(|e| e.status.as_ref())
+        .map(|s| s.error.is_none())
+        .unwrap_or(false);
+
+    let tx_digest = tx_resp
+        .transaction
+        .as_ref()
+        .and_then(|t| t.digest.as_ref())
+        .context("Failed to get transaction digest")?
+        .to_string();
+
+    if tx_successful {
+        info!(
+            "start_proving transaction executed successfully: {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+    } else {
+        warn!(
+            "start_proving transaction failed (proofs may be already reserved): {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+        return Err(anyhow!("Failed to reserve proofs - may be already reserved by another coordinator"));
+    }
+
+    Ok(tx_digest)
+}
+
 /// Convenience function to create a merge job
 pub async fn create_merge_job_tx(
     client: &mut GrpcClient,
