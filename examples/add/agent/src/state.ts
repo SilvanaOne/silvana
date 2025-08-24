@@ -35,7 +35,7 @@ export async function compile(): Promise<VerificationKey> {
   return vk;
 }
 
-export async function getState(params: {
+export async function getStateAndProof(params: {
   sequenceStates: SequenceState[];
   client: ReturnType<typeof createClient<typeof CoordinatorService>>;
   sessionId: string;
@@ -147,6 +147,7 @@ export async function getState(params: {
     if (transitionData.method === "add") {
       if (shouldProve) {
         // Generate proof for this sequence
+        console.time(`proving add for sequence ${currentSequence}`);
         const proofResult = await AddProgram.add(
           state,
           UInt32.from(transitionData.index),
@@ -156,6 +157,7 @@ export async function getState(params: {
           new AddProgramCommitment(commitments.oldCommitment),
           new AddProgramCommitment(commitments.newCommitment)
         );
+        console.timeEnd(`proving add for sequence ${currentSequence}`);
         finalProof = proofResult.proof;
         state = proofResult.proof.publicOutput;
         map = proofResult.auxiliaryOutput;
@@ -176,6 +178,7 @@ export async function getState(params: {
     } else if (transitionData.method === "multiply") {
       if (shouldProve) {
         // Generate proof for this sequence
+        console.time(`proving multiply for sequence ${currentSequence}`);
         const proofResult = await AddProgram.multiply(
           state,
           UInt32.from(transitionData.index),
@@ -185,6 +188,7 @@ export async function getState(params: {
           new AddProgramCommitment(commitments.oldCommitment),
           new AddProgramCommitment(commitments.newCommitment)
         );
+        console.timeEnd(`proving multiply for sequence ${currentSequence}`);
         finalProof = proofResult.proof;
         state = proofResult.proof.publicOutput;
         map = proofResult.auxiliaryOutput;
@@ -212,7 +216,9 @@ export async function getState(params: {
         if (vk === undefined) {
           throw new Error("vk is not set");
         }
+        console.time(`verifying proof for sequence ${currentSequence}`);
         const ok = await verify(proof, vk);
+        console.timeEnd(`verifying proof for sequence ${currentSequence}`);
         if (!ok) {
           throw new Error(
             `Proof verification failed for sequence ${currentSequence}`

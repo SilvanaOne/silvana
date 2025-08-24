@@ -4,7 +4,7 @@ use crate::state::SharedState;
 use std::collections::HashSet;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn, error};
 use base64::{engine::general_purpose, Engine as _};
 
 /// Represents a sequence state from the Move SequenceState struct

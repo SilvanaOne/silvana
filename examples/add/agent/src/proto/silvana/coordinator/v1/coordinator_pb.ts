@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file silvana/coordinator/v1/coordinator.proto.
  */
 export const file_silvana_coordinator_v1_coordinator: GenFile = /*@__PURE__*/
-  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIqgCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSEQoJc2VxdWVuY2VzGAkgAygEEgwKBGRhdGEYCiABKAwSDgoGam9iX2lkGAsgASgJEhAKCGF0dGVtcHRzGAwgASgNEhIKCmNyZWF0ZWRfYXQYDSABKAQSEgoKdXBkYXRlZF9hdBgOIAEoBEIOCgxfZGVzY3JpcHRpb24iWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkiqAEKDVNlcXVlbmNlU3RhdGUSEAoIc2VxdWVuY2UYASABKAQSEgoFc3RhdGUYAiABKAxIAIgBARIeChFkYXRhX2F2YWlsYWJpbGl0eRgDIAEoCUgBiAEBEhgKEG9wdGltaXN0aWNfc3RhdGUYBCABKAwSFwoPdHJhbnNpdGlvbl9kYXRhGAUgASgMQggKBl9zdGF0ZUIUChJfZGF0YV9hdmFpbGFiaWxpdHkiUAoYR2V0U2VxdWVuY2VTdGF0ZXNSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSDgoGam9iX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgEIlIKGUdldFNlcXVlbmNlU3RhdGVzUmVzcG9uc2USNQoGc3RhdGVzGAEgAygLMiUuc2lsdmFuYS5jb29yZGluYXRvci52MS5TZXF1ZW5jZVN0YXRlIkIKG1JlYWREYXRhQXZhaWxhYmlsaXR5UmVxdWVzdBIPCgdkYV9oYXNoGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiXAocUmVhZERhdGFBdmFpbGFiaWxpdHlSZXNwb25zZRIRCgRkYXRhGAEgASgJSACIAQESDwoHc3VjY2VzcxgCIAEoCBIPCgdtZXNzYWdlGAMgASgJQgcKBV9kYXRhMpcFChJDb29yZGluYXRvclNlcnZpY2USVwoGR2V0Sm9iEiUuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRKb2JSZXF1ZXN0GiYuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRKb2JSZXNwb25zZRJmCgtDb21wbGV0ZUpvYhIqLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuQ29tcGxldGVKb2JSZXF1ZXN0Gisuc2lsdmFuYS5jb29yZGluYXRvci52MS5Db21wbGV0ZUpvYlJlc3BvbnNlEloKB0ZhaWxKb2ISJi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkZhaWxKb2JSZXF1ZXN0Gicuc2lsdmFuYS5jb29yZGluYXRvci52MS5GYWlsSm9iUmVzcG9uc2USZgoLU3VibWl0UHJvb2YSKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFByb29mUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0UHJvb2ZSZXNwb25zZRJ4ChFHZXRTZXF1ZW5jZVN0YXRlcxIwLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0U2VxdWVuY2VTdGF0ZXNSZXF1ZXN0GjEuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRTZXF1ZW5jZVN0YXRlc1Jlc3BvbnNlEoEBChRSZWFkRGF0YUF2YWlsYWJpbGl0eRIzLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0GjQuc2lsdmFuYS5jb29yZGluYXRvci52MS5SZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlQkNaQWdpdGh1Yi5jb20vU2lsdmFuYU9uZS96ay10ZXN0cy9wYWNrYWdlcy9hdnMvcnBjL3Byb3RvO2Nvb3JkaW5hdG9yYgZwcm90bzM", [file_google_protobuf_descriptor]);
+  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIqgCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSEQoJc2VxdWVuY2VzGAkgAygEEgwKBGRhdGEYCiABKAwSDgoGam9iX2lkGAsgASgJEhAKCGF0dGVtcHRzGAwgASgNEhIKCmNyZWF0ZWRfYXQYDSABKAQSEgoKdXBkYXRlZF9hdBgOIAEoBEIOCgxfZGVzY3JpcHRpb24iWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkirgEKElN1Ym1pdFN0YXRlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEg4KBmpvYl9pZBgDIAEoCRIbCg5uZXdfc3RhdGVfZGF0YRgEIAEoDEgAiAEBEh0KEHNlcmlhbGl6ZWRfc3RhdGUYBSABKAlIAYgBAUIRCg9fbmV3X3N0YXRlX2RhdGFCEwoRX3NlcmlhbGl6ZWRfc3RhdGUiSAoTU3VibWl0U3RhdGVSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEhQKB2RhX2hhc2gYAiABKAlIAIgBAUIKCghfZGFfaGFzaCKoAQoNU2VxdWVuY2VTdGF0ZRIQCghzZXF1ZW5jZRgBIAEoBBISCgVzdGF0ZRgCIAEoDEgAiAEBEh4KEWRhdGFfYXZhaWxhYmlsaXR5GAMgASgJSAGIAQESGAoQb3B0aW1pc3RpY19zdGF0ZRgEIAEoDBIXCg90cmFuc2l0aW9uX2RhdGEYBSABKAxCCAoGX3N0YXRlQhQKEl9kYXRhX2F2YWlsYWJpbGl0eSJQChhHZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZqb2JfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQiUgoZR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRI1CgZzdGF0ZXMYASADKAsyJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNlcXVlbmNlU3RhdGUiQgobUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg8KB2RhX2hhc2gYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJcChxSZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEhEKBGRhdGEYASABKAlIAIgBARIPCgdzdWNjZXNzGAIgASgIEg8KB21lc3NhZ2UYAyABKAlCBwoFX2RhdGEy/wUKEkNvb3JkaW5hdG9yU2VydmljZRJXCgZHZXRKb2ISJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlcXVlc3QaJi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlc3BvbnNlEmYKC0NvbXBsZXRlSm9iEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5Db21wbGV0ZUpvYlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkNvbXBsZXRlSm9iUmVzcG9uc2USWgoHRmFpbEpvYhImLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuRmFpbEpvYlJlcXVlc3QaJy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkZhaWxKb2JSZXNwb25zZRJmCgtTdWJtaXRQcm9vZhIqLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0UHJvb2ZSZXF1ZXN0Gisuc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRQcm9vZlJlc3BvbnNlEmYKC1N1Ym1pdFN0YXRlEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRTdGF0ZVJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFN0YXRlUmVzcG9uc2USeAoRR2V0U2VxdWVuY2VTdGF0ZXMSMC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFNlcXVlbmNlU3RhdGVzUmVxdWVzdBoxLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRKBAQoUUmVhZERhdGFBdmFpbGFiaWxpdHkSMy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlJlYWREYXRhQXZhaWxhYmlsaXR5UmVxdWVzdBo0LnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmVhZERhdGFBdmFpbGFiaWxpdHlSZXNwb25zZUJDWkFnaXRodWIuY29tL1NpbHZhbmFPbmUvemstdGVzdHMvcGFja2FnZXMvYXZzL3JwYy9wcm90bztjb29yZGluYXRvcmIGcHJvdG8z", [file_google_protobuf_descriptor]);
 
 /**
  * Job message matching the partial Move struct
@@ -348,6 +348,75 @@ export const SubmitProofResponseSchema: GenMessage<SubmitProofResponse> = /*@__P
   messageDesc(file_silvana_coordinator_v1_coordinator, 8);
 
 /**
+ * Request message for submitting state
+ *
+ * @generated from message silvana.coordinator.v1.SubmitStateRequest
+ */
+export type SubmitStateRequest = Message<"silvana.coordinator.v1.SubmitStateRequest"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: string job_id = 3;
+   */
+  jobId: string;
+
+  /**
+   * raw state data (vector<u8>) for update_state_for_sequence
+   *
+   * @generated from field: optional bytes new_state_data = 4;
+   */
+  newStateData?: Uint8Array;
+
+  /**
+   * serialized state data (string) to write to Walrus
+   *
+   * @generated from field: optional string serialized_state = 5;
+   */
+  serializedState?: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.SubmitStateRequest.
+ * Use `create(SubmitStateRequestSchema)` to create a new message.
+ */
+export const SubmitStateRequestSchema: GenMessage<SubmitStateRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 9);
+
+/**
+ * Response message for state submission
+ *
+ * @generated from message silvana.coordinator.v1.SubmitStateResponse
+ */
+export type SubmitStateResponse = Message<"silvana.coordinator.v1.SubmitStateResponse"> & {
+  /**
+   * @generated from field: string tx_hash = 1;
+   */
+  txHash: string;
+
+  /**
+   * only present if serialized_state was provided
+   *
+   * @generated from field: optional string da_hash = 2;
+   */
+  daHash?: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.SubmitStateResponse.
+ * Use `create(SubmitStateResponseSchema)` to create a new message.
+ */
+export const SubmitStateResponseSchema: GenMessage<SubmitStateResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 10);
+
+/**
  * Sequence state message matching the Move SequenceState struct
  *
  * @generated from message silvana.coordinator.v1.SequenceState
@@ -384,7 +453,7 @@ export type SequenceState = Message<"silvana.coordinator.v1.SequenceState"> & {
  * Use `create(SequenceStateSchema)` to create a new message.
  */
 export const SequenceStateSchema: GenMessage<SequenceState> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 9);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 11);
 
 /**
  * Request message for querying sequence states
@@ -413,7 +482,7 @@ export type GetSequenceStatesRequest = Message<"silvana.coordinator.v1.GetSequen
  * Use `create(GetSequenceStatesRequestSchema)` to create a new message.
  */
 export const GetSequenceStatesRequestSchema: GenMessage<GetSequenceStatesRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 10);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 12);
 
 /**
  * Response message for sequence states query
@@ -432,7 +501,7 @@ export type GetSequenceStatesResponse = Message<"silvana.coordinator.v1.GetSeque
  * Use `create(GetSequenceStatesResponseSchema)` to create a new message.
  */
 export const GetSequenceStatesResponseSchema: GenMessage<GetSequenceStatesResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 11);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 13);
 
 /**
  * Request message for reading data availability by hash
@@ -456,7 +525,7 @@ export type ReadDataAvailabilityRequest = Message<"silvana.coordinator.v1.ReadDa
  * Use `create(ReadDataAvailabilityRequestSchema)` to create a new message.
  */
 export const ReadDataAvailabilityRequestSchema: GenMessage<ReadDataAvailabilityRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 12);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 14);
 
 /**
  * Response message for data availability read
@@ -485,7 +554,7 @@ export type ReadDataAvailabilityResponse = Message<"silvana.coordinator.v1.ReadD
  * Use `create(ReadDataAvailabilityResponseSchema)` to create a new message.
  */
 export const ReadDataAvailabilityResponseSchema: GenMessage<ReadDataAvailabilityResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 13);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 15);
 
 /**
  * gRPC service definition
@@ -524,6 +593,14 @@ export const CoordinatorService: GenService<{
     methodKind: "unary";
     input: typeof SubmitProofRequestSchema;
     output: typeof SubmitProofResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.SubmitState
+   */
+  submitState: {
+    methodKind: "unary";
+    input: typeof SubmitStateRequestSchema;
+    output: typeof SubmitStateResponseSchema;
   },
   /**
    * @generated from rpc silvana.coordinator.v1.CoordinatorService.GetSequenceStates

@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use sui_rpc::Client;
 use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 // Maximum number of concurrent Docker containers/agents that can run simultaneously
 pub const MAX_CONCURRENT_AGENTS: usize = 2;
@@ -84,7 +85,7 @@ impl SharedState {
             agent_method,
         };
         current_agents.insert(session_id, current_agent.clone());
-        tracing::info!(
+        info!(
             "Set current agent for session {}: {}/{}/{}",
             current_agent.session_id,
             current_agent.developer,
@@ -96,7 +97,7 @@ impl SharedState {
     pub async fn clear_current_agent(&self, session_id: &str) {
         let mut current_agents = self.current_agents.write().await;
         if let Some(agent) = current_agents.remove(session_id) {
-            tracing::info!(
+            info!(
                 "Clearing current agent: {}/{}/{} (session: {})",
                 agent.developer,
                 agent.agent,
@@ -142,7 +143,7 @@ impl SharedState {
         // Set the flag that we have pending jobs
         self.has_pending_jobs.store(true, Ordering::Release);
         
-        tracing::info!(
+        info!(
             "Added app_instance {} for {}/{}/{}",
             app_instance, developer, agent, agent_method
         );
@@ -152,7 +153,7 @@ impl SharedState {
     pub async fn remove_job(&self, _job_sequence: u64) {
         // No longer tracking individual jobs, only app_instances
         // The reconciliation process will handle removing app_instances with no pending jobs
-        tracing::debug!("Job completion/failure noted (individual jobs not tracked)");
+        debug!("Job completion/failure noted (individual jobs not tracked)");
     }
 
     /// Remove an app_instance when it has no pending jobs
@@ -165,7 +166,7 @@ impl SharedState {
             self.has_pending_jobs.store(false, Ordering::Release);
         }
         
-        tracing::info!("Removed app_instance from tracking: {} (remaining: {})", app_instance_id, count);
+        info!("Removed app_instance from tracking: {} (remaining: {})", app_instance_id, count);
     }
 
     /// Get all app_instances with pending jobs

@@ -3,7 +3,7 @@ use proto::Event;
 use sea_orm::{Database, DatabaseConnection, EntityTrait, TransactionTrait};
 use std::time::Instant;
 use tidb as entities;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn, error};
 
 // Result structs for query responses
 #[derive(Debug, Clone)]

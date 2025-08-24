@@ -6,7 +6,7 @@ use std::path::Path;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::debug;
+use tracing::{debug, info, warn, error};
 
 pub mod coordinator {
     tonic::include_proto!("silvana.coordinator.v1");
@@ -18,6 +18,7 @@ use coordinator::{
     CompleteJobRequest, CompleteJobResponse,
     FailJobRequest, FailJobResponse,
     SubmitProofRequest, SubmitProofResponse,
+    SubmitStateRequest, SubmitStateResponse,
     GetSequenceStatesRequest, GetSequenceStatesResponse, SequenceState,
     ReadDataAvailabilityRequest, ReadDataAvailabilityResponse,
 };
@@ -41,7 +42,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
     ) -> Result<Response<GetJobResponse>, Status> {
         let req = request.into_inner();
         
-        tracing::info!(
+        info!(
             developer = %req.developer,
             agent = %req.agent,
             agent_method = %req.agent_method,
@@ -53,7 +54,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         if let Some(agent_job) = self.state.get_agent_job_db()
             .get_ready_job(&req.developer, &req.agent, &req.agent_method).await {
             
-            tracing::info!(
+            info!(
                 "Returning ready job {} from agent database",
                 agent_job.job_id
             );
@@ -91,7 +92,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 let current_instances = self.state.get_current_app_instances(&req.session_id).await;
                 
                 if !current_instances.is_empty() {
-                    tracing::info!("Found {} current app_instances for this agent", current_instances.len());
+                    info!("Found {} current app_instances for this agent", current_instances.len());
                     
                     // Get a cloned Sui client
                     let mut client = self.state.get_sui_client();
@@ -105,7 +106,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         &req.agent_method,
                     ).await {
                         Ok(Some(pending_job)) => {
-                            tracing::info!("Found pending job {} using index", pending_job.job_sequence);
+                            info!("Found pending job {} using index", pending_job.job_sequence);
                             
                             // Execute start_job transaction on Sui before returning the job
                             match start_job_tx(
@@ -114,7 +115,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                 pending_job.job_sequence,
                             ).await {
                                 Ok(tx_digest) => {
-                                    tracing::info!("Successfully started job {} with tx: {}", pending_job.job_sequence, tx_digest);
+                                    info!("Successfully started job {} with tx: {}", pending_job.job_sequence, tx_digest);
                                     
                                     // Create AgentJob and add it to agent database
                                     let agent_job = AgentJob::new(pending_job, &self.state);
@@ -122,7 +123,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     // Add to pending jobs (job has been started and is being returned to agent)
                                     self.state.get_agent_job_db().add_to_pending(agent_job.clone()).await;
                                     
-                                    tracing::info!("Added job {} to agent database with job_id: {}", 
+                                    info!("Added job {} to agent database with job_id: {}", 
                                         agent_job.job_sequence, agent_job.job_id);
                                     
                                     // Convert AgentJob to protobuf Job
@@ -146,21 +147,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     return Ok(Response::new(GetJobResponse { job: Some(job) }));
                                 }
                                 Err(e) => {
-                                    tracing::error!("Failed to start job {} on Sui: {}", pending_job.job_sequence, e);
+                                    error!("Failed to start job {} on Sui: {}", pending_job.job_sequence, e);
                                     // Don't return the job if start_job transaction failed
                                     // Continue to check for other jobs or return None
                                 }
                             }
                         }
                         Ok(None) => {
-                            tracing::info!("No pending jobs found using index for {}/{}/{}", 
+                            info!("No pending jobs found using index for {}/{}/{}", 
                                 req.developer, req.agent, req.agent_method);
                         }
                         Err(e) => {
-                            tracing::error!("Failed to fetch jobs using index: {}", e);
+                            error!("Failed to fetch jobs using index: {}", e);
                             // If it's a not found error, remove the stale app_instance
                             if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                                tracing::warn!("Jobs object not found, removing stale app_instances from tracking");
+                                warn!("Jobs object not found, removing stale app_instances from tracking");
                                 for instance in &current_instances {
                                     self.state.remove_app_instance(instance).await;
                                 }
@@ -168,15 +169,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         }
                     }
                     
-                    tracing::info!("No pending jobs found in any current app_instances");
+                    info!("No pending jobs found in any current app_instances");
                 } else {
-                    tracing::info!("No current app_instances for this agent");
+                    info!("No current app_instances for this agent");
                 }
             }
         }
 
         // No matching job found
-        tracing::info!("No matching job for {}/{}/{}", req.developer, req.agent, req.agent_method);
+        info!("No matching job for {}/{}/{}", req.developer, req.agent, req.agent_method);
         Ok(Response::new(GetJobResponse { job: None }))
     }
 
@@ -186,7 +187,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
     ) -> Result<Response<CompleteJobResponse>, Status> {
         let req = request.into_inner();
         
-        tracing::info!(
+        info!(
             job_id = %req.job_id,
             session_id = %req.session_id,
             "Received CompleteJob request"
@@ -196,7 +197,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
             Some(job) => job,
             None => {
-                tracing::warn!("CompleteJob request for unknown job_id: {}", req.job_id);
+                warn!("CompleteJob request for unknown job_id: {}", req.job_id);
                 return Ok(Response::new(CompleteJobResponse {
                     success: false,
                     message: format!("Job not found: {}", req.job_id),
@@ -210,7 +211,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             if current.developer != agent_job.developer 
                 || current.agent != agent_job.agent 
                 || current.agent_method != agent_job.agent_method {
-                tracing::warn!(
+                warn!(
                     "CompleteJob request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
                     agent_job.developer, agent_job.agent, agent_job.agent_method,
                     current.developer, current.agent, current.agent_method
@@ -221,7 +222,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }));
             }
         } else {
-            tracing::warn!("CompleteJob request from unknown session: {}", req.session_id);
+            warn!("CompleteJob request from unknown session: {}", req.session_id);
             return Ok(Response::new(CompleteJobResponse {
                 success: false,
                 message: "Invalid session ID".to_string(),
@@ -238,16 +239,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
             // Remove job from agent database
             let removed_job = self.state.get_agent_job_db().complete_job(&req.job_id).await;
             if removed_job.is_some() {
-                tracing::info!("Successfully completed and removed job {} from agent database", req.job_id);
+                info!("Successfully completed and removed job {} from agent database", req.job_id);
             } else {
-                tracing::warn!("Job {} completed on blockchain but was not found in agent database", req.job_id);
+                warn!("Job {} completed on blockchain but was not found in agent database", req.job_id);
             }
             Ok(Response::new(CompleteJobResponse {
                 success: true,
                 message: format!("Job {} completed successfully", req.job_id),
             }))
         } else {
-            tracing::error!("Failed to complete job {} on blockchain", req.job_id);
+            error!("Failed to complete job {} on blockchain", req.job_id);
             Ok(Response::new(CompleteJobResponse {
                 success: false,
                 message: format!("Failed to complete job {} on blockchain", req.job_id),
@@ -261,7 +262,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
     ) -> Result<Response<FailJobResponse>, Status> {
         let req = request.into_inner();
         
-        tracing::info!(
+        info!(
             job_id = %req.job_id,
             error = %req.error_message,
             session_id = %req.session_id,
@@ -272,7 +273,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
             Some(job) => job,
             None => {
-                tracing::warn!("FailJob request for unknown job_id: {}", req.job_id);
+                warn!("FailJob request for unknown job_id: {}", req.job_id);
                 return Ok(Response::new(FailJobResponse {
                     success: false,
                     message: format!("Job not found: {}", req.job_id),
@@ -286,7 +287,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             if current.developer != agent_job.developer 
                 || current.agent != agent_job.agent 
                 || current.agent_method != agent_job.agent_method {
-                tracing::warn!(
+                warn!(
                     "FailJob request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
                     agent_job.developer, agent_job.agent, agent_job.agent_method,
                     current.developer, current.agent, current.agent_method
@@ -297,7 +298,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }));
             }
         } else {
-            tracing::warn!("FailJob request from unknown session: {}", req.session_id);
+            warn!("FailJob request from unknown session: {}", req.session_id);
             return Ok(Response::new(FailJobResponse {
                 success: false,
                 message: "Invalid session ID".to_string(),
@@ -318,13 +319,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
             // Remove job from agent database
             self.state.get_agent_job_db().fail_job(&req.job_id).await;
             
-            tracing::info!("Successfully failed job {}", req.job_id);
+            info!("Successfully failed job {}", req.job_id);
             Ok(Response::new(FailJobResponse {
                 success: true,
                 message: format!("Job {} failed successfully", req.job_id),
             }))
         } else {
-            tracing::error!("Failed to fail job {} on blockchain", req.job_id);
+            error!("Failed to fail job {} on blockchain", req.job_id);
             Ok(Response::new(FailJobResponse {
                 success: false,
                 message: format!("Failed to fail job {} on blockchain", req.job_id),
@@ -338,7 +339,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
     ) -> Result<Response<SubmitProofResponse>, Status> {
         let req = request.into_inner();
         
-        tracing::info!(
+        info!(
             session_id = %req.session_id,
             block_number = %req.block_number,
             job_id = %req.job_id,
@@ -368,7 +369,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
             Some(job) => job,
             None => {
-                tracing::warn!("SubmitProof request for unknown job_id: {}", req.job_id);
+                warn!("SubmitProof request for unknown job_id: {}", req.job_id);
                 return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
             }
         };
@@ -379,7 +380,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             if current.developer != agent_job.developer 
                 || current.agent != agent_job.agent 
                 || current.agent_method != agent_job.agent_method {
-                tracing::warn!(
+                warn!(
                     "SubmitProof request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
                     agent_job.developer, agent_job.agent, agent_job.agent_method,
                     current.developer, current.agent, current.agent_method
@@ -387,12 +388,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Err(Status::permission_denied("Job does not belong to requesting session"));
             }
         } else {
-            tracing::warn!("SubmitProof request from unknown session: {}", req.session_id);
+            warn!("SubmitProof request from unknown session: {}", req.session_id);
             return Err(Status::unauthenticated("Invalid session ID"));
         }
 
         // Save proof to Walrus DA
-        tracing::info!("Saving proof to Walrus DA for job {}", req.job_id);
+        info!("Saving proof to Walrus DA for job {}", req.job_id);
         let walrus_client = walrus::WalrusClient::new();
         
         let save_params = walrus::SaveToWalrusParams {
@@ -401,17 +402,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
             num_epochs: Some(53), // Maximum epochs for longer retention
         };
 
+        let walrus_save_start = std::time::Instant::now();
         let da_hash = match walrus_client.save_to_walrus(save_params).await {
             Ok(Some(blob_id)) => {
-                tracing::info!("Successfully saved proof to Walrus with blob_id: {}", blob_id);
+                let walrus_save_duration = walrus_save_start.elapsed();
+                info!("Successfully saved proof to Walrus with blob_id: {} (took {}ms)", 
+                    blob_id, walrus_save_duration.as_millis());
                 blob_id
             }
             Ok(None) => {
-                tracing::error!("Failed to save proof to Walrus: no blob_id returned");
+                error!("Failed to save proof to Walrus: no blob_id returned");
                 return Err(Status::internal("Failed to save proof to data availability layer"));
             }
             Err(e) => {
-                tracing::error!("Error saving proof to Walrus: {}", e);
+                error!("Error saving proof to Walrus: {}", e);
                 return Err(Status::internal("Failed to save proof to data availability layer"));
             }
         };
@@ -451,15 +455,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match tx_result {
             Ok(tx_hash) => {
-                tracing::info!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
-                
-                // Remove job from agent database after successful proof submission
-                let removed_job = self.state.get_agent_job_db().complete_job(&req.job_id).await;
-                if removed_job.is_some() {
-                    tracing::info!("Successfully completed and removed job {} from agent database after proof submission", req.job_id);
-                } else {
-                    tracing::warn!("Job {} completed on blockchain but was not found in agent database", req.job_id);
-                }
+                info!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
 
                 Ok(Response::new(SubmitProofResponse {
                     tx_hash,
@@ -467,8 +463,109 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                tracing::error!("Failed to submit proof for job {} on blockchain: {}", req.job_id, e);
+                error!("Failed to submit proof for job {} on blockchain: {}", req.job_id, e);
                 Err(Status::internal(format!("Failed to submit proof transaction: {}", e)))
+            }
+        }
+    }
+
+    async fn submit_state(
+        &self,
+        request: Request<SubmitStateRequest>,
+    ) -> Result<Response<SubmitStateResponse>, Status> {
+        let req = request.into_inner();
+        
+        info!(
+            session_id = %req.session_id,
+            sequence = %req.sequence,
+            job_id = %req.job_id,
+            has_new_state_data = %req.new_state_data.is_some(),
+            has_serialized_state = %req.serialized_state.is_some(),
+            "Received SubmitState request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => job,
+            None => {
+                warn!("SubmitState request for unknown job_id: {}", req.job_id);
+                return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer 
+                || current.agent != agent_job.agent 
+                || current.agent_method != agent_job.agent_method {
+                warn!(
+                    "SubmitState request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer, agent_job.agent, agent_job.agent_method,
+                    current.developer, current.agent, current.agent_method
+                );
+                return Err(Status::permission_denied("Job does not belong to requesting session"));
+            }
+        } else {
+            warn!("SubmitState request from unknown session: {}", req.session_id);
+            return Err(Status::unauthenticated("Invalid session ID"));
+        }
+
+        // Save serialized state to Walrus DA if provided
+        let da_hash = if let Some(serialized_state) = req.serialized_state {
+            info!("Saving state to Walrus DA for sequence {}", req.sequence);
+            let walrus_client = walrus::WalrusClient::new();
+            
+            let save_params = walrus::SaveToWalrusParams {
+                data: serialized_state,
+                address: None,
+                num_epochs: Some(53), // Maximum epochs for longer retention
+            };
+
+            let walrus_save_start = std::time::Instant::now();
+            match walrus_client.save_to_walrus(save_params).await {
+                Ok(Some(blob_id)) => {
+                    let walrus_save_duration = walrus_save_start.elapsed();
+                    info!("Successfully saved state to Walrus with blob_id: {} (took {}ms)", 
+                        blob_id, walrus_save_duration.as_millis());
+                    Some(blob_id)
+                }
+                Ok(None) => {
+                    error!("Failed to save state to Walrus: no blob_id returned");
+                    return Err(Status::internal("Failed to save state to data availability layer"));
+                }
+                Err(e) => {
+                    error!("Error saving state to Walrus: {}", e);
+                    return Err(Status::internal("Failed to save state to data availability layer"));
+                }
+            }
+        } else {
+            None
+        };
+
+        // Call update_state_for_sequence on Sui
+        let sui_client = self.state.get_sui_client();
+        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        
+        let tx_result = sui_interface.update_state_for_sequence(
+            &agent_job.app_instance,
+            req.sequence,
+            req.new_state_data,
+            da_hash.clone(),
+        ).await;
+
+        match tx_result {
+            Ok(tx_hash) => {
+                info!("Successfully updated state for sequence {} with tx: {}", req.sequence, tx_hash);
+
+                Ok(Response::new(SubmitStateResponse {
+                    tx_hash,
+                    da_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to update state for sequence {} on blockchain: {}", req.sequence, e);
+                Err(Status::internal(format!("Failed to update state transaction: {}", e)))
             }
         }
     }
@@ -479,7 +576,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
     ) -> Result<Response<GetSequenceStatesResponse>, Status> {
         let req = request.into_inner();
         
-        tracing::info!(
+        info!(
             session_id = %req.session_id,
             job_id = %req.job_id,
             sequence = %req.sequence,
@@ -497,7 +594,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 job
             }
             None => {
-                tracing::warn!("GetSequenceStates request for unknown job_id: {}", req.job_id);
+                warn!("GetSequenceStates request for unknown job_id: {}", req.job_id);
                 return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
             }
         };
@@ -508,7 +605,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             if current.developer != agent_job.developer 
                 || current.agent != agent_job.agent 
                 || current.agent_method != agent_job.agent_method {
-                tracing::warn!(
+                warn!(
                     "GetSequenceStates request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
                     agent_job.developer, agent_job.agent, agent_job.agent_method,
                     current.developer, current.agent, current.agent_method
@@ -516,7 +613,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Err(Status::permission_denied("Job does not belong to requesting session"));
             }
         } else {
-            tracing::warn!("GetSequenceStates request from unknown session: {}", req.session_id);
+            warn!("GetSequenceStates request from unknown session: {}", req.session_id);
             return Err(Status::unauthenticated("Invalid session ID"));
         }
 
@@ -538,14 +635,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     })
                     .collect();
 
-                tracing::info!("Successfully retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence);
+                info!("Successfully retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence);
                 
                 Ok(Response::new(GetSequenceStatesResponse {
                     states: proto_states,
                 }))
             }
             Err(e) => {
-                tracing::error!("Failed to query sequence states for sequence {}: {}", req.sequence, e);
+                error!("Failed to query sequence states for sequence {}: {}", req.sequence, e);
                 Err(Status::internal(format!("Failed to query sequence states: {}", e)))
             }
         }
@@ -557,7 +654,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
     ) -> Result<Response<ReadDataAvailabilityResponse>, Status> {
         let req = request.into_inner();
         
-        tracing::info!(
+        info!(
             session_id = %req.session_id,
             da_hash = %req.da_hash,
             "Received ReadDataAvailability request"
@@ -566,7 +663,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Validate session_id exists
         let current_agent = self.state.get_current_agent(&req.session_id).await;
         if current_agent.is_none() {
-            tracing::warn!("ReadDataAvailability request from unknown session: {}", req.session_id);
+            warn!("ReadDataAvailability request from unknown session: {}", req.session_id);
             return Ok(Response::new(ReadDataAvailabilityResponse {
                 data: None,
                 success: false,
@@ -576,7 +673,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Validate da_hash is provided
         if req.da_hash.is_empty() {
-            tracing::warn!("ReadDataAvailability request with empty da_hash");
+            warn!("ReadDataAvailability request with empty da_hash");
             return Ok(Response::new(ReadDataAvailabilityResponse {
                 data: None,
                 success: false,
@@ -592,7 +689,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match walrus_client.read_from_walrus(read_params).await {
             Ok(Some(data)) => {
-                tracing::info!("Successfully read data from Walrus for da_hash: {}", req.da_hash);
+                info!("Successfully read data from Walrus for da_hash: {}", req.da_hash);
                 Ok(Response::new(ReadDataAvailabilityResponse {
                     data: Some(data),
                     success: true,
@@ -600,7 +697,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Ok(None) => {
-                tracing::warn!("No data found for da_hash: {}", req.da_hash);
+                warn!("No data found for da_hash: {}", req.da_hash);
                 Ok(Response::new(ReadDataAvailabilityResponse {
                     data: None,
                     success: false,
@@ -608,7 +705,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                tracing::error!("Failed to read data from Walrus for da_hash {}: {}", req.da_hash, e);
+                error!("Failed to read data from Walrus for da_hash {}: {}", req.da_hash, e);
                 Ok(Response::new(ReadDataAvailabilityResponse {
                     data: None,
                     success: false,
@@ -641,7 +738,7 @@ pub async fn start_grpc_server(socket_path: &str, state: SharedState) -> Result<
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         let uds_stream = UnixListenerStream::new(uds);
 
-        tracing::info!("Starting gRPC server on Unix socket: {}", socket_path);
+        info!("Starting gRPC server on Unix socket: {}", socket_path);
 
         Server::builder()
             .add_service(CoordinatorServiceServer::new(CoordinatorServiceImpl::new(uds_state)))
@@ -653,7 +750,7 @@ pub async fn start_grpc_server(socket_path: &str, state: SharedState) -> Result<
     let tcp_server = async {
         let addr = "0.0.0.0:50051".parse()
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-        tracing::info!("Starting gRPC server on TCP: {}", addr);
+        info!("Starting gRPC server on TCP: {}", addr);
 
         Server::builder()
             .add_service(CoordinatorServiceServer::new(CoordinatorServiceImpl::new(tcp_state)))

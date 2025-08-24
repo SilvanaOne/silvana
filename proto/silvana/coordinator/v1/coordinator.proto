@@ -86,6 +86,21 @@ message SubmitProofResponse {
   string da_hash = 2;
 }
 
+// Request message for submitting state
+message SubmitStateRequest {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string job_id = 3;
+  optional bytes new_state_data = 4; // raw state data (vector<u8>) for update_state_for_sequence
+  optional string serialized_state = 5; // serialized state data (string) to write to Walrus
+}
+
+// Response message for state submission
+message SubmitStateResponse {
+  string tx_hash = 1;
+  optional string da_hash = 2; // only present if serialized_state was provided
+}
+
 // Sequence state message matching the Move SequenceState struct
 message SequenceState {
   uint64 sequence = 1;
@@ -126,6 +141,7 @@ service CoordinatorService {
   rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
   rpc FailJob(FailJobRequest) returns (FailJobResponse);
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc SubmitState(SubmitStateRequest) returns (SubmitStateResponse);
   rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
   rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);
 }

@@ -7,7 +7,7 @@ use aws_sdk_kms::{Client, primitives::Blob};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
-use tracing::info;
+use tracing::{debug, info, warn, error};
 
 // Global static to store the KMS client
 static KMS_CLIENT: OnceLock<Arc<Client>> = OnceLock::new();
@@ -72,7 +72,7 @@ impl KMS {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!("Failed to generate KMS data key: {}", e);
+                error!("Failed to generate KMS data key: {}", e);
                 anyhow!("Failed to generate KMS data key: {}", e)
             })?;
 
@@ -117,7 +117,7 @@ impl KMS {
             .send()
             .await
             .map_err(|e| {
-                tracing::error!("Failed to decrypt KMS data key: {}", e);
+                error!("Failed to decrypt KMS data key: {}", e);
                 anyhow!("Failed to decrypt KMS data key: {}", e)
             })?;
 

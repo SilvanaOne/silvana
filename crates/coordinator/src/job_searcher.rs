@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn, error};
 
 /// State of the job searcher
 #[derive(Debug, Clone, PartialEq)]

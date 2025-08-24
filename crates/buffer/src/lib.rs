@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore, mpsc};
 use tokio::time::{Duration, Instant, interval, sleep, timeout};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn, error};
 
 // Note: Backend implementations have been moved to their respective domain crates:
 // - TiDB backend: tidb crate

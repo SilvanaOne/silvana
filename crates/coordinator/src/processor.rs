@@ -9,7 +9,7 @@ use sui_rpc::proto::sui::rpc::v2beta2::{
 };
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
-use tracing::{error, info, warn};
+use tracing::{info, warn, error};
 
 const RETRY_DELAY_SECS: u64 = 5;
 const MAX_RETRIES: usize = 5;

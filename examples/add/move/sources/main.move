@@ -146,26 +146,12 @@ public fun init_app_with_instance(
     };
     let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
 
-    // Create job for init method
-    coordination::app_instance::create_app_job(
-        instance,
-        b"init".to_string(),
-        option::some(b"Initialize app state job".to_string()),
-        option::some(vector[0u64]), // sequence 0
-        vector[], // empty transition data for initial state
-        clock,
-        ctx,
-    );
-
     // Add sequence 0 state to the sequence state manager
     // No transition data for initial state, so use empty vector
-    coordination::app_instance::add_state_for_sequence(
+    coordination::app_instance::increase_sequence(
         instance,
-        0u64,
-        option::none(), // state is None initially, calculated off-chain
-        option::none(), // data_availability is None initially
         optimistic_state_bytes,
-        vector[], // empty transition data for initial state
+        vector[],
         clock,
         ctx,
     );

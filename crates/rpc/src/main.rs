@@ -8,7 +8,7 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic_reflection::server::Builder as ReflectionBuilder;
 use tonic_web::GrpcWebLayer;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{error, info, warn};
+use tracing::{debug, info, warn, error};
 
 use monitoring::{init_monitoring, spawn_monitoring_tasks, start_metrics_server};
 use proto::Event;

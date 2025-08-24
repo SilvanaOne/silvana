@@ -6,10 +6,13 @@ import {
   CompleteJobRequestSchema,
   FailJobRequestSchema,
   GetSequenceStatesRequestSchema,
+  SubmitProofRequestSchema,
+  SubmitStateRequestSchema,
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
 import { deserializeTransitionData } from "./transition.js";
-import { getState, SequenceState } from "./state.js";
+import { getStateAndProof, SequenceState } from "./state.js";
+import { serializeProofAndState, serializeState } from "./proof.js";
 
 async function agent() {
   console.time("Agent runtime");
@@ -156,14 +159,17 @@ async function agent() {
             `Processed ${sequenceStates.length} sequence states for getState`
           );
 
-          // Call getState to get the current program state
+          // Call getStateAndProof to get the current program state and proof
           try {
-            const result = await getState({
+            const startTime = Date.now();
+            const result = await getStateAndProof({
               sequenceStates,
               client,
               sessionId,
               sequence: transitionData.sequence,
             });
+            const endTime = Date.now();
+            const cpuTimeMs = endTime - startTime;
 
             if (result) {
               console.log(
@@ -172,7 +178,93 @@ async function agent() {
               console.log(
                 `State available: sum ${result.state.sum.toBigInt()}, Map available: root: ${result.map.root.toBigInt()}`
               );
-              // Here you can use result.state and result.map for further processing
+              console.log(`Total processing time: ${cpuTimeMs}ms`);
+
+              if (result.proof) {
+                console.log(
+                  `Proof generated for sequence ${transitionData.sequence}`
+                );
+
+                // Serialize proof and state separately
+                const serializedProofAndState = serializeProofAndState(
+                  result.proof,
+                  result.state,
+                  result.map
+                );
+                const serializedStateOnly = serializeState(
+                  result.state,
+                  result.map
+                );
+
+                console.log(`Serialized proof and state for submission`);
+                console.log(
+                  `Proof size: ${serializedProofAndState.length} chars`
+                );
+                console.log(`State size: ${serializedStateOnly.length} chars`);
+
+                // Create requests for concurrent submission
+                const submitProofRequest = create(SubmitProofRequestSchema, {
+                  sessionId: sessionId,
+                  blockNumber: BigInt(transitionData.block_number),
+                  sequences: [transitionData.sequence],
+                  mergedSequences1: [], // No merged sequences for single proof
+                  mergedSequences2: [], // No merged sequences for single proof
+                  jobId: response.job.jobId,
+                  proof: serializedProofAndState,
+                  cpuTime: BigInt(cpuTimeMs),
+                });
+
+                const submitStateRequest = create(SubmitStateRequestSchema, {
+                  sessionId: sessionId,
+                  sequence: transitionData.sequence,
+                  jobId: response.job.jobId,
+                  newStateData: undefined, // No raw state data
+                  serializedState: serializedStateOnly, // Only state data for Walrus
+                });
+
+                console.log(
+                  `Submitting proof and state concurrently for sequence ${transitionData.sequence}...`
+                );
+
+                // Submit both concurrently without awaiting
+                const proofPromise = client.submitProof(submitProofRequest);
+                const statePromise = client.submitState(submitStateRequest);
+
+                // Wait for both to complete
+                try {
+                  const [submitProofResponse, submitStateResponse] =
+                    await Promise.all([proofPromise, statePromise]);
+
+                  console.log(
+                    `Both proof and state submitted successfully for sequence ${transitionData.sequence}`
+                  );
+                  console.log(
+                    `Proof transaction hash: ${submitProofResponse.txHash}`
+                  );
+                  console.log(
+                    `Proof data availability hash: ${submitProofResponse.daHash}`
+                  );
+                  console.log(
+                    `State transaction hash: ${submitStateResponse.txHash}`
+                  );
+                  if (submitStateResponse.daHash) {
+                    console.log(
+                      `State data availability hash: ${submitStateResponse.daHash}`
+                    );
+                  }
+                } catch (submitError) {
+                  console.error(
+                    `Failed to submit proof and/or state for sequence ${transitionData.sequence}:`,
+                    submitError
+                  );
+                }
+              } else {
+                console.log(
+                  `No proof generated for sequence ${transitionData.sequence}`
+                );
+              }
+
+              // Here you can use result.state, result.map, and result.proof for further processing
             } else {
               console.log(
                 `No program state could be retrieved from sequence states`
@@ -181,10 +273,6 @@ async function agent() {
           } catch (error) {
             console.error(`Failed to get program state:`, error);
           }
-
-          // Simulate job processing for 5 seconds
-          await sleep(5000);
-
           // Complete the job
           const completeRequest = create(CompleteJobRequestSchema, {
             jobId: response.job.jobId,

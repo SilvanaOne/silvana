@@ -5,7 +5,7 @@ use proto::{
     silvana_events_service_client::SilvanaEventsServiceClient,
 };
 use tonic::transport::Channel;
-use tracing::{debug, error, info};
+use tracing::{debug, info, error};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SecretsClientError {

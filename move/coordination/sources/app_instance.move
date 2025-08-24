@@ -5,8 +5,8 @@ use coordination::app_method::{Self, AppMethod};
 use coordination::block::{Self, Block};
 use coordination::jobs::{Self, Jobs};
 use coordination::prover::{Self, ProofCalculation};
-use coordination::silvana_app::{Self, SilvanaApp};
 use coordination::sequence_state::{Self, SequenceState, SequenceStateManager};
+use coordination::silvana_app::{Self, SilvanaApp};
 use std::string::String;
 use sui::bls12381::{Scalar, scalar_zero};
 use sui::clock::{timestamp_ms, Clock};
@@ -74,7 +74,6 @@ public struct InsufficientTimeForBlockEvent has copy, drop {
     min_time_required: u64,
 }
 
-
 public struct APP_INSTANCE has drop {}
 
 fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
@@ -119,7 +118,9 @@ public fun create_app_instance(
     >(ctx);
     proof_calculations.add(1u64, proof_calculation_block_1);
 
-    let sequence_state_manager = sequence_state::create_sequence_state_manager(ctx);
+    let sequence_state_manager = sequence_state::create_sequence_state_manager(
+        ctx,
+    );
 
     let state = create_app_state(ctx);
     let jobs = jobs::create_jobs(option::none(), ctx);
@@ -208,8 +209,6 @@ public fun increase_sequence(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    app_instance.sequence = app_instance.sequence + 1;
-    
     // Add new sequence state
     sequence_state::add_state_for_sequence(
         &mut app_instance.sequence_state_manager,
@@ -221,8 +220,9 @@ public fun increase_sequence(
         clock,
         ctx,
     );
-    
+
     try_create_block(app_instance, clock, ctx);
+    app_instance.sequence = app_instance.sequence + 1;
 }
 
 fun try_create_block(
@@ -231,7 +231,7 @@ fun try_create_block(
     ctx: &mut TxContext,
 ) {
     let current_time = clock.timestamp_ms();
-    
+
     if (
         (app_instance.previous_block_last_sequence + 1) == app_instance.sequence
     ) {
@@ -243,7 +243,7 @@ fun try_create_block(
         });
         return
     };
-    
+
     if (
         current_time - app_instance.previous_block_timestamp <= MIN_TIME_BETWEEN_BLOCKS
     ) {
@@ -309,7 +309,7 @@ fun try_create_block(
         block_number,
         new_proof_calculation,
     );
-    
+
     event::emit(BlockCreatedEvent {
         app_instance_address: app_instance.id.to_address(),
         block_number: app_instance.block_number - 1, // Use the created block number, not the new one
@@ -549,7 +549,6 @@ public fun update_block_mina_tx_hash(
 
 #[error]
 const EBlockNotSentToMina: vector<u8> = b"Block not sent to Mina";
-
 
 public fun update_block_mina_tx_included_in_block(
     app_instance: &mut AppInstance,
@@ -856,14 +855,32 @@ public fun highest_sequence(app_instance: &AppInstance): Option<u64> {
     sequence_state::highest_sequence(&app_instance.sequence_state_manager)
 }
 
-public(package) fun has_sequence_state(app_instance: &AppInstance, sequence: u64): bool {
-    sequence_state::has_sequence_state(&app_instance.sequence_state_manager, sequence)
+public(package) fun has_sequence_state(
+    app_instance: &AppInstance,
+    sequence: u64,
+): bool {
+    sequence_state::has_sequence_state(
+        &app_instance.sequence_state_manager,
+        sequence,
+    )
 }
 
-public(package) fun borrow_sequence_state(app_instance: &AppInstance, sequence: u64): &SequenceState {
-    sequence_state::borrow_sequence_state(&app_instance.sequence_state_manager, sequence)
+public(package) fun borrow_sequence_state(
+    app_instance: &AppInstance,
+    sequence: u64,
+): &SequenceState {
+    sequence_state::borrow_sequence_state(
+        &app_instance.sequence_state_manager,
+        sequence,
+    )
 }
 
-public(package) fun borrow_sequence_state_mut(app_instance: &mut AppInstance, sequence: u64): &mut SequenceState {
-    sequence_state::borrow_sequence_state_mut(&mut app_instance.sequence_state_manager, sequence)
+public(package) fun borrow_sequence_state_mut(
+    app_instance: &mut AppInstance,
+    sequence: u64,
+): &mut SequenceState {
+    sequence_state::borrow_sequence_state_mut(
+        &mut app_instance.sequence_state_manager,
+        sequence,
+    )
 }

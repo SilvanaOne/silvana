@@ -4,7 +4,7 @@ use std::str::FromStr;
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
-use tracing::{debug};
+use tracing::debug;
 use prost_types;
 
 /// Derive Sui address from a 32-byte private key using the exact reference algorithm

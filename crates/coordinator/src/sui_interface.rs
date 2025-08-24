@@ -1,6 +1,6 @@
-use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx};
+use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx};
 use sui_rpc::Client;
-use tracing::{info, error, warn};
+use tracing::{info, warn, error};
 
 /// Interface for calling Sui Move functions related to job management
 pub struct SuiJobInterface {
@@ -134,6 +134,43 @@ impl SuiJobInterface {
             Err(e) => {
                 error!("Failed to submit proof for job {} on blockchain: {}", job_id, e);
                 Err(format!("Failed to submit proof: {}", e).into())
+            }
+        }
+    }
+
+    /// Update state for a sequence on the Sui blockchain by calling the update_state_for_sequence Move function
+    /// Returns the transaction hash if successful, or an error if it failed
+    pub async fn update_state_for_sequence(
+        &mut self,
+        app_instance: &str,
+        sequence: u64,
+        new_state_data: Option<Vec<u8>>,
+        new_data_availability_hash: Option<String>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to update state for sequence {} on Sui blockchain",
+            sequence
+        );
+
+        match update_state_for_sequence_tx(
+            &mut self.client,
+            app_instance,
+            sequence,
+            new_state_data,
+            new_data_availability_hash.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated state for sequence {} on blockchain, tx: {}",
+                    sequence, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to update state for sequence {} on blockchain: {}", sequence, e);
+                Err(format!("Failed to update state: {}", e).into())
             }
         }
     }

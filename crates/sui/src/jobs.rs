@@ -6,7 +6,7 @@ use sui_rpc::proto::sui::rpc::v2beta2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
 use sui_crypto::SuiSigner;
-use tracing::{debug, info, error, warn};
+use tracing::{debug, info, warn, error};
 
 use crate::chain::{get_reference_gas_price, load_sender_from_env};
 use crate::coin::fetch_coin;
@@ -645,6 +645,146 @@ pub async fn submit_proof_tx(
 
     info!(
         "submit_proof transaction executed: {} (took {}ms)",
+        tx_digest, tx_elapsed_ms
+    );
+
+    Ok(tx_digest)
+}
+
+/// Create and submit a transaction to update state for a sequence
+pub async fn update_state_for_sequence_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    sequence: u64,
+    new_state_data: Option<Vec<u8>>,
+    new_data_availability_hash: Option<String>,
+) -> Result<String> {
+    info!("Creating update_state_for_sequence transaction for sequence: {}", sequence);
+    
+    // Parse IDs
+    let package_id = get_coordination_package_id()
+        .context("Failed to get coordination package ID")?;
+    let app_instance_id = get_app_instance_id(app_instance_str)
+        .context("Failed to parse app instance ID")?;
+    let clock_object_id = get_clock_object_id();
+
+    // Parse sender and secret key
+    let (sender, sk) = load_sender_from_env()?;
+
+    // Build transaction using TransactionBuilder
+    let mut tb = sui_transaction_builder::TransactionBuilder::new();
+    tb.set_sender(sender);
+    tb.set_gas_budget(100_000_000); // 0.1 SUI
+
+    // Get gas price and gas coin using provided client
+    let gas_price = get_reference_gas_price(client).await?;
+    tb.set_gas_price(gas_price);
+
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
+    let gas_input = sui_transaction_builder::unresolved::Input::owned(
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
+    );
+    tb.add_gas_objects(vec![gas_input]);
+
+    // Get current version and ownership info of app_instance object
+    let (app_instance_ref, initial_shared_version) = get_object_details(client, app_instance_id).await
+        .context("Failed to get app instance details")?;
+    
+    // Create input based on whether object is shared or owned
+    let app_instance_input = if let Some(shared_version) = initial_shared_version {
+        debug!("Using shared object input for app_instance (update_state_for_sequence) with initial_shared_version={}", shared_version);
+        sui_transaction_builder::unresolved::Input::shared(
+            app_instance_id,
+            shared_version,
+            true // mutable
+        )
+    } else {
+        debug!("Using owned object input for app_instance (update_state_for_sequence)");
+        sui_transaction_builder::unresolved::Input::owned(
+            *app_instance_ref.object_id(),
+            app_instance_ref.version(),
+            *app_instance_ref.digest(),
+        )
+    };
+    let app_instance_arg = tb.input(app_instance_input);
+
+    // Arguments
+    let sequence_arg = tb.input(sui_transaction_builder::Serialized(&sequence));
+    let new_state_data_arg = tb.input(sui_transaction_builder::Serialized(&new_state_data));
+    let new_data_availability_hash_arg = tb.input(sui_transaction_builder::Serialized(&new_data_availability_hash));
+
+    // Clock object (shared)
+    let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
+    let clock_arg = tb.input(clock_input);
+
+    // Function call: coordination::app_instance::update_state_for_sequence
+    let func = sui_transaction_builder::Function::new(
+        package_id,
+        "app_instance".parse()
+            .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+        "update_state_for_sequence".parse()
+            .map_err(|e| anyhow!("Failed to parse function name 'update_state_for_sequence': {}", e))?,
+        vec![],
+    );
+    tb.move_call(func, vec![
+        app_instance_arg,
+        sequence_arg,
+        new_state_data_arg,
+        new_data_availability_hash_arg,
+        clock_arg,
+    ]);
+
+    // Finalize and sign
+    let tx = tb.finish()?;
+    let sig = sk.sign_transaction(&tx)?;
+
+    // Execute transaction using provided client
+    let mut exec = client.execution_client();
+    let req = proto::ExecuteTransactionRequest {
+        transaction: Some(tx.into()),
+        signatures: vec![sig.into()],
+        read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
+    };
+
+    debug!("Sending update_state_for_sequence transaction...");
+    let tx_start = std::time::Instant::now();
+    let exec_result = exec.execute_transaction(req).await;
+    let tx_elapsed_ms = tx_start.elapsed().as_millis();
+
+    let resp = match exec_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Transaction execution error: {:?}", e);
+            return Err(anyhow!("Failed to execute transaction: {}", e));
+        }
+    };
+    let tx_resp = resp.into_inner();
+
+    // Check transaction was successful
+    if tx_resp.finality.is_none() {
+        return Err(anyhow!("Transaction did not achieve finality"));
+    }
+
+    let tx_digest = tx_resp
+        .transaction
+        .as_ref()
+        .and_then(|t| t.digest.as_ref())
+        .context("Failed to get transaction digest")?
+        .to_string();
+
+    info!(
+        "update_state_for_sequence transaction executed: {} (took {}ms)",
         tx_digest, tx_elapsed_ms
     );
 

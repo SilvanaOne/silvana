@@ -18,7 +18,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use sysinfo::{Networks, System};
 use tokio::time::interval;
-use tracing::{info, warn};
+use tracing::{debug, info, warn, error};
 
 use buffer::EventBuffer;
 

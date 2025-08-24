@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContainerConfig {
