@@ -158,7 +158,12 @@ async function agent() {
 
           // Call getState to get the current program state
           try {
-            const result = await getState(sequenceStates, client, sessionId);
+            const result = await getState({
+              sequenceStates,
+              client,
+              sessionId,
+              sequence: transitionData.sequence,
+            });
 
             if (result) {
               console.log(

@@ -5,7 +5,7 @@ FROM node:24-alpine
 WORKDIR /app
 COPY package.json tsconfig.json ./
 COPY src ./src/
-#COPY cache ./cache
+COPY cache ./cache
 RUN npm install
 RUN npm run build        
 
