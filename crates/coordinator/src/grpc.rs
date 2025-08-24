@@ -19,6 +19,7 @@ use coordinator::{
     FailJobRequest, FailJobResponse,
     SubmitProofRequest, SubmitProofResponse,
     GetSequenceStatesRequest, GetSequenceStatesResponse, SequenceState,
+    ReadDataAvailabilityRequest, ReadDataAvailabilityResponse,
 };
 
 #[derive(Clone)]
@@ -546,6 +547,73 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Err(e) => {
                 tracing::error!("Failed to query sequence states for sequence {}: {}", req.sequence, e);
                 Err(Status::internal(format!("Failed to query sequence states: {}", e)))
+            }
+        }
+    }
+
+    async fn read_data_availability(
+        &self,
+        request: Request<ReadDataAvailabilityRequest>,
+    ) -> Result<Response<ReadDataAvailabilityResponse>, Status> {
+        let req = request.into_inner();
+        
+        tracing::info!(
+            session_id = %req.session_id,
+            da_hash = %req.da_hash,
+            "Received ReadDataAvailability request"
+        );
+
+        // Validate session_id exists
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if current_agent.is_none() {
+            tracing::warn!("ReadDataAvailability request from unknown session: {}", req.session_id);
+            return Ok(Response::new(ReadDataAvailabilityResponse {
+                data: None,
+                success: false,
+                message: "Invalid session ID".to_string(),
+            }));
+        }
+
+        // Validate da_hash is provided
+        if req.da_hash.is_empty() {
+            tracing::warn!("ReadDataAvailability request with empty da_hash");
+            return Ok(Response::new(ReadDataAvailabilityResponse {
+                data: None,
+                success: false,
+                message: "Data availability hash is required".to_string(),
+            }));
+        }
+
+        // Use walrus client to read the data
+        let walrus_client = walrus::WalrusClient::new();
+        let read_params = walrus::ReadFromWalrusParams {
+            blob_id: req.da_hash.clone(),
+        };
+
+        match walrus_client.read_from_walrus(read_params).await {
+            Ok(Some(data)) => {
+                tracing::info!("Successfully read data from Walrus for da_hash: {}", req.da_hash);
+                Ok(Response::new(ReadDataAvailabilityResponse {
+                    data: Some(data),
+                    success: true,
+                    message: format!("Successfully read data for hash: {}", req.da_hash),
+                }))
+            }
+            Ok(None) => {
+                tracing::warn!("No data found for da_hash: {}", req.da_hash);
+                Ok(Response::new(ReadDataAvailabilityResponse {
+                    data: None,
+                    success: false,
+                    message: format!("No data found for hash: {}", req.da_hash),
+                }))
+            }
+            Err(e) => {
+                tracing::error!("Failed to read data from Walrus for da_hash {}: {}", req.da_hash, e);
+                Ok(Response::new(ReadDataAvailabilityResponse {
+                    data: None,
+                    success: false,
+                    message: format!("Failed to read data: {}", e),
+                }))
             }
         }
     }

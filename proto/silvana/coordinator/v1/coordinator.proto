@@ -107,6 +107,19 @@ message GetSequenceStatesResponse {
   repeated SequenceState states = 1;
 }
 
+// Request message for reading data availability by hash
+message ReadDataAvailabilityRequest {
+  string da_hash = 1;
+  string session_id = 2;
+}
+
+// Response message for data availability read
+message ReadDataAvailabilityResponse {
+  optional string data = 1;
+  bool success = 2;
+  string message = 3;
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -114,4 +127,5 @@ service CoordinatorService {
   rpc FailJob(FailJobRequest) returns (FailJobResponse);
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
   rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
+  rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);
 }

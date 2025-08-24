@@ -14,6 +14,7 @@ use coordination::registry::{
     SilvanaRegistry,
     create_app_instance_from_registry
 };
+use std::string::String;
 use sui::bcs;
 use sui::bls12381::Scalar;
 use sui::clock::Clock;
@@ -69,13 +70,14 @@ const SUM_INDEX: u32 = 0;
 
 // Struct for serializing transition data
 public struct TransitionData has copy, drop {
+    block_number: u64,
+    sequence: u64,
+    method: String,
     index: u32,
     value: u256,
     old_value: u256,
     old_commitment: CommitmentData,
     new_commitment: CommitmentData,
-    block_number: u64,
-    sequence: u64,
 }
 
 // Struct for optimistic state
@@ -132,18 +134,18 @@ public fun init_app_with_instance(
     instance
         .state_mut(&app.instance_cap)
         .commit_action(action, &vector[state_update], ctx);
-    
+
     // Get initial commitment data for sequence 0
     let state = instance.state_mut(&app.instance_cap);
     let initial_commitment = get_commitment_data(state);
-    
+
     // Create optimistic state for sequence 0
     let optimistic_state_struct = OptimisticState {
         sum: 0u256,
         commitment: initial_commitment,
     };
     let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
-    
+
     // Create job for init method
     coordination::app_instance::create_app_job(
         instance,
@@ -154,7 +156,7 @@ public fun init_app_with_instance(
         clock,
         ctx,
     );
-    
+
     // Add sequence 0 state to the sequence state manager
     // No transition data for initial state, so use empty vector
     coordination::app_instance::add_state_for_sequence(
@@ -218,19 +220,20 @@ public fun add(
         commitment: new_commitment,
     };
     let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
-    
+
     let sequence = instance.sequence();
-    let transition_data_struct = TransitionData { 
-        index, 
+    let transition_data_struct = TransitionData {
+        block_number: instance.block_number(),
+        sequence,
+        method: b"add".to_string(),
+        index,
         value,
         old_value,
         old_commitment,
         new_commitment,
-        block_number: instance.block_number(),
-        sequence,
     };
     let transition_data_bytes = bcs::to_bytes(&transition_data_struct);
-    
+
     coordination::app_instance::create_app_job(
         instance,
         b"add".to_string(),
@@ -306,19 +309,20 @@ public fun multiply(
         commitment: new_commitment,
     };
     let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
-    
+
     let sequence = instance.sequence();
-    let transition_data_struct = TransitionData { 
-        index, 
+    let transition_data_struct = TransitionData {
+        block_number: instance.block_number(),
+        sequence,
+        method: b"multiply".to_string(),
+        index,
         value,
         old_value,
         old_commitment,
         new_commitment,
-        block_number: instance.block_number(),
-        sequence,
     };
     let transition_data_bytes = bcs::to_bytes(&transition_data_struct);
-    
+
     coordination::app_instance::create_app_job(
         instance,
         b"multiply".to_string(),
@@ -384,10 +388,14 @@ public fun purge_rollback_records(
     let state = instance.state_mut(&app.instance_cap);
     let rollback = state.get_rollback_mut();
     commitment::rollback::purge_records(rollback, proved_sequence);
-    
+
     // Purge sequence states for sequences older than proved_sequence - 10
     if (proved_sequence > 10) {
         let threshold_sequence = proved_sequence - 10;
-        coordination::app_instance::purge_sequences_below(instance, threshold_sequence, clock);
+        coordination::app_instance::purge_sequences_below(
+            instance,
+            threshold_sequence,
+            clock,
+        );
     };
 }

@@ -19,13 +19,14 @@ import type { CanonicalElement } from "@silvana-one/mina-utils";
  *
  * Move struct:
  * public struct TransitionData has copy, drop {
+ *     block_number: u64,
+ *     sequence: u64,
+ *     method: String,
  *     index: u32,
  *     value: u256,
  *     old_value: u256,
  *     old_commitment: CommitmentData,
  *     new_commitment: CommitmentData,
- *     block_number: u64,
- *     sequence: u64,
  * }
  */
 
@@ -41,13 +42,14 @@ export const CommitmentDataBcs = bcs.struct("CommitmentData", {
 });
 
 export const TransitionDataBcs = bcs.struct("TransitionData", {
+  block_number: bcs.u64(),
+  sequence: bcs.u64(),
+  method: bcs.string(),
   index: bcs.u32(),
   value: bcs.u256(),
   old_value: bcs.u256(),
   old_commitment: CommitmentDataBcs,
   new_commitment: CommitmentDataBcs,
-  block_number: bcs.u64(),
-  sequence: bcs.u64(),
 });
 
 /**
@@ -63,13 +65,14 @@ export interface RawCommitmentData {
  * Raw TransitionData as returned by BCS deserialization
  */
 export interface RawTransitionData {
+  block_number: string; // BCS returns u64 as string
+  sequence: string; // BCS returns u64 as string
+  method: string;
   index: number;
   value: string; // BCS returns u256 as string
   old_value: string; // BCS returns u256 as string
   old_commitment: RawCommitmentData;
   new_commitment: RawCommitmentData;
-  block_number: string; // BCS returns u64 as string
-  sequence: string; // BCS returns u64 as string
 }
 
 /**
@@ -85,13 +88,14 @@ export interface CommitmentData {
  * Processed TransitionData with provable commitment representations
  */
 export interface TransitionData {
+  block_number: bigint; // u64 as bigint for numeric operations
+  sequence: bigint; // u64 as bigint for numeric operations
+  method: string;
   index: number;
   value: bigint; // u256 as bigint for numeric operations
   old_value: bigint; // u256 as bigint for numeric operations
   old_commitment: CommitmentData;
   new_commitment: CommitmentData;
-  block_number: bigint; // u64 as bigint for numeric operations
-  sequence: bigint; // u64 as bigint for numeric operations
 }
 
 /**
@@ -144,6 +148,9 @@ export function deserializeTransitionData(data: number[] | Uint8Array): Transiti
   const rawTransitionData = deserializeRawTransitionData(data);
 
   return {
+    block_number: BigInt(rawTransitionData.block_number),
+    sequence: BigInt(rawTransitionData.sequence),
+    method: rawTransitionData.method,
     index: rawTransitionData.index,
     value: BigInt(rawTransitionData.value),
     old_value: BigInt(rawTransitionData.old_value),
@@ -165,8 +172,6 @@ export function deserializeTransitionData(data: number[] | Uint8Array): Transiti
         commitmentArrayToBigInt(rawTransitionData.new_commitment.state_commitment.bytes)
       ),
     },
-    block_number: BigInt(rawTransitionData.block_number),
-    sequence: BigInt(rawTransitionData.sequence),
   };
 }
 
@@ -187,6 +192,9 @@ function provableToBigInt(provable: CanonicalElement): bigint {
 export function serializeTransitionData(transitionData: TransitionData): Uint8Array {
   // Convert back to raw format for serialization
   const rawTransitionData: RawTransitionData = {
+    block_number: transitionData.block_number.toString(),
+    sequence: transitionData.sequence.toString(),
+    method: transitionData.method,
     index: transitionData.index,
     value: transitionData.value.toString(),
     old_value: transitionData.old_value.toString(),
@@ -208,8 +216,6 @@ export function serializeTransitionData(transitionData: TransitionData): Uint8Ar
         provableToBigInt(transitionData.new_commitment.state_commitment)
       ) },
     },
-    block_number: transitionData.block_number.toString(),
-    sequence: transitionData.sequence.toString(),
   };
 
   return TransitionDataBcs.serialize(rawTransitionData).toBytes();

@@ -20,7 +20,7 @@ use clap::Parser;
 use dotenv::dotenv;
 use tokio::task;
 use tokio::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
             
             // Get current stats before reconciliation
             let stats = reconciliation_state.get_jobs_tracker().get_stats().await;
-            info!(
+            debug!(
                 "Starting periodic reconciliation (currently tracking {} app_instances, {} agent methods)",
                 stats.app_instances_count,
                 stats.agent_methods_count
@@ -120,7 +120,7 @@ async fn main() -> Result<()> {
                 Ok(has_jobs) => {
                     // Update the pending jobs flag based on reconciliation result
                     reconciliation_state.update_pending_jobs_flag().await;
-                    info!("Reconciliation complete, has_pending_jobs={}", has_jobs);
+                    debug!("Reconciliation complete, has_pending_jobs={}", has_jobs);
                 }
                 Err(e) => {
                     warn!("Reconciliation failed: {}", e);

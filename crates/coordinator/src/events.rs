@@ -39,8 +39,6 @@ pub fn parse_coordination_events(
                         || event_type
                             == &format!("{}::{}::JobFailedEvent", target_package, target_module)
                     {
-                        debug!("Checking event {}", event_type);
-
                         let coordination_event = CoordinationEvent {
                             event_type: event.event_type.clone().unwrap_or_default(),
                             // package_id: target_package.to_string(),
@@ -62,8 +60,6 @@ pub fn parse_coordination_events(
                         );
 
                         events.push(coordination_event);
-                    } else {
-                        debug!("Skipping event {}", event_type);
                     }
                 }
             }

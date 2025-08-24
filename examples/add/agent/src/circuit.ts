@@ -13,7 +13,7 @@ import {
   serializeIndexedMap,
   deserializeIndexedMerkleMap,
 } from "@silvana-one/storage";
-import { Fr, R, scalar } from "@silvana-one/mina-utils";
+import { R, scalar } from "@silvana-one/mina-utils";
 
 export const MAP_HEIGHT = 10;
 const IndexedMerkleMap = Experimental.IndexedMerkleMap;

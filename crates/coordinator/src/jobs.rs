@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use sui_rpc::Client;
 use crate::error::Result;
 
@@ -145,7 +145,7 @@ impl JobsTracker {
     /// Returns true if there are still pending jobs after reconciliation
     pub async fn reconcile_with_chain(&self, client: &mut Client) -> Result<bool> {
         let initial_count = self.app_instances_count().await;
-        info!("Starting reconciliation with on-chain state ({} app_instances tracked)", initial_count);
+        debug!("Starting reconciliation with on-chain state ({} app_instances tracked)", initial_count);
         
         // Get a snapshot of instances to check with their timestamps
         let instances_to_check: Vec<(String, Instant)> = {
@@ -201,7 +201,7 @@ impl JobsTracker {
         
         let final_count = self.app_instances_count().await;
         
-        info!(
+        debug!(
             "Reconciliation completed: {} checked, {} removed, {} have jobs, {} errors, {} skipped (updated during reconciliation). Now tracking {} app_instances",
             instances_to_check.len(),
             removed_count,

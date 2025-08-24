@@ -783,10 +783,28 @@ pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Resu
         // Extract transition_data field
         if let Some(field) = struct_value.fields.get("transition_data") {
             if let Some(prost_types::value::Kind::StringValue(data_str)) = &field.kind {
+                debug!("Raw transition_data string: {}", data_str);
+                debug!("Transition_data string length: {}", data_str.len());
+                
+                // Try hex decoding first (for backwards compatibility)
                 if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
+                    debug!("Decoded transition_data as hex, length: {}, first 20 bytes: {:?}", 
+                        data.len(), 
+                        data.iter().take(20).collect::<Vec<_>>());
                     sequence_state.transition_data = data;
+                } else if let Ok(data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
+                    debug!("Decoded transition_data as base64, length: {}, first 20 bytes: {:?}", 
+                        data.len(), 
+                        data.iter().take(20).collect::<Vec<_>>());
+                    sequence_state.transition_data = data;
+                } else {
+                    debug!("Failed to decode transition_data as hex or base64: {}", data_str);
                 }
+            } else {
+                debug!("transition_data field is not a string value: {:?}", field.kind);
             }
+        } else {
+            debug!("No transition_data field found in sequence state");
         }
         
         return Ok(sequence_state);
