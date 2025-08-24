@@ -208,25 +208,25 @@ async function agent() {
             );
 
             // Call getStateAndProof to get the current program state and proof
-            try {
-              const startTime = Date.now();
-              const result = await getStateAndProof({
-                sequenceStates,
-                client,
-                sessionId,
-                sequence: transitionData.sequence,
-              });
-              const endTime = Date.now();
-              const cpuTimeMs = endTime - startTime;
+            // Note: Removed inner try-catch so errors propagate to outer handler
+            const startTime = Date.now();
+            const result = await getStateAndProof({
+              sequenceStates,
+              client,
+              sessionId,
+              sequence: transitionData.sequence,
+            });
+            const endTime = Date.now();
+            const cpuTimeMs = endTime - startTime;
 
-              if (result) {
-                console.log(
-                  `Successfully retrieved program state and map from sequence states`
-                );
-                console.log(
-                  `State available: sum ${result.state.sum.toBigInt()}, Map available: root: ${result.map.root.toBigInt()}`
-                );
-                console.log(`Total processing time: ${cpuTimeMs}ms`);
+            if (result) {
+              console.log(
+                `Successfully retrieved program state and map from sequence states`
+              );
+              console.log(
+                `State available: sum ${result.state.sum.toBigInt()}, Map available: root: ${result.map.root.toBigInt()}`
+              );
+              console.log(`Total processing time: ${cpuTimeMs}ms`);
 
                 if (result.proof) {
                   console.log(
@@ -320,13 +320,10 @@ async function agent() {
                 }
 
                 // Here you can use result.state, result.map, and result.proof for further processing
-              } else {
-                console.log(
-                  `No program state could be retrieved from sequence states`
-                );
-              }
-            } catch (error) {
-              console.error(`Failed to get program state:`, error);
+            } else {
+              console.log(
+                `No program state could be retrieved from sequence states`
+              );
             }
           } // Close the else block for prove job processing
 
@@ -428,10 +425,6 @@ async function agent() {
 
   console.log(`Agent processed ${jobCount} jobs`);
   console.timeEnd("Agent runtime");
-}
-
-async function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 agent().catch(console.error);

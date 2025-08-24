@@ -96,6 +96,7 @@ async fn fetch_block_from_table(
     const PAGE_SIZE: u32 = 50; // Smaller page size to reduce data transfer
     let mut pages_searched = 0;
     const MAX_PAGES: u32 = 100; // Prevent infinite loops in case of issues
+    let mut all_found_blocks = Vec::new(); // Collect all found block numbers for debugging
     
     loop {
         let request = ListDynamicFieldsRequest {
@@ -124,6 +125,7 @@ async fn fetch_block_from_table(
             if let Some(name_value) = &field.name_value {
                 // The name_value is BCS-encoded u64 (block_number)
                 if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+                    all_found_blocks.push(field_block_number);
                     //debug!("🔢 Found block {} in dynamic fields", field_block_number);
                     if field_block_number == block_number {
                         debug!("🎯 Found matching block {} in dynamic fields (page {})", block_number, pages_searched);
@@ -132,6 +134,9 @@ async fn fetch_block_from_table(
                             return fetch_block_object_by_field_id(client, field_id, block_number).await;
                         }
                     }
+                } else {
+                    // Log the raw bytes if BCS decoding fails
+                    debug!("⚠️ Failed to decode block number from bytes: {:?}", name_value);
                 }
             }
         }
@@ -149,7 +154,17 @@ async fn fetch_block_from_table(
         }
     }
     
-    debug!("❌ Block {} not found in table {} after searching {} pages", block_number, table_id, pages_searched);
+    // Sort the found blocks for better readability
+    all_found_blocks.sort();
+    all_found_blocks.dedup();
+    
+    warn!("❌ Block {} not found in table {} after searching {} pages", block_number, table_id, pages_searched);
+    warn!("📊 All block numbers found in the blocks table: {:?}", all_found_blocks);
+    warn!("📊 Total unique blocks found: {}", all_found_blocks.len());
+    
+    // Now fetch and display full details of all dynamic fields for deeper debugging
+    debug_all_dynamic_fields(client, table_id, block_number).await;
+    
     Ok(None)
 }
 
@@ -218,6 +233,74 @@ async fn fetch_block_object_by_field_id(
     }
     
     Ok(None)
+}
+
+/// Debug function to print all dynamic fields with full details
+async fn debug_all_dynamic_fields(client: &mut Client, table_id: &str, target_block: u64) {
+    warn!("🔍 DEBUG: Fetching ALL dynamic fields for blocks table {} to diagnose why block {} is not found", table_id, target_block);
+    
+    // Fetch dynamic field information
+    let request = ListDynamicFieldsRequest {
+        parent: Some(table_id.to_string()),
+        page_size: Some(100), // Larger page size to get more fields at once
+        page_token: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec![
+                "field_id".to_string(),
+                "name_type".to_string(),
+                "name_value".to_string(),
+            ],
+        }),
+    };
+    
+    match client.live_data_client().list_dynamic_fields(request).await {
+        Ok(response) => {
+            let inner = response.into_inner();
+            warn!("📋 DEBUG: Found {} dynamic fields in first page", inner.dynamic_fields.len());
+            
+            for (i, field) in inner.dynamic_fields.iter().enumerate() {
+                warn!("═══════════════════════════════════════════");
+                warn!("📌 Dynamic Field #{}", i + 1);
+                warn!("  Field ID: {:?}", field.field_id);
+                warn!("  Name Type: {:?}", field.name_type);
+                
+                // Try to decode the name_value as u64
+                if let Some(name_value) = &field.name_value {
+                    warn!("  Name Value (raw bytes): {:?}", name_value);
+                    warn!("  Name Value (hex): {}", hex::encode(name_value));
+                    
+                    // Try BCS decoding as u64
+                    match bcs::from_bytes::<u64>(name_value) {
+                        Ok(block_num) => {
+                            warn!("  ✅ Decoded as block number: {}", block_num);
+                            if block_num == target_block {
+                                warn!("  🎯 THIS IS THE TARGET BLOCK!");
+                            }
+                        }
+                        Err(e) => {
+                            warn!("  ❌ Failed to decode as u64: {}", e);
+                            
+                            // Try other decodings
+                            if let Ok(u32_val) = bcs::from_bytes::<u32>(name_value) {
+                                warn!("  ⚠️ Can decode as u32: {}", u32_val);
+                            }
+                            if let Ok(string_val) = bcs::from_bytes::<String>(name_value) {
+                                warn!("  ⚠️ Can decode as String: {}", string_val);
+                            }
+                        }
+                    }
+                }
+            }
+            warn!("═══════════════════════════════════════════");
+            
+            if inner.next_page_token.is_some() {
+                warn!("⚠️ There are more pages of dynamic fields not shown here");
+            }
+        }
+        Err(e) => {
+            warn!("❌ DEBUG: Failed to fetch dynamic fields for debugging: {}", e);
+        }
+    }
 }
 
 /// Extract Block information from JSON
