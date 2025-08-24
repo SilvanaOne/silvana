@@ -1259,7 +1259,6 @@ async fn fetch_block_from_table(
                 "field_id".to_string(),
                 "name_type".to_string(),
                 "name_value".to_string(),
-                "name_parsed".to_string(),
             ],
         }),
     };
@@ -1446,7 +1445,6 @@ async fn fetch_proof_calculations_from_table(
                 "field_id".to_string(),
                 "name_type".to_string(),
                 "name_value".to_string(),
-                "name_parsed".to_string(),
             ],
         }),
     };
