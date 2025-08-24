@@ -20,7 +20,7 @@ pub struct SequenceState {
 /// Extract PendingJob from JSON representation
 pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<PendingJob> {
     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-        debug!("Job JSON fields: {:?}", struct_value.fields.keys().collect::<Vec<_>>());
+        //debug!("Job JSON fields: {:?}", struct_value.fields.keys().collect::<Vec<_>>());
         let mut job = PendingJob {
             job_sequence: 0,
             description: None,
@@ -116,18 +116,18 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<PendingJ
         }
         
         if let Some(field) = struct_value.fields.get("data") {
-            debug!("Found data field: {:?}", field.kind);
+            //debug!("Found data field: {:?}", field.kind);
             if let Some(prost_types::value::Kind::StringValue(data_str)) = &field.kind {
-                debug!("Data string: {}", data_str);
+                //debug!("Data string: {}", data_str);
                 // Data might be base64 encoded or hex encoded
                 if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
-                    debug!("Decoded hex data length: {}", data.len());
+                    //debug!("Decoded hex data length: {}", data.len());
                     job.data = data;
                 } else if let Ok(data) = general_purpose::STANDARD.decode(data_str) {
-                    debug!("Decoded base64 data length: {}", data.len());
+                    //debug!("Decoded base64 data length: {}", data.len());
                     job.data = data;
                 } else {
-                    debug!("Failed to decode data as hex or base64: {}", data_str);
+                    //debug!("Failed to decode data as hex or base64: {}", data_str);
                 }
             }
         } else {
@@ -592,7 +592,7 @@ pub async fn get_jobs_info_from_app_instance(
                                 debug!("Jobs table struct fields: {:?}", jobs_table_struct.fields.keys().collect::<Vec<_>>());
                                 if let Some(table_id_field) = jobs_table_struct.fields.get("id") {
                                     if let Some(prost_types::value::Kind::StringValue(jobs_table_id)) = &table_id_field.kind {
-                                        debug!("Found Jobs table ID: {}", jobs_table_id);
+                                        //debug!("Found Jobs table ID: {}", jobs_table_id);
                                         // Return app_instance_id as the "Jobs object" since Jobs is embedded
                                         return Ok(Some((formatted_id, jobs_table_id.clone())));
                                     } else {
@@ -738,12 +738,18 @@ pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Resu
                     // Check if it's Some variant
                     if let Some(some_field) = option_struct.fields.get("Some") {
                         if let Some(prost_types::value::Kind::StringValue(state_str)) = &some_field.kind {
-                            if let Ok(state_data) = hex::decode(state_str.trim_start_matches("0x")) {
+                            if let Ok(state_data) = base64::engine::general_purpose::STANDARD.decode(state_str) {
                                 sequence_state.state = Some(state_data);
                             }
                         }
                     }
                     // If None variant exists or no Some field, state remains None
+                }
+                Some(prost_types::value::Kind::StringValue(state_str)) => {
+                    // Handle case where state is directly a string value
+                    if let Ok(state_data) = base64::engine::general_purpose::STANDARD.decode(state_str) {
+                        sequence_state.state = Some(state_data);
+                    }
                 }
                 Some(prost_types::value::Kind::NullValue(_)) => {
                     sequence_state.state = None;
@@ -764,6 +770,10 @@ pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Resu
                     }
                     // If None variant exists or no Some field, data_availability remains None
                 }
+                Some(prost_types::value::Kind::StringValue(da_str)) => {
+                    // Handle case where data_availability is directly a string value
+                    sequence_state.data_availability = Some(da_str.clone());
+                }
                 Some(prost_types::value::Kind::NullValue(_)) => {
                     sequence_state.data_availability = None;
                 }
@@ -774,7 +784,7 @@ pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Resu
         // Extract optimistic_state field
         if let Some(field) = struct_value.fields.get("optimistic_state") {
             if let Some(prost_types::value::Kind::StringValue(state_str)) = &field.kind {
-                if let Ok(state_data) = hex::decode(state_str.trim_start_matches("0x")) {
+                if let Ok(state_data) = base64::engine::general_purpose::STANDARD.decode(state_str) {
                     sequence_state.optimistic_state = state_data;
                 }
             }
@@ -786,19 +796,13 @@ pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Resu
                 debug!("Raw transition_data string: {}", data_str);
                 debug!("Transition_data string length: {}", data_str.len());
                 
-                // Try hex decoding first (for backwards compatibility)
-                if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
-                    debug!("Decoded transition_data as hex, length: {}, first 20 bytes: {:?}", 
-                        data.len(), 
-                        data.iter().take(20).collect::<Vec<_>>());
-                    sequence_state.transition_data = data;
-                } else if let Ok(data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
+                if let Ok(data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
                     debug!("Decoded transition_data as base64, length: {}, first 20 bytes: {:?}", 
                         data.len(), 
                         data.iter().take(20).collect::<Vec<_>>());
                     sequence_state.transition_data = data;
                 } else {
-                    debug!("Failed to decode transition_data as hex or base64: {}", data_str);
+                    debug!("Failed to decode transition_data as base64: {}", data_str);
                 }
             } else {
                 debug!("transition_data field is not a string value: {:?}", field.kind);
@@ -821,7 +825,7 @@ pub async fn fetch_sequence_state_by_id(
     sequence_states_table_id: &str,
     sequence: u64,
 ) -> Result<Option<SequenceState>> {
-    debug!("Fetching sequence {} from sequence_states table {}", sequence, sequence_states_table_id);
+    debug!("🔍 Fetching sequence {} from sequence_states table {}", sequence, sequence_states_table_id);
     
     // List dynamic fields to find the specific sequence state
     let list_request = ListDynamicFieldsRequest {
@@ -846,6 +850,7 @@ pub async fn fetch_sequence_state_by_id(
         ))?;
     
     let response = list_response.into_inner();
+    debug!("📋 Found {} dynamic fields in sequence_states table", response.dynamic_fields.len());
     
     // Find the specific sequence state entry
     for field in &response.dynamic_fields {
@@ -853,7 +858,9 @@ pub async fn fetch_sequence_state_by_id(
             // The name_value is BCS-encoded u64 (sequence)
             if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
                 if field_sequence == sequence {
+                    debug!("🎯 Found matching sequence {} in dynamic fields", sequence);
                     if let Some(field_id) = &field.field_id {
+                        debug!("📄 Fetching sequence state field object: {}", field_id);
                         // Fetch the sequence state field wrapper
                         let sequence_state_field_request = GetObjectRequest {
                             object_id: Some(field_id.clone()),
@@ -902,10 +909,19 @@ pub async fn fetch_sequence_state_by_id(
                                             
                                             if let Some(sequence_state_object) = sequence_state_response.into_inner().object {
                                                 if let Some(sequence_state_json) = &sequence_state_object.json {
+                                                    //debug!("🔍 FULL SequenceState JSON for sequence {}: {:#?}", sequence, sequence_state_json);
                                                     if let Ok(sequence_state) = extract_sequence_state_from_json(sequence_state_json) {
+                                                        debug!("✅ Successfully extracted sequence state {}: has_state={}, has_data_availability={}", 
+                                                            sequence, sequence_state.state.is_some(), sequence_state.data_availability.is_some());
                                                         return Ok(Some(sequence_state));
+                                                    } else {
+                                                        error!("❌ Failed to extract sequence state {} from JSON", sequence);
                                                     }
+                                                } else {
+                                                    error!("❌ No JSON found for sequence state object {}", sequence);
                                                 }
+                                            } else {
+                                                error!("❌ No sequence state object found for sequence {}", sequence);
                                             }
                                         }
                                     }
@@ -918,7 +934,7 @@ pub async fn fetch_sequence_state_by_id(
         }
     }
     
-    debug!("Sequence state {} not found in table", sequence);
+    debug!("❌ Sequence state {} not found in table {}", sequence, sequence_states_table_id);
     Ok(None)
 }
 
@@ -1067,8 +1083,12 @@ pub async fn query_sequence_states(
     
     // Get SequenceStateManager info from AppInstance
     let (lowest_sequence, highest_sequence, table_id) = match get_sequence_state_manager_info_from_app_instance(client, app_instance_id).await? {
-        Some(info) => info,
+        Some(info) => {
+            debug!("SequenceStateManager found: lowest={}, highest={}, table_id={}", info.0, info.1, info.2);
+            info
+        },
         None => {
+            error!("SequenceStateManager not found in app_instance {}", app_instance_id);
             return Err(CoordinatorError::ConfigError(
                 format!("SequenceStateManager not found in app_instance {}", app_instance_id)
             ));
@@ -1077,57 +1097,467 @@ pub async fn query_sequence_states(
     
     // Check if requested sequence is within bounds
     if requested_sequence < lowest_sequence || requested_sequence > highest_sequence {
+        error!("Requested sequence {} is out of bounds [{}, {}]", 
+            requested_sequence, lowest_sequence, highest_sequence);
         return Err(CoordinatorError::ConfigError(
             format!("Requested sequence {} is out of bounds [{}, {}]", 
                 requested_sequence, lowest_sequence, highest_sequence)
         ));
     }
     
+    debug!("Requested sequence {} is within bounds [{}, {}], fetching state", 
+        requested_sequence, lowest_sequence, highest_sequence);
+    
     // Fetch the requested sequence state first
     let requested_state = match fetch_sequence_state_by_id(client, &table_id, requested_sequence).await? {
-        Some(state) => state,
+        Some(state) => {
+            debug!("Successfully fetched requested sequence state {}: has_state={}, has_data_availability={}", 
+                requested_sequence, state.state.is_some(), state.data_availability.is_some());
+            state
+        },
         None => {
+            error!("Sequence state {} not found in table {}", requested_sequence, table_id);
             return Err(CoordinatorError::ConfigError(
                 format!("Sequence state {} not found", requested_sequence)
             ));
         }
     };
     
-    // Check if requested sequence has both state and data_availability
-    if requested_state.state.is_some() && requested_state.data_availability.is_some() {
+    // Check if requested sequence has data_availability
+    if requested_state.data_availability.is_some() {
         // Return just this sequence
-        info!("Requested sequence {} has complete data, returning single state", requested_sequence);
+        info!("Requested sequence {} has data availability, returning single state", requested_sequence);
         return Ok(vec![requested_state]);
     }
     
-    // Find the highest sequence with both state and data_availability set
+    // Find the highest sequence with data_availability set (going backwards from requested_sequence-1)
+    debug!("Requested sequence {} does not have data availability, searching for highest sequence with DA", requested_sequence);
     let mut start_sequence = None;
-    for seq in (lowest_sequence..=requested_sequence).rev() {
+    for seq in (lowest_sequence..requested_sequence).rev() {
+        debug!("Checking sequence {} for data availability", seq);
         if let Ok(Some(state)) = fetch_sequence_state_by_id(client, &table_id, seq).await {
-            if state.state.is_some() && state.data_availability.is_some() {
+            debug!("Sequence {}: has_state={}, has_data_availability={}", 
+                seq, state.state.is_some(), state.data_availability.is_some());
+            if state.data_availability.is_some() {
                 start_sequence = Some(seq);
+                debug!("Found start sequence with data availability: {}", seq);
                 break;
+            }
+        } else {
+            debug!("Failed to fetch sequence state for {}", seq);
+        }
+    }
+    
+    match start_sequence {
+        Some(seq) => {
+            // Found a sequence with data availability, return only that sequence and the requested sequence
+            let mut result_states = Vec::new();
+            
+            // Add the start sequence (highest with DA)
+            if let Ok(Some(start_state)) = fetch_sequence_state_by_id(client, &table_id, seq).await {
+                result_states.push(start_state);
+            }
+            
+            // Add the requested sequence if it's different from start sequence
+            if seq != requested_sequence {
+                result_states.push(requested_state);
+            }
+            
+            info!("Returning {} sequence states: start sequence {} (with DA) and requested sequence {}", 
+                result_states.len(), seq, requested_sequence);
+            return Ok(result_states);
+        }
+        None => {
+            // No sequence with data availability found, return all sequences from lowest to requested
+            info!("No sequence with data availability found, returning all sequences from {} to {}", 
+                lowest_sequence, requested_sequence);
+            let mut result_states = Vec::new();
+            for seq in lowest_sequence..=requested_sequence {
+                if let Ok(Some(state)) = fetch_sequence_state_by_id(client, &table_id, seq).await {
+                    result_states.push(state);
+                }
+            }
+            return Ok(result_states);
+        }
+    }
+}
+
+/// Block information fetched from blockchain
+#[derive(Debug, Clone)]
+pub struct BlockInfo {
+    pub block_number: u64,
+    pub start_sequence: u64,
+    pub end_sequence: u64,
+    pub name: String,
+}
+
+/// Fetch Block information from AppInstance by block number
+pub async fn fetch_block_info(
+    client: &mut Client,
+    app_instance: &str,
+    block_number: u64,
+) -> Result<Option<BlockInfo>> {
+    debug!("Fetching Block info for block {} from app_instance {}", block_number, app_instance);
+    
+    // Ensure the app_instance has 0x prefix
+    let formatted_id = if app_instance.starts_with("0x") {
+        app_instance.to_string()
+    } else {
+        format!("0x{}", app_instance)
+    };
+    
+    let request = GetObjectRequest {
+        object_id: Some(formatted_id.clone()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec![
+                "object_id".to_string(),
+                "json".to_string(),
+            ],
+        }),
+    };
+    
+    let object_response = client.ledger_client().get_object(request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+        format!("Failed to fetch app_instance {}: {}", app_instance, e)
+    ))?;
+    
+    let response = object_response.into_inner();
+    
+    if let Some(proto_object) = response.object {
+        if let Some(json_value) = &proto_object.json {
+            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                // Get the blocks ObjectTable
+                if let Some(blocks_field) = struct_value.fields.get("blocks") {
+                    if let Some(prost_types::value::Kind::StructValue(blocks_struct)) = &blocks_field.kind {
+                        if let Some(table_id_field) = blocks_struct.fields.get("id") {
+                            if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
+                                // Fetch the Block from the ObjectTable using block_number
+                                return fetch_block_from_table(client, table_id, block_number).await;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
     
-    let start_seq = match start_sequence {
-        Some(seq) => seq,
-        None => {
-            // No sequence with complete data found, return range from lowest to requested
-            lowest_sequence
-        }
+    Ok(None)
+}
+
+/// Fetch Block from ObjectTable by block number
+async fn fetch_block_from_table(
+    client: &mut Client,
+    table_id: &str,
+    block_number: u64,
+) -> Result<Option<BlockInfo>> {
+    let request = ListDynamicFieldsRequest {
+        parent: Some(table_id.to_string()),
+        page_size: Some(100),
+        page_token: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec![
+                "field_id".to_string(),
+                "name_type".to_string(),
+                "name_value".to_string(),
+                "name_parsed".to_string(),
+            ],
+        }),
     };
     
-    // Fetch all sequences from start_seq (inclusive) to requested_sequence
-    let mut result_states = Vec::new();
-    for seq in start_seq..=requested_sequence {
-        if let Ok(Some(state)) = fetch_sequence_state_by_id(client, &table_id, seq).await {
-            result_states.push(state);
+    let fields_response = client.live_data_client().list_dynamic_fields(request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+        format!("Failed to list dynamic fields: {}", e)
+    ))?;
+    
+    let response = fields_response.into_inner();
+    
+    for field in &response.dynamic_fields {
+        if let Some(name_value) = &field.name_value {
+            // The name_value is BCS-encoded u64 (block_number)
+            if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+                if field_block_number == block_number {
+                    if let Some(field_id) = &field.field_id {
+                        // Found the block, fetch its content
+                        let block_request = GetObjectRequest {
+                            object_id: Some(field_id.clone()),
+                            version: None,
+                            read_mask: Some(prost_types::FieldMask {
+                                paths: vec![
+                                    "object_id".to_string(),
+                                    "json".to_string(),
+                                ],
+                            }),
+                        };
+                        
+                        let block_response = client.ledger_client().get_object(block_request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+        format!("Failed to fetch block {}: {}", field_block_number, e)
+    ))?;
+                        
+                        let block_response_inner = block_response.into_inner();
+                        if let Some(block_object) = block_response_inner.object {
+                            if let Some(block_json) = &block_object.json {
+                                // Extract the actual block object ID from the Field wrapper
+                                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &block_json.kind {
+                                    if let Some(value_field) = struct_value.fields.get("value") {
+                                        if let Some(prost_types::value::Kind::StringValue(block_object_id)) = &value_field.kind {
+                                            // Fetch the actual block object
+                                            let actual_block_request = GetObjectRequest {
+                                                object_id: Some(block_object_id.clone()),
+                                                version: None,
+                                                read_mask: Some(prost_types::FieldMask {
+                                                    paths: vec![
+                                                        "object_id".to_string(),
+                                                        "json".to_string(),
+                                                    ],
+                                                }),
+                                            };
+                                            
+                                            let actual_block_response = client.ledger_client().get_object(actual_block_request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+                                                format!("Failed to fetch actual block {}: {}", block_number, e)
+                                            ))?;
+                                            
+                                            if let Some(actual_block_object) = actual_block_response.into_inner().object {
+                                                if let Some(actual_block_json) = &actual_block_object.json {
+                                                    return extract_block_info_from_json(actual_block_json, block_number);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     
-    info!("Returning {} sequence states from sequence {} to {}", 
-        result_states.len(), start_seq, requested_sequence);
-    Ok(result_states)
+    Ok(None)
+}
+
+/// Extract Block information from JSON
+fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u64) -> Result<Option<BlockInfo>> {
+    if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+        let mut name = String::new();
+        let mut start_sequence = 0u64;
+        let mut end_sequence = 0u64;
+        
+        if let Some(name_field) = struct_value.fields.get("name") {
+            if let Some(prost_types::value::Kind::StringValue(name_str)) = &name_field.kind {
+                name = name_str.clone();
+            }
+        }
+        
+        if let Some(start_field) = struct_value.fields.get("start_sequence") {
+            if let Some(prost_types::value::Kind::StringValue(start_str)) = &start_field.kind {
+                start_sequence = start_str.parse().unwrap_or(0);
+            }
+        }
+        
+        if let Some(end_field) = struct_value.fields.get("end_sequence") {
+            if let Some(prost_types::value::Kind::StringValue(end_str)) = &end_field.kind {
+                end_sequence = end_str.parse().unwrap_or(0);
+            }
+        }
+        
+        return Ok(Some(BlockInfo {
+            block_number,
+            start_sequence,
+            end_sequence,
+            name,
+        }));
+    }
+    
+    Ok(None)
+}
+
+/// ProofCalculation information fetched from blockchain
+#[derive(Debug, Clone)]
+pub struct ProofCalculationInfo {
+    pub block_number: u64,
+    pub sequences: Vec<u64>,
+    pub job_id: String,
+}
+
+/// Fetch all ProofCalculations for a block from AppInstance
+pub async fn fetch_proof_calculations(
+    client: &mut Client,
+    app_instance: &str,
+    block_number: u64,
+) -> Result<Vec<ProofCalculationInfo>> {
+    debug!("Fetching ProofCalculations for block {} from app_instance {}", block_number, app_instance);
+    
+    // Ensure the app_instance has 0x prefix
+    let formatted_id = if app_instance.starts_with("0x") {
+        app_instance.to_string()
+    } else {
+        format!("0x{}", app_instance)
+    };
+    
+    let request = GetObjectRequest {
+        object_id: Some(formatted_id.clone()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec![
+                "object_id".to_string(),
+                "json".to_string(),
+            ],
+        }),
+    };
+    
+    let object_response = client.ledger_client().get_object(request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+        format!("Failed to fetch app_instance {}: {}", app_instance, e)
+    ))?;
+    
+    let response = object_response.into_inner();
+    
+    if let Some(proto_object) = response.object {
+        if let Some(json_value) = &proto_object.json {
+            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                // Get the proof_calculations ObjectTable
+                if let Some(proofs_field) = struct_value.fields.get("proof_calculations") {
+                    if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
+                        if let Some(table_id_field) = proofs_struct.fields.get("id") {
+                            if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
+                                // Fetch all ProofCalculations from the ObjectTable
+                                return fetch_proof_calculations_from_table(client, table_id, block_number).await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(vec![])
+}
+
+/// Fetch ProofCalculations from ObjectTable, filtering by block number
+async fn fetch_proof_calculations_from_table(
+    client: &mut Client,
+    table_id: &str,
+    target_block_number: u64,
+) -> Result<Vec<ProofCalculationInfo>> {
+    let request = ListDynamicFieldsRequest {
+        parent: Some(table_id.to_string()),
+        page_size: Some(100),
+        page_token: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec![
+                "field_id".to_string(),
+                "name_type".to_string(),
+                "name_value".to_string(),
+                "name_parsed".to_string(),
+            ],
+        }),
+    };
+    
+    let fields_response = client.live_data_client().list_dynamic_fields(request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+        format!("Failed to list dynamic fields: {}", e)
+    ))?;
+    
+    let response = fields_response.into_inner();
+    let mut proofs = Vec::new();
+    
+    for field in &response.dynamic_fields {
+        if let Some(field_id) = &field.field_id {
+            // Fetch each ProofCalculation
+            let proof_request = GetObjectRequest {
+                object_id: Some(field_id.clone()),
+                version: None,
+                read_mask: Some(prost_types::FieldMask {
+                    paths: vec![
+                        "object_id".to_string(),
+                        "json".to_string(),
+                    ],
+                }),
+            };
+        
+        let proof_response = client.ledger_client().get_object(proof_request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+        format!("Failed to fetch proof calculation: {}", e)
+    ))?;
+        
+        let proof_response_inner = proof_response.into_inner();
+        if let Some(proof_object) = proof_response_inner.object {
+            if let Some(proof_json) = &proof_object.json {
+                // Extract the actual proof calculation object ID from the Field wrapper
+                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_json.kind {
+                    if let Some(value_field) = struct_value.fields.get("value") {
+                        if let Some(prost_types::value::Kind::StringValue(proof_object_id)) = &value_field.kind {
+                            // Fetch the actual proof calculation object
+                            let actual_proof_request = GetObjectRequest {
+                                object_id: Some(proof_object_id.clone()),
+                                version: None,
+                                read_mask: Some(prost_types::FieldMask {
+                                    paths: vec![
+                                        "object_id".to_string(),
+                                        "json".to_string(),
+                                    ],
+                                }),
+                            };
+                            
+                            let actual_proof_response = client.ledger_client().get_object(actual_proof_request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+                                format!("Failed to fetch actual proof calculation: {}", e)
+                            ))?;
+                            
+                            if let Some(actual_proof_object) = actual_proof_response.into_inner().object {
+                                if let Some(actual_proof_json) = &actual_proof_object.json {
+                                    if let Some(proof_info) = extract_proof_calculation_from_json(actual_proof_json) {
+                                        // Filter by block number
+                                        if proof_info.block_number == target_block_number {
+                                            proofs.push(proof_info);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        }
+    }
+    
+    debug!("Found {} ProofCalculations for block {}", proofs.len(), target_block_number);
+    Ok(proofs)
+}
+
+/// Extract ProofCalculation information from JSON
+fn extract_proof_calculation_from_json(json_value: &prost_types::Value) -> Option<ProofCalculationInfo> {
+    if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+        let mut block_number = 0u64;
+        let mut sequences = Vec::new();
+        let mut job_id = String::new();
+        
+        if let Some(block_field) = struct_value.fields.get("block_number") {
+            if let Some(prost_types::value::Kind::StringValue(block_str)) = &block_field.kind {
+                block_number = block_str.parse().unwrap_or(0);
+            }
+        }
+        
+        if let Some(sequences_field) = struct_value.fields.get("sequences") {
+            if let Some(prost_types::value::Kind::ListValue(list_value)) = &sequences_field.kind {
+                for value in &list_value.values {
+                    if let Some(prost_types::value::Kind::StringValue(seq_str)) = &value.kind {
+                        if let Ok(seq) = seq_str.parse::<u64>() {
+                            sequences.push(seq);
+                        }
+                    }
+                }
+            }
+        }
+        
+        if let Some(job_id_field) = struct_value.fields.get("job_id") {
+            if let Some(prost_types::value::Kind::StringValue(job_id_str)) = &job_id_field.kind {
+                job_id = job_id_str.clone();
+            }
+        }
+        
+        return Some(ProofCalculationInfo {
+            block_number,
+            sequences,
+            job_id,
+        });
+    }
+    
+    None
 }

@@ -1,5 +1,7 @@
 mod agent;
+mod block;
 mod config;
+mod coordination;
 mod error;
 mod events;
 mod fetch;
@@ -8,6 +10,7 @@ mod hardware;
 mod job_id;
 mod job_searcher;
 mod jobs;
+mod merge;
 mod pending;
 mod processor;
 mod registry;

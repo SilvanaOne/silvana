@@ -25,6 +25,39 @@ public struct Proof has copy, drop, store {
     job_id: String,
 }
 
+// Struct for serializing proof merge data
+public struct ProofMergeData has copy, drop {
+    block_number: u64,
+    sequences1: vector<u64>,
+    sequences2: vector<u64>,
+}
+
+// Create a new ProofMergeData instance
+public fun create_proof_merge_data(
+    block_number: u64,
+    sequences1: vector<u64>,
+    sequences2: vector<u64>,
+): ProofMergeData {
+    ProofMergeData {
+        block_number,
+        sequences1,
+        sequences2,
+    }
+}
+
+// Getters for ProofMergeData
+public fun get_block_number(proof_merge_data: &ProofMergeData): u64 {
+    proof_merge_data.block_number
+}
+
+public fun get_sequences1(proof_merge_data: &ProofMergeData): &vector<u64> {
+    &proof_merge_data.sequences1
+}
+
+public fun get_sequences2(proof_merge_data: &ProofMergeData): &vector<u64> {
+    &proof_merge_data.sequences2
+}
+
 public struct ProofStartedEvent has copy, drop {
     block_number: u64,
     sequences: vector<u64>,
@@ -257,23 +290,26 @@ public(package) fun delete_proof_calculation(
         block_proof,
         is_finished,
     } = proof_calculation;
-    
+
     let proof_calculation_address = id.to_address();
     let proofs_count = sui::vec_map::size(&proofs);
     let timestamp = sui::clock::timestamp_ms(clock);
-    
+
     // Emit comprehensive event with all data before deletion
     event::emit(ProofCalculationFinishedEvent {
         proof_calculation_address,
         block_number,
         start_sequence,
         end_sequence: *option::borrow_with_default(&end_sequence, &0),
-        block_proof: *option::borrow_with_default(&block_proof, &b"".to_string()),
+        block_proof: *option::borrow_with_default(
+            &block_proof,
+            &b"".to_string(),
+        ),
         is_finished,
         proofs_count,
         timestamp,
     });
-    
+
     // Delete the object
     object::delete(id);
 }

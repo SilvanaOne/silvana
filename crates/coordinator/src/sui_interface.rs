@@ -148,8 +148,14 @@ impl SuiJobInterface {
         new_data_availability_hash: Option<String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!(
-            "Attempting to update state for sequence {} on Sui blockchain",
-            sequence
+            "🔄 Attempting to update state for sequence {} on Sui blockchain (app_instance={})",
+            sequence, app_instance
+        );
+        
+        info!(
+            "State update details: has_state_data={}, has_da_hash={}", 
+            new_state_data.is_some(), 
+            new_data_availability_hash.is_some()
         );
 
         match update_state_for_sequence_tx(
@@ -163,13 +169,18 @@ impl SuiJobInterface {
         {
             Ok(tx_digest) => {
                 info!(
-                    "Successfully updated state for sequence {} on blockchain, tx: {}",
+                    "✅ Successfully updated state for sequence {} on blockchain, tx: {} - waiting for propagation",
                     sequence, tx_digest
                 );
+                
+                // Add a small delay to allow blockchain state to propagate
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                
+                info!("State update transaction {} should now be propagated", tx_digest);
                 Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to update state for sequence {} on blockchain: {}", sequence, e);
+                error!("❌ Failed to update state for sequence {} on blockchain: {}", sequence, e);
                 Err(format!("Failed to update state: {}", e).into())
             }
         }

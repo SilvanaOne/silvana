@@ -1,5 +1,7 @@
 use crate::agent::AgentJob;
+use crate::coordination::ProofCalculation;
 use crate::fetch::fetch_pending_job_from_instances;
+use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
 use crate::state::SharedState;
 use sui::start_job_tx;
 use std::path::Path;
@@ -435,6 +437,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Some(req.merged_sequences_2) 
         };
 
+        // Create ProofCalculation for merge analysis before moving sequences
+        let proof_calc = ProofCalculation {
+            block_number: req.block_number,
+            sequences: sequences.clone(),
+        };
+
         // Submit proof transaction on Sui
         let sui_client = self.state.get_sui_client();
         let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
@@ -457,6 +465,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(tx_hash) => {
                 info!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
 
+                // After successful proof submission, determine if this is a complete block or needs merging
+                let mut client = self.state.get_sui_client();
+                if let Err(e) = analyze_proof_completion(
+                    &proof_calc, 
+                    &da_hash, 
+                    &agent_job.app_instance,
+                    &mut client
+                ).await {
+                    warn!("Failed to analyze proof completion: {}", e);
+                    // Don't fail the entire request if analysis fails
+                }
+
                 Ok(Response::new(SubmitProofResponse {
                     tx_hash,
                     da_hash,
@@ -464,6 +484,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
             Err(e) => {
                 error!("Failed to submit proof for job {} on blockchain: {}", req.job_id, e);
+                
+                // Even after failure, analyze the proof calculation for potential merges
+                let mut client = self.state.get_sui_client();
+                if let Err(analysis_err) = analyze_proof_completion(
+                    &proof_calc, 
+                    "", 
+                    &agent_job.app_instance,
+                    &mut client
+                ).await {
+                    warn!("Failed to analyze failed proof for merge opportunities: {}", analysis_err);
+                }
+
                 Err(Status::internal(format!("Failed to submit proof transaction: {}", e)))
             }
         }
@@ -618,24 +650,30 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Query sequence states from the coordinator fetch module
-        debug!("Querying sequence states for app_instance={}, sequence={}", agent_job.app_instance, req.sequence);
+        debug!("🔍 Querying sequence states for app_instance={}, sequence={}", agent_job.app_instance, req.sequence);
         let mut sui_client = self.state.get_sui_client();
         
         match crate::fetch::query_sequence_states(&mut sui_client, &agent_job.app_instance, req.sequence).await {
             Ok(fetch_states) => {
+                debug!("📦 Retrieved {} sequence states from query", fetch_states.len());
                 // Convert fetch SequenceState to protobuf SequenceState
                 let proto_states: Vec<SequenceState> = fetch_states
                     .into_iter()
-                    .map(|state| SequenceState {
-                        sequence: state.sequence,
-                        state: state.state,
-                        data_availability: state.data_availability,
-                        optimistic_state: state.optimistic_state,
-                        transition_data: state.transition_data,
+                    .enumerate()
+                    .map(|(i, state)| {
+                        debug!("State {}: sequence={}, has_state={}, has_data_availability={}", 
+                            i, state.sequence, state.state.is_some(), state.data_availability.is_some());
+                        SequenceState {
+                            sequence: state.sequence,
+                            state: state.state,
+                            data_availability: state.data_availability,
+                            optimistic_state: state.optimistic_state,
+                            transition_data: state.transition_data,
+                        }
                     })
                     .collect();
 
-                info!("Successfully retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence);
+                info!("✅ Successfully retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence);
                 
                 Ok(Response::new(GetSequenceStatesResponse {
                     states: proto_states,
@@ -762,5 +800,50 @@ pub async fn start_grpc_server(socket_path: &str, state: SharedState) -> Result<
     // Run both servers concurrently
     tokio::try_join!(uds_server, tcp_server)?;
 
+    Ok(())
+}
+
+// Helper function to analyze proof completion and determine next action
+async fn analyze_proof_completion(
+    proof_calc: &ProofCalculation, 
+    _da_hash: &str,
+    app_instance: &str,
+    client: &mut sui_rpc::Client,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let sequences = &proof_calc.sequences;
+    let block_number = proof_calc.block_number;
+    
+    // Check if sequences are consecutive and form a complete range
+    let mut sorted_sequences = sequences.clone();
+    sorted_sequences.sort();
+    
+    // Check if sequences are consecutive
+    let is_consecutive = sorted_sequences.windows(2).all(|w| w[1] == w[0] + 1);
+    
+    if !is_consecutive {
+        info!("Sequences {:?} are not consecutive - analyzing for merge opportunities", sequences);
+        analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client).await?;
+        return Ok(());
+    }
+    
+    let start_sequence = sorted_sequences[0];
+    let end_sequence = sorted_sequences[sorted_sequences.len() - 1];
+    
+    info!(
+        "Proof for block {} covers sequences {}-{} (total: {})",
+        block_number, start_sequence, end_sequence, sequences.len()
+    );
+    
+    // Now use blockchain data to make intelligent decisions
+    info!("🔍 Analyzing with blockchain data for merge opportunities");
+    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client).await?;
+    
+    // TODO: When block completeness check is implemented, call settle for complete blocks:
+    // if is_complete_block {
+    //     settle(proof_calc.clone(), da_hash.to_string()).await?;
+    // } else {
+    //     analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client).await?;
+    // }
+    
     Ok(())
 }

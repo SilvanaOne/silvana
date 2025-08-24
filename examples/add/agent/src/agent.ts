@@ -11,6 +11,7 @@ import {
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
 import { deserializeTransitionData } from "./transition.js";
+import { deserializeProofMergeData, displayProofMergeData } from "./merge.js";
 import { getStateAndProof, SequenceState } from "./state.js";
 import { serializeProofAndState, serializeState } from "./proof.js";
 
@@ -59,220 +60,270 @@ async function agent() {
         );
 
         try {
-          // Deserialize the job data to get TransitionData with sequence
-          console.log("Processing job...");
-          console.log(`Job data length: ${response.job.data.length}`);
-          console.log(
-            `Job data first 20 bytes: ${Array.from(
-              response.job.data.slice(0, 20)
-            )}`
-          );
-          const transitionData = deserializeTransitionData(
-            Array.from(response.job.data)
-          );
-          console.log(
-            `Job ${response.job.jobSequence} has transition data with sequence: ${transitionData.sequence}`
-          );
-
-          // Query sequence states using the sequence from TransitionData
-          const sequenceStatesRequest = create(GetSequenceStatesRequestSchema, {
-            sessionId: sessionId,
-            jobId: response.job.jobId,
-            sequence: transitionData.sequence,
-          });
-
-          console.log(
-            `Querying sequence states for sequence ${transitionData.sequence}...`
-          );
-          const sequenceStatesResponse = await client.getSequenceStates(
-            sequenceStatesRequest
-          );
-
-          console.log(
-            `Retrieved ${sequenceStatesResponse.states.length} sequence states:`
-          );
-          sequenceStatesResponse.states.forEach((state, index) => {
+          // Check if this is a merge job by app_instance_method
+          if (response.job.appInstanceMethod === "merge") {
+            console.log("🔀 MERGE JOB DETECTED");
+            // Print all job details
+            console.log("=== JOB DETAILS ===");
+            console.log(`Job Sequence: ${response.job.jobSequence}`);
+            console.log(`Job ID: ${response.job.jobId}`);
+            console.log(`Description: ${response.job.description || "none"}`);
+            console.log(`Developer: ${response.job.developer}`);
+            console.log(`Agent: ${response.job.agent}`);
+            console.log(`Agent Method: ${response.job.agentMethod}`);
+            console.log(`App: ${response.job.app}`);
+            console.log(`App Instance: ${response.job.appInstance}`);
             console.log(
-              `  State ${index + 1}: sequence=${
-                state.sequence
-              }, has_state=${!!state.state}, has_data_availability=${!!state.dataAvailability}`
+              `App Instance Method: ${response.job.appInstanceMethod}`
             );
-          });
+            console.log(`Sequences: [${response.job.sequences.join(", ")}]`);
+            console.log(`Attempts: ${response.job.attempts}`);
+            console.log(`Created At: ${response.job.createdAt}`);
+            console.log(`Updated At: ${response.job.updatedAt}`);
+            console.log(`Data Length: ${response.job.data.length}`);
+            console.log(
+              `Data First 20 bytes: ${Array.from(
+                response.job.data.slice(0, 20)
+              )}`
+            );
+            console.log("==================");
 
-          // Prepare sequence states for getState function
-          const sequenceStates: SequenceState[] = [];
+            // Deserialize ProofMergeData
+            const proofMergeData = deserializeProofMergeData(
+              Array.from(response.job.data)
+            );
+            console.log(
+              `Job ${response.job.jobSequence} is a merge job for block ${proofMergeData.block_number}`
+            );
 
-          for (const state of sequenceStatesResponse.states) {
-            try {
-              // Deserialize transition data from each sequence state
-              console.log(
-                `Processing sequence ${state.sequence}: transitionData length=${
-                  state.transitionData.length
-                }, first 20 bytes=[${Array.from(
-                  state.transitionData.slice(0, 20)
-                ).join(",")}]`
-              );
+            // Display the merge data
+            displayProofMergeData(proofMergeData);
 
-              // Sequence 0 is the initial state and has no transition data
-              if (Number(state.sequence) === 0) {
-                if (state.transitionData.length === 0) {
-                  console.log(
-                    `Sequence 0 is initial state with no transition data - skipping deserialization`
-                  );
-                  // Skip sequence 0 as it has no transition data (initial state)
-                  continue;
-                } else {
-                  console.warn(
-                    `Sequence 0 unexpectedly has transition data (length: ${state.transitionData.length})`
-                  );
-                }
+            // For now, just complete the merge job without processing
+            // TODO: Implement actual proof merging logic
+            console.log(
+              "Merge job processing not yet implemented - completing job"
+            );
+          } else {
+            // Default to prove job processing
+            console.log("⚡ PROVE JOB DETECTED");
+            const transitionData = deserializeTransitionData(
+              Array.from(response.job.data)
+            );
+            console.log(
+              `Job ${response.job.jobSequence} has transition data with sequence: ${transitionData.sequence}`
+            );
+
+            // Query sequence states using the sequence from TransitionData
+            const sequenceStatesRequest = create(
+              GetSequenceStatesRequestSchema,
+              {
+                sessionId: sessionId,
+                jobId: response.job.jobId,
+                sequence: transitionData.sequence,
               }
+            );
 
-              const transition = deserializeTransitionData(
-                Array.from(state.transitionData)
-              );
+            console.log(
+              `Querying sequence states for sequence ${transitionData.sequence}...`
+            );
+            const sequenceStatesResponse = await client.getSequenceStates(
+              sequenceStatesRequest
+            );
 
-              sequenceStates.push({
-                sequence: Number(state.sequence),
-                transition: transition,
-                dataAvailability: state.dataAvailability || undefined,
-              });
-
+            console.log(
+              `Retrieved ${sequenceStatesResponse.states.length} sequence states:`
+            );
+            sequenceStatesResponse.states.forEach((state, index) => {
               console.log(
-                `Successfully deserialized sequence ${state.sequence} with transition sequence: ${transition.sequence}`
+                `  State ${index + 1}: sequence=${
+                  state.sequence
+                }, has_state=${!!state.state}, has_data_availability=${
+                  state.dataAvailability ?? "none"
+                }`
               );
-            } catch (error) {
-              console.error(
-                `Failed to deserialize sequence ${state.sequence}:`,
-                error
-              );
-              console.error(
-                `TransitionData bytes: [${Array.from(state.transitionData).join(
-                  ","
-                )}]`
-              );
-              // Continue processing other sequences
-            }
-          }
-
-          console.log(
-            `Processed ${sequenceStates.length} sequence states for getState`
-          );
-
-          // Call getStateAndProof to get the current program state and proof
-          try {
-            const startTime = Date.now();
-            const result = await getStateAndProof({
-              sequenceStates,
-              client,
-              sessionId,
-              sequence: transitionData.sequence,
             });
-            const endTime = Date.now();
-            const cpuTimeMs = endTime - startTime;
 
-            if (result) {
-              console.log(
-                `Successfully retrieved program state and map from sequence states`
-              );
-              console.log(
-                `State available: sum ${result.state.sum.toBigInt()}, Map available: root: ${result.map.root.toBigInt()}`
-              );
-              console.log(`Total processing time: ${cpuTimeMs}ms`);
+            // Prepare sequence states for getState function
+            const sequenceStates: SequenceState[] = [];
 
-              if (result.proof) {
+            for (const state of sequenceStatesResponse.states) {
+              try {
+                // Deserialize transition data from each sequence state
                 console.log(
-                  `Proof generated for sequence ${transitionData.sequence}`
+                  `Processing sequence ${
+                    state.sequence
+                  }: transitionData length=${
+                    state.transitionData.length
+                  }, first 20 bytes=[${Array.from(
+                    state.transitionData.slice(0, 20)
+                  ).join(",")}]`
                 );
 
-                // Serialize proof and state separately
-                const serializedProofAndState = serializeProofAndState(
-                  result.proof,
-                  result.state,
-                  result.map
-                );
-                const serializedStateOnly = serializeState(
-                  result.state,
-                  result.map
-                );
-
-                console.log(`Serialized proof and state for submission`);
-                console.log(
-                  `Proof size: ${serializedProofAndState.length} chars`
-                );
-                console.log(`State size: ${serializedStateOnly.length} chars`);
-
-                // Create requests for concurrent submission
-                const submitProofRequest = create(SubmitProofRequestSchema, {
-                  sessionId: sessionId,
-                  blockNumber: BigInt(transitionData.block_number),
-                  sequences: [transitionData.sequence],
-                  mergedSequences1: [], // No merged sequences for single proof
-                  mergedSequences2: [], // No merged sequences for single proof
-                  jobId: response.job.jobId,
-                  proof: serializedProofAndState,
-                  cpuTime: BigInt(cpuTimeMs),
-                });
-
-                const submitStateRequest = create(SubmitStateRequestSchema, {
-                  sessionId: sessionId,
-                  sequence: transitionData.sequence,
-                  jobId: response.job.jobId,
-                  newStateData: undefined, // No raw state data
-                  serializedState: serializedStateOnly, // Only state data for Walrus
-                });
-
-                console.log(
-                  `Submitting proof and state concurrently for sequence ${transitionData.sequence}...`
-                );
-
-                // Submit both concurrently without awaiting
-                const proofPromise = client.submitProof(submitProofRequest);
-                const statePromise = client.submitState(submitStateRequest);
-
-                // Wait for both to complete
-                try {
-                  const [submitProofResponse, submitStateResponse] =
-                    await Promise.all([proofPromise, statePromise]);
-
-                  console.log(
-                    `Both proof and state submitted successfully for sequence ${transitionData.sequence}`
-                  );
-                  console.log(
-                    `Proof transaction hash: ${submitProofResponse.txHash}`
-                  );
-                  console.log(
-                    `Proof data availability hash: ${submitProofResponse.daHash}`
-                  );
-                  console.log(
-                    `State transaction hash: ${submitStateResponse.txHash}`
-                  );
-                  if (submitStateResponse.daHash) {
+                // Sequence 0 is the initial state and has no transition data
+                if (Number(state.sequence) === 0) {
+                  if (state.transitionData.length === 0) {
                     console.log(
-                      `State data availability hash: ${submitStateResponse.daHash}`
+                      `Sequence 0 is initial state with no transition data - skipping deserialization`
+                    );
+                    // Skip sequence 0 as it has no transition data (initial state)
+                    continue;
+                  } else {
+                    console.warn(
+                      `Sequence 0 unexpectedly has transition data (length: ${state.transitionData.length})`
                     );
                   }
-                } catch (submitError) {
-                  console.error(
-                    `Failed to submit proof and/or state for sequence ${transitionData.sequence}:`,
-                    submitError
+                }
+
+                const transition = deserializeTransitionData(
+                  Array.from(state.transitionData)
+                );
+
+                sequenceStates.push({
+                  sequence: Number(state.sequence),
+                  transition: transition,
+                  dataAvailability: state.dataAvailability || undefined,
+                });
+
+                console.log(
+                  `Successfully deserialized sequence ${state.sequence} with transition sequence: ${transition.sequence}`
+                );
+              } catch (error) {
+                console.error(
+                  `Failed to deserialize sequence ${state.sequence}:`,
+                  error
+                );
+                console.error(
+                  `TransitionData bytes: [${Array.from(
+                    state.transitionData
+                  ).join(",")}]`
+                );
+                // Continue processing other sequences
+              }
+            }
+
+            console.log(
+              `Processed ${sequenceStates.length} sequence states for getState`
+            );
+
+            // Call getStateAndProof to get the current program state and proof
+            try {
+              const startTime = Date.now();
+              const result = await getStateAndProof({
+                sequenceStates,
+                client,
+                sessionId,
+                sequence: transitionData.sequence,
+              });
+              const endTime = Date.now();
+              const cpuTimeMs = endTime - startTime;
+
+              if (result) {
+                console.log(
+                  `Successfully retrieved program state and map from sequence states`
+                );
+                console.log(
+                  `State available: sum ${result.state.sum.toBigInt()}, Map available: root: ${result.map.root.toBigInt()}`
+                );
+                console.log(`Total processing time: ${cpuTimeMs}ms`);
+
+                if (result.proof) {
+                  console.log(
+                    `Proof generated for sequence ${transitionData.sequence}`
+                  );
+
+                  // Serialize proof and state separately
+                  const serializedProofAndState = serializeProofAndState(
+                    result.proof,
+                    result.state,
+                    result.map
+                  );
+                  const serializedStateOnly = serializeState(
+                    result.state,
+                    result.map
+                  );
+
+                  console.log(`Serialized proof and state for submission`);
+                  console.log(
+                    `Proof size: ${serializedProofAndState.length} chars`
+                  );
+                  console.log(
+                    `State size: ${serializedStateOnly.length} chars`
+                  );
+
+                  // Create requests for concurrent submission
+                  const submitProofRequest = create(SubmitProofRequestSchema, {
+                    sessionId: sessionId,
+                    blockNumber: BigInt(transitionData.block_number),
+                    sequences: [transitionData.sequence],
+                    mergedSequences1: [], // No merged sequences for single proof
+                    mergedSequences2: [], // No merged sequences for single proof
+                    jobId: response.job.jobId,
+                    proof: serializedProofAndState,
+                    cpuTime: BigInt(cpuTimeMs),
+                  });
+
+                  const submitStateRequest = create(SubmitStateRequestSchema, {
+                    sessionId: sessionId,
+                    sequence: transitionData.sequence,
+                    jobId: response.job.jobId,
+                    newStateData: undefined, // No raw state data
+                    serializedState: serializedStateOnly, // Only state data for Walrus
+                  });
+
+                  console.log(
+                    `Submitting proof and state concurrently for sequence ${transitionData.sequence}...`
+                  );
+
+                  // Submit both concurrently without awaiting
+                  const proofPromise = client.submitProof(submitProofRequest);
+                  const statePromise = client.submitState(submitStateRequest);
+
+                  // Wait for both to complete
+                  try {
+                    const [submitProofResponse, submitStateResponse] =
+                      await Promise.all([proofPromise, statePromise]);
+
+                    console.log(
+                      `Both proof and state submitted successfully for sequence ${transitionData.sequence}`
+                    );
+                    console.log(
+                      `Proof transaction hash: ${submitProofResponse.txHash}`
+                    );
+                    console.log(
+                      `Proof data availability hash: ${submitProofResponse.daHash}`
+                    );
+                    console.log(
+                      `State transaction hash: ${submitStateResponse.txHash}`
+                    );
+                    if (submitStateResponse.daHash) {
+                      console.log(
+                        `State data availability hash: ${submitStateResponse.daHash}`
+                      );
+                    }
+                  } catch (submitError) {
+                    console.error(
+                      `Failed to submit proof and/or state for sequence ${transitionData.sequence}:`,
+                      submitError
+                    );
+                  }
+                } else {
+                  console.log(
+                    `No proof generated for sequence ${transitionData.sequence}`
                   );
                 }
+
+                // Here you can use result.state, result.map, and result.proof for further processing
               } else {
                 console.log(
-                  `No proof generated for sequence ${transitionData.sequence}`
+                  `No program state could be retrieved from sequence states`
                 );
               }
-
-              // Here you can use result.state, result.map, and result.proof for further processing
-            } else {
-              console.log(
-                `No program state could be retrieved from sequence states`
-              );
+            } catch (error) {
+              console.error(`Failed to get program state:`, error);
             }
-          } catch (error) {
-            console.error(`Failed to get program state:`, error);
-          }
+          } // Close the else block for prove job processing
+
           // Complete the job
           const completeRequest = create(CompleteJobRequestSchema, {
             jobId: response.job.jobId,

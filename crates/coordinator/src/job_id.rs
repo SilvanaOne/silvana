@@ -107,8 +107,10 @@ mod tests {
     #[tokio::test]
     async fn test_generate_job_id() {
         // Set environment variables for test
-        std::env::set_var("SUI_ADDRESS", "0x123");
-        std::env::set_var("SUI_CHAIN", "testnet");
+        unsafe {
+            std::env::set_var("SUI_ADDRESS", "0x123");
+            std::env::set_var("SUI_CHAIN", "testnet");
+        }
         
         // Create a mock sui client (we need to create this differently for tests)
         use sui_rpc::Client;
