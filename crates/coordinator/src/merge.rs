@@ -55,13 +55,18 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     };
 
     // Fetch all existing ProofCalculations for this block
-    let existing_proofs = match fetch_proof_calculations(client, app_instance, proof_calc.block_number).await {
+    let existing_proof_calculations = match fetch_proof_calculations(client, app_instance, proof_calc.block_number).await {
         Ok(proofs) => {
             info!("🧮 Fetched {} existing ProofCalculations for block {}:", 
                 proofs.len(), proof_calc.block_number);
-            for (i, proof) in proofs.iter().enumerate() {
-                info!("  Proof {}: sequences={:?}, job_id={}", 
-                    i + 1, proof.sequences, proof.job_id);
+            for (i, proof_calc) in proofs.iter().enumerate() {
+                info!("  ProofCalculation {}: block={}, start_seq={}, end_seq={:?}, finished={}, individual_proofs={}",
+                    i + 1, proof_calc.block_number, proof_calc.start_sequence, 
+                    proof_calc.end_sequence, proof_calc.is_finished, proof_calc.individual_proofs.len());
+                for (j, proof) in proof_calc.individual_proofs.iter().enumerate() {
+                    info!("    Individual proof {}: sequences={:?}, status={}, job_id={}", 
+                        j + 1, proof.sequences, proof.status, proof.job_id);
+                }
             }
             proofs
         }
@@ -83,13 +88,15 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     });
 
     // Add existing proofs (assume they are all calculated)
-    for existing_proof in &existing_proofs {
-        proof_infos.push(ProofInfo {
-            sequences: existing_proof.sequences.clone(),
-            status: ProofStatus::Calculated,
-            da_hash: None, // TODO: Fetch DA hash from ProofCalculation
-            timestamp: Some(chrono::Utc::now().timestamp() as u64 * 1000),
-        });
+    for existing_proof_calc in &existing_proof_calculations {
+        for existing_proof in &existing_proof_calc.individual_proofs {
+            proof_infos.push(ProofInfo {
+                sequences: existing_proof.sequences.clone(),
+                status: ProofStatus::Calculated,
+                da_hash: existing_proof.da_hash.clone(),
+                timestamp: Some(existing_proof.timestamp),
+            });
+        }
     }
 
     let block_proofs = BlockProofs {
