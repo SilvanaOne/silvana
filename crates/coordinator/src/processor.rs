@@ -11,8 +11,9 @@ use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tracing::{info, warn, error};
 
-const RETRY_DELAY_SECS: u64 = 5;
-const MAX_RETRIES: usize = 5;
+const INITIAL_RETRY_DELAY_SECS: u64 = 5;
+const MAX_RETRY_DELAY_SECS: u64 = 300;  // Cap at 5 minutes
+const MAX_RETRIES: usize = 100;  // Increased from 5 to 100 for better resilience
 const STREAM_TIMEOUT_SECS: u64 = 30;
 
 pub struct EventProcessor {
@@ -53,8 +54,11 @@ impl EventProcessor {
                         return Err(e);
                     }
 
-                    let delay = Duration::from_secs(RETRY_DELAY_SECS * retry_count as u64);
-                    warn!("Retrying in {:?}...", delay);
+                    // Exponential backoff: double the delay each time, capped at MAX_RETRY_DELAY_SECS
+                    let delay_secs = (INITIAL_RETRY_DELAY_SECS * 2_u64.pow((retry_count - 1) as u32))
+                        .min(MAX_RETRY_DELAY_SECS);
+                    let delay = Duration::from_secs(delay_secs);
+                    warn!("Retrying in {}s...", delay_secs);
                     sleep(delay).await;
                 }
             }
