@@ -28,6 +28,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
 use crate::job_searcher::JobSearcher;
+use crate::block::try_create_block;
+use crate::sui_interface::SuiJobInterface;
 use crate::processor::EventProcessor;
 use crate::state::SharedState;
 
@@ -133,7 +135,91 @@ async fn main() -> Result<()> {
     });
     info!("🔄 Started reconciliation task (runs every 10 minutes)");
 
-    // 3. Start job searcher in a separate thread
+    // 3. Start block creation task in a separate thread (runs every minute)
+    let block_creation_state = state.clone();
+    let block_creation_client = sui_client.clone();
+    let block_creation_handle = task::spawn(async move {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        
+        let mut block_interval = tokio::time::interval(Duration::from_secs(60)); // 1 minute
+        block_interval.tick().await; // Skip the first immediate tick
+        
+        let task_running = Arc::new(AtomicBool::new(false));
+        
+        loop {
+            block_interval.tick().await;
+            
+            // Check if previous task is still running
+            if task_running.load(Ordering::Acquire) {
+                warn!("Previous block creation task is still running, skipping this iteration");
+                continue;
+            }
+            
+            // Clone Arc for the spawned task
+            let task_running_clone = task_running.clone();
+            let block_creation_state_clone = block_creation_state.clone();
+            let block_creation_client_clone = block_creation_client.clone();
+            
+            // Spawn the actual block creation work as a separate task
+            tokio::spawn(async move {
+                // Mark task as running
+                task_running_clone.store(true, Ordering::Release);
+                
+                debug!("Starting periodic block creation check");
+                
+                // Get all app_instances from shared state
+                let app_instances = block_creation_state_clone.get_app_instances().await;
+                
+                if app_instances.is_empty() {
+                    debug!("No app_instances to check for block creation");
+                    task_running_clone.store(false, Ordering::Release);
+                    return;
+                }
+                
+                debug!("Checking {} app_instances for block creation", app_instances.len());
+                
+                let mut created_count = 0;
+                let mut error_count = 0;
+                
+                // Create a SuiJobInterface for this iteration
+                let mut sui_interface = SuiJobInterface::new(block_creation_client_clone.clone());
+                let mut client = block_creation_client_clone.clone();
+                
+                for app_instance_id in app_instances {
+                    match try_create_block(&mut client, &mut sui_interface, &app_instance_id).await {
+                        Ok(true) => {
+                            created_count += 1;
+                            info!("Block created for app_instance {}", app_instance_id);
+                        }
+                        Ok(false) => {
+                            // Conditions not met or another coordinator created it
+                            debug!("Block not created for app_instance {} (conditions not met)", app_instance_id);
+                        }
+                        Err(e) => {
+                            error_count += 1;
+                            debug!("Error checking block creation for app_instance {}: {}", app_instance_id, e);
+                        }
+                    }
+                }
+                
+                if created_count > 0 || error_count > 0 {
+                    info!(
+                        "Block creation check completed: {} blocks created, {} errors",
+                        created_count, error_count
+                    );
+                } else {
+                    debug!("Block creation check completed: no blocks created");
+                }
+                
+                // Mark task as completed
+                task_running_clone.store(false, Ordering::Release);
+            });
+        }
+    });
+    info!("🔲 Started block creation task (runs every minute)");
+
+    // 4. Start job searcher in a separate thread
     let job_searcher_state = state.clone();
     let use_tee = args.use_tee;
     let container_timeout_secs = args.container_timeout;
@@ -166,6 +252,7 @@ async fn main() -> Result<()> {
     // If processor exits, cancel all background tasks
     grpc_handle.abort();
     reconciliation_handle.abort();
+    block_creation_handle.abort();
     job_searcher_handle.abort();
 
     if let Err(e) = processor_result {

@@ -157,6 +157,7 @@ impl SharedState {
     }
 
     /// Remove an app_instance when it has no pending jobs
+    #[allow(dead_code)]
     pub async fn remove_app_instance(&self, app_instance_id: &str) {
         self.jobs_tracker.remove_app_instance(app_instance_id).await;
         

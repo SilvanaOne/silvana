@@ -1,6 +1,6 @@
-use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, reject_proof_tx, start_proving_tx};
+use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use sui_rpc::Client;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 
 /// Interface for calling Sui Move functions related to job management
 pub struct SuiJobInterface {
@@ -353,6 +353,52 @@ impl SuiJobInterface {
             Err(e) => {
                 error!("❌ Failed to update state for sequence {} on blockchain: {}", sequence, e);
                 Err(format!("Failed to update state: {}", e).into())
+            }
+        }
+    }
+
+    /// Try to create a new block for the app instance
+    /// This calls the try_create_block Move function which checks if conditions are met
+    /// Returns the transaction hash if successful, or an error if it failed
+    pub async fn try_create_block(
+        &mut self,
+        app_instance: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        debug!(
+            "Attempting to create block for app_instance {} on Sui blockchain",
+            app_instance
+        );
+
+        match try_create_block_tx(&mut self.client, app_instance).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully created block for app_instance {} on blockchain, tx: {}",
+                    app_instance, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                let error_str = e.to_string();
+                if error_str.contains("NonEntryFunctionInvoked") || error_str.contains("not an entry function") {
+                    // This is a critical error - the function doesn't exist or isn't entry
+                    error!(
+                        "CRITICAL: try_create_block is not an entry function for app_instance {}: {}",
+                        app_instance, e
+                    );
+                } else if error_str.contains("conditions not met") {
+                    // This is expected - conditions for block creation aren't met
+                    debug!(
+                        "Block creation conditions not met for app_instance {}: {}",
+                        app_instance, e
+                    );
+                } else {
+                    // Some other error
+                    warn!(
+                        "Failed to create block for app_instance {}: {}",
+                        app_instance, e
+                    );
+                }
+                Err(e.into())
             }
         }
     }

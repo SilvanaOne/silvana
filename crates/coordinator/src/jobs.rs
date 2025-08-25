@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use tracing::{debug, warn, info};
 use sui_rpc::Client;
 use crate::error::Result;
 
@@ -162,35 +162,66 @@ impl JobsTracker {
         let mut skipped_updated = 0;
         
         for (app_instance_id, original_timestamp) in &instances_to_check {
-            // Fetch pending_jobs_count directly from the embedded Jobs in AppInstance
-            match fetch_pending_jobs_count_from_app_instance(client, app_instance_id).await {
-                Ok(count) => {
-                    if count == 0 {
-                        // Check if the timestamp has changed (new events arrived)
-                        let should_remove = {
-                            let instances = self.app_instances_with_jobs.read().await;
-                            instances
-                                .get(app_instance_id)
-                                .map(|info| info.updated_at == *original_timestamp)
-                                .unwrap_or(false)
-                        };
-                        
-                        if should_remove {
-                            debug!("App_instance {} has 0 pending jobs and wasn't updated, removing", app_instance_id);
-                            self.remove_app_instance(app_instance_id).await;
-                            removed_count += 1;
-                        } else {
-                            debug!("App_instance {} has 0 pending jobs but was updated during reconciliation, keeping", app_instance_id);
-                            skipped_updated += 1;
-                        }
-                    } else {
-                        debug!("App_instance {} has {} pending jobs", app_instance_id, count);
+            // First check if the AppInstance is ready for removal
+            // (all sequences are in blocks and all blocks are proved)
+            match is_app_instance_ready_for_removal(client, app_instance_id).await {
+                Ok(ready_for_removal) => {
+                    if !ready_for_removal {
+                        // AppInstance has pending sequences or unproved blocks, keep it
+                        debug!("App_instance {} has pending sequences or unproved blocks, keeping", app_instance_id);
                         instances_with_jobs += 1;
+                        continue;
+                    }
+                    
+                    // AppInstance is ready for removal, now check if it has pending jobs
+                    match fetch_pending_jobs_count_from_app_instance(client, app_instance_id).await {
+                        Ok(count) => {
+                            if count == 0 {
+                                // Check if the timestamp has changed (new events arrived)
+                                let should_remove = {
+                                    let instances = self.app_instances_with_jobs.read().await;
+                                    instances
+                                        .get(app_instance_id)
+                                        .map(|info| info.updated_at == *original_timestamp)
+                                        .unwrap_or(false)
+                                };
+                                
+                                if should_remove {
+                                    debug!("App_instance {} is ready for removal (no pending sequences/blocks) and has 0 pending jobs, removing", app_instance_id);
+                                    self.remove_app_instance(app_instance_id).await;
+                                    removed_count += 1;
+                                } else {
+                                    debug!("App_instance {} is ready for removal but was updated during reconciliation, keeping", app_instance_id);
+                                    skipped_updated += 1;
+                                }
+                            } else {
+                                debug!("App_instance {} has {} pending jobs", app_instance_id, count);
+                                instances_with_jobs += 1;
+                            }
+                        }
+                        Err(e) => {
+                            // Handle errors from fetch_pending_jobs_count
+                            if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
+                                debug!("Jobs object for app_instance {} not found, removing from tracker", app_instance_id);
+                                self.remove_app_instance(app_instance_id).await;
+                                removed_count += 1;
+                            } else {
+                                warn!("Failed to fetch pending_jobs_count for {}: {}", app_instance_id, e);
+                                instances_with_errors += 1;
+                            }
+                        }
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to fetch pending_jobs_count for {}: {}", app_instance_id, e);
-                    instances_with_errors += 1;
+                    // Handle errors from is_app_instance_ready_for_removal
+                    if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
+                        debug!("App_instance {} not found on chain (likely deleted), removing from tracker", app_instance_id);
+                        self.remove_app_instance(app_instance_id).await;
+                        removed_count += 1;
+                    } else {
+                        warn!("Error checking app_instance {} state: {}", app_instance_id, e);
+                        instances_with_errors += 1;
+                    }
                 }
             }
         }
@@ -210,6 +241,10 @@ impl JobsTracker {
             skipped_updated,
             final_count
         );
+
+        if removed_count > 0 {
+            info!("Reconciliation removed {} app_instances", removed_count);
+        }
         
         // Return whether we still have pending jobs
         Ok(final_count > 0)
@@ -240,6 +275,99 @@ impl Default for JobsTracker {
 pub struct TrackerStats {
     pub app_instances_count: usize,
     pub agent_methods_count: usize,
+}
+
+/// Helper function to check if AppInstance is ready for removal
+/// Returns true if all sequences are in blocks and all blocks are proved
+async fn is_app_instance_ready_for_removal(client: &mut Client, app_instance_id: &str) -> Result<bool> {
+    use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
+    use crate::error::CoordinatorError;
+    
+    // Ensure the app_instance_id has 0x prefix
+    let formatted_id = if app_instance_id.starts_with("0x") {
+        app_instance_id.to_string()
+    } else {
+        format!("0x{}", app_instance_id)
+    };
+    
+    let request = GetObjectRequest {
+        object_id: Some(formatted_id.clone()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec![
+                "json".to_string(),
+            ],
+        }),
+    };
+    
+    let response = client.ledger_client().get_object(request).await
+        .map_err(|e| CoordinatorError::RpcConnectionError(
+            format!("Failed to fetch AppInstance {}: {}", app_instance_id, e)
+        ))?;
+    
+    let object = response.into_inner().object
+        .ok_or_else(|| CoordinatorError::RpcConnectionError(
+            format!("AppInstance not found: {}", app_instance_id)
+        ))?;
+    
+    let json_value = object.json
+        .ok_or_else(|| CoordinatorError::RpcConnectionError(
+            format!("No JSON data for AppInstance: {}", app_instance_id)
+        ))?;
+    
+    // Extract fields from AppInstance
+    if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+        let mut sequence = 0u64;
+        let mut previous_block_last_sequence = 0u64;
+        let mut last_proved_block_number = 0u64;
+        let mut block_number = 0u64;
+        
+        // Extract sequence
+        if let Some(seq_field) = struct_value.fields.get("sequence") {
+            if let Some(prost_types::value::Kind::StringValue(seq_str)) = &seq_field.kind {
+                sequence = seq_str.parse().unwrap_or(0);
+            }
+        }
+        
+        // Extract previous_block_last_sequence
+        if let Some(prev_seq_field) = struct_value.fields.get("previous_block_last_sequence") {
+            if let Some(prost_types::value::Kind::StringValue(prev_seq_str)) = &prev_seq_field.kind {
+                previous_block_last_sequence = prev_seq_str.parse().unwrap_or(0);
+            }
+        }
+        
+        // Extract last_proved_block_number
+        if let Some(last_proved_field) = struct_value.fields.get("last_proved_block_number") {
+            if let Some(prost_types::value::Kind::StringValue(last_proved_str)) = &last_proved_field.kind {
+                last_proved_block_number = last_proved_str.parse().unwrap_or(0);
+            }
+        }
+        
+        // Extract block_number
+        if let Some(block_num_field) = struct_value.fields.get("block_number") {
+            if let Some(prost_types::value::Kind::StringValue(block_num_str)) = &block_num_field.kind {
+                block_number = block_num_str.parse().unwrap_or(0);
+            }
+        }
+        
+        // Check conditions:
+        // 1. sequence == previous_block_last_sequence + 1 (no new sequences not in blocks)
+        // 2. last_proved_block_number + 1 == block_number (all blocks are proved)
+        let no_pending_sequences = sequence == previous_block_last_sequence + 1;
+        let all_blocks_proved = last_proved_block_number + 1 == block_number;
+        
+        debug!(
+            "AppInstance {} state: sequence={}, prev_block_last_seq={}, last_proved_block={}, block_number={} -> ready_for_removal={}",
+            app_instance_id, sequence, previous_block_last_sequence, last_proved_block_number, block_number,
+            no_pending_sequences && all_blocks_proved
+        );
+        
+        Ok(no_pending_sequences && all_blocks_proved)
+    } else {
+        Err(CoordinatorError::RpcConnectionError(
+            format!("Invalid JSON structure for AppInstance: {}", app_instance_id)
+        ))
+    }
 }
 
 /// Helper function to fetch pending_jobs_count from embedded Jobs in AppInstance

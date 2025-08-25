@@ -12,6 +12,45 @@ use tokio::time::{sleep, Duration};
 use crate::chain::{get_reference_gas_price, load_sender_from_env};
 use crate::coin::fetch_coin;
 
+/// Helper function to check transaction effects for errors
+fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operation: &str) -> Result<()> {
+    // Check for errors in transaction effects
+    if let Some(ref transaction) = tx_resp.transaction {
+        if let Some(ref effects) = transaction.effects {
+            debug!("{} effects status: {:?}", operation, effects.status);
+            if let Some(ref status) = effects.status {
+                if status.error.is_some() {
+                    let error_msg = status.error.as_ref().unwrap();
+                    let error_str = format!("{:?}", error_msg);
+                    error!("{} transaction failed with error: {}", operation, error_str);
+                    return Err(anyhow!("{} transaction failed: {}", operation, error_str));
+                }
+            }
+        }
+    }
+    
+    // Check transaction was successful
+    if tx_resp.finality.is_none() {
+        error!("{} transaction did not achieve finality", operation);
+        return Err(anyhow!("{} transaction did not achieve finality", operation));
+    }
+    
+    // Check for transaction success in effects
+    let tx_successful = tx_resp.transaction
+        .as_ref()
+        .and_then(|t| t.effects.as_ref())
+        .and_then(|e| e.status.as_ref())
+        .map(|s| s.error.is_none())
+        .unwrap_or(false);
+        
+    if !tx_successful {
+        error!("{} transaction failed despite being executed", operation);
+        return Err(anyhow!("{} transaction failed despite being executed", operation));
+    }
+    
+    Ok(())
+}
+
 /// Wait for a transaction to be available in the ledger
 /// This polls GetTransaction until the transaction is found or timeout occurs
 async fn wait_for_transaction(
@@ -23,7 +62,7 @@ async fn wait_for_transaction(
     let start = std::time::Instant::now();
     let mut ledger = client.ledger_client();
     
-    info!("Waiting for transaction {} to be available in ledger (max {}ms)", tx_digest, timeout);
+    debug!("Waiting for transaction {} to be available in ledger (max {}ms)", tx_digest, timeout);
     
     loop {
         // Check if we've exceeded the maximum wait time
@@ -197,16 +236,14 @@ pub async fn start_job_tx(
     let resp = match exec_result {
         Ok(r) => r,
         Err(e) => {
-            error!("Transaction execution error: {}", e);
-            return Err(anyhow!("Failed to execute transaction: {}", e));
+            error!("Transaction execution network error: {}", e);
+            return Err(anyhow!("Failed to execute start_job transaction: {}", e));
         }
     };
     let tx_resp = resp.into_inner();
 
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        return Err(anyhow!("Transaction did not achieve finality"));
-    }
+    // Check transaction effects for errors
+    check_transaction_effects(&tx_resp, "start_job")?;
 
     let tx_digest = tx_resp
         .transaction
@@ -216,7 +253,7 @@ pub async fn start_job_tx(
         .to_string();
 
     info!(
-        "start_app_job transaction executed: {} (took {}ms)",
+        "start_job transaction executed successfully: {} (took {}ms)",
         tx_digest, tx_elapsed_ms
     );
 
@@ -333,16 +370,14 @@ pub async fn complete_job_tx(
     let resp = match exec_result {
         Ok(r) => r,
         Err(e) => {
-            error!("Transaction execution error: {:?}", e);
-            return Err(anyhow!("Failed to execute transaction: {}", e));
+            error!("Transaction execution network error: {}", e);
+            return Err(anyhow!("Failed to execute complete_job transaction: {}", e));
         }
     };
     let tx_resp = resp.into_inner();
 
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        return Err(anyhow!("Transaction did not achieve finality"));
-    }
+    // Check transaction effects for errors
+    check_transaction_effects(&tx_resp, "complete_job")?;
 
     let tx_digest = tx_resp
         .transaction
@@ -352,7 +387,7 @@ pub async fn complete_job_tx(
         .to_string();
 
     info!(
-        "complete_app_job transaction executed: {} (took {}ms)",
+        "complete_job transaction executed successfully: {} (took {}ms)",
         tx_digest, tx_elapsed_ms
     );
     
@@ -690,16 +725,14 @@ pub async fn submit_proof_tx(
     let resp = match exec_result {
         Ok(r) => r,
         Err(e) => {
-            error!("Transaction execution error: {:?}", e);
-            return Err(anyhow!("Failed to execute transaction: {}", e));
+            error!("Transaction execution network error: {}", e);
+            return Err(anyhow!("Failed to execute submit_proof transaction: {}", e));
         }
     };
     let tx_resp = resp.into_inner();
 
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        return Err(anyhow!("Transaction did not achieve finality"));
-    }
+    // Check transaction effects for errors
+    check_transaction_effects(&tx_resp, "submit_proof")?;
 
     let tx_digest = tx_resp
         .transaction
@@ -709,7 +742,7 @@ pub async fn submit_proof_tx(
         .to_string();
 
     info!(
-        "submit_proof transaction executed: {} (took {}ms)",
+        "submit_proof transaction executed successfully: {} (took {}ms)",
         tx_digest, tx_elapsed_ms
     );
 
@@ -836,16 +869,14 @@ pub async fn update_state_for_sequence_tx(
     let resp = match exec_result {
         Ok(r) => r,
         Err(e) => {
-            error!("Transaction execution error: {:?}", e);
-            return Err(anyhow!("Failed to execute transaction: {}", e));
+            error!("Transaction execution network error: {}", e);
+            return Err(anyhow!("Failed to execute update_state_for_sequence transaction: {}", e));
         }
     };
     let tx_resp = resp.into_inner();
 
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        return Err(anyhow!("Transaction did not achieve finality"));
-    }
+    // Check transaction effects for errors
+    check_transaction_effects(&tx_resp, "update_state_for_sequence")?;
 
     let tx_digest = tx_resp
         .transaction
@@ -855,7 +886,7 @@ pub async fn update_state_for_sequence_tx(
         .to_string();
 
     info!(
-        "update_state_for_sequence transaction executed: {} (took {}ms)",
+        "update_state_for_sequence transaction executed successfully: {} (took {}ms)",
         tx_digest, tx_elapsed_ms
     );
 
@@ -981,45 +1012,14 @@ pub async fn create_app_job_tx(
     let resp = match exec_result {
         Ok(r) => r,
         Err(e) => {
-            error!("Transaction execution error: {:?}", e);
-            return Err(anyhow!("Failed to execute transaction: {}", e));
+            error!("Transaction execution network error: {}", e);
+            return Err(anyhow!("Failed to execute create_app_job transaction: {}", e));
         }
     };
     let tx_resp = resp.into_inner();
 
-    // Debug: Log full transaction response details
-    debug!("Transaction response finality: {:?}", tx_resp.finality);
-    if let Some(ref transaction) = tx_resp.transaction {
-        debug!("Transaction digest: {:?}", transaction.digest);
-        debug!("Transaction signatures: {:?}", transaction.signatures);
-        debug!("Transaction effects: {:?}", transaction.effects);
-        
-        // Check for errors in transaction effects
-        if let Some(ref effects) = transaction.effects {
-            debug!("Effects status: {:?}", effects.status);
-            if let Some(ref status) = effects.status {
-                if status.error.is_some() {
-                    error!("Transaction failed with error: {:?}", status.error);
-                    let error_msg = status.error.as_ref().unwrap();
-                    return Err(anyhow!("Transaction failed: {:?}", error_msg));
-                }
-            }
-        }
-    }
-
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        error!("Transaction did not achieve finality");
-        return Err(anyhow!("Transaction did not achieve finality"));
-    }
-
-    // Check for transaction success in effects
-    let tx_successful = tx_resp.transaction
-        .as_ref()
-        .and_then(|t| t.effects.as_ref())
-        .and_then(|e| e.status.as_ref())
-        .map(|s| s.error.is_none())
-        .unwrap_or(false);
+    // Check transaction effects for errors
+    check_transaction_effects(&tx_resp, &format!("create_app_job[{}]", method_name))?;
 
     let tx_digest = tx_resp
         .transaction
@@ -1028,18 +1028,10 @@ pub async fn create_app_job_tx(
         .context("Failed to get transaction digest")?
         .to_string();
 
-    if tx_successful {
-        info!(
-            "create_app_job transaction executed successfully for method '{}': {} (took {}ms)",
-            method_name, tx_digest, tx_elapsed_ms
-        );
-    } else {
-        error!(
-            "create_app_job transaction failed for method '{}': {} (took {}ms)",
-            method_name, tx_digest, tx_elapsed_ms
-        );
-        return Err(anyhow!("Transaction failed despite being executed"));
-    }
+    info!(
+        "create_app_job transaction executed successfully for method '{}': {} (took {}ms)",
+        method_name, tx_digest, tx_elapsed_ms
+    );
 
     // Wait for the transaction to be available in the ledger
     if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
@@ -1175,19 +1167,8 @@ pub async fn reject_proof_tx(
         }
     }
 
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        error!("Transaction did not achieve finality");
-        return Err(anyhow!("Transaction did not achieve finality"));
-    }
-
-    // Check for transaction success in effects
-    let tx_successful = tx_resp.transaction
-        .as_ref()
-        .and_then(|t| t.effects.as_ref())
-        .and_then(|e| e.status.as_ref())
-        .map(|s| s.error.is_none())
-        .unwrap_or(false);
+    // Check transaction effects for errors
+    check_transaction_effects(&tx_resp, "reject_proof")?;
 
     let tx_digest = tx_resp
         .transaction
@@ -1196,24 +1177,16 @@ pub async fn reject_proof_tx(
         .context("Failed to get transaction digest")?
         .to_string();
 
-    if tx_successful {
-        info!(
-            "reject_proof transaction executed successfully: {} (took {}ms)",
-            tx_digest, tx_elapsed_ms
-        );
-        
-        // Wait for the transaction to be available in the ledger
-        // This is important because start_proving might be called right after
-        if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
-            warn!("Failed to wait for reject_proof transaction to be available: {}", e);
-            // Continue anyway, the transaction was successful
-        }
-    } else {
-        error!(
-            "reject_proof transaction failed: {} (took {}ms)",
-            tx_digest, tx_elapsed_ms
-        );
-        return Err(anyhow!("Transaction failed despite being executed"));
+    info!(
+        "reject_proof transaction executed successfully: {} (took {}ms)",
+        tx_digest, tx_elapsed_ms
+    );
+    
+    // Wait for the transaction to be available in the ledger
+    // This is important because start_proving might be called right after
+    if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+        warn!("Failed to wait for reject_proof transaction to be available: {}", e);
+        // Continue anyway, the transaction was successful
     }
 
     Ok(tx_digest)
@@ -1536,5 +1509,189 @@ async fn get_object_details(
     } else {
         Err(anyhow!("Object not found: {}", object_id))
     }
+}
+
+/// Try to create a new block for the app instance
+/// This function calls the try_create_block Move function on the blockchain
+/// which will check if conditions are met to create a new block
+pub async fn try_create_block_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+) -> Result<String> {
+    info!("Creating try_create_block transaction for app_instance: {}", app_instance_str);
+    
+    // Parse IDs
+    let package_id = get_coordination_package_id()
+        .context("Failed to get coordination package ID")?;
+    let app_instance_id = get_app_instance_id(app_instance_str)
+        .context("Failed to parse app instance ID")?;
+    let clock_object_id = get_clock_object_id();
+    
+    debug!("Package ID: {}", package_id);
+    debug!("App instance ID: {}", app_instance_id);
+    
+    // Parse sender and secret key
+    let (sender, sk) = load_sender_from_env()?;
+    debug!("Sender: {}", sender);
+
+    // Build transaction using TransactionBuilder
+    let mut tb = sui_transaction_builder::TransactionBuilder::new();
+    tb.set_sender(sender);
+    tb.set_gas_budget(100_000_000); // 0.1 SUI
+
+    // Get gas price and gas object using provided client
+    let gas_price = get_reference_gas_price(client).await?;
+    tb.set_gas_price(gas_price);
+    debug!("Gas price: {}", gas_price);
+
+    // Select gas coin using parallel-safe coin management
+    let rpc_url = get_rpc_url()?;
+    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+        Some((coin, guard)) => (coin, guard),
+        None => {
+            error!("No available coins with sufficient balance for gas");
+            return Err(anyhow!("No available coins with sufficient balance for gas"));
+        }
+    };
+    
+    let gas_input = sui_transaction_builder::unresolved::Input::owned(
+        gas_coin.object_id(),
+        gas_coin.object_ref.version(),
+        *gas_coin.object_ref.digest(),
+    );
+    tb.add_gas_objects(vec![gas_input]);
+    debug!("Gas coin selected: id={} ver={} digest={} balance={}", 
+        gas_coin.object_id(), gas_coin.object_ref.version(), gas_coin.object_ref.digest(), gas_coin.balance);
+
+    // Get current version and ownership info of app_instance object
+    let (app_instance_ref, initial_shared_version) = get_object_details(client, app_instance_id).await
+        .context("Failed to get app instance details")?;
+    
+    // Create input based on whether object is shared or owned
+    let app_instance_input = if let Some(shared_version) = initial_shared_version {
+        debug!("Using shared object input for app_instance with initial_shared_version={}", shared_version);
+        sui_transaction_builder::unresolved::Input::shared(
+            app_instance_id,
+            shared_version,
+            true // mutable
+        )
+    } else {
+        debug!("Using owned object input for app_instance");
+        sui_transaction_builder::unresolved::Input::owned(
+            *app_instance_ref.object_id(),
+            app_instance_ref.version(),
+            *app_instance_ref.digest(),
+        )
+    };
+    let app_instance_arg = tb.input(app_instance_input);
+
+    // Clock object (shared)
+    let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
+    let clock_arg = tb.input(clock_input);
+
+    // Function call: coordination::app_instance::try_create_block
+    let func = sui_transaction_builder::Function::new(
+        package_id,
+        "app_instance".parse()
+            .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+        "try_create_block".parse()
+            .map_err(|e| anyhow!("Failed to parse function name 'try_create_block': {}", e))?,
+        vec![],
+    );
+    tb.move_call(func, vec![app_instance_arg, clock_arg]);
+
+    // Finalize and sign
+    let tx = tb.finish()?;
+    let sig = sk.sign_transaction(&tx)?;
+
+    // Execute transaction via gRPC using provided client
+    let mut exec = client.execution_client();
+    let req = proto::ExecuteTransactionRequest {
+        transaction: Some(tx.into()),
+        signatures: vec![sig.into()],
+        read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
+    };
+
+    debug!("Sending try_create_block transaction...");
+    let tx_start = std::time::Instant::now();
+    let exec_result = exec.execute_transaction(req).await;
+    let tx_elapsed_ms = tx_start.elapsed().as_millis();
+
+    let resp = match exec_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Transaction execution network error: {}", e);
+            return Err(anyhow!("Failed to execute try_create_block transaction: {}", e));
+        }
+    };
+    let tx_resp = resp.into_inner();
+
+    // Debug: Log full transaction response details
+    debug!("Transaction response finality: {:?}", tx_resp.finality);
+    if let Some(ref transaction) = tx_resp.transaction {
+        debug!("Transaction digest: {:?}", transaction.digest);
+        debug!("Transaction effects: {:?}", transaction.effects);
+        
+        // Check for errors in transaction effects
+        if let Some(ref effects) = transaction.effects {
+            debug!("Effects status: {:?}", effects.status);
+            if let Some(ref status) = effects.status {
+                if status.error.is_some() {
+                    let error_msg = status.error.as_ref().unwrap();
+                    let error_str = format!("{:?}", error_msg);
+                    // Check if this is a NonEntryFunctionInvoked error
+                    if error_str.contains("NonEntryFunctionInvoked") {
+                        error!("try_create_block is not an entry function! Error: {}", error_str);
+                        return Err(anyhow!("try_create_block is not an entry function in the Move contract"));
+                    }
+                    // This might be expected if conditions aren't met (e.g., not enough time passed)
+                    debug!("Transaction failed with expected error (conditions not met): {}", error_str);
+                    return Err(anyhow!("Block creation conditions not met: {}", error_str));
+                }
+            }
+        }
+    }
+
+    // Check transaction was successful
+    if tx_resp.finality.is_none() {
+        error!("Transaction did not achieve finality");
+        return Err(anyhow!("Transaction did not achieve finality"));
+    }
+
+    // Check for transaction success in effects
+    let tx_successful = tx_resp.transaction
+        .as_ref()
+        .and_then(|t| t.effects.as_ref())
+        .and_then(|e| e.status.as_ref())
+        .map(|s| s.error.is_none())
+        .unwrap_or(false);
+
+    let tx_digest = tx_resp
+        .transaction
+        .as_ref()
+        .and_then(|t| t.digest.as_ref())
+        .context("Failed to get transaction digest")?
+        .to_string();
+
+    if tx_successful {
+        info!(
+            "try_create_block transaction executed successfully: {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+    } else {
+        error!(
+            "try_create_block transaction failed: {} (took {}ms)",
+            tx_digest, tx_elapsed_ms
+        );
+        return Err(anyhow!("Transaction failed - check Move contract for try_create_block entry function"));
+    }
+    
+    // Wait for transaction to be included
+    if let Err(e) = wait_for_transaction(client, &tx_digest, Some(5000)).await {
+        warn!("Failed to wait for try_create_block transaction to be available: {}", e);
+        // Continue anyway if the transaction was successful
+    }
+    
+    Ok(tx_digest)
 }
 

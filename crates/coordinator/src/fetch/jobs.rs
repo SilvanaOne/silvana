@@ -174,7 +174,7 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<PendingJ
 pub async fn fetch_pending_jobs_from_app_instance(
     client: &mut Client,
     app_instance_id: &str,
-    state: &SharedState,
+    _state: &SharedState,
     only_check: bool,
 ) -> Result<Option<PendingJob>> {
     // Ensure the app_instance_id has 0x prefix
@@ -223,8 +223,8 @@ pub async fn fetch_pending_jobs_from_app_instance(
                                             debug!("Found {} pending jobs in app_instance (check-only mode)", count);
                                             return Ok(None);
                                         } else {
-                                            info!("No pending jobs in app_instance {} (count=0), removing from tracking", app_instance_id);
-                                            state.remove_app_instance(app_instance_id).await;
+                                            debug!("No pending jobs in app_instance {} (count=0)", app_instance_id);
+                                            //state.remove_app_instance(app_instance_id).await;
                                             return Ok(None);
                                         }
                                     }
@@ -247,8 +247,8 @@ pub async fn fetch_pending_jobs_from_app_instance(
                                         }
                                         
                                         if pending_job_sequences.is_empty() {
-                                            info!("No pending jobs in app_instance {}, removing from tracking", app_instance_id);
-                                            state.remove_app_instance(app_instance_id).await;
+                                            debug!("No pending jobs in app_instance {}", app_instance_id);
+                                            //state.remove_app_instance(app_instance_id).await;
                                             return Ok(None);
                                         }
                                         
@@ -679,7 +679,7 @@ pub async fn fetch_all_pending_jobs(
             Ok(job_opt) => {
                 if !only_check {
                     if let Some(job) = job_opt {
-                        info!("Found pending job with job_sequence {} in app_instance {}", job.job_sequence, app_instance_id);
+                        debug!("Found pending job with job_sequence {} in app_instance {}", job.job_sequence, app_instance_id);
                         all_pending_jobs.push(job);
                     }
                 }
@@ -693,7 +693,7 @@ pub async fn fetch_all_pending_jobs(
     // Sort all collected jobs and return the one with smallest job_sequence
     if all_pending_jobs.is_empty() {
         if !only_check {
-            info!("No pending jobs found across all app_instances");
+            debug!("No pending jobs found across all app_instances");
         }
         Ok(None)
     } else {

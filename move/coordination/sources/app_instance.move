@@ -225,7 +225,7 @@ public fun increase_sequence(
     app_instance.sequence = app_instance.sequence + 1;
 }
 
-fun try_create_block(
+public fun try_create_block(
     app_instance: &mut AppInstance,
     clock: &Clock,
     ctx: &mut TxContext,

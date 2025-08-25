@@ -163,10 +163,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             error!("Failed to fetch jobs using index: {}", e);
                             // If it's a not found error, remove the stale app_instance
                             if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                                warn!("Jobs object not found, removing stale app_instances from tracking");
-                                for instance in &current_instances {
-                                    self.state.remove_app_instance(instance).await;
-                                }
+                                error!("Jobs object not found: {}", current_instances.join(", "));
+                                // for instance in &current_instances {
+                                //     self.state.remove_app_instance(instance).await;
+                                // }
                             }
                         }
                     }

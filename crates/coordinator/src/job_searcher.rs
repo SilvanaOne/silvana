@@ -151,8 +151,8 @@ impl JobSearcher {
                             // No jobs found despite flag being set - update the flag
                             self.state.update_pending_jobs_flag().await;
                             
-                            // Small delay before next check
-                            sleep(Duration::from_millis(100)).await;
+                            // Delay before next check (1 second to avoid too frequent checks)
+                            sleep(Duration::from_secs(1)).await;
                         }
                     }
                 }
