@@ -23,6 +23,7 @@ use coordinator::{
     SubmitStateRequest, SubmitStateResponse,
     GetSequenceStatesRequest, GetSequenceStatesResponse, SequenceState,
     ReadDataAvailabilityRequest, ReadDataAvailabilityResponse,
+    GetProofRequest, GetProofResponse,
 };
 
 #[derive(Clone)]
@@ -785,6 +786,371 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     data: None,
                     success: false,
                     message: format!("Failed to read data: {}", e),
+                }))
+            }
+        }
+    }
+
+    async fn get_proof(
+        &self,
+        request: Request<GetProofRequest>,
+    ) -> Result<Response<GetProofResponse>, Status> {
+        let req = request.into_inner();
+        
+        info!(
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            sequences = ?req.sequences,
+            job_id = %req.job_id,
+            "Received GetProof request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => job,
+            None => {
+                warn!("GetProof request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("Job not found: {}", req.job_id)),
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer || 
+               current.agent != agent_job.agent || 
+               current.agent_method != agent_job.agent_method {
+                warn!(
+                    "Session mismatch for GetProof: session agent={}/{}/{}, job agent={}/{}/{}",
+                    current.developer, current.agent, current.agent_method,
+                    agent_job.developer, agent_job.agent, agent_job.agent_method
+                );
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some("Session does not match job assignment".to_string()),
+                }));
+            }
+        } else {
+            warn!("GetProof request from unknown session: {}", req.session_id);
+            return Ok(Response::new(GetProofResponse {
+                success: false,
+                proof: None,
+                message: Some("Invalid session ID".to_string()),
+            }));
+        }
+
+        // Validate sequences are provided
+        if req.sequences.is_empty() {
+            warn!("GetProof request with empty sequences");
+            return Ok(Response::new(GetProofResponse {
+                success: false,
+                proof: None,
+                message: Some("Sequences are required".to_string()),
+            }));
+        }
+
+        // Use the app_instance from the job
+        let app_instance = agent_job.app_instance.clone();
+
+        // Get SUI client from shared state
+        let mut client = self.state.get_sui_client();
+
+        // Fetch the AppInstance object
+        let formatted_id = if app_instance.starts_with("0x") {
+            app_instance.clone()
+        } else {
+            format!("0x{}", app_instance)
+        };
+
+        // Get the AppInstance to find proof_calculations ObjectTable
+        let app_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+            object_id: Some(formatted_id.clone()),
+            version: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["json".to_string()],
+            }),
+        };
+
+        let app_response = match client.ledger_client().get_object(app_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to fetch AppInstance: {}", e);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("Failed to fetch AppInstance: {}", e)),
+                }));
+            }
+        };
+
+        // Extract proof_calculations ObjectTable ID
+        let proof_calc_table_id = if let Some(proto_object) = app_response.object {
+            if let Some(json_value) = &proto_object.json {
+                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                    if let Some(proofs_field) = struct_value.fields.get("proof_calculations") {
+                        if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
+                            if let Some(table_id_field) = proofs_struct.fields.get("id") {
+                                if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
+                                    Some(table_id.clone())
+                                } else { None }
+                            } else { None }
+                        } else { None }
+                    } else { None }
+                } else { None }
+            } else { None }
+        } else { None };
+
+        let proof_calc_table_id = match proof_calc_table_id {
+            Some(id) => id,
+            None => {
+                error!("Failed to extract proof_calculations table ID from AppInstance");
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some("Failed to extract proof_calculations table ID".to_string()),
+                }));
+            }
+        };
+
+        debug!("Found proof_calculations table ID: {}", proof_calc_table_id);
+
+        // Fetch the ProofCalculation for the given block_number
+        // First, list dynamic fields to find the field for our block_number
+        let list_request = sui_rpc::proto::sui::rpc::v2beta2::ListDynamicFieldsRequest {
+            parent: Some(proof_calc_table_id.clone()),
+            page_size: Some(100),
+            page_token: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["field_id".to_string(), "name_value".to_string()],
+            }),
+        };
+
+        let list_response = match client.live_data_client().list_dynamic_fields(list_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to list dynamic fields: {}", e);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("Failed to list dynamic fields: {}", e)),
+                }));
+            }
+        };
+
+        // Find the field with our block_number
+        let mut proof_calc_field_id = None;
+        for field in &list_response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                // The name_value is BCS-encoded u64 (block_number)
+                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+                    if field_block_number == req.block_number {
+                        proof_calc_field_id = field.field_id.clone();
+                        break;
+                    }
+                }
+            }
+        }
+
+        let proof_calc_field_id = match proof_calc_field_id {
+            Some(id) => id,
+            None => {
+                warn!("No ProofCalculation found for block {}", req.block_number);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("No ProofCalculation found for block {}", req.block_number)),
+                }));
+            }
+        };
+
+        // Fetch the ProofCalculation object
+        let proof_calc_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+            object_id: Some(proof_calc_field_id.clone()),
+            version: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["json".to_string()],
+            }),
+        };
+
+        let proof_calc_response = match client.ledger_client().get_object(proof_calc_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to fetch ProofCalculation field: {}", e);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("Failed to fetch ProofCalculation: {}", e)),
+                }));
+            }
+        };
+
+        // Extract the actual ProofCalculation object ID from the Field wrapper
+        let proof_calc_object_id = if let Some(proof_object) = proof_calc_response.object {
+            if let Some(proof_json) = &proof_object.json {
+                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_json.kind {
+                    if let Some(value_field) = struct_value.fields.get("value") {
+                        if let Some(prost_types::value::Kind::StringValue(object_id)) = &value_field.kind {
+                            Some(object_id.clone())
+                        } else { None }
+                    } else { None }
+                } else { None }
+            } else { None }
+        } else { None };
+
+        let proof_calc_object_id = match proof_calc_object_id {
+            Some(id) => id,
+            None => {
+                error!("Failed to extract ProofCalculation object ID");
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some("Failed to extract ProofCalculation object ID".to_string()),
+                }));
+            }
+        };
+
+        // Fetch the actual ProofCalculation object
+        let actual_proof_calc_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+            object_id: Some(proof_calc_object_id),
+            version: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["json".to_string()],
+            }),
+        };
+
+        let actual_proof_calc_response = match client.ledger_client().get_object(actual_proof_calc_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to fetch actual ProofCalculation: {}", e);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("Failed to fetch ProofCalculation: {}", e)),
+                }));
+            }
+        };
+
+        // Extract the proofs VecMap and find our proof by sequences
+        let mut da_hash: Option<String> = None;
+        if let Some(proof_calc_object) = actual_proof_calc_response.object {
+            if let Some(proof_calc_json) = &proof_calc_object.json {
+                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_calc_json.kind {
+                    // Get the proofs VecMap
+                    if let Some(proofs_field) = struct_value.fields.get("proofs") {
+                        if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
+                            if let Some(contents) = proofs_struct.fields.get("contents") {
+                                if let Some(prost_types::value::Kind::ListValue(list_value)) = &contents.kind {
+                                    // Search through the VecMap entries for matching sequences
+                                    'outer: for entry in &list_value.values {
+                                        if let Some(prost_types::value::Kind::StructValue(entry_struct)) = &entry.kind {
+                                            // Check the key (sequences)
+                                            if let Some(key_field) = entry_struct.fields.get("key") {
+                                                if let Some(prost_types::value::Kind::ListValue(key_list)) = &key_field.kind {
+                                                    let mut key_sequences = Vec::new();
+                                                    for seq_val in &key_list.values {
+                                                        if let Some(prost_types::value::Kind::StringValue(seq_str)) = &seq_val.kind {
+                                                            if let Ok(seq) = seq_str.parse::<u64>() {
+                                                                key_sequences.push(seq);
+                                                            }
+                                                        } else if let Some(prost_types::value::Kind::NumberValue(seq_num)) = &seq_val.kind {
+                                                            key_sequences.push(seq_num.round() as u64);
+                                                        }
+                                                    }
+                                                    
+                                                    // Check if sequences match
+                                                    if key_sequences == req.sequences {
+                                                        // Found our proof! Extract da_hash
+                                                        if let Some(value_field) = entry_struct.fields.get("value") {
+                                                            if let Some(prost_types::value::Kind::StructValue(proof_struct)) = &value_field.kind {
+                                                                // Check job_id matches if provided
+                                                                if !req.job_id.is_empty() {
+                                                                    if let Some(job_id_field) = proof_struct.fields.get("job_id") {
+                                                                        if let Some(prost_types::value::Kind::StringValue(job_id)) = &job_id_field.kind {
+                                                                            if job_id != &req.job_id {
+                                                                                continue; // Job ID doesn't match, keep searching
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                
+                                                                // Get da_hash from the Proof
+                                                                if let Some(da_hash_field) = proof_struct.fields.get("da_hash") {
+                                                                    if let Some(prost_types::value::Kind::StructValue(option_struct)) = &da_hash_field.kind {
+                                                                        if let Some(vec_field) = option_struct.fields.get("vec") {
+                                                                            if let Some(prost_types::value::Kind::ListValue(vec_list)) = &vec_field.kind {
+                                                                                if !vec_list.values.is_empty() {
+                                                                                    if let Some(prost_types::value::Kind::StringValue(hash)) = &vec_list.values[0].kind {
+                                                                                        da_hash = Some(hash.clone());
+                                                                                        break 'outer;
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        let da_hash = match da_hash {
+            Some(hash) => hash,
+            None => {
+                warn!("No proof found for sequences {:?} in block {}", req.sequences, req.block_number);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("No proof found for sequences {:?} in block {}", req.sequences, req.block_number)),
+                }));
+            }
+        };
+
+        debug!("Found proof with da_hash: {}", da_hash);
+
+        // Use walrus client to read the proof data
+        let walrus_client = walrus::WalrusClient::new();
+        let read_params = walrus::ReadFromWalrusParams {
+            blob_id: da_hash.clone(),
+        };
+
+        match walrus_client.read_from_walrus(read_params).await {
+            Ok(Some(data)) => {
+                info!("Successfully read proof from Walrus for da_hash: {}", da_hash);
+                Ok(Response::new(GetProofResponse {
+                    success: true,
+                    proof: Some(data),
+                    message: None,
+                }))
+            }
+            Ok(None) => {
+                warn!("No data found for da_hash: {}", da_hash);
+                Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("No data found for hash: {}", da_hash)),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to read proof from Walrus for da_hash {}: {}", da_hash, e);
+                Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("Failed to read proof: {}", e)),
                 }))
             }
         }

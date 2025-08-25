@@ -118,12 +118,6 @@ fn get_coordination_package_id() -> Result<sui::Address> {
     Ok(sui::Address::from_str(&package_id)?)
 }
 
-/// Get RPC URL from environment variables  
-fn get_rpc_url() -> Result<String> {
-    let rpc_url = env::var("SUI_RPC_URL")
-        .map_err(|_| anyhow!("SUI_RPC_URL environment variable not set"))?;
-    Ok(rpc_url)
-}
 
 /// Create and submit a transaction to start a job
 pub async fn start_job_tx(
@@ -559,8 +553,7 @@ where
     debug!("Gas price: {}", gas_price);
 
     // Select gas coin using parallel-safe coin management
-    let rpc_url = get_rpc_url()?;
-    let (gas_coin, _gas_guard) = match fetch_coin(&rpc_url, sender, 100_000_000).await? {
+    let (gas_coin, _gas_guard) = match fetch_coin(client, sender, 100_000_000).await? {
         Some((coin, guard)) => (coin, guard),
         None => {
             error!("No available coins with sufficient balance for gas");

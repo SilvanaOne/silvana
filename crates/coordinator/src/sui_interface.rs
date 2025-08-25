@@ -1,4 +1,4 @@
-use sui::jobs::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
+use sui::transactions::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use sui_rpc::Client;
 use tracing::{info, warn, error, debug};
 

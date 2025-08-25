@@ -135,6 +135,21 @@ message ReadDataAvailabilityResponse {
   string message = 3;
 }
 
+// Request message for getting a proof
+message GetProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  repeated uint64 sequences = 3; // should be sorted
+  string job_id = 4;
+}
+
+// Response message for getting a proof
+message GetProofResponse {
+  bool success = 1;
+  optional string proof = 2; // available when success is true
+  optional string message = 3; // available when success is false
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -144,4 +159,5 @@ service CoordinatorService {
   rpc SubmitState(SubmitStateRequest) returns (SubmitStateResponse);
   rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
   rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);
+  rpc GetProof(GetProofRequest) returns (GetProofResponse);
 }

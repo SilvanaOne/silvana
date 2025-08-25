@@ -8,11 +8,12 @@ import {
   GetSequenceStatesRequestSchema,
   SubmitProofRequestSchema,
   SubmitStateRequestSchema,
+  GetProofRequestSchema,
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
 import { deserializeTransitionData } from "./transition.js";
 import { deserializeProofMergeData, displayProofMergeData } from "./merge.js";
-import { getStateAndProof, SequenceState } from "./state.js";
+import { getStateAndProof, SequenceState, merge } from "./state.js";
 import { serializeProofAndState, serializeState } from "./proof.js";
 
 async function agent() {
@@ -100,11 +101,76 @@ async function agent() {
             // Display the merge data
             displayProofMergeData(proofMergeData);
 
-            // For now, just complete the merge job without processing
-            // TODO: Implement actual proof merging logic
-            console.log(
-              "Merge job processing not yet implemented - completing job"
-            );
+            // Fetch the two proofs to merge
+            console.log("Fetching proofs to merge...");
+            
+            try {
+              // Fetch first proof
+              console.log(`Fetching proof 1: sequences ${proofMergeData.sequences1.join(", ")}`);
+              const getProof1Request = create(GetProofRequestSchema, {
+                sessionId: sessionId,
+                blockNumber: proofMergeData.block_number,
+                sequences: proofMergeData.sequences1.map(s => BigInt(s)),
+                jobId: response.job.jobId, // Use the current job ID
+              });
+              
+              const proof1Response = await client.getProof(getProof1Request);
+              if (!proof1Response.success || !proof1Response.proof) {
+                throw new Error(`Failed to fetch proof 1: ${proof1Response.message || "Unknown error"}`);
+              }
+              console.log(`Successfully fetched proof 1 (${proof1Response.proof.length} chars)`);
+              
+              // Fetch second proof
+              console.log(`Fetching proof 2: sequences ${proofMergeData.sequences2.join(", ")}`);
+              const getProof2Request = create(GetProofRequestSchema, {
+                sessionId: sessionId,
+                blockNumber: proofMergeData.block_number,
+                sequences: proofMergeData.sequences2.map(s => BigInt(s)),
+                jobId: response.job.jobId, // Use the current job ID
+              });
+              
+              const proof2Response = await client.getProof(getProof2Request);
+              if (!proof2Response.success || !proof2Response.proof) {
+                throw new Error(`Failed to fetch proof 2: ${proof2Response.message || "Unknown error"}`);
+              }
+              console.log(`Successfully fetched proof 2 (${proof2Response.proof.length} chars)`);
+              
+              // Merge the proofs
+              console.log("Starting proof merge...");
+              const mergeStartTime = Date.now();
+              const mergedProof = await merge(proof1Response.proof, proof2Response.proof);
+              const mergeTimeMs = Date.now() - mergeStartTime;
+              console.log(`Merge completed! Merged proof size: ${mergedProof.length} chars`);
+              
+              // Combine and sort all sequences for submission
+              const allSequences = [
+                ...proofMergeData.sequences1,
+                ...proofMergeData.sequences2
+              ].sort((a, b) => Number(a) - Number(b));
+              
+              console.log(`Submitting merged proof for sequences: ${allSequences.join(", ")}`);
+              
+              // Submit the merged proof
+              const submitProofRequest = create(SubmitProofRequestSchema, {
+                sessionId: sessionId,
+                blockNumber: proofMergeData.block_number,
+                sequences: allSequences,
+                mergedSequences1: proofMergeData.sequences1,
+                mergedSequences2: proofMergeData.sequences2,
+                jobId: response.job.jobId,
+                proof: mergedProof,
+                cpuTime: BigInt(mergeTimeMs),
+              });
+              
+              const submitProofResponse = await client.submitProof(submitProofRequest);
+              console.log(
+                `Merged proof submitted successfully! TX: ${submitProofResponse.txHash}, DA: ${submitProofResponse.daHash}`
+              );
+              
+            } catch (error) {
+              console.error("Failed to merge proofs:", error);
+              // Report the error but continue to complete the job
+            }
           } else {
             // Default to prove job processing
             console.log("⚡ PROVE JOB DETECTED");

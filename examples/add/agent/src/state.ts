@@ -35,6 +35,63 @@ export async function compile(): Promise<VerificationKey> {
   return vk;
 }
 
+export async function merge(
+  proof1Serialized: string,
+  proof2Serialized: string
+): Promise<string> {
+  console.log("Starting proof merge...");
+  console.log(`Proof 1 size: ${proof1Serialized.length} chars`);
+  console.log(`Proof 2 size: ${proof2Serialized.length} chars`);
+  
+  // Ensure the circuit is compiled
+  const vk = await compile();
+  if (!vk) {
+    throw new Error("Failed to compile circuit for merging");
+  }
+  
+  // Deserialize the proofs
+  console.log("Deserializing proof 1...");
+  const proof1 = await AddProgramProof.fromJSON(JSON.parse(proof1Serialized));
+  
+  console.log("Deserializing proof 2...");
+  const proof2 = await AddProgramProof.fromJSON(JSON.parse(proof2Serialized));
+  
+  // Verify both proofs before merging
+  console.log("Verifying proof 1...");
+  const ok1 = await verify(proof1, vk);
+  if (!ok1) {
+    throw new Error("Proof 1 verification failed");
+  }
+  
+  console.log("Verifying proof 2...");
+  const ok2 = await verify(proof2, vk);
+  if (!ok2) {
+    throw new Error("Proof 2 verification failed");
+  }
+  
+  // Get the public outputs from the proofs for merge
+  const publicOutput1 = proof1.publicOutput;
+  const publicOutput2 = proof2.publicOutput;
+  
+  // Merge the proofs
+  console.time("merging proofs");
+  const mergedProof = await AddProgram.merge(publicOutput1, proof1, proof2);
+  console.timeEnd("merging proofs");
+  
+  // Verify the merged proof
+  console.log("Verifying merged proof...");
+  const okMerged = await verify(mergedProof.proof, vk);
+  if (!okMerged) {
+    throw new Error("Merged proof verification failed");
+  }
+  
+  // Serialize the merged proof
+  const mergedProofSerialized = JSON.stringify(mergedProof.proof.toJSON());
+  console.log(`Merged proof size: ${mergedProofSerialized.length} chars`);
+  
+  return mergedProofSerialized;
+}
+
 export async function getStateAndProof(params: {
   sequenceStates: SequenceState[];
   client: ReturnType<typeof createClient<typeof CoordinatorService>>;

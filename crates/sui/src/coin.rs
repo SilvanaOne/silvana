@@ -101,14 +101,13 @@ impl CoinInfo {
 
 /// Fetches a coin with sufficient balance and locks it for exclusive use
 pub async fn fetch_coin(
-    rpc_url: &str,
+    client: &mut GrpcClient,
     sender: sui::Address,
     min_balance: u64,
 ) -> Result<Option<(CoinInfo, CoinLockGuard)>> {
     let lock_manager = get_coin_lock_manager();
 
     for attempt in 1..=MAX_RETRIES {
-        let mut client = GrpcClient::new(rpc_url.to_string())?;
         let mut live = client.live_data_client();
 
         // List owned objects to find SUI coins
@@ -144,11 +143,11 @@ pub async fn fetch_coin(
                     if let Some(value) = &contents.value {
                         extract_coin_balance_from_contents(value)?
                     } else {
-                        get_coin_balance_via_get_object(rpc_url, &object_ref).await?
+                        get_coin_balance_via_get_object(client, &object_ref).await?
                     }
                 } else {
                     // Fallback: fetch object details to get balance
-                    get_coin_balance_via_get_object(rpc_url, &object_ref).await?
+                    get_coin_balance_via_get_object(client, &object_ref).await?
                 };
 
                 if balance >= min_balance {
@@ -192,10 +191,9 @@ fn extract_coin_balance_from_contents(contents: &[u8]) -> Result<u64> {
 
 /// Gets the balance of a specific coin object via get_object RPC
 async fn get_coin_balance_via_get_object(
-    rpc_url: &str,
+    client: &mut GrpcClient,
     object_ref: &sui::ObjectReference,
 ) -> Result<u64> {
-    let mut client = GrpcClient::new(rpc_url.to_string())?;
     let mut ledger = client.ledger_client();
 
     let resp = ledger
@@ -221,8 +219,7 @@ async fn get_coin_balance_via_get_object(
 }
 
 /// Lists all available coins for a sender with their balances
-pub async fn list_coins(rpc_url: &str, sender: sui::Address) -> Result<Vec<CoinInfo>> {
-    let mut client = GrpcClient::new(rpc_url.to_string())?;
+pub async fn list_coins(client: &mut GrpcClient, sender: sui::Address) -> Result<Vec<CoinInfo>> {
     let mut live = client.live_data_client();
 
     let resp = live
@@ -258,10 +255,10 @@ pub async fn list_coins(rpc_url: &str, sender: sui::Address) -> Result<Vec<CoinI
                 if let Some(value) = &contents.value {
                     extract_coin_balance_from_contents(value)?
                 } else {
-                    get_coin_balance_via_get_object(rpc_url, &object_ref).await?
+                    get_coin_balance_via_get_object(client, &object_ref).await?
                 }
             } else {
-                get_coin_balance_via_get_object(rpc_url, &object_ref).await?
+                get_coin_balance_via_get_object(client, &object_ref).await?
             };
 
             coins.push(CoinInfo {
