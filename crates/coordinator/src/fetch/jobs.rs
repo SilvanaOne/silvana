@@ -620,8 +620,8 @@ pub async fn fetch_pending_job_from_instances(
     agent: &str,
     agent_method: &str,
 ) -> Result<Option<PendingJob>> {
-    // Collect all job IDs from all app_instances
-    let mut all_jobs: Vec<(u64, String, String)> = Vec::new(); // (job_sequence, app_instance_id, jobs_table_id)
+    // Collect all job IDs from all app_instances with their app_instance_method
+    let mut all_jobs: Vec<(u64, String, String, String)> = Vec::new(); // (job_sequence, app_instance_id, jobs_table_id, app_instance_method)
     
     for app_instance in app_instances {
         // Get Jobs table ID from the AppInstance
@@ -642,8 +642,21 @@ pub async fn fetch_pending_job_from_instances(
             agent_method,
         ).await?;
         
+        // Fetch each job to get its app_instance_method
         for job_sequence in job_sequences {
-            all_jobs.push((job_sequence, app_instance.clone(), jobs_table_id.clone()));
+            match fetch_job_by_id(client, &jobs_table_id, job_sequence).await? {
+                Some(job) => {
+                    all_jobs.push((
+                        job_sequence, 
+                        app_instance.clone(), 
+                        jobs_table_id.clone(),
+                        job.app_instance_method.clone()
+                    ));
+                }
+                None => {
+                    warn!("Could not fetch job {} from table {}", job_sequence, jobs_table_id);
+                }
+            }
         }
     }
     
@@ -652,14 +665,41 @@ pub async fn fetch_pending_job_from_instances(
         return Ok(None);
     }
     
-    // Sort by job_sequence to get the lowest one
-    all_jobs.sort_by_key(|&(job_sequence, _, _)| job_sequence);
-    let (lowest_job_sequence, app_instance, jobs_table_id) = &all_jobs[0];
+    // Separate merge jobs from non-merge jobs
+    let mut merge_jobs: Vec<_> = all_jobs.iter()
+        .filter(|(_, _, _, method)| method == "merge")
+        .collect();
+    let mut non_merge_jobs: Vec<_> = all_jobs.iter()
+        .filter(|(_, _, _, method)| method != "merge")
+        .collect();
     
-    info!(
-        "Found {} total pending jobs across {} app_instances for {}/{}/{}, fetching job {} from {}",
-        all_jobs.len(), app_instances.len(), developer, agent, agent_method, lowest_job_sequence, app_instance
-    );
+    // Sort both lists by job_sequence
+    merge_jobs.sort_by_key(|(job_seq, _, _, _)| *job_seq);
+    non_merge_jobs.sort_by_key(|(job_seq, _, _, _)| *job_seq);
+    
+    // Prioritize merge jobs, but fall back to non-merge if no merge jobs exist
+    let selected_job = if !merge_jobs.is_empty() {
+        let job = merge_jobs[0];
+        info!(
+            "Found {} merge jobs and {} non-merge jobs for {}/{}/{}. Selecting merge job {} from {}",
+            merge_jobs.len(), non_merge_jobs.len(), developer, agent, agent_method, 
+            job.0, job.1
+        );
+        job
+    } else if !non_merge_jobs.is_empty() {
+        let job = non_merge_jobs[0];
+        info!(
+            "Found {} non-merge jobs for {}/{}/{}. Selecting job {} from {}",
+            non_merge_jobs.len(), developer, agent, agent_method, 
+            job.0, job.1
+        );
+        job
+    } else {
+        // This shouldn't happen since we checked all_jobs.is_empty() above
+        return Ok(None);
+    };
+    
+    let (lowest_job_sequence, _app_instance, jobs_table_id, _app_instance_method) = selected_job;
     
     // Fetch the specific job by ID
     fetch_job_by_id(client, jobs_table_id, *lowest_job_sequence).await

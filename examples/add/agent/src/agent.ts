@@ -120,6 +120,10 @@ async function agent() {
               }
               console.log(`Successfully fetched proof 1 (${proof1Response.proof.length} chars)`);
               
+              // Extract just the proof part from the serialized data
+              const proof1Data = JSON.parse(proof1Response.proof);
+              const proof1Only = proof1Data.proof;
+              
               // Fetch second proof
               console.log(`Fetching proof 2: sequences ${proofMergeData.sequences2.join(", ")}`);
               const getProof2Request = create(GetProofRequestSchema, {
@@ -135,10 +139,14 @@ async function agent() {
               }
               console.log(`Successfully fetched proof 2 (${proof2Response.proof.length} chars)`);
               
+              // Extract just the proof part from the serialized data
+              const proof2Data = JSON.parse(proof2Response.proof);
+              const proof2Only = proof2Data.proof;
+              
               // Merge the proofs
               console.log("Starting proof merge...");
               const mergeStartTime = Date.now();
-              const mergedProof = await merge(proof1Response.proof, proof2Response.proof);
+              const mergedProof = await merge(proof1Only, proof2Only);
               const mergeTimeMs = Date.now() - mergeStartTime;
               console.log(`Merge completed! Merged proof size: ${mergedProof.length} chars`);
               

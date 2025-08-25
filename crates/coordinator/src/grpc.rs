@@ -1082,31 +1082,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                                         // Found our proof! Extract da_hash
                                                         if let Some(value_field) = entry_struct.fields.get("value") {
                                                             if let Some(prost_types::value::Kind::StructValue(proof_struct)) = &value_field.kind {
-                                                                // Check job_id matches if provided
-                                                                if !req.job_id.is_empty() {
-                                                                    if let Some(job_id_field) = proof_struct.fields.get("job_id") {
-                                                                        if let Some(prost_types::value::Kind::StringValue(job_id)) = &job_id_field.kind {
-                                                                            if job_id != &req.job_id {
-                                                                                continue; // Job ID doesn't match, keep searching
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
+                                                                // Don't check job_id - the proof may have been calculated by a different job
+                                                                // We only care that app_instance, block_number, and sequences match
                                                                 
-                                                                // Get da_hash from the Proof
+                                                                // Get da_hash from the Proof (Option<String> field)
                                                                 if let Some(da_hash_field) = proof_struct.fields.get("da_hash") {
-                                                                    if let Some(prost_types::value::Kind::StructValue(option_struct)) = &da_hash_field.kind {
-                                                                        if let Some(vec_field) = option_struct.fields.get("vec") {
-                                                                            if let Some(prost_types::value::Kind::ListValue(vec_list)) = &vec_field.kind {
-                                                                                if !vec_list.values.is_empty() {
-                                                                                    if let Some(prost_types::value::Kind::StringValue(hash)) = &vec_list.values[0].kind {
-                                                                                        da_hash = Some(hash.clone());
-                                                                                        break 'outer;
-                                                                                    }
+                                                                    match &da_hash_field.kind {
+                                                                        // Direct string value (Some case)
+                                                                        Some(prost_types::value::Kind::StringValue(hash)) => {
+                                                                            da_hash = Some(hash.clone());
+                                                                            info!("Found da_hash: {}", hash);
+                                                                            break 'outer;
+                                                                        }
+                                                                        // Null value (None case)
+                                                                        Some(prost_types::value::Kind::NullValue(_)) => {
+                                                                            debug!("da_hash is null for this proof");
+                                                                            // Continue searching for another proof with da_hash
+                                                                        }
+                                                                        // Struct with Some field (older format compatibility)
+                                                                        Some(prost_types::value::Kind::StructValue(option_struct)) => {
+                                                                            if let Some(some_field) = option_struct.fields.get("Some") {
+                                                                                if let Some(prost_types::value::Kind::StringValue(hash)) = &some_field.kind {
+                                                                                    da_hash = Some(hash.clone());
+                                                                                    info!("Found da_hash in Some variant: {}", hash);
+                                                                                    break 'outer;
                                                                                 }
                                                                             }
                                                                         }
+                                                                        _ => {
+                                                                            warn!("Unexpected da_hash field type: {:?}", da_hash_field.kind);
+                                                                        }
                                                                     }
+                                                                } else {
+                                                                    warn!("da_hash field not found in proof struct");
                                                                 }
                                                             }
                                                         }
