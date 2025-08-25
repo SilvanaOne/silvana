@@ -273,17 +273,19 @@ async function agent() {
                   });
 
                   console.log(
-                    `Submitting proof and state concurrently for sequence ${transitionData.sequence}...`
+                    `Submitting proof and state sequentially for sequence ${transitionData.sequence}...`
                   );
 
-                  // Submit both concurrently without awaiting
-                  const proofPromise = client.submitProof(submitProofRequest);
-                  const statePromise = client.submitState(submitStateRequest);
-
-                  // Wait for both to complete
+                  // Submit proof first and wait for completion
                   try {
-                    const [submitProofResponse, submitStateResponse] =
-                      await Promise.all([proofPromise, statePromise]);
+                    console.log(`Submitting proof for sequence ${transitionData.sequence}...`);
+                    const submitProofResponse = await client.submitProof(submitProofRequest);
+                    console.log(`Proof submitted successfully for sequence ${transitionData.sequence}`);
+                    
+                    // Then submit state after proof is done
+                    console.log(`Submitting state for sequence ${transitionData.sequence}...`);
+                    const submitStateResponse = await client.submitState(submitStateRequest);
+                    console.log(`State submitted successfully for sequence ${transitionData.sequence}`);
 
                     console.log(
                       `Both proof and state submitted successfully for sequence ${transitionData.sequence}`
