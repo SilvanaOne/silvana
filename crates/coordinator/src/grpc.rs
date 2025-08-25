@@ -437,10 +437,28 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Some(req.merged_sequences_2) 
         };
 
-        // Create ProofCalculation for merge analysis before moving sequences
+        // Fetch the real ProofCalculation from blockchain to get start_sequence and end_sequence
+        let mut sui_fetch_client = self.state.get_sui_client();
+        let proof_calculations = crate::fetch::fetch_proof_calculations(
+            &mut sui_fetch_client,
+            &agent_job.app_instance,
+            req.block_number
+        ).await
+        .map_err(|e| Status::internal(format!("Failed to fetch ProofCalculation: {}", e)))?;
+        
+        // Get the first ProofCalculation for this block (should exist)
+        let proof_calc_info = proof_calculations.first()
+            .ok_or_else(|| Status::internal(format!("No ProofCalculation found for block {}", req.block_number)))?;
+        
+        // Create ProofCalculation with real data from blockchain
         let proof_calc = ProofCalculation {
             block_number: req.block_number,
             sequences: sequences.clone(),
+            start_sequence: proof_calc_info.start_sequence,
+            end_sequence: proof_calc_info.end_sequence,
+            proofs: vec![],  // Individual proofs will be fetched later in merge analysis
+            block_proof: proof_calc_info.block_proof.clone(),
+            is_finished: proof_calc_info.is_finished,
         };
 
         // Submit proof transaction on Sui
