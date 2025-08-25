@@ -345,6 +345,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         info!(
             session_id = %req.session_id,
             block_number = %req.block_number,
+            sequences = ?req.sequences,
             job_id = %req.job_id,
             cpu_time = %req.cpu_time,
             "Received SubmitProof request"
@@ -992,18 +993,28 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Extract the actual ProofCalculation object ID from the Field wrapper
         let proof_calc_object_id = if let Some(proof_object) = proof_calc_response.object {
             if let Some(proof_json) = &proof_object.json {
+                debug!("ProofCalculation field JSON structure: {:?}", proof_json);
                 if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_json.kind {
                     if let Some(value_field) = struct_value.fields.get("value") {
                         if let Some(prost_types::value::Kind::StringValue(object_id)) = &value_field.kind {
                             Some(object_id.clone())
-                        } else { None }
-                    } else { None }
+                        } else { 
+                            debug!("value field is not a string: {:?}", value_field);
+                            None 
+                        }
+                    } else { 
+                        debug!("No 'value' field found in struct");
+                        None 
+                    }
                 } else { None }
             } else { None }
         } else { None };
 
         let proof_calc_object_id = match proof_calc_object_id {
-            Some(id) => id,
+            Some(id) => {
+                debug!("Extracted ProofCalculation object ID: {}", id);
+                id
+            },
             None => {
                 error!("Failed to extract ProofCalculation object ID");
                 return Ok(Response::new(GetProofResponse {
@@ -1045,8 +1056,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
                             if let Some(contents) = proofs_struct.fields.get("contents") {
                                 if let Some(prost_types::value::Kind::ListValue(list_value)) = &contents.kind {
+                                    debug!("Found {} proofs in ProofCalculation", list_value.values.len());
                                     // Search through the VecMap entries for matching sequences
-                                    'outer: for entry in &list_value.values {
+                                    'outer: for (i, entry) in list_value.values.iter().enumerate() {
                                         if let Some(prost_types::value::Kind::StructValue(entry_struct)) = &entry.kind {
                                             // Check the key (sequences)
                                             if let Some(key_field) = entry_struct.fields.get("key") {
@@ -1062,8 +1074,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                                         }
                                                     }
                                                     
+                                                    debug!("Proof {}: sequences={:?}, looking for={:?}", i, key_sequences, req.sequences);
+                                                    
                                                     // Check if sequences match
                                                     if key_sequences == req.sequences {
+                                                        info!("Found matching proof for sequences {:?}", req.sequences);
                                                         // Found our proof! Extract da_hash
                                                         if let Some(value_field) = entry_struct.fields.get("value") {
                                                             if let Some(prost_types::value::Kind::StructValue(proof_struct)) = &value_field.kind {

@@ -51,15 +51,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     // Convert to BlockProofs structure
     let mut proof_infos = Vec::new();
     
-    // Add the current proof
-    proof_infos.push(ProofInfo {
-        sequences: proof_calc.sequences.clone(),
-        status: ProofStatus::Calculated,
-        da_hash: None, // TODO: Get actual DA hash from submission
-        timestamp: Some(chrono::Utc::now().timestamp() as u64 * 1000),
-    });
-
-    // Add existing proofs with their actual status from blockchain
+    // Only add existing proofs from blockchain (which already includes the current proof)
     for existing_proof_calc in &existing_proof_calculations {
         for existing_proof in &existing_proof_calc.individual_proofs {
             // Convert u8 status to ProofStatus enum
@@ -98,6 +90,19 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         block_proofs.start_sequence,  // Direct access, no unwrap needed
         block_proofs.end_sequence.map(|e| e.to_string()).unwrap_or_else(|| "pending".to_string()));
     info!("  Total proofs available: {} (including current)", block_proofs.proofs.len());
+    
+    // List all available proofs with their sequences
+    for (i, proof) in block_proofs.proofs.iter().enumerate() {
+        let status_str = match proof.status {
+            ProofStatus::Started => "Started",
+            ProofStatus::Calculated => "Calculated",
+            ProofStatus::Rejected => "Rejected", 
+            ProofStatus::Reserved => "Reserved",
+            ProofStatus::Used => "Used",
+        };
+        info!("    Proof {}: sequences {:?} (status: {})", i + 1, proof.sequences, status_str);
+    }
+    
     info!("  Current proof covers: sequences {:?}", proof_calc.sequences);
     info!("  Block is finished: {}", proof_calc.is_finished);
 
@@ -144,18 +149,10 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 }
             };
             
-            // Rebuild proof_infos with updated data
+            // Rebuild proof_infos with updated data (only from blockchain)
             let mut updated_proof_infos = Vec::new();
             
-            // Add the current proof
-            updated_proof_infos.push(ProofInfo {
-                sequences: proof_calc.sequences.clone(),
-                status: ProofStatus::Calculated,
-                da_hash: Some(da_hash.to_string()),
-                timestamp: Some(chrono::Utc::now().timestamp() as u64 * 1000),
-            });
-            
-            // Add existing proofs from refetched data with their actual status
+            // Only add existing proofs from refetched data with their actual status
             for existing_proof_calc in &updated_proof_calculations {
                 for existing_proof in &existing_proof_calc.individual_proofs {
                     // Convert u8 status to ProofStatus enum

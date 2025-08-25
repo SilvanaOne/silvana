@@ -168,8 +168,16 @@ async function agent() {
               );
               
             } catch (error) {
-              console.error("Failed to merge proofs:", error);
-              // Report the error but continue to complete the job
+              console.error(`Failed to merge proofs: ${error}`);
+              // Fail the job instead of completing it
+              console.log(`Failing job ${response.job.jobId} due to merge error...`);
+              await client.failJob(create(FailJobRequestSchema, {
+                sessionId: sessionId,
+                jobId: response.job.jobId,
+                errorMessage: `Merge failed: ${error}`,
+              }));
+              console.log(`Job ${jobCount} failed due to merge error`);
+              continue; // Skip to next job without marking as complete
             }
           } else {
             // Default to prove job processing
