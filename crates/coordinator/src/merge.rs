@@ -59,12 +59,23 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         timestamp: Some(chrono::Utc::now().timestamp() as u64 * 1000),
     });
 
-    // Add existing proofs (assume they are all calculated)
+    // Add existing proofs with their actual status from blockchain
     for existing_proof_calc in &existing_proof_calculations {
         for existing_proof in &existing_proof_calc.individual_proofs {
+            // Convert u8 status to ProofStatus enum
+            // From Move: 1=STARTED, 2=CALCULATED, 3=REJECTED, 4=RESERVED, 5=USED
+            let status = match existing_proof.status {
+                1 => ProofStatus::Started,
+                2 => ProofStatus::Calculated,
+                3 => ProofStatus::Rejected,
+                4 => ProofStatus::Reserved,
+                5 => ProofStatus::Used,
+                _ => ProofStatus::Rejected, // Unknown status defaults to Rejected
+            };
+            
             proof_infos.push(ProofInfo {
                 sequences: existing_proof.sequences.clone(),
-                status: ProofStatus::Calculated,
+                status,
                 da_hash: existing_proof.da_hash.clone(),
                 timestamp: Some(existing_proof.timestamp),
             });
@@ -144,12 +155,23 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 timestamp: Some(chrono::Utc::now().timestamp() as u64 * 1000),
             });
             
-            // Add existing proofs from refetched data
+            // Add existing proofs from refetched data with their actual status
             for existing_proof_calc in &updated_proof_calculations {
                 for existing_proof in &existing_proof_calc.individual_proofs {
+                    // Convert u8 status to ProofStatus enum
+                    // From Move: 1=STARTED, 2=CALCULATED, 3=REJECTED, 4=RESERVED, 5=USED
+                    let status = match existing_proof.status {
+                        1 => ProofStatus::Started,
+                        2 => ProofStatus::Calculated,
+                        3 => ProofStatus::Rejected,
+                        4 => ProofStatus::Reserved,
+                        5 => ProofStatus::Used,
+                        _ => ProofStatus::Rejected, // Unknown status defaults to Rejected
+                    };
+                    
                     updated_proof_infos.push(ProofInfo {
                         sequences: existing_proof.sequences.clone(),
-                        status: ProofStatus::Calculated,
+                        status,
                         da_hash: existing_proof.da_hash.clone(),
                         timestamp: Some(existing_proof.timestamp),
                     });

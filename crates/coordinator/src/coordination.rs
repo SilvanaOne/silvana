@@ -24,11 +24,11 @@ pub struct ProofInfo {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ProofStatus {
-    Started,
-    Calculated,
-    Used,
-    Reserved,
-    Failed,
+    Started,    // PROOF_STATUS_STARTED = 1
+    Calculated, // PROOF_STATUS_CALCULATED = 2
+    Rejected,   // PROOF_STATUS_REJECTED = 3
+    Reserved,   // PROOF_STATUS_RESERVED = 4
+    Used,       // PROOF_STATUS_USED = 5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

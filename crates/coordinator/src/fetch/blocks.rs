@@ -5,6 +5,7 @@ use tracing::{debug, warn};
 
 /// Block information fetched from blockchain
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct BlockInfo {
     pub block_number: u64,
     pub start_sequence: u64,
@@ -13,6 +14,7 @@ pub struct BlockInfo {
 }
 
 /// Fetch Block information from AppInstance by block number
+#[allow(dead_code)]
 pub async fn fetch_block_info(
     client: &mut Client,
     app_instance: &str,
@@ -85,6 +87,7 @@ pub async fn fetch_block_info(
 }
 
 /// Fetch Block from ObjectTable by block number using optimized pagination
+#[allow(dead_code)]
 async fn fetch_block_from_table(
     client: &mut Client,
     table_id: &str,
@@ -169,6 +172,7 @@ async fn fetch_block_from_table(
 }
 
 /// Fetch Block object content by field ID (extracted from dynamic field lookup)
+#[allow(dead_code)]
 async fn fetch_block_object_by_field_id(
     client: &mut Client,
     field_id: &str,
@@ -236,6 +240,7 @@ async fn fetch_block_object_by_field_id(
 }
 
 /// Debug function to print all dynamic fields with full details
+#[allow(dead_code)]
 async fn debug_all_dynamic_fields(client: &mut Client, table_id: &str, target_block: u64) {
     warn!("🔍 DEBUG: Fetching ALL dynamic fields for blocks table {} to diagnose why block {} is not found", table_id, target_block);
     
@@ -304,6 +309,7 @@ async fn debug_all_dynamic_fields(client: &mut Client, table_id: &str, target_bl
 }
 
 /// Extract Block information from JSON
+#[allow(dead_code)]
 fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u64) -> Result<Option<BlockInfo>> {
     debug!("🔍 Extracting block info for block {} from JSON", block_number);
     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
