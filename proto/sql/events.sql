@@ -23,19 +23,18 @@ CREATE TABLE IF NOT EXISTS agent_started_job_event (
     `developer` VARCHAR(255) NOT NULL,
     `agent` VARCHAR(255) NOT NULL,
     `app` VARCHAR(255) NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `job_sequence` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
     INDEX idx_coordinator_id (`coordinator_id`),
-    INDEX idx_job_id (`job_id`),
     INDEX idx_event_timestamp (`event_timestamp`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_app (`app`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+    FULLTEXT INDEX ft_idx_job_sequence (`job_sequence`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- AgentFinishedJobEvent Table
@@ -45,20 +44,19 @@ CREATE TABLE IF NOT EXISTS agent_finished_job_event (
     `developer` VARCHAR(255) NOT NULL,
     `agent` VARCHAR(255) NOT NULL,
     `app` VARCHAR(255) NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `job_sequence` VARCHAR(255) NOT NULL,
     `duration` BIGINT NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
     INDEX idx_coordinator_id (`coordinator_id`),
-    INDEX idx_job_id (`job_id`),
     INDEX idx_event_timestamp (`event_timestamp`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_app (`app`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+    FULLTEXT INDEX ft_idx_job_sequence (`job_sequence`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- CoordinationTxEvent Table
@@ -68,7 +66,7 @@ CREATE TABLE IF NOT EXISTS coordination_tx_event (
     `developer` VARCHAR(255) NOT NULL,
     `agent` VARCHAR(255) NOT NULL,
     `app` VARCHAR(255) NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `job_sequence` VARCHAR(255) NOT NULL,
     `memo` VARCHAR(255) NOT NULL,
     `tx_hash` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
@@ -76,14 +74,13 @@ CREATE TABLE IF NOT EXISTS coordination_tx_event (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
     INDEX idx_coordinator_id (`coordinator_id`),
-    INDEX idx_job_id (`job_id`),
     INDEX idx_tx_hash (`tx_hash`),
     INDEX idx_event_timestamp (`event_timestamp`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_app (`app`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD,
+    FULLTEXT INDEX ft_idx_job_sequence (`job_sequence`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_memo (`memo`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_tx_hash (`tx_hash`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -138,7 +135,7 @@ CREATE TABLE IF NOT EXISTS agent_message_event (
     `developer` VARCHAR(255) NOT NULL,
     `agent` VARCHAR(255) NOT NULL,
     `app` VARCHAR(255) NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `job_sequence` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `level` TINYINT NOT NULL,
     `message` TEXT NOT NULL,
@@ -146,13 +143,12 @@ CREATE TABLE IF NOT EXISTS agent_message_event (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
     INDEX idx_coordinator_id (`coordinator_id`),
-    INDEX idx_job_id (`job_id`),
     INDEX idx_event_timestamp (`event_timestamp`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_app (`app`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD,
+    FULLTEXT INDEX ft_idx_job_sequence (`job_sequence`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_message (`message`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -176,7 +172,7 @@ CREATE TABLE IF NOT EXISTS agent_transaction_event (
     `developer` VARCHAR(255) NOT NULL,
     `agent` VARCHAR(255) NOT NULL,
     `app` VARCHAR(255) NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `job_sequence` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `tx_hash` VARCHAR(255) NOT NULL,
     `chain` VARCHAR(255) NOT NULL,
@@ -187,7 +183,6 @@ CREATE TABLE IF NOT EXISTS agent_transaction_event (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
     INDEX idx_coordinator_id (`coordinator_id`),
-    INDEX idx_job_id (`job_id`),
     INDEX idx_event_timestamp (`event_timestamp`),
     INDEX idx_tx_hash (`tx_hash`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
@@ -195,7 +190,7 @@ CREATE TABLE IF NOT EXISTS agent_transaction_event (
     FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_app (`app`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD,
+    FULLTEXT INDEX ft_idx_job_sequence (`job_sequence`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_tx_hash (`tx_hash`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_chain (`chain`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_network (`network`) WITH PARSER STANDARD,

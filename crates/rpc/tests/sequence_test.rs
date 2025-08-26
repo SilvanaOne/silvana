@@ -323,7 +323,7 @@ fn create_test_events_with_sequences(coordinator_id: &str) -> Vec<(Event, u64, S
                         developer: "sequence-test-developer".to_string(),
                         agent: "sequence-test-agent".to_string(),
                         app: "sequence-test-app".to_string(),
-                        job_id: job_id.clone(),
+                        job_sequence: job_id.clone(),
                         sequences: vec![sequence], // Single sequence per event for this test
                         event_timestamp: get_current_timestamp() + i as u64,
                         level: 1, // LogLevel::Info
@@ -342,7 +342,7 @@ fn create_test_events_with_sequences(coordinator_id: &str) -> Vec<(Event, u64, S
                         developer: "sequence-test-developer".to_string(),
                         agent: "sequence-test-agent".to_string(),
                         app: "sequence-test-app".to_string(),
-                        job_id: job_id.clone(),
+                        job_sequence: job_id.clone(),
                         sequences: vec![sequence], // Single sequence per event for this test
                         event_timestamp: get_current_timestamp() + i as u64,
                         tx_hash: format!("0x{:064x}", i),

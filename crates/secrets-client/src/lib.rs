@@ -6,6 +6,7 @@ use proto::{
 };
 use tonic::transport::Channel;
 use tracing::{debug, info, error};
+use std::sync::Once;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SecretsClientError {
@@ -21,6 +22,16 @@ pub enum SecretsClientError {
     InvalidArgument(String),
 }
 
+// Initialize rustls crypto provider once
+static INIT: Once = Once::new();
+
+fn init_rustls() {
+    INIT.call_once(|| {
+        // Install the default crypto provider (aws-lc-rs) - same as integration tests
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    });
+}
+
 pub struct SecretsClient {
     client: SilvanaEventsServiceClient<Channel>,
 }
@@ -28,12 +39,15 @@ pub struct SecretsClient {
 impl SecretsClient {
     /// Create a new secrets client with the RPC service endpoint
     pub async fn new(endpoint: impl AsRef<str>) -> Result<Self, SecretsClientError> {
-        let channel = Channel::from_shared(endpoint.as_ref().to_string())
-            .map_err(|e| SecretsClientError::InvalidUri(e.to_string()))?
-            .connect()
-            .await?;
+        let endpoint_str = endpoint.as_ref();
         
-        let client = SilvanaEventsServiceClient::new(channel);
+        // Initialize rustls crypto provider (required for HTTPS)
+        init_rustls();
+        
+        // Connect using the same method as integration tests
+        let client = SilvanaEventsServiceClient::connect(endpoint_str.to_string())
+            .await
+            .map_err(|e| SecretsClientError::TransportError(e))?;
         
         Ok(Self { client })
     }

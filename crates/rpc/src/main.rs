@@ -15,6 +15,7 @@ use proto::Event;
 use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
 use rpc::SilvanaEventsServiceImpl;
 use rpc::database::EventDatabase;
+use db::secrets_storage::SecureSecretsStorage;
 
 // Import buffer directly
 use buffer::EventBuffer;
@@ -148,8 +149,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start monitoring tasks
     spawn_monitoring_tasks(event_buffer.clone());
 
+    // Initialize secrets storage if configured
+    let mut events_service = SilvanaEventsServiceImpl::new(event_buffer, Arc::clone(&database));
+    
+    // Check if secrets storage is configured via environment variables
+    let secrets_table = env::var("SECRETS_TABLE_NAME").ok();
+    let kms_key_id = env::var("SECRETS_KMS_KEY_ID").ok();
+    
+    if let (Some(table_name), Some(key_id)) = (secrets_table, kms_key_id) {
+        info!("🔐 Initializing secrets storage with table: {} and KMS key: {}", table_name, key_id);
+        match SecureSecretsStorage::new(table_name, key_id).await {
+            Ok(storage) => {
+                events_service = events_service.with_secrets_storage(Arc::new(storage));
+                info!("✅ Secrets storage initialized successfully");
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize secrets storage: {}", e);
+                warn!("⚠️  Continuing without secrets storage - secrets API will return errors");
+            }
+        }
+    } else {
+        warn!("⚠️  Secrets storage not configured - SECRETS_TABLE_NAME and SECRETS_KMS_KEY_ID environment variables not set");
+        warn!("⚠️  Secrets API endpoints will return 'not available' errors");
+    }
+
     // Create gRPC service with Prometheus metrics layer
-    let events_service = SilvanaEventsServiceImpl::new(event_buffer, Arc::clone(&database));
     let grpc_service = SilvanaEventsServiceServer::new(events_service);
 
     // Create reflection service
