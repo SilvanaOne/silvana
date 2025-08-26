@@ -416,6 +416,93 @@ pub async fn create_merge_job_tx(
     ).await
 }
 
+/// Update block proof data availability
+pub async fn update_block_proof_data_availability_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    block_number: u64,
+    proof_data_availability: String,
+) -> Result<String> {
+    info!("Creating update_block_proof_data_availability transaction for block_number: {}", block_number);
+    
+    execute_app_instance_function(
+        client,
+        app_instance_str,
+        "update_block_proof_data_availability",
+        move |tb, app_instance_arg, clock_arg| {
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            let proof_da_arg = tb.input(sui_transaction_builder::Serialized(&proof_data_availability));
+            
+            vec![app_instance_arg, block_number_arg, proof_da_arg, clock_arg]
+        },
+    ).await
+}
+
+/// Convenience function to create a settle job
+pub async fn create_settle_job_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    block_number: u64,
+    job_description: Option<String>,
+) -> Result<String> {
+    // Call the general create_app_job_tx function with settle method
+    create_app_job_tx(
+        client,
+        app_instance_str,
+        "settle".to_string(),
+        job_description,
+        Some(block_number),         // Pass block_number
+        None,                       // No sequences for settle
+        None,                       // No sequences1 for settle
+        None,                       // No sequences2 for settle
+        vec![],                     // Empty data
+    ).await
+}
+
+/// Update block settlement transaction hash
+pub async fn update_block_settlement_tx_hash_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    block_number: u64,
+    settlement_tx_hash: String,
+) -> Result<String> {
+    info!("Creating update_block_settlement_tx_hash transaction for block_number: {}", block_number);
+    
+    execute_app_instance_function(
+        client,
+        app_instance_str,
+        "update_block_settlement_tx_hash",
+        move |tb, app_instance_arg, clock_arg| {
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            let settlement_tx_hash_arg = tb.input(sui_transaction_builder::Serialized(&settlement_tx_hash));
+            
+            vec![app_instance_arg, block_number_arg, settlement_tx_hash_arg, clock_arg]
+        },
+    ).await
+}
+
+/// Update block settlement transaction included in block
+pub async fn update_block_settlement_tx_included_in_block_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    block_number: u64,
+    settled_at: u64,
+) -> Result<String> {
+    info!("Creating update_block_settlement_tx_included_in_block transaction for block_number: {}", block_number);
+    
+    execute_app_instance_function(
+        client,
+        app_instance_str,
+        "update_block_settlement_tx_included_in_block",
+        move |tb, app_instance_arg, clock_arg| {
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            let settled_at_arg = tb.input(sui_transaction_builder::Serialized(&settled_at));
+            
+            vec![app_instance_arg, block_number_arg, settled_at_arg, clock_arg]
+        },
+    ).await
+}
+
 /// Debug function to query job status from the blockchain
 async fn query_job_status(
     client: &mut GrpcClient,

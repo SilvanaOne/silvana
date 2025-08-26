@@ -521,10 +521,10 @@ public fun update_block_proof_data_availability(
 #[error]
 const EBlockNotProved: vector<u8> = b"Block not proved";
 
-public fun update_block_mina_tx_hash(
+public fun update_block_settlement_tx_hash(
     app_instance: &mut AppInstance,
     block_number: u64,
-    mina_tx_hash: String,
+    settlement_tx_hash: String,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -540,7 +540,7 @@ public fun update_block_mina_tx_hash(
     );
     block::set_settlement_tx(
         block,
-        option::some(mina_tx_hash),
+        option::some(settlement_tx_hash),
         false,
         option::some(timestamp),
         option::none(),
@@ -550,10 +550,10 @@ public fun update_block_mina_tx_hash(
 #[error]
 const EBlockNotSentToMina: vector<u8> = b"Block not sent to Mina";
 
-public fun update_block_mina_tx_included_in_block(
+public fun update_block_settlement_tx_included_in_block(
     app_instance: &mut AppInstance,
     block_number: u64,
-    settled_on_mina_at: u64,
+    settled_at: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -581,7 +581,7 @@ public fun update_block_mina_tx_included_in_block(
         settlement_tx_hash,
         true,
         sent_to_settlement_at,
-        option::some(settled_on_mina_at),
+        option::some(settled_at),
     );
 
     // Delete the proof_calculation for this block as it's no longer needed

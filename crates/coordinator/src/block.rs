@@ -1,32 +1,72 @@
-use crate::coordination::ProofCalculation;
 use crate::sui_interface::SuiJobInterface;
 use anyhow::Result;
 use sui_rpc::Client;
 use tracing::{info, debug, error};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub async fn settle(proof_calc: ProofCalculation, da_hash: String) -> Result<()> {
-    // Get sequences from the last proof (which should be the complete block proof)
-    let sequences = proof_calc.proofs.last()
-        .map(|p| p.sequences.clone())
-        .unwrap_or_default();
-    
+pub async fn settle(
+    app_instance: &str,
+    block_number: u64,
+    proof_da_hash: String,
+    client: &mut Client,
+) -> Result<()> {
     info!(
-        "Settling complete block {} with {} sequences: {} (da_hash: {})",
-        proof_calc.block_number,
-        sequences.len(),
-        sequences.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
-        da_hash
+        "Settling complete block {} (da_hash: {})",
+        block_number,
+        proof_da_hash
     );
 
-    // This function is called only when we have a complete block proof
-    // TODO: Implement actual block settlement logic:
-    // 1. Update the Block struct with proof_data_availability = da_hash
-    // 2. Set proved_at timestamp
-    // 3. Create settlement transaction if needed
-    // 4. Emit settlement events
+    // Create a SuiJobInterface to interact with the blockchain
+    let mut sui_interface = SuiJobInterface::new(client.clone());
 
-    info!("Block {} settlement complete - proof recorded", proof_calc.block_number);
+    // 1. First, update the block proof data availability on the blockchain
+    match sui_interface.update_block_proof_data_availability(
+        app_instance,
+        block_number,
+        proof_da_hash.clone(),
+    ).await {
+        Ok(tx_digest) => {
+            info!(
+                "✅ Successfully updated block proof DA for block {} - Transaction: {}",
+                block_number, tx_digest
+            );
+        }
+        Err(e) => {
+            error!(
+                "❌ Failed to update block proof DA for block {}: {}",
+                block_number, e
+            );
+            return Err(anyhow::anyhow!("Failed to update block proof DA: {}", e));
+        }
+    }
+
+    // 2. Now create a settle job on the blockchain (after DA is updated)
+    let job_description = Some(format!(
+        "Settle block {} with proof DA hash",
+        block_number
+    ));
+    
+    match sui_interface.create_settle_job(
+        app_instance,
+        block_number,
+        job_description,
+    ).await {
+        Ok(tx_digest) => {
+            info!(
+                "✅ Successfully created settle job for block {} - Transaction: {}",
+                block_number, tx_digest
+            );
+        }
+        Err(e) => {
+            error!(
+                "❌ Failed to create settle job for block {}: {}",
+                block_number, e
+            );
+            return Err(anyhow::anyhow!("Failed to create settle job: {}", e));
+        }
+    }
+
+    info!("Block {} settlement complete - proof recorded with DA hash: {}", block_number, proof_da_hash);
     
     Ok(())
 }

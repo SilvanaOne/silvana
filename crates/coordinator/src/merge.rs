@@ -123,7 +123,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             info!("🔒 Settling block {} as complete for app_instance {}", proof_calc.block_number, app_instance);
             
             // Call settle for the complete block with the DA hash
-            settle(proof_calc.clone(), da_hash.to_string()).await?;
+            settle(app_instance, proof_calc.block_number, da_hash.to_string(), client).await?;
             
             return Ok(());
         }

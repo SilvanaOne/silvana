@@ -25,6 +25,7 @@ use coordinator::{
     GetSequenceStatesRequest, GetSequenceStatesResponse, SequenceState,
     ReadDataAvailabilityRequest, ReadDataAvailabilityResponse,
     GetProofRequest, GetProofResponse,
+    GetBlockProofRequest, GetBlockProofResponse,
     RetrieveSecretRequest, RetrieveSecretResponse,
 };
 
@@ -1193,6 +1194,305 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     success: false,
                     proof: None,
                     message: Some(format!("Failed to read proof: {}", e)),
+                }))
+            }
+        }
+    }
+
+    async fn get_block_proof(
+        &self,
+        request: Request<GetBlockProofRequest>,
+    ) -> Result<Response<GetBlockProofResponse>, Status> {
+        let req = request.into_inner();
+        
+        info!(
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            job_id = %req.job_id,
+            "Received GetBlockProof request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => job,
+            None => {
+                warn!("GetBlockProof request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Job not found: {}", req.job_id)),
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer || 
+               current.agent != agent_job.agent || 
+               current.agent_method != agent_job.agent_method {
+                warn!(
+                    "Session mismatch for GetBlockProof: session agent={}/{}/{}, job agent={}/{}/{}",
+                    current.developer, current.agent, current.agent_method,
+                    agent_job.developer, agent_job.agent, agent_job.agent_method
+                );
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some("Session does not match job assignment".to_string()),
+                }));
+            }
+        } else {
+            warn!("GetBlockProof request from unknown session: {}", req.session_id);
+            return Ok(Response::new(GetBlockProofResponse {
+                success: false,
+                block_proof: None,
+                message: Some("Invalid session ID".to_string()),
+            }));
+        }
+
+        // Use the app_instance from the job
+        let app_instance = agent_job.app_instance.clone();
+
+        // Get SUI client from shared state
+        let mut client = self.state.get_sui_client();
+
+        // Fetch the AppInstance object
+        let formatted_id = if app_instance.starts_with("0x") {
+            app_instance.clone()
+        } else {
+            format!("0x{}", app_instance)
+        };
+
+        // Get the AppInstance to find proof_calculations ObjectTable
+        let app_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+            object_id: Some(formatted_id.clone()),
+            version: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["json".to_string()],
+            }),
+        };
+
+        let app_response = match client.ledger_client().get_object(app_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to fetch AppInstance: {}", e);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Failed to fetch AppInstance: {}", e)),
+                }));
+            }
+        };
+
+        // Extract proof_calculations ObjectTable ID
+        let proof_calc_table_id = if let Some(proto_object) = app_response.object {
+            if let Some(json_value) = &proto_object.json {
+                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                    if let Some(proofs_field) = struct_value.fields.get("proof_calculations") {
+                        if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
+                            if let Some(table_id_field) = proofs_struct.fields.get("id") {
+                                if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
+                                    Some(table_id.clone())
+                                } else { None }
+                            } else { None }
+                        } else { None }
+                    } else { None }
+                } else { None }
+            } else { None }
+        } else { None };
+
+        let proof_calc_table_id = match proof_calc_table_id {
+            Some(id) => id,
+            None => {
+                error!("Could not extract proof_calculations table ID");
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some("Failed to extract proof_calculations table".to_string()),
+                }));
+            }
+        };
+
+        debug!("proof_calculations table ID: {}", proof_calc_table_id);
+
+        // List dynamic fields of proof_calculations ObjectTable to find our block
+        let list_request = sui_rpc::proto::sui::rpc::v2beta2::ListDynamicFieldsRequest {
+            parent: Some(proof_calc_table_id),
+            page_size: Some(100),
+            page_token: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["field_id".to_string(), "name_value".to_string()],
+            }),
+        };
+
+        let list_response = match client.live_data_client().list_dynamic_fields(list_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to list proof_calculations dynamic fields: {}", e);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Failed to list dynamic fields: {}", e)),
+                }));
+            }
+        };
+
+        // Find the field with our block_number
+        let mut proof_calc_field_id = None;
+        for field in &list_response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                // The name_value is BCS-encoded u64 (block_number)
+                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+                    if field_block_number == req.block_number {
+                        proof_calc_field_id = field.field_id.clone();
+                        break;
+                    }
+                }
+            }
+        }
+
+        let proof_calc_field_id = match proof_calc_field_id {
+            Some(id) => id,
+            None => {
+                warn!("No ProofCalculation found for block {}", req.block_number);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("No ProofCalculation found for block {}", req.block_number)),
+                }));
+            }
+        };
+
+        // Fetch the ProofCalculation object
+        let proof_calc_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+            object_id: Some(proof_calc_field_id.clone()),
+            version: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["json".to_string()],
+            }),
+        };
+
+        let proof_calc_response = match client.ledger_client().get_object(proof_calc_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to fetch ProofCalculation field: {}", e);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Failed to fetch ProofCalculation: {}", e)),
+                }));
+            }
+        };
+
+        // Extract the actual ProofCalculation object ID from the Field wrapper
+        let proof_calc_object_id = if let Some(proof_object) = proof_calc_response.object {
+            if let Some(proof_json) = &proof_object.json {
+                debug!("ProofCalculation field JSON structure: {:?}", proof_json);
+                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_json.kind {
+                    if let Some(value_field) = struct_value.fields.get("value") {
+                        if let Some(prost_types::value::Kind::StringValue(object_id)) = &value_field.kind {
+                            Some(object_id.clone())
+                        } else { None }
+                    } else { None }
+                } else { None }
+            } else { None }
+        } else { None };
+
+        let proof_calc_object_id = match proof_calc_object_id {
+            Some(id) => id,
+            None => {
+                error!("Could not extract ProofCalculation object ID");
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some("Failed to extract ProofCalculation object ID".to_string()),
+                }));
+            }
+        };
+
+        debug!("Fetching actual ProofCalculation object: {}", proof_calc_object_id);
+
+        // Fetch the actual ProofCalculation object to get block_proof field
+        let actual_proof_calc_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+            object_id: Some(proof_calc_object_id),
+            version: None,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["json".to_string()],
+            }),
+        };
+
+        let actual_proof_calc_response = match client.ledger_client().get_object(actual_proof_calc_request).await {
+            Ok(resp) => resp.into_inner(),
+            Err(e) => {
+                error!("Failed to fetch actual ProofCalculation: {}", e);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Failed to fetch ProofCalculation: {}", e)),
+                }));
+            }
+        };
+
+        // Extract the block_proof field from ProofCalculation
+        let mut block_proof: Option<String> = None;
+        if let Some(proof_calc_object) = actual_proof_calc_response.object {
+            if let Some(proof_calc_json) = &proof_calc_object.json {
+                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_calc_json.kind {
+                    // Get the block_proof field (Option<String>)
+                    if let Some(block_proof_field) = struct_value.fields.get("block_proof") {
+                        match &block_proof_field.kind {
+                            // Direct string value (Some case)
+                            Some(prost_types::value::Kind::StringValue(proof)) => {
+                                block_proof = Some(proof.clone());
+                                info!("Found block_proof for block {}", req.block_number);
+                            }
+                            // Null value (None case)
+                            Some(prost_types::value::Kind::NullValue(_)) => {
+                                debug!("block_proof is null for block {}", req.block_number);
+                            }
+                            // Struct with Some field (older format compatibility)
+                            Some(prost_types::value::Kind::StructValue(option_struct)) => {
+                                if let Some(some_field) = option_struct.fields.get("Some") {
+                                    if let Some(prost_types::value::Kind::StringValue(proof)) = &some_field.kind {
+                                        block_proof = Some(proof.clone());
+                                        info!("Found block_proof in Some variant for block {}", req.block_number);
+                                    }
+                                }
+                            }
+                            _ => {
+                                debug!("block_proof field has unexpected kind");
+                            }
+                        }
+                    } else {
+                        debug!("No block_proof field found in ProofCalculation");
+                    }
+                } else {
+                    debug!("ProofCalculation JSON is not a struct");
+                }
+            } else {
+                debug!("ProofCalculation object has no JSON");
+            }
+        } else {
+            debug!("No ProofCalculation object found");
+        }
+
+        // Return the block proof if found
+        match block_proof {
+            Some(proof) => {
+                info!("Successfully retrieved block proof for block {}", req.block_number);
+                Ok(Response::new(GetBlockProofResponse {
+                    success: true,
+                    block_proof: Some(proof),
+                    message: None,
+                }))
+            }
+            None => {
+                info!("No block proof available yet for block {}", req.block_number);
+                Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Block proof not available yet for block {}", req.block_number)),
                 }))
             }
         }

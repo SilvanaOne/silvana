@@ -153,6 +153,20 @@ message GetProofResponse {
   optional string message = 3; // available when success is false
 }
 
+// Request message for getting a block proof
+message GetBlockProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  string job_id = 3;
+}
+
+// Response message for getting a block proof
+message GetBlockProofResponse {
+  bool success = 1;
+  optional string block_proof = 2; // available when success is true
+  optional string message = 3; // available when success is false
+}
+
 // Request message for retrieving a secret
 message RetrieveSecretRequest {
   string job_id = 1;
@@ -177,5 +191,6 @@ service CoordinatorService {
   rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
   rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  rpc GetBlockProof(GetBlockProofRequest) returns (GetBlockProofResponse);
   rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
 }

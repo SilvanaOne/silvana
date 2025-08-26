@@ -99,11 +99,23 @@ pub fn parse_jobs_event_with_contents(event: &Event) -> Option<String> {
                                 .sequences
                                 .map(|s| format!("{:?}", s))
                                 .unwrap_or_else(|| "None".to_string());
+                            let sequences1_str = job_event
+                                .sequences1
+                                .map(|s| format!("{:?}", s))
+                                .unwrap_or_else(|| "None".to_string());
+                            let sequences2_str = job_event
+                                .sequences2
+                                .map(|s| format!("{:?}", s))
+                                .unwrap_or_else(|| "None".to_string());
                             let description_str =
                                 job_event.description.unwrap_or_else(|| "None".to_string());
+                            let block_number_str = job_event
+                                .block_number
+                                .map(|b| b.to_string())
+                                .unwrap_or_else(|| "None".to_string());
 
                             return Some(format!(
-                                "JobCreatedEvent:\n  job_sequence: {}\n  description: {}\n  developer: {}\n  agent: {}\n  agent_method: {}\n  app: {}\n  app_instance: {}\n  app_instance_method: {}\n  sequences: {}\n  data: 0x{}\n  status: {:?}\n  created_at: {}",
+                                "JobCreatedEvent:\n  job_sequence: {}\n  description: {}\n  developer: {}\n  agent: {}\n  agent_method: {}\n  app: {}\n  app_instance: {}\n  app_instance_method: {}\n  block_number: {}\n  sequences: {}\n  sequences1: {}\n  sequences2: {}\n  data: 0x{}\n  status: {:?}\n  created_at: {}",
                                 job_event.job_sequence,
                                 description_str,
                                 job_event.developer,
@@ -112,7 +124,10 @@ pub fn parse_jobs_event_with_contents(event: &Event) -> Option<String> {
                                 job_event.app,
                                 job_event.app_instance,
                                 job_event.app_instance_method,
+                                block_number_str,
                                 sequences_str,
+                                sequences1_str,
+                                sequences2_str,
                                 data_hex,
                                 job_event.status,
                                 created_time
@@ -161,7 +176,10 @@ struct JobCreatedEventBcs {
     app: String,
     app_instance: String,
     app_instance_method: String,
+    block_number: Option<u64>,
     sequences: Option<Vec<u64>>,
+    sequences1: Option<Vec<u64>>,
+    sequences2: Option<Vec<u64>>,
     data: Vec<u8>,
     status: JobStatusBcs,
     created_at: u64,

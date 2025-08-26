@@ -1,4 +1,4 @@
-use sui::transactions::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
+use sui::transactions::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use sui_rpc::Client;
 use tracing::{info, warn, error, debug};
 
@@ -172,6 +172,154 @@ impl SuiJobInterface {
             Err(e) => {
                 error!(
                     "Failed to create merge job for block {} on blockchain: {}",
+                    block_number, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Create a settle job on the Sui blockchain
+    pub async fn create_settle_job(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        job_description: Option<String>,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to create settle job for block {} on Sui blockchain",
+            block_number
+        );
+
+        match create_settle_job_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            job_description,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully created settle job for block {} on blockchain, tx: {}",
+                    block_number, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to create settle job for block {} on blockchain: {}",
+                    block_number, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Update block proof data availability on the Sui blockchain
+    pub async fn update_block_proof_data_availability(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        proof_data_availability: String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to update block proof DA for block {} on Sui blockchain",
+            block_number
+        );
+
+        match update_block_proof_data_availability_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            proof_data_availability.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated block proof DA for block {} on blockchain, tx: {}",
+                    block_number, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to update block proof DA for block {} on blockchain: {}",
+                    block_number, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Update block settlement transaction hash on the Sui blockchain
+    pub async fn update_block_settlement_tx_hash(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        settlement_tx_hash: String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to update block settlement tx hash for block {} on Sui blockchain",
+            block_number
+        );
+
+        match update_block_settlement_tx_hash_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            settlement_tx_hash.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated block settlement tx hash for block {} on blockchain, tx: {}",
+                    block_number, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to update block settlement tx hash for block {} on blockchain: {}",
+                    block_number, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Update block settlement included in block on the Sui blockchain
+    pub async fn update_block_settlement_tx_included_in_block(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        settled_at: u64,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to update block settlement included for block {} on Sui blockchain",
+            block_number
+        );
+
+        match update_block_settlement_tx_included_in_block_tx(
+            &mut self.client,
+            app_instance,
+            block_number,
+            settled_at,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated block settlement included for block {} on blockchain, tx: {}",
+                    block_number, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to update block settlement included for block {} on blockchain: {}",
                     block_number, e
                 );
                 Err(e.into())

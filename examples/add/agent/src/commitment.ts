@@ -1,4 +1,12 @@
-import { Field, UInt32, UInt64, Struct, Encoding, Provable } from "o1js";
+import {
+  Field,
+  UInt32,
+  UInt64,
+  Struct,
+  Encoding,
+  Provable,
+  Poseidon,
+} from "o1js";
 import { Fr, update, digestStruct, scalar, R } from "@silvana-one/mina-utils";
 import { convertFieldToCanonicalElement } from "./convert.js";
 
@@ -43,6 +51,10 @@ export class AddProgramCommitment extends Struct({
       actionsSequence: UInt64.from(BigInt(actionsSequence)),
       actionsRPower: Fr.from(BigInt(actionsRPower)).assertCanonical(),
     });
+  }
+
+  hash(): Field {
+    return Poseidon.hashPacked(AddProgramCommitment, this);
   }
 }
 

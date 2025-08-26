@@ -9,11 +9,13 @@ import {
   SubmitProofRequestSchema,
   SubmitStateRequestSchema,
   GetProofRequestSchema,
+  GetBlockProofRequestSchema,
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
 import { deserializeTransitionData } from "./transition.js";
 import { getStateAndProof, SequenceState, merge } from "./state.js";
 import { serializeProofAndState, serializeState } from "./proof.js";
+import { settle } from "./settle.js";
 
 async function agent() {
   console.time("Agent runtime");
@@ -89,12 +91,76 @@ async function agent() {
             );
             console.log("==========================");
             
-            // TODO: Implement settle logic here
-            console.log("📝 TODO: Implement settle logic");
-            console.log("For now, just logging settle job information");
+            // Get the block proof for settlement
+            const blockNumber = response.job.blockNumber!;
+            console.log(`\nFetching block proof for block ${blockNumber}...`);
             
-            // Complete the settle job (for now, just mark as complete)
-            console.log("Marking settle job as complete (placeholder)...");
+            try {
+              // Fetch the block proof using GetBlockProof
+              const getBlockProofRequest = create(GetBlockProofRequestSchema, {
+                sessionId: sessionId,
+                blockNumber: blockNumber,
+                jobId: response.job.jobId,
+              });
+              
+              const blockProofResponse = await client.getBlockProof(getBlockProofRequest);
+              
+              if (!blockProofResponse.success || !blockProofResponse.blockProof) {
+                throw new Error(`Failed to fetch block proof: ${blockProofResponse.message || "Block proof not available yet"}`);
+              }
+              
+              console.log(`Successfully fetched block proof (${blockProofResponse.blockProof.length} chars)`);
+              
+              // Verify the block proof
+              console.log("\n🔐 Starting block proof verification...");
+              const settlementStartTime = Date.now();
+              
+              const isValid = await settle(blockProofResponse.blockProof, blockNumber);
+              
+              const settlementTimeMs = Date.now() - settlementStartTime;
+              console.log(`\n✅ Settlement verification completed in ${settlementTimeMs}ms`);
+              
+              if (isValid) {
+                console.log("Block proof is valid and ready for on-chain settlement!");
+                
+                // TODO: In production, submit the proof to the smart contract
+                console.log("\n📝 TODO: Submit proof to smart contract for on-chain settlement");
+                console.log("For now, marking job as complete...");
+                
+                // Complete the job successfully
+                console.log(`\nCompleting settle job ${response.job.jobId}...`);
+                const completeRequest = create(CompleteJobRequestSchema, {
+                  jobId: response.job.jobId,
+                  sessionId: sessionId,
+                });
+                
+                const completeResponse = await client.completeJob(completeRequest);
+                if (completeResponse.success) {
+                  console.log(`✅ Settle job completed successfully: ${completeResponse.message}`);
+                } else {
+                  console.error(`Failed to complete settle job: ${completeResponse.message}`);
+                }
+              } else {
+                throw new Error("Block proof verification failed");
+              }
+              
+            } catch (error) {
+              console.error(`\n❌ Failed to settle block: ${error}`);
+              
+              // Fail the job
+              console.log(`Failing job ${response.job.jobId} due to settlement error...`);
+              const failRequest = create(FailJobRequestSchema, {
+                jobId: response.job.jobId,
+                errorMessage: `Settlement failed: ${error}`,
+                sessionId: sessionId,
+              });
+              
+              await client.failJob(failRequest);
+              console.log("Job marked as failed");
+              continue;
+            }
+            
+            console.log("Settle job processing complete");
             
           } else if (response.job.appInstanceMethod === "merge") {
             console.log("🔀 MERGE JOB DETECTED");
