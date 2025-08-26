@@ -63,12 +63,11 @@ describe("Deploy App for Coordinator", async () => {
     await fs.writeFile(envPath, envContent, "utf-8");
 
     console.log("💾 Configuration saved to .env.app");
+    console.log("App instance ID:", appInstanceID);
     console.log("\n📋 Next steps:");
     console.log(
-      "1. Copy COORDINATION_PACKAGE_ID and registry settings to your coordinator's .env"
+      "Copy SILVANA_REGISTRY_PACKAGE and SILVANA_REGISTRY to your coordinator's .env"
     );
-    console.log("2. Start the coordinator: cargo run --bin coordinator");
-    console.log("3. Run send.test.ts to generate events");
     console.log("\n📦 Registry Details:");
     console.log(`SILVANA_REGISTRY=${registryAddress}`);
     console.log(`SILVANA_REGISTRY_PACKAGE=${registryPackageID}`);

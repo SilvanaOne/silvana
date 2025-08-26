@@ -105,6 +105,23 @@ async fn main() -> Result<()> {
     // 2. Start reconciliation task in a separate thread (runs every 10 minutes)
     let reconciliation_state = state.clone();
     let reconciliation_client = sui_client.clone();
+    
+    // Test fetch_app_instance with the provided app instance ID
+    {
+        let test_app_instance_id = "0x8384d9ddc045e8ef6c85a382671452fa1b46407cdd8d55be730e3fd386e431e5";
+        let mut test_client = sui_client.clone();
+        info!("🧪 Testing fetch_app_instance with ID: {}", test_app_instance_id);
+        
+        match crate::fetch::fetch_app_instance(&mut test_client, test_app_instance_id).await {
+            Ok(app_instance) => {
+                info!("✅ Successfully fetched AppInstance:");
+                info!("  Full result: {:#?}", app_instance);
+            }
+            Err(e) => {
+                error!("❌ Failed to fetch AppInstance: {}", e);
+            }
+        }
+    }
     let reconciliation_handle = task::spawn(async move {
         let mut reconciliation_interval = tokio::time::interval(Duration::from_secs(600)); // 10 minutes
         reconciliation_interval.tick().await; // Skip the first immediate tick

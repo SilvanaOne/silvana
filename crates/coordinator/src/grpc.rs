@@ -453,7 +453,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .ok_or_else(|| Status::internal(format!("No ProofCalculation found for block {}", req.block_number)))?;
         
         // Create ProofCalculation with real data from blockchain
-        let proof_calc = ProofCalculation {
+        let _proof_calc = ProofCalculation {
             block_number: req.block_number,
             sequences: sequences.clone(),
             start_sequence: proof_calc_info.start_sequence,
@@ -486,8 +486,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 info!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
 
                 // Spawn merge analysis in background to not delay the response
-                let proof_calc_clone = proof_calc.clone();
-                let da_hash_clone = da_hash.clone();
                 let app_instance_clone = agent_job.app_instance.clone();
                 let mut client_clone = self.state.get_sui_client();
                 let job_id_clone = req.job_id.clone();
@@ -495,8 +493,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 tokio::spawn(async move {
                     info!("🔄 Starting background merge analysis for job {}", job_id_clone);
                     if let Err(e) = analyze_proof_completion(
-                        &proof_calc_clone, 
-                        &da_hash_clone, 
                         &app_instance_clone,
                         &mut client_clone
                     ).await {
@@ -516,7 +512,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 error!("Failed to submit proof for job {} on blockchain: {}", req.job_id, e);
                 
                 // Even after failure, spawn merge analysis in background
-                let proof_calc_clone = proof_calc.clone();
                 let app_instance_clone = agent_job.app_instance.clone();
                 let mut client_clone = self.state.get_sui_client();
                 let job_id_clone = req.job_id.clone();
@@ -524,8 +519,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 tokio::spawn(async move {
                     info!("🔄 Starting background merge analysis for failed job {}", job_id_clone);
                     if let Err(analysis_err) = analyze_proof_completion(
-                        &proof_calc_clone, 
-                        "", // No DA hash for failed submission
                         &app_instance_clone,
                         &mut client_clone
                     ).await {
@@ -1230,39 +1223,132 @@ pub async fn start_grpc_server(socket_path: &str, state: SharedState) -> Result<
 }
 
 // Helper function to analyze proof completion and determine next action
+// Refactored to take only app_instance and client, fetches all necessary data from blockchain
 async fn analyze_proof_completion(
-    proof_calc: &ProofCalculation, 
-    da_hash: &str,
     app_instance: &str,
     client: &mut sui_rpc::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let sequences = &proof_calc.sequences;
-    let block_number = proof_calc.block_number;
+    info!("🔍 Starting proof completion analysis for app_instance: {}", app_instance);
     
-    // Check if sequences are consecutive and form a complete range
-    let mut sorted_sequences = sequences.clone();
-    sorted_sequences.sort();
+    // Step 1: Fetch the AppInstance to get block numbers and proof_calculations table
+    let formatted_id = if app_instance.starts_with("0x") {
+        app_instance.to_string()
+    } else {
+        format!("0x{}", app_instance)
+    };
     
-    // Check if sequences are consecutive
-    let is_consecutive = sorted_sequences.windows(2).all(|w| w[1] == w[0] + 1);
+    let request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+        object_id: Some(formatted_id.clone()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec!["json".to_string()],
+        }),
+    };
     
-    if !is_consecutive {
-        info!("Sequences {:?} are not consecutive - analyzing for merge opportunities", sequences);
-        analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client, da_hash).await?;
+    let response = match client.ledger_client().get_object(request).await {
+        Ok(resp) => resp.into_inner(),
+        Err(e) => {
+            error!("Failed to fetch AppInstance: {}", e);
+            return Err(Box::new(e));
+        }
+    };
+    
+    // Extract last_proved_block_number and block_number from AppInstance
+    let (last_proved_block_number, current_block_number) = if let Some(proto_object) = response.object {
+        if let Some(json_value) = &proto_object.json {
+            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                let last_proved = struct_value.fields.get("last_proved_block_number")
+                    .and_then(|f| match &f.kind {
+                        Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
+                        Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                
+                let current_block = struct_value.fields.get("block_number")
+                    .and_then(|f| match &f.kind {
+                        Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
+                        Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                
+                (last_proved, current_block)
+            } else {
+                (0, 0)
+            }
+        } else {
+            (0, 0)
+        }
+    } else {
+        (0, 0)
+    };
+    
+    info!("📊 AppInstance status: last_proved_block_number={}, current_block_number={}", 
+        last_proved_block_number, current_block_number);
+    
+    if last_proved_block_number >= current_block_number {
+        info!("✅ All blocks are already proved up to block {}", current_block_number);
         return Ok(());
     }
     
-    let start_sequence = sorted_sequences[0];
-    let end_sequence = sorted_sequences[sorted_sequences.len() - 1];
+    // Step 2: Process blocks in order from last_proved_block_number + 1 to current_block_number
+    info!("🔄 Processing blocks from {} to {} for merge opportunities", 
+        last_proved_block_number + 1, current_block_number);
     
-    info!(
-        "Proof for block {} covers sequences {}-{} (total: {})",
-        block_number, start_sequence, end_sequence, sequences.len()
-    );
+    for block_number in (last_proved_block_number + 1)..=current_block_number {
+        info!("📦 Analyzing block {} for merge opportunities", block_number);
+        
+        // Fetch ProofCalculations for this block
+        let proof_calculations = match crate::fetch::fetch_proof_calculations(
+            client,
+            app_instance,
+            block_number
+        ).await {
+            Ok(proofs) => {
+                if proofs.is_empty() {
+                    info!("⏭️ No ProofCalculations found for block {}, skipping", block_number);
+                    continue;
+                }
+                info!("📊 Found {} ProofCalculation(s) for block {}", proofs.len(), block_number);
+                proofs
+            }
+            Err(e) => {
+                warn!("Failed to fetch ProofCalculations for block {}: {}, skipping", block_number, e);
+                continue;
+            }
+        };
+        
+        // Use the first ProofCalculation for this block
+        let proof_calc_info = &proof_calculations[0];
+        
+        // Create a ProofCalculation struct for analysis
+        // Note: We don't have sequences here, but the merge analysis will fetch all proofs
+        let proof_calc = ProofCalculation {
+            block_number,
+            sequences: vec![], // Will be populated by merge analysis from blockchain data
+            start_sequence: proof_calc_info.start_sequence,
+            end_sequence: proof_calc_info.end_sequence,
+            proofs: vec![], // Will be populated by merge analysis
+            block_proof: proof_calc_info.block_proof.clone(),
+            is_finished: proof_calc_info.is_finished,
+        };
+        
+        // Analyze this block for merge opportunities
+        // Use empty da_hash since we're just looking for merge opportunities
+        if let Err(e) = analyze_and_create_merge_jobs_with_blockchain_data(
+            &proof_calc,
+            app_instance,
+            client,
+            "", // No specific da_hash for general analysis
+        ).await {
+            warn!("Failed to analyze block {} for merges: {}", block_number, e);
+            // Continue to next block even if this one fails
+        } else {
+            info!("✅ Successfully analyzed block {} for merge opportunities", block_number);
+        }
+    }
     
-    // Now use blockchain data to make intelligent decisions (including block completeness check)
-    info!("🔍 Analyzing with blockchain data for merge opportunities or block settlement");
-    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client, da_hash).await?;
-    
+    info!("🎉 Completed proof completion analysis for all blocks");
     Ok(())
 }
