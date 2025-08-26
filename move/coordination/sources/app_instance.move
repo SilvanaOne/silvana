@@ -220,9 +220,9 @@ public fun increase_sequence(
         clock,
         ctx,
     );
+    app_instance.sequence = app_instance.sequence + 1;
 
     try_create_block(app_instance, clock, ctx);
-    app_instance.sequence = app_instance.sequence + 1;
 }
 
 public fun try_create_block(

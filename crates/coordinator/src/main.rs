@@ -27,6 +27,8 @@ use tracing::{debug, info, warn, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::Config;
+use crate::fetch::fetch_app_instance;
+use crate::grpc::analyze_proof_completion;
 use crate::job_searcher::JobSearcher;
 use crate::block::try_create_block;
 use crate::sui_interface::SuiJobInterface;
@@ -108,7 +110,7 @@ async fn main() -> Result<()> {
     
     // Test fetch_app_instance with the provided app instance ID
     {
-        let test_app_instance_id = "0x8384d9ddc045e8ef6c85a382671452fa1b46407cdd8d55be730e3fd386e431e5";
+        let test_app_instance_id = "0x7881cb90e9363ea4bc5b6512a1e8e7e9b91e29fd78b13840b7b87790da3ce902";
         let mut test_client = sui_client.clone();
         info!("🧪 Testing fetch_app_instance with ID: {}", test_app_instance_id);
         
@@ -216,6 +218,22 @@ async fn main() -> Result<()> {
                         Err(e) => {
                             error_count += 1;
                             debug!("Error checking block creation for app_instance {}: {}", app_instance_id, e);
+                        }
+                    }
+                    
+                    // After attempting block creation (whether successful or not), 
+                    // always analyze proof completion to check for merge opportunities
+                    debug!("🔍 Analyzing proof completion for app_instance {}", app_instance_id);
+                    match fetch_app_instance(&mut client, &app_instance_id).await {
+                        Ok(app_instance) => {
+                            if let Err(e) = analyze_proof_completion(&app_instance, &mut client).await {
+                                debug!("Failed to analyze proof completion for {}: {}", app_instance_id, e);
+                            } else {
+                                debug!("✅ Proof completion analysis done for {}", app_instance_id);
+                            }
+                        }
+                        Err(e) => {
+                            debug!("Failed to fetch AppInstance {} for proof analysis: {}", app_instance_id, e);
                         }
                     }
                 }

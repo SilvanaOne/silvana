@@ -361,18 +361,35 @@ public(package) fun start_proving(
     clock: &Clock,
     ctx: &TxContext,
 ) {
+    // Sort and validate all sequences, get back sorted versions
+    let sorted_sequences = sort_and_validate_sequences(&sequences, proof_calculation.start_sequence, &proof_calculation.end_sequence);
+    
+    // Sort and validate sequence1 if provided
+    let sorted_sequence1 = if (sequence1.is_some()) {
+        option::some(sort_and_validate_sequences(sequence1.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+    } else {
+        option::none()
+    };
+    
+    // Sort and validate sequence2 if provided
+    let sorted_sequence2 = if (sequence2.is_some()) {
+        option::some(sort_and_validate_sequences(sequence2.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+    } else {
+        option::none()
+    };
+    
     let mut isBlockProof = false;
     if (proof_calculation.end_sequence.is_some()) {
         let end_sequence = *proof_calculation.end_sequence.borrow();
         if (
-            sequences[0] == proof_calculation.start_sequence && sequences[vector::length(&sequences)-1] == end_sequence
+            sorted_sequences[0] == proof_calculation.start_sequence && sorted_sequences[vector::length(&sorted_sequences)-1] == end_sequence
         ) {
             isBlockProof = true;
         }
     };
     let proof = Proof {
-        sequence1,
-        sequence2,
+        sequence1: sorted_sequence1,
+        sequence2: sorted_sequence2,
         rejected_count: 0,
         job_id,
         prover: ctx.sender(),
@@ -381,13 +398,13 @@ public(package) fun start_proving(
         status: PROOF_STATUS_STARTED,
         timestamp: sui::clock::timestamp_ms(clock),
     };
-    if (contains(&proof_calculation.proofs, &sequences)) {
+    if (contains(&proof_calculation.proofs, &sorted_sequences)) {
         let mut existing_sequence_1: vector<u64> = vector::empty();
         let mut existing_sequence_2: vector<u64> = vector::empty();
         {
             let existing_proof = get_mut(
                 &mut proof_calculation.proofs,
-                &sequences,
+                &sorted_sequences,
             );
             assert!(
                 existing_proof.status == PROOF_STATUS_REJECTED,
@@ -433,30 +450,30 @@ public(package) fun start_proving(
                 };
             }
         };
-    } else { insert(&mut proof_calculation.proofs, sequences, proof); };
-    if (sequence1.is_some()) {
+    } else { insert(&mut proof_calculation.proofs, sorted_sequences, proof); };
+    if (sorted_sequence1.is_some()) {
         let proof1 = get_mut(
             &mut proof_calculation.proofs,
-            sequence1.borrow(),
+            sorted_sequence1.borrow(),
         );
         reserve_proof(proof1, isBlockProof, clock, ctx);
         event::emit(ProofReservedEvent {
             block_number: proof_calculation.block_number,
-            sequences: *sequence1.borrow(),
+            sequences: *sorted_sequence1.borrow(),
             da_hash: *proof1.da_hash.borrow(),
             timestamp: sui::clock::timestamp_ms(clock),
             user: ctx.sender(),
         });
     };
-    if (sequence2.is_some()) {
+    if (sorted_sequence2.is_some()) {
         let proof2 = get_mut(
             &mut proof_calculation.proofs,
-            sequence2.borrow(),
+            sorted_sequence2.borrow(),
         );
         reserve_proof(proof2, isBlockProof, clock, ctx);
         event::emit(ProofReservedEvent {
             block_number: proof_calculation.block_number,
-            sequences: *sequence2.borrow(),
+            sequences: *sorted_sequence2.borrow(),
             da_hash: *proof2.da_hash.borrow(),
             timestamp: sui::clock::timestamp_ms(clock),
             user: ctx.sender(),
@@ -464,7 +481,7 @@ public(package) fun start_proving(
     };
     event::emit(ProofStartedEvent {
         block_number: proof_calculation.block_number,
-        sequences,
+        sequences: sorted_sequences,
         timestamp: sui::clock::timestamp_ms(clock),
         prover: ctx.sender(),
     })
@@ -476,10 +493,13 @@ public fun reject_proof(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    // Sort and validate sequences
+    let sorted_sequences = sort_and_validate_sequences(&sequences, proof_calculation.start_sequence, &proof_calculation.end_sequence);
+    
     let mut sequence1 = vector::empty<u64>();
     let mut sequence2 = vector::empty<u64>();
     {
-        let proof = get_mut(&mut proof_calculation.proofs, &sequences);
+        let proof = get_mut(&mut proof_calculation.proofs, &sorted_sequences);
         proof.status = PROOF_STATUS_REJECTED;
         proof.rejected_count = proof.rejected_count + 1;
         if (proof.sequence1.is_some()) {
@@ -515,10 +535,61 @@ public fun reject_proof(
     };
     event::emit(ProofRejectedEvent {
         block_number: proof_calculation.block_number,
-        sequences,
+        sequences: sorted_sequences,
         timestamp: sui::clock::timestamp_ms(clock),
         verifier: ctx.sender(),
     });
+}
+
+#[error]
+const ESequenceOutOfRange: vector<u8> = b"Sequence is outside valid range for this block";
+
+#[error]
+const ESequencesCannotBeEmpty: vector<u8> = b"Sequences vector cannot be empty";
+
+// Helper function to sort and validate that all sequences are within the valid range
+// Returns a sorted copy of the input sequences
+fun sort_and_validate_sequences(
+    sequences: &vector<u64>,
+    start_sequence: u64,
+    end_sequence: &Option<u64>,
+): vector<u64> {
+    let len = vector::length(sequences);
+    
+    // Sequences cannot be empty
+    assert!(len > 0, ESequencesCannotBeEmpty);
+    
+    // Clone the input vector
+    let mut sorted_sequences = *sequences;
+    
+    // Sort the sequences using bubble sort (simple for Move)
+    let mut i = 0;
+    while (i < len) {
+        let mut j = 0;
+        while (j < len - i - 1) {
+            if (sorted_sequences[j] > sorted_sequences[j + 1]) {
+                // Swap elements
+                vector::swap(&mut sorted_sequences, j, j + 1);
+            };
+            j = j + 1;
+        };
+        i = i + 1;
+    };
+    
+    // After sorting, only need to check first and last elements
+    let first_seq = sorted_sequences[0];
+    let last_seq = sorted_sequences[len - 1];
+    
+    // Check that first sequence is >= start_sequence
+    assert!(first_seq >= start_sequence, ESequenceOutOfRange);
+    
+    // If end_sequence is set, check that last sequence is <= end_sequence
+    if (end_sequence.is_some()) {
+        let end_seq = *end_sequence.borrow();
+        assert!(last_seq <= end_seq, ESequenceOutOfRange);
+    };
+    
+    sorted_sequences
 }
 
 // TODO: add prover whitelisting or proof verification
@@ -536,9 +607,25 @@ public fun submit_proof(
     clock: &Clock,
     ctx: &mut TxContext,
 ): bool {
+    // Sort and validate all sequences, get back sorted versions
+    let sorted_sequences = sort_and_validate_sequences(&sequences, proof_calculation.start_sequence, &proof_calculation.end_sequence);
+    
+    // Sort and validate sequence1 if provided
+    let sorted_sequence1 = if (sequence1.is_some()) {
+        option::some(sort_and_validate_sequences(sequence1.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+    } else {
+        option::none()
+    };
+    
+    // Sort and validate sequence2 if provided
+    let sorted_sequence2 = if (sequence2.is_some()) {
+        option::some(sort_and_validate_sequences(sequence2.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+    } else {
+        option::none()
+    };
     let proof = Proof {
-        sequence1,
-        sequence2,
+        sequence1: sorted_sequence1,
+        sequence2: sorted_sequence2,
         rejected_count: 0,
         job_id,
         prover: ctx.sender(),
@@ -549,7 +636,7 @@ public fun submit_proof(
     };
     event::emit(ProofSubmittedEvent {
         block_number: proof_calculation.block_number,
-        sequences,
+        sequences: sorted_sequences,
         da_hash,
         timestamp: sui::clock::timestamp_ms(clock),
         prover: ctx.sender(),
@@ -558,35 +645,35 @@ public fun submit_proof(
         prover_memory,
         cpu_time,
     });
-    if (contains(&proof_calculation.proofs, &sequences)) {
-        let existing_proof = get_mut(&mut proof_calculation.proofs, &sequences);
+    if (contains(&proof_calculation.proofs, &sorted_sequences)) {
+        let existing_proof = get_mut(&mut proof_calculation.proofs, &sorted_sequences);
         let rejected_count = existing_proof.rejected_count;
         *existing_proof = proof;
         existing_proof.rejected_count = rejected_count;
-    } else { insert(&mut proof_calculation.proofs, sequences, proof); };
-    if (sequence1.is_some()) {
+    } else { insert(&mut proof_calculation.proofs, sorted_sequences, proof); };
+    if (sorted_sequence1.is_some()) {
         let proof1 = get_mut(
             &mut proof_calculation.proofs,
-            sequence1.borrow(),
+            sorted_sequence1.borrow(),
         );
         use_proof(proof1, clock, ctx);
         event::emit(ProofUsedEvent {
             block_number: proof_calculation.block_number,
-            sequences: *sequence1.borrow(),
+            sequences: *sorted_sequence1.borrow(),
             da_hash: *proof1.da_hash.borrow(),
             timestamp: sui::clock::timestamp_ms(clock),
             user: ctx.sender(),
         });
     };
-    if (sequence2.is_some()) {
+    if (sorted_sequence2.is_some()) {
         let proof2 = get_mut(
             &mut proof_calculation.proofs,
-            sequence2.borrow(),
+            sorted_sequence2.borrow(),
         );
         use_proof(proof2, clock, ctx);
         event::emit(ProofUsedEvent {
             block_number: proof_calculation.block_number,
-            sequences: *sequence2.borrow(),
+            sequences: *sorted_sequence2.borrow(),
             da_hash: *proof2.da_hash.borrow(),
             timestamp: sui::clock::timestamp_ms(clock),
             user: ctx.sender(),
@@ -595,8 +682,8 @@ public fun submit_proof(
     if (proof_calculation.end_sequence.is_some()) {
         let end_sequence = *proof_calculation.end_sequence.borrow();
         if (
-            sequences[0]==proof_calculation.start_sequence && 
-            sequences[vector::length(&sequences)-1] == end_sequence
+            sorted_sequences[0]==proof_calculation.start_sequence && 
+            sorted_sequences[vector::length(&sorted_sequences)-1] == end_sequence
         ) {
             finish_proof_calculation(
                 proof_calculation,
