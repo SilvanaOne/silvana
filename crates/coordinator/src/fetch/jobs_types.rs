@@ -80,8 +80,14 @@ pub struct Job {
     pub app_instance: String,
     /// App instance method name
     pub app_instance_method: String,
+    /// Optional block number
+    pub block_number: Option<u64>,
     /// Optional sequence numbers
     pub sequences: Option<Vec<u64>>,
+    /// Optional sequences1 for merge operations
+    pub sequences1: Option<Vec<u64>>,
+    /// Optional sequences2 for merge operations
+    pub sequences2: Option<Vec<u64>>,
     /// Job data as bytes
     pub data: Vec<u8>,
     /// Job status

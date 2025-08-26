@@ -1,5 +1,5 @@
 use crate::job_id::generate_job_id;
-use crate::pending::PendingJob;
+use crate::fetch::jobs_types::Job;
 use crate::state::SharedState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,14 +16,14 @@ pub struct AgentJob {
     pub developer: String,
     pub agent: String,
     pub agent_method: String,
-    pub pending_job: PendingJob,
+    pub pending_job: Job,
     #[allow(dead_code)]
     pub sent_at: u64, // Unix timestamp when job was sent to agent
     pub start_tx_sent: bool, // Whether start_job transaction was sent
 }
 
 impl AgentJob {
-    pub fn new(pending_job: PendingJob, state: &SharedState) -> Self {
+    pub fn new(pending_job: Job, state: &SharedState) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -338,7 +338,7 @@ impl Default for AgentJobDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pending::PendingJob;
+    use crate::fetch::jobs_types::{Job, JobStatus};
     use sui_rpc::Client;
 
     fn create_test_state() -> SharedState {
@@ -350,9 +350,9 @@ mod tests {
         SharedState::new(client)
     }
 
-    fn create_test_pending_job() -> PendingJob {
-        use crate::pending::JobStatus;
-        PendingJob {
+    fn create_test_pending_job() -> Job {
+        Job {
+            id: "test_job_id".to_string(),
             job_sequence: 1,
             description: Some("Test job".to_string()),
             developer: "TestDev".to_string(),
@@ -361,7 +361,10 @@ mod tests {
             app: "TestApp".to_string(),
             app_instance: "0x456".to_string(),
             app_instance_method: "test".to_string(),
+            block_number: Some(100),
             sequences: Some(vec![1, 2, 3]),
+            sequences1: None,
+            sequences2: None,
             data: vec![0x01, 0x02, 0x03],
             status: JobStatus::Pending,
             attempts: 1,

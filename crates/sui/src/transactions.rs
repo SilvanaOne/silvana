@@ -279,7 +279,10 @@ pub async fn create_app_job_tx(
     app_instance_str: &str,
     method_name: String,
     job_description: Option<String>,
+    block_number: Option<u64>,
     sequences: Option<Vec<u64>>,
+    sequences1: Option<Vec<u64>>,
+    sequences2: Option<Vec<u64>>,
     data: Vec<u8>,
 ) -> Result<String> {
     info!("Creating app job transaction for method: {}, data size: {} bytes", 
@@ -293,14 +296,20 @@ pub async fn create_app_job_tx(
         move |tb, app_instance_arg, clock_arg| {
             let method_name_arg = tb.input(sui_transaction_builder::Serialized(&method_name));
             let job_description_arg = tb.input(sui_transaction_builder::Serialized(&job_description));
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
+            let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&sequences1));
+            let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&sequences2));
             let data_arg = tb.input(sui_transaction_builder::Serialized(&data));
             
             vec![
                 app_instance_arg,
                 method_name_arg,
                 job_description_arg,
+                block_number_arg,
                 sequences_arg,
+                sequences1_arg,
+                sequences2_arg,
                 data_arg,
                 clock_arg,
             ]
@@ -384,27 +393,6 @@ pub async fn create_merge_job_tx(
     sequences2: Vec<u64>,
     job_description: Option<String>,
 ) -> Result<String> {
-    // Create ProofMergeData and serialize it with BCS
-    use serde::{Serialize, Deserialize};
-    
-    #[derive(Serialize, Deserialize)]
-    struct ProofMergeData {
-        block_number: u64,
-        sequences1: Vec<u64>,
-        sequences2: Vec<u64>,
-    }
-    
-    let merge_data = ProofMergeData {
-        block_number,
-        sequences1: sequences1.clone(),
-        sequences2: sequences2.clone(),
-    };
-    
-    let serialized_data = bcs::to_bytes(&merge_data)
-        .context("Failed to serialize ProofMergeData")?;
-    
-    debug!("Serialized ProofMergeData size: {} bytes", serialized_data.len());
-    
     // Combine and sort sequences from both proofs
     let mut combined_sequences = sequences1.clone();
     combined_sequences.extend(sequences2.clone());
@@ -412,15 +400,19 @@ pub async fn create_merge_job_tx(
     combined_sequences.dedup(); // Remove any duplicates
     
     debug!("Combined sequences for merge job: {:?}", combined_sequences);
+    debug!("Block number: {}, sequences1: {:?}, sequences2: {:?}", block_number, sequences1, sequences2);
 
-    // Call the general create_app_job_tx function
+    // Call the general create_app_job_tx function with the new fields
     create_app_job_tx(
         client,
         app_instance_str,
         "merge".to_string(),
         job_description,
-        Some(combined_sequences), // Pass the combined sequences
-        serialized_data,
+        Some(block_number),         // Pass block_number
+        Some(combined_sequences),   // Pass the combined sequences
+        Some(sequences1),           // Pass sequences1
+        Some(sequences2),           // Pass sequences2
+        vec![],                     // Empty data since we're using the Job fields now
     ).await
 }
 

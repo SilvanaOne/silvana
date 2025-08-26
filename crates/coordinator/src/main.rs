@@ -11,7 +11,6 @@ mod job_id;
 mod job_searcher;
 mod jobs;
 mod merge;
-mod pending;
 mod processor;
 mod registry;
 mod session_id;

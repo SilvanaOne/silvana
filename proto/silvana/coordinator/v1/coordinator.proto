@@ -19,15 +19,18 @@ message Job {
   string app = 6;
   string app_instance = 7;
   string app_instance_method = 8;
-  repeated uint64 sequences = 9;
-  bytes data = 10;
+  optional uint64 block_number = 9;
+  repeated uint64 sequences = 10;
+  repeated uint64 sequences1 = 11;
+  repeated uint64 sequences2 = 12;
+  bytes data = 13;
   // Generated unique job ID for agent reference
-  string job_id = 11;
+  string job_id = 14;
   // Metadata of the job
-  uint32 attempts = 12;
+  uint32 attempts = 15;
   // Metadata of the job
-  uint64 created_at = 13;
-  uint64 updated_at = 14;
+  uint64 created_at = 16;
+  uint64 updated_at = 17;
 }
 
 // Request message for getting a job

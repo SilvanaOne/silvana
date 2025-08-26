@@ -1,5 +1,5 @@
 use crate::error::{CoordinatorError, Result};
-use crate::pending::{PendingJob, JobStatus};
+use crate::fetch::jobs_types::{Job, JobStatus};
 use crate::state::SharedState;
 use std::collections::HashSet;
 use sui_rpc::Client;
@@ -7,160 +7,158 @@ use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsReque
 use tracing::{debug, info, warn, error};
 use base64::{engine::general_purpose, Engine as _};
 
-/// Extract PendingJob from JSON representation
-pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<PendingJob> {
+/// Extract Job from JSON representation
+pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
         //debug!("Job JSON fields: {:?}", struct_value.fields.keys().collect::<Vec<_>>());
-        let mut job = PendingJob {
-            job_sequence: 0,
-            description: None,
-            developer: String::new(),
-            agent: String::new(),
-            agent_method: String::new(),
-            app: String::new(),
-            app_instance: String::new(),
-            app_instance_method: String::new(),
-            sequences: None,
-            data: Vec::new(),
-            status: JobStatus::Pending,
-            attempts: 0,
-            created_at: 0,
-            updated_at: 0,
+        
+        // Helper function to extract string value
+        let get_string = |field_name: &str| -> Option<String> {
+            struct_value.fields.get(field_name).and_then(|f| {
+                match &f.kind {
+                    Some(prost_types::value::Kind::StringValue(s)) => Some(s.clone()),
+                    _ => None,
+                }
+            })
         };
         
-        // Extract all fields from the job struct
-        if let Some(field) = struct_value.fields.get("job_sequence") {
-            if let Some(prost_types::value::Kind::StringValue(id_str)) = &field.kind {
-                job.job_sequence = id_str.parse().unwrap_or(0);
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("description") {
-            match &field.kind {
-                Some(prost_types::value::Kind::StringValue(desc)) => {
-                    job.description = Some(desc.clone());
+        // Helper function to extract number as u64
+        let get_u64 = |field_name: &str| -> u64 {
+            struct_value.fields.get(field_name).and_then(|f| {
+                match &f.kind {
+                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
+                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
+                    _ => None,
                 }
-                Some(prost_types::value::Kind::NullValue(_)) => {
-                    job.description = None;
+            }).unwrap_or(0)
+        };
+        
+        // Helper function to extract number as u8
+        let get_u8 = |field_name: &str| -> u8 {
+            struct_value.fields.get(field_name).and_then(|f| {
+                match &f.kind {
+                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u8>().ok(),
+                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u8),
+                    _ => None,
                 }
-                _ => {}
-            }
-        }
+            }).unwrap_or(0)
+        };
         
-        if let Some(field) = struct_value.fields.get("developer") {
-            if let Some(prost_types::value::Kind::StringValue(val)) = &field.kind {
-                job.developer = val.clone();
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("agent") {
-            if let Some(prost_types::value::Kind::StringValue(val)) = &field.kind {
-                job.agent = val.clone();
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("agent_method") {
-            if let Some(prost_types::value::Kind::StringValue(val)) = &field.kind {
-                job.agent_method = val.clone();
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("app") {
-            if let Some(prost_types::value::Kind::StringValue(val)) = &field.kind {
-                job.app = val.clone();
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("app_instance") {
-            if let Some(prost_types::value::Kind::StringValue(val)) = &field.kind {
-                job.app_instance = val.clone();
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("app_instance_method") {
-            if let Some(prost_types::value::Kind::StringValue(val)) = &field.kind {
-                job.app_instance_method = val.clone();
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("sequences") {
-            match &field.kind {
-                Some(prost_types::value::Kind::ListValue(list)) => {
-                    let mut sequences = Vec::new();
-                    for val in &list.values {
-                        if let Some(prost_types::value::Kind::StringValue(seq_str)) = &val.kind {
-                            if let Ok(seq) = seq_str.parse::<u64>() {
-                                sequences.push(seq);
+        // Helper function to extract vector of u64
+        let get_vec_u64 = |field_name: &str| -> Option<Vec<u64>> {
+            struct_value.fields.get(field_name).and_then(|f| {
+                match &f.kind {
+                    Some(prost_types::value::Kind::ListValue(list)) => {
+                        let mut values = Vec::new();
+                        for val in &list.values {
+                            match &val.kind {
+                                Some(prost_types::value::Kind::StringValue(s)) => {
+                                    if let Ok(num) = s.parse::<u64>() {
+                                        values.push(num);
+                                    }
+                                }
+                                Some(prost_types::value::Kind::NumberValue(n)) => {
+                                    values.push(n.round() as u64);
+                                }
+                                _ => {}
                             }
                         }
+                        if !values.is_empty() {
+                            Some(values)
+                        } else {
+                            None
+                        }
                     }
-                    if !sequences.is_empty() {
-                        job.sequences = Some(sequences);
-                    }
+                    Some(prost_types::value::Kind::NullValue(_)) => None,
+                    _ => None,
                 }
-                Some(prost_types::value::Kind::NullValue(_)) => {
-                    job.sequences = None;
-                }
-                _ => {}
-            }
-        }
+            })
+        };
         
-        if let Some(field) = struct_value.fields.get("data") {
-            //debug!("Found data field: {:?}", field.kind);
-            if let Some(prost_types::value::Kind::StringValue(data_str)) = &field.kind {
-                //debug!("Data string: {}", data_str);
-                // Data might be base64 encoded or hex encoded
-                if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
-                    //debug!("Decoded hex data length: {}", data.len());
-                    job.data = data;
-                } else if let Ok(data) = general_purpose::STANDARD.decode(data_str) {
-                    //debug!("Decoded base64 data length: {}", data.len());
-                    job.data = data;
+        // Helper function to extract bytes data
+        let get_bytes = |field_name: &str| -> Vec<u8> {
+            struct_value.fields.get(field_name).and_then(|f| {
+                if let Some(prost_types::value::Kind::StringValue(data_str)) = &f.kind {
+                    // Try hex decode first, then base64
+                    if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
+                        Some(data)
+                    } else if let Ok(data) = general_purpose::STANDARD.decode(data_str) {
+                        Some(data)
+                    } else {
+                        None
+                    }
                 } else {
-                    //debug!("Failed to decode data as hex or base64: {}", data_str);
+                    None
                 }
-            }
-        } else {
-            debug!("No data field found in job JSON");
-        }
+            }).unwrap_or_default()
+        };
         
-        if let Some(field) = struct_value.fields.get("status") {
-            if let Some(prost_types::value::Kind::StructValue(status_struct)) = &field.kind {
-                // Parse JobStatus enum
-                if let Some(variant_field) = status_struct.fields.iter().next() {
-                    match variant_field.0.as_str() {
-                        "Pending" => job.status = JobStatus::Pending,
-                        "Running" => job.status = JobStatus::Running,
-                        "Failed" => {
-                            if let Some(prost_types::value::Kind::StringValue(msg)) = &variant_field.1.kind {
-                                job.status = JobStatus::Failed(msg.clone());
+        // Extract job ID from the nested id field
+        let id = struct_value.fields.get("id")
+            .and_then(|field| {
+                if let Some(prost_types::value::Kind::StructValue(id_struct)) = &field.kind {
+                    id_struct.fields.get("id")
+                        .and_then(|id_field| {
+                            if let Some(prost_types::value::Kind::StringValue(id_str)) = &id_field.kind {
+                                Some(id_str.clone())
+                            } else {
+                                None
                             }
-                        }
-                        _ => {}
-                    }
+                        })
+                } else {
+                    None
                 }
-            }
-        }
+            })
+            .unwrap_or_default();
         
-        if let Some(field) = struct_value.fields.get("attempts") {
-            if let Some(prost_types::value::Kind::NumberValue(attempts)) = &field.kind {
-                job.attempts = *attempts as u8;
-            } else if let Some(prost_types::value::Kind::StringValue(attempts_str)) = &field.kind {
-                job.attempts = attempts_str.parse().unwrap_or(0);
-            }
-        }
+        // Parse status enum
+        let status = struct_value.fields.get("status")
+            .and_then(|field| {
+                if let Some(prost_types::value::Kind::StructValue(status_struct)) = &field.kind {
+                    // Parse JobStatus enum
+                    if let Some(variant_field) = status_struct.fields.iter().next() {
+                        match variant_field.0.as_str() {
+                            "Pending" => Some(JobStatus::Pending),
+                            "Running" => Some(JobStatus::Running),
+                            "Failed" => {
+                                if let Some(prost_types::value::Kind::StringValue(msg)) = &variant_field.1.kind {
+                                    Some(JobStatus::Failed(msg.clone()))
+                                } else {
+                                    Some(JobStatus::Failed("Unknown error".to_string()))
+                                }
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(JobStatus::Pending);
         
-        if let Some(field) = struct_value.fields.get("created_at") {
-            if let Some(prost_types::value::Kind::StringValue(ts_str)) = &field.kind {
-                job.created_at = ts_str.parse().unwrap_or(0);
-            }
-        }
-        
-        if let Some(field) = struct_value.fields.get("updated_at") {
-            if let Some(prost_types::value::Kind::StringValue(ts_str)) = &field.kind {
-                job.updated_at = ts_str.parse().unwrap_or(0);
-            }
-        }
+        // Build the Job struct with all fields
+        let job = Job {
+            id,
+            job_sequence: get_u64("job_sequence"),
+            description: get_string("description"),
+            developer: get_string("developer").unwrap_or_default(),
+            agent: get_string("agent").unwrap_or_default(),
+            agent_method: get_string("agent_method").unwrap_or_default(),
+            app: get_string("app").unwrap_or_default(),
+            app_instance: get_string("app_instance").unwrap_or_default(),
+            app_instance_method: get_string("app_instance_method").unwrap_or_default(),
+            block_number: if get_u64("block_number") > 0 { Some(get_u64("block_number")) } else { None },
+            sequences: get_vec_u64("sequences"),
+            sequences1: get_vec_u64("sequences1"),
+            sequences2: get_vec_u64("sequences2"),
+            data: get_bytes("data"),
+            status,
+            attempts: get_u8("attempts"),
+            created_at: get_u64("created_at"),
+            updated_at: get_u64("updated_at"),
+        };
         
         return Ok(job);
     }
@@ -176,7 +174,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
     app_instance_id: &str,
     _state: &SharedState,
     only_check: bool,
-) -> Result<Option<PendingJob>> {
+) -> Result<Option<Job>> {
     // Ensure the app_instance_id has 0x prefix
     let formatted_id = if app_instance_id.starts_with("0x") {
         app_instance_id.to_string()
@@ -291,7 +289,7 @@ pub async fn fetch_job_by_id(
     client: &mut Client,
     jobs_table_id: &str,
     job_sequence: u64,
-) -> Result<Option<PendingJob>> {
+) -> Result<Option<Job>> {
     debug!("Fetching job {} from jobs table {}", job_sequence, jobs_table_id);
     
     // List dynamic fields to find the specific job
@@ -619,7 +617,7 @@ pub async fn fetch_pending_job_from_instances(
     developer: &str,
     agent: &str,
     agent_method: &str,
-) -> Result<Option<PendingJob>> {
+) -> Result<Option<Job>> {
     // Collect all job IDs from all app_instances with their app_instance_method
     let mut all_jobs: Vec<(u64, String, String, String)> = Vec::new(); // (job_sequence, app_instance_id, jobs_table_id, app_instance_method)
     
@@ -711,7 +709,7 @@ pub async fn fetch_all_pending_jobs(
     app_instance_ids: &[String],
     state: &SharedState,
     only_check: bool,
-) -> Result<Option<PendingJob>> {
+) -> Result<Option<Job>> {
     let mut all_pending_jobs = Vec::new();
     
     for app_instance_id in app_instance_ids {

@@ -208,8 +208,9 @@ public fun add(
     let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
 
     let sequence = instance.sequence();
+    let block_number = instance.block_number();
     let transition_data_struct = TransitionData {
-        block_number: instance.block_number(),
+        block_number,
         sequence,
         method: b"add".to_string(),
         index,
@@ -224,7 +225,10 @@ public fun add(
         instance,
         b"add".to_string(),
         option::some(b"Add operation job".to_string()),
+        option::some(block_number), // block_number from instance
         option::some(vector[sequence]),
+        option::none(), // sequences1
+        option::none(), // sequences2
         transition_data_bytes,
         clock,
         ctx,
@@ -297,8 +301,9 @@ public fun multiply(
     let optimistic_state_bytes = bcs::to_bytes(&optimistic_state_struct);
 
     let sequence = instance.sequence();
+    let block_number = instance.block_number();
     let transition_data_struct = TransitionData {
-        block_number: instance.block_number(),
+        block_number,
         sequence,
         method: b"multiply".to_string(),
         index,
@@ -313,7 +318,10 @@ public fun multiply(
         instance,
         b"multiply".to_string(),
         option::some(b"Multiply operation job".to_string()),
+        option::some(block_number), // block_number from instance
         option::some(vector[sequence]),
+        option::none(), // sequences1
+        option::none(), // sequences2
         transition_data_bytes,
         clock,
         ctx,

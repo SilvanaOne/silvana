@@ -96,7 +96,10 @@ impl SuiJobInterface {
         app_instance: &str,
         method_name: String,
         job_description: Option<String>,
+        block_number: Option<u64>,
         sequences: Option<Vec<u64>>,
+        sequences1: Option<Vec<u64>>,
+        sequences2: Option<Vec<u64>>,
         data: Vec<u8>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!(
@@ -109,7 +112,10 @@ impl SuiJobInterface {
             app_instance,
             method_name.clone(),
             job_description,
+            block_number,
             sequences,
+            sequences1,
+            sequences2,
             data,
         )
         .await

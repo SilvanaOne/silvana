@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file silvana/coordinator/v1/coordinator.proto.
  */
 export const file_silvana_coordinator_v1_coordinator: GenFile = /*@__PURE__*/
-  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIqgCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSEQoJc2VxdWVuY2VzGAkgAygEEgwKBGRhdGEYCiABKAwSDgoGam9iX2lkGAsgASgJEhAKCGF0dGVtcHRzGAwgASgNEhIKCmNyZWF0ZWRfYXQYDSABKAQSEgoKdXBkYXRlZF9hdBgOIAEoBEIOCgxfZGVzY3JpcHRpb24iWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkirgEKElN1Ym1pdFN0YXRlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEg4KBmpvYl9pZBgDIAEoCRIbCg5uZXdfc3RhdGVfZGF0YRgEIAEoDEgAiAEBEh0KEHNlcmlhbGl6ZWRfc3RhdGUYBSABKAlIAYgBAUIRCg9fbmV3X3N0YXRlX2RhdGFCEwoRX3NlcmlhbGl6ZWRfc3RhdGUiSAoTU3VibWl0U3RhdGVSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEhQKB2RhX2hhc2gYAiABKAlIAIgBAUIKCghfZGFfaGFzaCKoAQoNU2VxdWVuY2VTdGF0ZRIQCghzZXF1ZW5jZRgBIAEoBBISCgVzdGF0ZRgCIAEoDEgAiAEBEh4KEWRhdGFfYXZhaWxhYmlsaXR5GAMgASgJSAGIAQESGAoQb3B0aW1pc3RpY19zdGF0ZRgEIAEoDBIXCg90cmFuc2l0aW9uX2RhdGEYBSABKAxCCAoGX3N0YXRlQhQKEl9kYXRhX2F2YWlsYWJpbGl0eSJQChhHZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZqb2JfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQiUgoZR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRI1CgZzdGF0ZXMYASADKAsyJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNlcXVlbmNlU3RhdGUiQgobUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg8KB2RhX2hhc2gYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJcChxSZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEhEKBGRhdGEYASABKAlIAIgBARIPCgdzdWNjZXNzGAIgASgIEg8KB21lc3NhZ2UYAyABKAlCBwoFX2RhdGEiXgoPR2V0UHJvb2ZSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSFAoMYmxvY2tfbnVtYmVyGAIgASgEEhEKCXNlcXVlbmNlcxgDIAMoBBIOCgZqb2JfaWQYBCABKAkiYwoQR2V0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhIKBXByb29mGAIgASgJSACIAQESFAoHbWVzc2FnZRgDIAEoCUgBiAEBQggKBl9wcm9vZkIKCghfbWVzc2FnZTLeBgoSQ29vcmRpbmF0b3JTZXJ2aWNlElcKBkdldEpvYhIlLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0Sm9iUmVxdWVzdBomLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0Sm9iUmVzcG9uc2USZgoLQ29tcGxldGVKb2ISKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkNvbXBsZXRlSm9iUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuQ29tcGxldGVKb2JSZXNwb25zZRJaCgdGYWlsSm9iEiYuc2lsdmFuYS5jb29yZGluYXRvci52MS5GYWlsSm9iUmVxdWVzdBonLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuRmFpbEpvYlJlc3BvbnNlEmYKC1N1Ym1pdFByb29mEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRQcm9vZlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFByb29mUmVzcG9uc2USZgoLU3VibWl0U3RhdGUSKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFN0YXRlUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0U3RhdGVSZXNwb25zZRJ4ChFHZXRTZXF1ZW5jZVN0YXRlcxIwLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0U2VxdWVuY2VTdGF0ZXNSZXF1ZXN0GjEuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRTZXF1ZW5jZVN0YXRlc1Jlc3BvbnNlEoEBChRSZWFkRGF0YUF2YWlsYWJpbGl0eRIzLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0GjQuc2lsdmFuYS5jb29yZGluYXRvci52MS5SZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEl0KCEdldFByb29mEicuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRQcm9vZlJlcXVlc3QaKC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFByb29mUmVzcG9uc2VCQ1pBZ2l0aHViLmNvbS9TaWx2YW5hT25lL3prLXRlc3RzL3BhY2thZ2VzL2F2cy9ycGMvcHJvdG87Y29vcmRpbmF0b3JiBnByb3RvMw", [file_google_protobuf_descriptor]);
+  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIvwCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSGQoMYmxvY2tfbnVtYmVyGAkgASgESAGIAQESEQoJc2VxdWVuY2VzGAogAygEEhIKCnNlcXVlbmNlczEYCyADKAQSEgoKc2VxdWVuY2VzMhgMIAMoBBIMCgRkYXRhGA0gASgMEg4KBmpvYl9pZBgOIAEoCRIQCghhdHRlbXB0cxgPIAEoDRISCgpjcmVhdGVkX2F0GBAgASgEEhIKCnVwZGF0ZWRfYXQYESABKARCDgoMX2Rlc2NyaXB0aW9uQg8KDV9ibG9ja19udW1iZXIiWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkirgEKElN1Ym1pdFN0YXRlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEg4KBmpvYl9pZBgDIAEoCRIbCg5uZXdfc3RhdGVfZGF0YRgEIAEoDEgAiAEBEh0KEHNlcmlhbGl6ZWRfc3RhdGUYBSABKAlIAYgBAUIRCg9fbmV3X3N0YXRlX2RhdGFCEwoRX3NlcmlhbGl6ZWRfc3RhdGUiSAoTU3VibWl0U3RhdGVSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEhQKB2RhX2hhc2gYAiABKAlIAIgBAUIKCghfZGFfaGFzaCKoAQoNU2VxdWVuY2VTdGF0ZRIQCghzZXF1ZW5jZRgBIAEoBBISCgVzdGF0ZRgCIAEoDEgAiAEBEh4KEWRhdGFfYXZhaWxhYmlsaXR5GAMgASgJSAGIAQESGAoQb3B0aW1pc3RpY19zdGF0ZRgEIAEoDBIXCg90cmFuc2l0aW9uX2RhdGEYBSABKAxCCAoGX3N0YXRlQhQKEl9kYXRhX2F2YWlsYWJpbGl0eSJQChhHZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZqb2JfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQiUgoZR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRI1CgZzdGF0ZXMYASADKAsyJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNlcXVlbmNlU3RhdGUiQgobUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg8KB2RhX2hhc2gYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJcChxSZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEhEKBGRhdGEYASABKAlIAIgBARIPCgdzdWNjZXNzGAIgASgIEg8KB21lc3NhZ2UYAyABKAlCBwoFX2RhdGEiXgoPR2V0UHJvb2ZSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSFAoMYmxvY2tfbnVtYmVyGAIgASgEEhEKCXNlcXVlbmNlcxgDIAMoBBIOCgZqb2JfaWQYBCABKAkiYwoQR2V0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhIKBXByb29mGAIgASgJSACIAQESFAoHbWVzc2FnZRgDIAEoCUgBiAEBQggKBl9wcm9vZkIKCghfbWVzc2FnZSJJChVSZXRyaWV2ZVNlY3JldFJlcXVlc3QSDgoGam9iX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEbmFtZRgDIAEoCSJmChZSZXRyaWV2ZVNlY3JldFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIZCgxzZWNyZXRfdmFsdWUYAyABKAlIAIgBAUIPCg1fc2VjcmV0X3ZhbHVlMs8HChJDb29yZGluYXRvclNlcnZpY2USVwoGR2V0Sm9iEiUuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRKb2JSZXF1ZXN0GiYuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRKb2JSZXNwb25zZRJmCgtDb21wbGV0ZUpvYhIqLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuQ29tcGxldGVKb2JSZXF1ZXN0Gisuc2lsdmFuYS5jb29yZGluYXRvci52MS5Db21wbGV0ZUpvYlJlc3BvbnNlEloKB0ZhaWxKb2ISJi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkZhaWxKb2JSZXF1ZXN0Gicuc2lsdmFuYS5jb29yZGluYXRvci52MS5GYWlsSm9iUmVzcG9uc2USZgoLU3VibWl0UHJvb2YSKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFByb29mUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0UHJvb2ZSZXNwb25zZRJmCgtTdWJtaXRTdGF0ZRIqLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0U3RhdGVSZXF1ZXN0Gisuc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRTdGF0ZVJlc3BvbnNlEngKEUdldFNlcXVlbmNlU3RhdGVzEjAuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QaMS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFNlcXVlbmNlU3RhdGVzUmVzcG9uc2USgQEKFFJlYWREYXRhQXZhaWxhYmlsaXR5EjMuc2lsdmFuYS5jb29yZGluYXRvci52MS5SZWFkRGF0YUF2YWlsYWJpbGl0eVJlcXVlc3QaNC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlJlYWREYXRhQXZhaWxhYmlsaXR5UmVzcG9uc2USXQoIR2V0UHJvb2YSJy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFByb29mUmVxdWVzdBooLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0UHJvb2ZSZXNwb25zZRJvCg5SZXRyaWV2ZVNlY3JldBItLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmV0cmlldmVTZWNyZXRSZXF1ZXN0Gi4uc2lsdmFuYS5jb29yZGluYXRvci52MS5SZXRyaWV2ZVNlY3JldFJlc3BvbnNlQkNaQWdpdGh1Yi5jb20vU2lsdmFuYU9uZS96ay10ZXN0cy9wYWNrYWdlcy9hdnMvcnBjL3Byb3RvO2Nvb3JkaW5hdG9yYgZwcm90bzM", [file_google_protobuf_descriptor]);
 
 /**
  * Job message matching the partial Move struct
@@ -64,38 +64,53 @@ export type Job = Message<"silvana.coordinator.v1.Job"> & {
   appInstanceMethod: string;
 
   /**
-   * @generated from field: repeated uint64 sequences = 9;
+   * @generated from field: optional uint64 block_number = 9;
+   */
+  blockNumber?: bigint;
+
+  /**
+   * @generated from field: repeated uint64 sequences = 10;
    */
   sequences: bigint[];
 
   /**
-   * @generated from field: bytes data = 10;
+   * @generated from field: repeated uint64 sequences1 = 11;
+   */
+  sequences1: bigint[];
+
+  /**
+   * @generated from field: repeated uint64 sequences2 = 12;
+   */
+  sequences2: bigint[];
+
+  /**
+   * @generated from field: bytes data = 13;
    */
   data: Uint8Array;
 
   /**
    * Generated unique job ID for agent reference
    *
-   * @generated from field: string job_id = 11;
+   * @generated from field: string job_id = 14;
    */
   jobId: string;
 
   /**
    * Metadata of the job
    *
-   * @generated from field: uint32 attempts = 12;
+   * @generated from field: uint32 attempts = 15;
    */
   attempts: number;
 
   /**
    * Metadata of the job
    *
-   * @generated from field: uint64 created_at = 13;
+   * @generated from field: uint64 created_at = 16;
    */
   createdAt: bigint;
 
   /**
-   * @generated from field: uint64 updated_at = 14;
+   * @generated from field: uint64 updated_at = 17;
    */
   updatedAt: bigint;
 };
@@ -626,6 +641,66 @@ export const GetProofResponseSchema: GenMessage<GetProofResponse> = /*@__PURE__*
   messageDesc(file_silvana_coordinator_v1_coordinator, 17);
 
 /**
+ * Request message for retrieving a secret
+ *
+ * @generated from message silvana.coordinator.v1.RetrieveSecretRequest
+ */
+export type RetrieveSecretRequest = Message<"silvana.coordinator.v1.RetrieveSecretRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string name = 3;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.RetrieveSecretRequest.
+ * Use `create(RetrieveSecretRequestSchema)` to create a new message.
+ */
+export const RetrieveSecretRequestSchema: GenMessage<RetrieveSecretRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 18);
+
+/**
+ * Response message for secret retrieval
+ *
+ * @generated from message silvana.coordinator.v1.RetrieveSecretResponse
+ */
+export type RetrieveSecretResponse = Message<"silvana.coordinator.v1.RetrieveSecretResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * Only returned if success is true
+   *
+   * @generated from field: optional string secret_value = 3;
+   */
+  secretValue?: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.RetrieveSecretResponse.
+ * Use `create(RetrieveSecretResponseSchema)` to create a new message.
+ */
+export const RetrieveSecretResponseSchema: GenMessage<RetrieveSecretResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 19);
+
+/**
  * gRPC service definition
  *
  * @generated from service silvana.coordinator.v1.CoordinatorService
@@ -694,6 +769,14 @@ export const CoordinatorService: GenService<{
     methodKind: "unary";
     input: typeof GetProofRequestSchema;
     output: typeof GetProofResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.RetrieveSecret
+   */
+  retrieveSecret: {
+    methodKind: "unary";
+    input: typeof RetrieveSecretRequestSchema;
+    output: typeof RetrieveSecretResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_silvana_coordinator_v1_coordinator, 0);

@@ -1,7 +1,7 @@
 use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
 use crate::fetch::fetch_all_pending_jobs;
-use crate::pending::PendingJob;
+use crate::fetch::jobs_types::Job;
 use crate::registry::fetch_agent_method;
 use crate::session_id::generate_docker_session;
 use crate::state::SharedState;
@@ -167,7 +167,7 @@ impl JobSearcher {
 
     /// Check for pending jobs and clean up app_instances without jobs
     /// This combines job searching with cleanup that reconciliation would do
-    async fn check_and_clean_pending_jobs(&self) -> Result<Option<PendingJob>> {
+    async fn check_and_clean_pending_jobs(&self) -> Result<Option<Job>> {
         let app_instances = self.state.get_app_instances().await;
         
         if app_instances.is_empty() {
@@ -215,7 +215,7 @@ impl JobSearcher {
     }
 
     /// Run a Docker container for a pending job
-    async fn run_docker_container(&mut self, job: PendingJob) {
+    async fn run_docker_container(&mut self, job: Job) {
         let job_start = Instant::now();
         
         info!("🐳 Starting Docker container for job {}", job.job_sequence);
@@ -435,7 +435,7 @@ impl JobSearcher {
     /// Retrieve secrets for a job from the secrets storage
     async fn retrieve_secrets_for_job(
         secrets_client: &mut SecretsClient,
-        job: &PendingJob,
+        job: &Job,
     ) -> Result<HashMap<String, String>> {
         let mut secrets = HashMap::new();
         

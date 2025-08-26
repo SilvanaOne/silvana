@@ -11,7 +11,6 @@ pub mod job_id;
 pub mod job_searcher;
 pub mod jobs;
 pub mod merge;
-pub mod pending;
 pub mod processor;
 pub mod registry;
 pub mod session_id;

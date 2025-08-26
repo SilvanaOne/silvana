@@ -25,7 +25,10 @@ public struct Job has key, store {
     app: String,
     app_instance: String,
     app_instance_method: String,
+    block_number: Option<u64>,
     sequences: Option<vector<u64>>,
+    sequences1: Option<vector<u64>>,
+    sequences2: Option<vector<u64>>,
     data: vector<u8>,
     // Metadata of the job
     status: JobStatus,
@@ -58,7 +61,10 @@ public struct JobCreatedEvent has copy, drop {
     app: String,
     app_instance: String,
     app_instance_method: String,
+    block_number: Option<u64>,
     sequences: Option<vector<u64>>,
+    sequences1: Option<vector<u64>>,
+    sequences2: Option<vector<u64>>,
     data: vector<u8>,
     status: JobStatus,
     created_at: u64,
@@ -139,7 +145,10 @@ public fun create_job(
     app: String,
     app_instance: String,
     app_instance_method: String,
+    block_number: Option<u64>,
     sequences: Option<vector<u64>>,
+    sequences1: Option<vector<u64>>,
+    sequences2: Option<vector<u64>>,
     data: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -157,7 +166,10 @@ public fun create_job(
         app,
         app_instance,
         app_instance_method,
+        block_number,
         sequences,
+        sequences1,
+        sequences2,
         data,
         status: JobStatus::Pending,
         attempts: 0,
@@ -175,7 +187,10 @@ public fun create_job(
         app,
         app_instance,
         app_instance_method,
+        block_number,
         sequences,
+        sequences1,
+        sequences2,
         data,
         status: JobStatus::Pending,
         created_at: timestamp,
@@ -546,8 +561,20 @@ public fun job_app_instance_method(job: &Job): &String {
     &job.app_instance_method
 }
 
+public fun job_block_number(job: &Job): &Option<u64> {
+    &job.block_number
+}
+
 public fun job_sequences(job: &Job): &Option<vector<u64>> {
     &job.sequences
+}
+
+public fun job_sequences1(job: &Job): &Option<vector<u64>> {
+    &job.sequences1
+}
+
+public fun job_sequences2(job: &Job): &Option<vector<u64>> {
+    &job.sequences2
 }
 
 public fun job_data(job: &Job): &vector<u8> {

@@ -184,6 +184,31 @@ export async function createApp(): Promise<string> {
       ],
     });
 
+    // Create and add the 'settle' method
+    const settleAppMethod = methodTx.moveCall({
+      target: `${
+        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+      }::app_method::new`,
+      arguments: [
+        methodTx.pure.option("string", "Settle proofs"), 
+        methodTx.pure.string(developerName),
+        methodTx.pure.string(agentName),
+        methodTx.pure.string("prove"),
+      ],
+    });
+
+    methodTx.moveCall({
+      target: `${
+        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+      }::registry::add_method_to_app`,
+      arguments: [
+        methodTx.object(registryAddress),
+        methodTx.pure.string("test_app"),
+        methodTx.pure.string("settle"),
+        settleAppMethod,
+      ],
+    });
+
     methodTx.setSender(keyPair.toSuiAddress());
     methodTx.setGasBudget(100_000_000);
 

@@ -12,7 +12,6 @@ import {
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
 import { deserializeTransitionData } from "./transition.js";
-import { deserializeProofMergeData, displayProofMergeData } from "./merge.js";
 import { getStateAndProof, SequenceState, merge } from "./state.js";
 import { serializeProofAndState, serializeState } from "./proof.js";
 
@@ -62,8 +61,42 @@ async function agent() {
         );
 
         try {
-          // Check if this is a merge job by app_instance_method
-          if (response.job.appInstanceMethod === "merge") {
+          // Check if this is a settle job by app_instance_method
+          if (response.job.appInstanceMethod === "settle") {
+            console.log("⚖️ SETTLE JOB DETECTED");
+            // Print all job details
+            console.log("=== SETTLE JOB DETAILS ===");
+            console.log(`Job Sequence: ${response.job.jobSequence}`);
+            console.log(`Job ID: ${response.job.jobId}`);
+            console.log(`Description: ${response.job.description || "none"}`);
+            console.log(`Developer: ${response.job.developer}`);
+            console.log(`Agent: ${response.job.agent}`);
+            console.log(`Agent Method: ${response.job.agentMethod}`);
+            console.log(`App: ${response.job.app}`);
+            console.log(`App Instance: ${response.job.appInstance}`);
+            console.log(
+              `App Instance Method: ${response.job.appInstanceMethod}`
+            );
+            console.log(`Sequences: [${response.job.sequences.join(", ")}]`);
+            console.log(`Attempts: ${response.job.attempts}`);
+            console.log(`Created At: ${response.job.createdAt}`);
+            console.log(`Updated At: ${response.job.updatedAt}`);
+            console.log(`Data Length: ${response.job.data.length}`);
+            console.log(
+              `Data First 20 bytes: ${Array.from(
+                response.job.data.slice(0, 20)
+              )}`
+            );
+            console.log("==========================");
+            
+            // TODO: Implement settle logic here
+            console.log("📝 TODO: Implement settle logic");
+            console.log("For now, just logging settle job information");
+            
+            // Complete the settle job (for now, just mark as complete)
+            console.log("Marking settle job as complete (placeholder)...");
+            
+          } else if (response.job.appInstanceMethod === "merge") {
             console.log("🔀 MERGE JOB DETECTED");
             // Print all job details
             console.log("=== JOB DETAILS ===");
@@ -90,27 +123,32 @@ async function agent() {
             );
             console.log("==================");
 
-            // Deserialize ProofMergeData
-            const proofMergeData = deserializeProofMergeData(
-              Array.from(response.job.data)
-            );
+            // Get merge data directly from Job fields
+            const blockNumber = response.job.blockNumber!;
+            const sequences1 = response.job.sequences1;
+            const sequences2 = response.job.sequences2;
+            
             console.log(
-              `Job ${response.job.jobSequence} is a merge job for block ${proofMergeData.block_number}`
+              `Job ${response.job.jobSequence} is a merge job for block ${blockNumber}`
             );
 
             // Display the merge data
-            displayProofMergeData(proofMergeData);
+            console.log(`ProofMergeData:`);
+            console.log(`  block_number: ${blockNumber}`);
+            console.log(`  sequences1: [${sequences1.join(', ')}]`);
+            console.log(`  sequences2: [${sequences2.join(', ')}]`);
+            console.log(`  Total sequences to merge: ${sequences1.length + sequences2.length}`);
 
             // Fetch the two proofs to merge
             console.log("Fetching proofs to merge...");
             
             try {
               // Fetch first proof
-              console.log(`Fetching proof 1: sequences ${proofMergeData.sequences1.join(", ")}`);
+              console.log(`Fetching proof 1: sequences ${sequences1.join(", ")}`);
               const getProof1Request = create(GetProofRequestSchema, {
                 sessionId: sessionId,
-                blockNumber: proofMergeData.block_number,
-                sequences: proofMergeData.sequences1.map(s => BigInt(s)),
+                blockNumber: blockNumber,
+                sequences: sequences1,
                 jobId: response.job.jobId, // Use the current job ID
               });
               
@@ -125,11 +163,11 @@ async function agent() {
               const proof1Only = proof1Data.proof;
               
               // Fetch second proof
-              console.log(`Fetching proof 2: sequences ${proofMergeData.sequences2.join(", ")}`);
+              console.log(`Fetching proof 2: sequences ${sequences2.join(", ")}`);
               const getProof2Request = create(GetProofRequestSchema, {
                 sessionId: sessionId,
-                blockNumber: proofMergeData.block_number,
-                sequences: proofMergeData.sequences2.map(s => BigInt(s)),
+                blockNumber: blockNumber,
+                sequences: sequences2,
                 jobId: response.job.jobId, // Use the current job ID
               });
               
@@ -152,8 +190,8 @@ async function agent() {
               
               // Combine and sort all sequences for submission
               const allSequences = [
-                ...proofMergeData.sequences1,
-                ...proofMergeData.sequences2
+                ...sequences1,
+                ...sequences2
               ].sort((a, b) => Number(a) - Number(b));
               
               console.log(`Submitting merged proof for sequences: ${allSequences.join(", ")}`);
@@ -161,10 +199,10 @@ async function agent() {
               // Submit the merged proof
               const submitProofRequest = create(SubmitProofRequestSchema, {
                 sessionId: sessionId,
-                blockNumber: proofMergeData.block_number,
+                blockNumber: blockNumber,
                 sequences: allSequences,
-                mergedSequences1: proofMergeData.sequences1,
-                mergedSequences2: proofMergeData.sequences2,
+                mergedSequences1: sequences1,
+                mergedSequences2: sequences2,
                 jobId: response.job.jobId,
                 proof: mergedProof,
                 cpuTime: BigInt(mergeTimeMs),
