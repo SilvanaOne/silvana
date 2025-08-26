@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofCalculation {
     pub block_number: u64,
-    pub sequences: Vec<u64>,  // Current sequences being calculated
     pub start_sequence: u64,
     pub end_sequence: Option<u64>,
     pub proofs: Vec<ProofInfo>,  // In Move: VecMap<vector<u64>, Proof>

@@ -11,6 +11,7 @@ pub enum JobStatus {
 
 impl JobStatus {
     /// Parse JobStatus from protobuf value
+    #[allow(dead_code)]
     pub fn from_proto_value(value: &prost_types::Value) -> Self {
         match &value.kind {
             Some(prost_types::value::Kind::StringValue(s)) => {

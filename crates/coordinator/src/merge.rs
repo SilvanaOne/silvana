@@ -2,7 +2,7 @@ use crate::coordination::{ProofCalculation, ProofInfo, ProofStatus};
 use crate::fetch::fetch_proof_calculations;
 use crate::block::settle;
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{debug, info, warn, error};
 
 pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     proof_calc: &ProofCalculation,
@@ -11,7 +11,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     da_hash: &str,
 ) -> Result<()> {
     info!("🔍 Analyzing proof calculation for block {} with sequences: {:?}", 
-        proof_calc.block_number, proof_calc.sequences);
+        proof_calc.block_number, proof_calc.proofs.last().map(|p| &p.sequences).unwrap_or(&vec![]));
 
     // Fetch all existing ProofCalculations for this block to get full info including start_sequence, end_sequence, is_finished
     let existing_proof_calculations = match fetch_proof_calculations(client, app_instance, proof_calc.block_number).await {
@@ -39,8 +39,12 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     // Use the first one or create default values if none exist
     let proof_calc_info = existing_proof_calculations.first();
     let start_sequence = proof_calc_info.map(|p| p.start_sequence).unwrap_or_else(|| {
-        // If no ProofCalculation exists yet, derive start_sequence from the sequences
-        proof_calc.sequences.iter().min().copied().unwrap_or(0)
+        // If no ProofCalculation exists yet, derive start_sequence from the proofs
+        proof_calc.proofs.iter()
+            .flat_map(|p| p.sequences.iter())
+            .min()
+            .copied()
+            .unwrap_or(proof_calc.start_sequence)
     });
     let end_sequence = proof_calc_info.and_then(|p| p.end_sequence);
     let is_finished = proof_calc_info.map(|p| p.is_finished).unwrap_or(false);
@@ -76,7 +80,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 
     let block_proofs = ProofCalculation {
         block_number: proof_calc.block_number,
-        sequences: proof_calc.sequences.clone(),  // Keep the current sequences
         start_sequence: proof_calc.start_sequence,  // No Some() needed
         end_sequence: proof_calc.end_sequence,
         proofs: proof_infos,
@@ -84,12 +87,12 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         is_finished: proof_calc.is_finished,
     };
 
-    info!("🎯 Block analysis summary:");
+    info!("🎯 Block analysis summary for app_instance {}:", app_instance);
     info!("  Block {}: sequences {}-{}", 
         proof_calc.block_number, 
         block_proofs.start_sequence,  // Direct access, no unwrap needed
         block_proofs.end_sequence.map(|e| e.to_string()).unwrap_or_else(|| "pending".to_string()));
-    info!("  Total proofs available: {} (including current)", block_proofs.proofs.len());
+    info!("  Total proofs available: {}", block_proofs.proofs.len());
     
     // List all available proofs with their sequences
     for (i, proof) in block_proofs.proofs.iter().enumerate() {
@@ -103,7 +106,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         info!("    Proof {}: sequences {:?} (status: {})", i + 1, proof.sequences, status_str);
     }
     
-    info!("  Current proof covers: sequences {:?}", proof_calc.sequences);
     info!("  Block is finished: {}", proof_calc.is_finished);
 
     // Check if the current proof covers the entire block
@@ -112,10 +114,13 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         let complete_block_sequences: Vec<u64> = (block_proofs.start_sequence..=end_seq).collect();
         
         // Check if current proof contains all sequences for the block
-        if proof_calc.sequences == complete_block_sequences {
+        let current_sequences = proof_calc.proofs.last()
+            .map(|p| p.sequences.clone())
+            .unwrap_or_default();
+        if current_sequences == complete_block_sequences {
             info!("🎉 Current proof covers the entire block {} (sequences {} to {})", 
                 proof_calc.block_number, block_proofs.start_sequence, end_seq);
-            info!("🔒 Settling block {} as complete", proof_calc.block_number);
+            info!("🔒 Settling block {} as complete for app_instance {}", proof_calc.block_number, app_instance);
             
             // Call settle for the complete block with the DA hash
             settle(proof_calc.clone(), da_hash.to_string()).await?;
@@ -123,7 +128,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             return Ok(());
         }
     } else {
-        info!("⏳ Block {} end_sequence not yet determined (still receiving sequences)", proof_calc.block_number);
+        info!("⏳ Block {} end_sequence not yet determined for app_instance {} (still receiving sequences)", proof_calc.block_number, app_instance);
     }
 
     // Try to find and create merge jobs, with up to 10 attempts
@@ -186,7 +191,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             
             ProofCalculation {
                 block_number: proof_calc.block_number,
-                sequences: proof_calc.sequences.clone(),
                 start_sequence: latest_start_seq,
                 end_sequence: latest_end_seq,
                 proofs: updated_proof_infos,
@@ -254,7 +258,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 }
             }
         } else {
-            info!("🚫 No more merge opportunities found for block {} after {} attempt(s)", 
+            debug!("🚫 No more merge opportunities found for block {} after {} attempt(s)", 
                 proof_calc.block_number, attempt);
             break; // No more merge opportunities available
         }
@@ -264,7 +268,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         warn!("❌ Failed to create any merge job for block {} after {} attempts", 
             proof_calc.block_number, attempted_merges.len());
     } else if !merge_created {
-        info!("🚫 No merge opportunities found for block {}", proof_calc.block_number);
+        info!("🚫 No merge opportunities found for block {} in app_instance {}", proof_calc.block_number, app_instance);
     }
 
     Ok(())

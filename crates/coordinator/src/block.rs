@@ -6,11 +6,16 @@ use tracing::{info, debug, error};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn settle(proof_calc: ProofCalculation, da_hash: String) -> Result<()> {
+    // Get sequences from the last proof (which should be the complete block proof)
+    let sequences = proof_calc.proofs.last()
+        .map(|p| p.sequences.clone())
+        .unwrap_or_default();
+    
     info!(
         "Settling complete block {} with {} sequences: {} (da_hash: {})",
         proof_calc.block_number,
-        proof_calc.sequences.len(),
-        proof_calc.sequences.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
+        sequences.len(),
+        sequences.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(", "),
         da_hash
     );
 
