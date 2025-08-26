@@ -25,6 +25,7 @@ use coordinator::{
     GetSequenceStatesRequest, GetSequenceStatesResponse, SequenceState,
     ReadDataAvailabilityRequest, ReadDataAvailabilityResponse,
     GetProofRequest, GetProofResponse,
+    RetrieveSecretRequest, RetrieveSecretResponse,
 };
 
 #[derive(Clone)]
@@ -1186,6 +1187,118 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     success: false,
                     proof: None,
                     message: Some(format!("Failed to read proof: {}", e)),
+                }))
+            }
+        }
+    }
+
+    async fn retrieve_secret(
+        &self,
+        request: Request<RetrieveSecretRequest>,
+    ) -> Result<Response<RetrieveSecretResponse>, Status> {
+        let req = request.into_inner();
+        
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            secret_name = %req.name,
+            "Received RetrieveSecret request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => job,
+            None => {
+                warn!("RetrieveSecret request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(RetrieveSecretResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    secret_value: None,
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer 
+                || current.agent != agent_job.agent 
+                || current.agent_method != agent_job.agent_method {
+                warn!(
+                    "RetrieveSecret request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer, agent_job.agent, agent_job.agent_method,
+                    current.developer, current.agent, current.agent_method
+                );
+                return Ok(Response::new(RetrieveSecretResponse {
+                    success: false,
+                    message: "Job does not belong to requesting session".to_string(),
+                    secret_value: None,
+                }));
+            }
+        } else {
+            warn!("RetrieveSecret request from unknown session: {}", req.session_id);
+            return Ok(Response::new(RetrieveSecretResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+                secret_value: None,
+            }));
+        }
+
+        // Get the Silvana RPC client from shared state
+        let mut rpc_client = match self.state.get_rpc_client().await {
+            Some(client) => client,
+            None => {
+                error!("Silvana RPC client not initialized");
+                return Ok(Response::new(RetrieveSecretResponse {
+                    success: false,
+                    message: "Silvana RPC service not available".to_string(),
+                    secret_value: None,
+                }));
+            }
+        };
+
+        // Build the secret reference from the job information
+        use crate::rpc::events;
+        let secret_reference = events::SecretReference {
+            developer: agent_job.developer.clone(),
+            agent: agent_job.agent.clone(),
+            app: Some(agent_job.pending_job.app.clone()),
+            app_instance: Some(agent_job.app_instance.clone()),
+            name: Some(req.name.clone()),
+        };
+
+        // Create the retrieve secret request for the Silvana RPC service
+        let retrieve_request = events::RetrieveSecretRequest {
+            reference: Some(secret_reference),
+            signature: vec![], // Empty signature for now (not validated yet per proto)
+        };
+
+        // Call the retrieve secret method on Silvana RPC
+        match rpc_client.retrieve_secret(retrieve_request).await {
+            Ok(response) => {
+                let inner = response.into_inner();
+                if inner.success {
+                    info!("Successfully retrieved secret '{}' for job {} via Silvana RPC", req.name, req.job_id);
+                    Ok(Response::new(RetrieveSecretResponse {
+                        success: true,
+                        message: inner.message,
+                        secret_value: Some(inner.secret_value),
+                    }))
+                } else {
+                    warn!("Failed to retrieve secret '{}' for job {}: {}", req.name, req.job_id, inner.message);
+                    Ok(Response::new(RetrieveSecretResponse {
+                        success: false,
+                        message: inner.message,
+                        secret_value: None,
+                    }))
+                }
+            }
+            Err(e) => {
+                error!("Error calling retrieve secret on Silvana RPC: {}", e);
+                Ok(Response::new(RetrieveSecretResponse {
+                    success: false,
+                    message: format!("Error retrieving secret: {}", e),
+                    secret_value: None,
                 }))
             }
         }

@@ -2,6 +2,16 @@ use clap::{Parser, Subcommand};
 use duct::cmd;
 use secrets_client::SecretsClient;
 
+/// Get the default RPC server endpoint from environment or fallback
+fn get_default_endpoint() -> String {
+    // Load .env file if it exists
+    dotenv::dotenv().ok();
+    
+    // Get SILVANA_RPC_SERVER from environment, fallback to default if not set
+    std::env::var("SILVANA_RPC_SERVER")
+        .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string())
+}
+
 #[derive(Parser)]
 struct Cli {
     #[command(subcommand)]
@@ -16,8 +26,8 @@ enum Cmd {
     DbReset,
     /// Store a secret via gRPC
     StoreSecret {
-        /// RPC endpoint (e.g., http://localhost:50051)
-        #[arg(long, default_value = "http://localhost:50051")]
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, default_value_t = get_default_endpoint())]
         endpoint: String,
         /// Developer identifier
         #[arg(long)]
@@ -40,8 +50,8 @@ enum Cmd {
     },
     /// Retrieve a secret via gRPC
     RetrieveSecret {
-        /// RPC endpoint (e.g., http://localhost:50051)
-        #[arg(long, default_value = "http://localhost:50051")]
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, default_value_t = get_default_endpoint())]
         endpoint: String,
         /// Developer identifier
         #[arg(long)]

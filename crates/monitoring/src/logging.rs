@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use std::env;
-use tracing::{debug, info, warn, error};
+use tracing::{info, warn, Event, Level, Subscriber};
 use tracing_appender::rolling;
 use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 

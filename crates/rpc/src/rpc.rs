@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, warn, error};
 
 use crate::database::EventDatabase;
 use buffer::EventBuffer;

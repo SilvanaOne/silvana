@@ -7,7 +7,7 @@ use aws_sdk_kms::{Client, primitives::Blob};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
-use tracing::{debug, info, warn, error};
+use tracing::{info, error};
 
 // Global static to store the KMS client
 static KMS_CLIENT: OnceLock<Arc<Client>> = OnceLock::new();

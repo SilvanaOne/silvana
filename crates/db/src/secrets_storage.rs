@@ -4,7 +4,7 @@ use kms::{EncryptedData, KMS};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, info};
 
 /// Key for identifying a unique secret
 #[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]

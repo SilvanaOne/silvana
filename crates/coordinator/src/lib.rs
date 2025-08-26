@@ -14,6 +14,7 @@ pub mod merge;
 pub mod pending;
 pub mod processor;
 pub mod registry;
+pub mod rpc;
 pub mod session_id;
 pub mod state;
 pub mod sui_interface;

@@ -14,6 +14,7 @@ mod merge;
 mod pending;
 mod processor;
 mod registry;
+mod rpc;
 mod session_id;
 mod state;
 mod sui_interface;

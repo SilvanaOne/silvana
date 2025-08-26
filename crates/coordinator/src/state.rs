@@ -1,12 +1,13 @@
 use crate::agent::AgentJobDatabase;
 use crate::jobs::JobsTracker;
+use crate::rpc::{RpcClient, create_rpc_client};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use sui_rpc::Client;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, error};
 
 // Maximum number of concurrent Docker containers/agents that can run simultaneously
 pub const MAX_CONCURRENT_AGENTS: usize = 2;
@@ -27,6 +28,7 @@ pub struct SharedState {
     agent_job_db: AgentJobDatabase,  // Memory database for agent job tracking
     sui_client: Client,  // Sui client (cloneable)
     has_pending_jobs: Arc<AtomicBool>,  // Fast check for pending jobs availability
+    rpc_client: Arc<RwLock<Option<RpcClient>>>,  // Silvana RPC service client
 }
 
 // Global static values initialized once from environment variables
@@ -39,12 +41,29 @@ impl SharedState {
         Self::init_coordinator_id();
         Self::init_chain();
         
+        // Initialize the Silvana RPC client asynchronously
+        let rpc_client = Arc::new(RwLock::new(None));
+        let rpc_client_clone = rpc_client.clone();
+        tokio::spawn(async move {
+            match create_rpc_client().await {
+                Ok(client) => {
+                    let mut lock = rpc_client_clone.write().await;
+                    *lock = Some(client);
+                    info!("Silvana RPC client initialized successfully");
+                }
+                Err(e) => {
+                    error!("Failed to initialize Silvana RPC client: {}", e);
+                }
+            }
+        });
+        
         Self {
             current_agents: Arc::new(RwLock::new(HashMap::new())),
             jobs_tracker: JobsTracker::new(),
             agent_job_db: AgentJobDatabase::new(),
             sui_client,
             has_pending_jobs: Arc::new(AtomicBool::new(false)),
+            rpc_client,
         }
     }
     
@@ -192,6 +211,12 @@ impl SharedState {
 
     pub fn get_sui_client(&self) -> Client {
         self.sui_client.clone()
+    }
+    
+    /// Get the Silvana RPC client (if initialized)
+    pub async fn get_rpc_client(&self) -> Option<RpcClient> {
+        let lock = self.rpc_client.read().await;
+        lock.clone()
     }
     
     /// Get reference to the JobsTracker for direct access

@@ -150,6 +150,20 @@ message GetProofResponse {
   optional string message = 3; // available when success is false
 }
 
+// Request message for retrieving a secret
+message RetrieveSecretRequest {
+  string job_id = 1;
+  string session_id = 2;
+  string name = 3;
+}
+
+// Response message for secret retrieval
+message RetrieveSecretResponse {
+  bool success = 1;
+  string message = 2;
+  optional string secret_value = 3; // Only returned if success is true
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -160,4 +174,5 @@ service CoordinatorService {
   rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
   rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
 }
