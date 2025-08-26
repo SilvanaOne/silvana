@@ -1161,6 +1161,7 @@ dependencies = [
  "prost",
  "prost-types",
  "proto",
+ "rpc-client",
  "rustls 0.23.31",
  "secrets-client",
  "serde",
@@ -1177,6 +1178,7 @@ dependencies = [
  "tonic-build",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "walrus",
 ]
 
@@ -3626,6 +3628,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpc-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dotenv",
+ "proto",
+ "rustls 0.23.31",
+ "thiserror 2.0.12",
+ "tokio",
+ "tonic",
+ "tracing",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3992,11 +4008,9 @@ name = "secrets-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "proto",
- "rustls 0.23.31",
+ "rpc-client",
  "thiserror 2.0.12",
  "tokio",
- "tonic",
  "tracing",
 ]
 
@@ -5298,6 +5312,7 @@ version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
+ "getrandom 0.3.3",
  "js-sys",
  "serde",
  "wasm-bindgen",

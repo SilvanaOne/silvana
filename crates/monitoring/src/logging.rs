@@ -130,58 +130,6 @@ impl LogVisitor {
     }
 }
 
-/// Custom console formatter that puts the target after the message
-struct ConsoleTargetAfterFormatter;
-
-impl<S, N> tracing_subscriber::fmt::FormatEvent<S, N> for ConsoleTargetAfterFormatter
-where
-    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
-    N: for<'a> tracing_subscriber::fmt::FormatFields<'a> + 'static,
-{
-    fn format_event(
-        &self,
-        _ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
-        mut writer: tracing_subscriber::fmt::format::Writer<'_>,
-        event: &Event<'_>,
-    ) -> std::fmt::Result {
-        // Write timestamp
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        let timestamp = chrono::DateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos())
-            .unwrap_or_else(|| chrono::Utc::now());
-        write!(writer, "{} ", timestamp.format("%Y-%m-%dT%H:%M:%S%.6fZ"))?;
-
-        // Write level with color
-        let level = event.metadata().level();
-        let colored_level = match *level {
-            Level::ERROR => "\x1b[31mERROR\x1b[0m", // Red
-            Level::WARN => "\x1b[33m WARN\x1b[0m",  // Yellow
-            Level::INFO => "\x1b[32m INFO\x1b[0m",  // Green
-            Level::DEBUG => "\x1b[34mDEBUG\x1b[0m", // Blue
-            Level::TRACE => "\x1b[36mTRACE\x1b[0m", // Cyan
-        };
-        write!(writer, "{} ", colored_level)?;
-
-        // Write the message (extract it from the event)
-        let mut visitor = LogVisitor::default();
-        event.record(&mut visitor);
-
-        if let Some(message) = visitor.get_message() {
-            write!(writer, "{}", message)?;
-        }
-
-        // Write target after the message (in a subtle gray color if ANSI is supported)
-        let target = event.metadata().target();
-        if !target.is_empty() {
-            write!(writer, " \x1b[90m[{}]\x1b[0m", target)?;
-        }
-
-        writeln!(writer)?;
-        Ok(())
-    }
-}
-
 /// Initialize tracing with configurable output destination
 ///
 /// ## Environment Variables
@@ -222,14 +170,12 @@ pub async fn init_logging() -> Result<()> {
                     tracing_subscriber::fmt::layer()
                         .with_writer(std::io::stdout)
                         .with_ansi(true) // Enable ANSI colors for console output
-                        .with_target(false) // We'll include target after the message
+                        .with_target(true) // Include target (crate::module) in logs
                         .compact()
                         .with_line_number(false)
                         .with_file(false)
                         .with_thread_ids(false)
-                        .with_thread_names(false)
-                        .fmt_fields(tracing_subscriber::fmt::format::DefaultFields::new())
-                        .event_format(ConsoleTargetAfterFormatter),
+                        .with_thread_names(false),
                 );
 
                 // Add OpenTelemetry layer if configured
@@ -292,7 +238,7 @@ pub async fn init_logging() -> Result<()> {
                     tracing_subscriber::fmt::layer()
                         .with_writer(non_blocking)
                         .with_ansi(false) // Disable ANSI colors for file output
-                        .with_target(false), // Clean up the format for files
+                        .with_target(true), // Include target (crate::module) in logs
                 );
 
                 // Add OpenTelemetry layer if configured

@@ -6,14 +6,8 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-# Proto definitions
-proto = { path = "../proto" }
-
-# gRPC client
-tonic = { workspace = true, features = ["tls-webpki-roots"] }
-
-# TLS support for rustls crypto provider
-rustls = { workspace = true }
+# RPC client
+rpc-client = { path = "../rpc-client" }
 
 # Async runtime
 tokio.workspace = true

@@ -1258,8 +1258,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Build the secret reference from the job information
-        use crate::rpc::events;
-        let secret_reference = events::SecretReference {
+        use rpc_client::SecretReference;
+        let secret_reference = SecretReference {
             developer: agent_job.developer.clone(),
             agent: agent_job.agent.clone(),
             app: Some(agent_job.pending_job.app.clone()),
@@ -1268,7 +1268,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Create the retrieve secret request for the Silvana RPC service
-        let retrieve_request = events::RetrieveSecretRequest {
+        use rpc_client::RetrieveSecretRequest;
+        let retrieve_request = RetrieveSecretRequest {
             reference: Some(secret_reference),
             signature: vec![], // Empty signature for now (not validated yet per proto)
         };

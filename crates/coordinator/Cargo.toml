@@ -16,7 +16,10 @@ docker = { path = "../docker" }
 # Sui utilities
 sui = { path = "../sui" }
 
-# Secrets client
+# RPC client
+rpc-client = { path = "../rpc-client" }
+
+# Secrets client  
 secrets-client = { path = "../secrets-client" }
 
 # Walrus data availability
@@ -74,6 +77,12 @@ parking_lot.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true
+
+[dev-dependencies]
+# For tests
+uuid = { version = "1.0", features = ["v4"] }
+dotenv = "0.15"
+rustls = { workspace = true }
 
 [[bin]]
 name = "coordinator"

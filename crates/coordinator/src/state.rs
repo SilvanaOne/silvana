@@ -1,6 +1,6 @@
 use crate::agent::AgentJobDatabase;
 use crate::jobs::JobsTracker;
-use crate::rpc::{RpcClient, create_rpc_client};
+use rpc_client::{RpcClient, RpcClientConfig, create_rpc_client};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,7 +45,8 @@ impl SharedState {
         let rpc_client = Arc::new(RwLock::new(None));
         let rpc_client_clone = rpc_client.clone();
         tokio::spawn(async move {
-            match create_rpc_client().await {
+            let config = RpcClientConfig::from_env();
+            match create_rpc_client(config).await {
                 Ok(client) => {
                     let mut lock = rpc_client_clone.write().await;
                     *lock = Some(client);

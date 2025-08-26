@@ -556,7 +556,6 @@ mod tests {
     fn test_find_proofs_to_merge() {
         let block_proofs = ProofCalculation {
             block_number: 1,
-            sequences: vec![1, 2, 3, 4],
             start_sequence: 1,  // No longer Option
             end_sequence: Some(4),
             proofs: vec![
