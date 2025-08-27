@@ -1533,22 +1533,50 @@ impl CoordinatorService for CoordinatorServiceImpl {
             debug!("No ProofCalculation object found");
         }
 
-        // Return the block proof if found
-        match block_proof {
-            Some(proof) => {
-                info!("Successfully retrieved block proof for block {}", req.block_number);
-                Ok(Response::new(GetBlockProofResponse {
-                    success: true,
-                    block_proof: Some(proof),
-                    message: None,
-                }))
-            }
+        // If we found a block proof DA hash, fetch the actual proof from Walrus
+        let da_hash = match block_proof {
+            Some(hash) => hash,
             None => {
                 info!("No block proof available yet for block {}", req.block_number);
-                Ok(Response::new(GetBlockProofResponse {
+                return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
                     message: Some(format!("Block proof not available yet for block {}", req.block_number)),
+                }));
+            }
+        };
+
+        debug!("Found block proof with da_hash: {}", da_hash);
+
+        // Use walrus client to read the proof data
+        let walrus_client = walrus::WalrusClient::new();
+        let read_params = walrus::ReadFromWalrusParams {
+            blob_id: da_hash.clone(),
+        };
+
+        match walrus_client.read_from_walrus(read_params).await {
+            Ok(Some(data)) => {
+                info!("Successfully read block proof from Walrus for da_hash: {}", da_hash);
+                Ok(Response::new(GetBlockProofResponse {
+                    success: true,
+                    block_proof: Some(data),
+                    message: None,
+                }))
+            }
+            Ok(None) => {
+                warn!("No data found for da_hash: {}", da_hash);
+                Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("No data found for hash: {}", da_hash)),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to read block proof from Walrus for da_hash {}: {}", da_hash, e);
+                Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Failed to read proof: {}", e)),
                 }))
             }
         }

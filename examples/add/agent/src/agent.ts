@@ -92,7 +92,7 @@ async function agent() {
             console.log("==========================");
 
             // Get the block proof for settlement
-            const blockNumber = response.job.blockNumber!;
+            const blockNumber = response.job.blockNumber ?? 1n;
             console.log(`\nFetching block proof for block ${blockNumber}...`);
 
             try {
@@ -127,11 +127,10 @@ async function agent() {
               console.log("\n🔐 Starting block proof verification...");
               const settlementStartTime = Date.now();
 
-              // const isValid = await settle(
-              //   blockProofResponse.blockProof,
-              //   blockNumber
-              // );
-              const isValid = true;
+              const isValid = await settle(
+                blockProofResponse.blockProof,
+                blockNumber
+              );
 
               const settlementTimeMs = Date.now() - settlementStartTime;
               console.log(
