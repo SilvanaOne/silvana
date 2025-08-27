@@ -14,6 +14,7 @@ mod merge;
 mod processor;
 mod registry;
 mod session_id;
+mod settlement;
 mod state;
 mod sui_interface;
 

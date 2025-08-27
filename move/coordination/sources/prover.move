@@ -25,6 +25,16 @@ public struct Proof has copy, drop, store {
     job_id: String,
 }
 
+public struct ProofCalculation has key, store {
+    id: UID,
+    block_number: u64,
+    start_sequence: u64,
+    end_sequence: Option<u64>,
+    proofs: VecMap<vector<u64>, Proof>,
+    block_proof: Option<String>,
+    is_finished: bool,
+}
+
 // Struct for serializing proof merge data
 public struct ProofMergeData has copy, drop {
     block_number: u64,
@@ -112,16 +122,6 @@ public struct BlockProofEvent has copy, drop {
     end_sequence: u64,
     da_hash: String,
     timestamp: u64,
-}
-
-public struct ProofCalculation has key, store {
-    id: UID,
-    block_number: u64,
-    start_sequence: u64,
-    end_sequence: Option<u64>,
-    proofs: VecMap<vector<u64>, Proof>,
-    block_proof: Option<String>,
-    is_finished: bool,
 }
 
 public struct ProofCalculationCreatedEvent has copy, drop {
@@ -362,22 +362,38 @@ public(package) fun start_proving(
     ctx: &TxContext,
 ) {
     // Sort and validate all sequences, get back sorted versions
-    let sorted_sequences = sort_and_validate_sequences(&sequences, proof_calculation.start_sequence, &proof_calculation.end_sequence);
-    
+    let sorted_sequences = sort_and_validate_sequences(
+        &sequences,
+        proof_calculation.start_sequence,
+        &proof_calculation.end_sequence,
+    );
+
     // Sort and validate sequence1 if provided
     let sorted_sequence1 = if (sequence1.is_some()) {
-        option::some(sort_and_validate_sequences(sequence1.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+        option::some(
+            sort_and_validate_sequences(
+                sequence1.borrow(),
+                proof_calculation.start_sequence,
+                &proof_calculation.end_sequence,
+            ),
+        )
     } else {
         option::none()
     };
-    
+
     // Sort and validate sequence2 if provided
     let sorted_sequence2 = if (sequence2.is_some()) {
-        option::some(sort_and_validate_sequences(sequence2.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+        option::some(
+            sort_and_validate_sequences(
+                sequence2.borrow(),
+                proof_calculation.start_sequence,
+                &proof_calculation.end_sequence,
+            ),
+        )
     } else {
         option::none()
     };
-    
+
     let mut isBlockProof = false;
     if (proof_calculation.end_sequence.is_some()) {
         let end_sequence = *proof_calculation.end_sequence.borrow();
@@ -494,8 +510,12 @@ public fun reject_proof(
     ctx: &mut TxContext,
 ) {
     // Sort and validate sequences
-    let sorted_sequences = sort_and_validate_sequences(&sequences, proof_calculation.start_sequence, &proof_calculation.end_sequence);
-    
+    let sorted_sequences = sort_and_validate_sequences(
+        &sequences,
+        proof_calculation.start_sequence,
+        &proof_calculation.end_sequence,
+    );
+
     let mut sequence1 = vector::empty<u64>();
     let mut sequence2 = vector::empty<u64>();
     {
@@ -542,7 +562,8 @@ public fun reject_proof(
 }
 
 #[error]
-const ESequenceOutOfRange: vector<u8> = b"Sequence is outside valid range for this block";
+const ESequenceOutOfRange: vector<u8> =
+    b"Sequence is outside valid range for this block";
 
 #[error]
 const ESequencesCannotBeEmpty: vector<u8> = b"Sequences vector cannot be empty";
@@ -555,13 +576,13 @@ fun sort_and_validate_sequences(
     end_sequence: &Option<u64>,
 ): vector<u64> {
     let len = vector::length(sequences);
-    
+
     // Sequences cannot be empty
     assert!(len > 0, ESequencesCannotBeEmpty);
-    
+
     // Clone the input vector
     let mut sorted_sequences = *sequences;
-    
+
     // Sort the sequences using bubble sort (simple for Move)
     let mut i = 0;
     while (i < len) {
@@ -575,20 +596,20 @@ fun sort_and_validate_sequences(
         };
         i = i + 1;
     };
-    
+
     // After sorting, only need to check first and last elements
     let first_seq = sorted_sequences[0];
     let last_seq = sorted_sequences[len - 1];
-    
+
     // Check that first sequence is >= start_sequence
     assert!(first_seq >= start_sequence, ESequenceOutOfRange);
-    
+
     // If end_sequence is set, check that last sequence is <= end_sequence
     if (end_sequence.is_some()) {
         let end_seq = *end_sequence.borrow();
         assert!(last_seq <= end_seq, ESequenceOutOfRange);
     };
-    
+
     sorted_sequences
 }
 
@@ -608,18 +629,34 @@ public fun submit_proof(
     ctx: &mut TxContext,
 ): bool {
     // Sort and validate all sequences, get back sorted versions
-    let sorted_sequences = sort_and_validate_sequences(&sequences, proof_calculation.start_sequence, &proof_calculation.end_sequence);
-    
+    let sorted_sequences = sort_and_validate_sequences(
+        &sequences,
+        proof_calculation.start_sequence,
+        &proof_calculation.end_sequence,
+    );
+
     // Sort and validate sequence1 if provided
     let sorted_sequence1 = if (sequence1.is_some()) {
-        option::some(sort_and_validate_sequences(sequence1.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+        option::some(
+            sort_and_validate_sequences(
+                sequence1.borrow(),
+                proof_calculation.start_sequence,
+                &proof_calculation.end_sequence,
+            ),
+        )
     } else {
         option::none()
     };
-    
+
     // Sort and validate sequence2 if provided
     let sorted_sequence2 = if (sequence2.is_some()) {
-        option::some(sort_and_validate_sequences(sequence2.borrow(), proof_calculation.start_sequence, &proof_calculation.end_sequence))
+        option::some(
+            sort_and_validate_sequences(
+                sequence2.borrow(),
+                proof_calculation.start_sequence,
+                &proof_calculation.end_sequence,
+            ),
+        )
     } else {
         option::none()
     };
@@ -646,7 +683,10 @@ public fun submit_proof(
         cpu_time,
     });
     if (contains(&proof_calculation.proofs, &sorted_sequences)) {
-        let existing_proof = get_mut(&mut proof_calculation.proofs, &sorted_sequences);
+        let existing_proof = get_mut(
+            &mut proof_calculation.proofs,
+            &sorted_sequences,
+        );
         let rejected_count = existing_proof.rejected_count;
         *existing_proof = proof;
         existing_proof.rejected_count = rejected_count;

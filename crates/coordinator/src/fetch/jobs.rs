@@ -138,6 +138,18 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
             })
             .unwrap_or(JobStatus::Pending);
         
+        // Helper function to extract Option<u64>
+        let get_option_u64 = |field_name: &str| -> Option<u64> {
+            struct_value.fields.get(field_name).and_then(|f| {
+                match &f.kind {
+                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
+                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
+                    Some(prost_types::value::Kind::NullValue(_)) => None,
+                    _ => None,
+                }
+            })
+        };
+        
         // Build the Job struct with all fields
         let job = Job {
             id,
@@ -156,6 +168,8 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
             data: get_bytes("data"),
             status,
             attempts: get_u8("attempts"),
+            interval_ms: get_option_u64("interval_ms"),
+            next_scheduled_at: get_option_u64("next_scheduled_at"),
             created_at: get_u64("created_at"),
             updated_at: get_u64("updated_at"),
         };
@@ -610,6 +624,143 @@ pub async fn get_jobs_info_from_app_instance(
     Ok(None)
 }
 
+/// Fetch all jobs from an app instance
+pub async fn fetch_all_jobs_from_app_instance(
+    client: &mut Client,
+    app_instance_id: &str,
+) -> Result<Vec<Job>> {
+    debug!("Fetching all jobs from app_instance {}", app_instance_id);
+    
+    // Ensure the app_instance_id has 0x prefix
+    let formatted_id = if app_instance_id.starts_with("0x") {
+        app_instance_id.to_string()
+    } else {
+        format!("0x{}", app_instance_id)
+    };
+    
+    // Fetch the AppInstance object
+    let request = GetObjectRequest {
+        object_id: Some(formatted_id.clone()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec!["json".to_string()],
+        }),
+    };
+
+    let response = client
+        .ledger_client()
+        .get_object(request)
+        .await
+        .map_err(|e| CoordinatorError::RpcConnectionError(
+            format!("Failed to fetch AppInstance {}: {}", formatted_id, e)
+        ))?;
+
+    let mut all_jobs = Vec::new();
+
+    if let Some(proto_object) = response.into_inner().object {
+        if let Some(json_value) = &proto_object.json {
+            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
+                // Get the embedded jobs field
+                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
+                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
+                        // Get the jobs ObjectTable
+                        if let Some(jobs_table_field) = jobs_struct.fields.get("jobs") {
+                            if let Some(prost_types::value::Kind::StructValue(jobs_table_struct)) = &jobs_table_field.kind {
+                                if let Some(table_id_field) = jobs_table_struct.fields.get("id") {
+                                    if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
+                                        // Fetch all jobs from the ObjectTable
+                                        let mut page_token = None;
+                                        loop {
+                                            let list_request = ListDynamicFieldsRequest {
+                                                parent: Some(table_id.clone()),
+                                                page_size: Some(100),
+                                                page_token: page_token.clone(),
+                                                read_mask: Some(prost_types::FieldMask {
+                                                    paths: vec!["field_id".to_string()],
+                                                }),
+                                            };
+
+                                            let fields_response = client
+                                                .live_data_client()
+                                                .list_dynamic_fields(list_request)
+                                                .await
+                                                .map_err(|e| CoordinatorError::RpcConnectionError(
+                                                    format!("Failed to list jobs: {}", e)
+                                                ))?;
+
+                                            let response = fields_response.into_inner();
+                                            
+                                            // Fetch each job
+                                            for field in &response.dynamic_fields {
+                                                if let Some(field_id) = &field.field_id {
+                                                    // Fetch the job field wrapper
+                                                    let job_request = GetObjectRequest {
+                                                        object_id: Some(field_id.clone()),
+                                                        version: None,
+                                                        read_mask: Some(prost_types::FieldMask {
+                                                            paths: vec!["json".to_string()],
+                                                        }),
+                                                    };
+
+                                                    if let Ok(job_response) = client.ledger_client().get_object(job_request).await {
+                                                        if let Some(job_object) = job_response.into_inner().object {
+                                                            if let Some(job_json) = &job_object.json {
+                                                                // Extract actual job ID from field wrapper
+                                                                if let Some(prost_types::value::Kind::StructValue(field_struct)) = &job_json.kind {
+                                                                    if let Some(value_field) = field_struct.fields.get("value") {
+                                                                        if let Some(prost_types::value::Kind::StringValue(job_object_id)) = &value_field.kind {
+                                                                            // Fetch actual job object
+                                                                            let actual_job_request = GetObjectRequest {
+                                                                                object_id: Some(job_object_id.clone()),
+                                                                                version: None,
+                                                                                read_mask: Some(prost_types::FieldMask {
+                                                                                    paths: vec!["json".to_string()],
+                                                                                }),
+                                                                            };
+
+                                                                            if let Ok(actual_job_response) = client.ledger_client().get_object(actual_job_request).await {
+                                                                                if let Some(actual_job_object) = actual_job_response.into_inner().object {
+                                                                                    if let Some(actual_job_json) = &actual_job_object.json {
+                                                                                        if let Ok(job) = extract_job_from_json(actual_job_json) {
+                                                                                            all_jobs.push(job);
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Check for next page
+                                            if let Some(next_token) = response.next_page_token {
+                                                if !next_token.is_empty() {
+                                                    page_token = Some(next_token);
+                                                } else {
+                                                    break;
+                                                }
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    debug!("Found {} total jobs in app_instance {}", all_jobs.len(), app_instance_id);
+    Ok(all_jobs)
+}
+
 /// Try to fetch a pending job from any of the given app_instances using the index
 pub async fn fetch_pending_job_from_instances(
     client: &mut Client,
@@ -618,8 +769,15 @@ pub async fn fetch_pending_job_from_instances(
     agent: &str,
     agent_method: &str,
 ) -> Result<Option<Job>> {
-    // Collect all job IDs from all app_instances with their app_instance_method
-    let mut all_jobs: Vec<(u64, String, String, String)> = Vec::new(); // (job_sequence, app_instance_id, jobs_table_id, app_instance_method)
+    // Get current time for checking next_scheduled_at
+    let current_time_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    
+    // Collect all job IDs from all app_instances with their app_instance_method and next_scheduled_at
+    let mut all_jobs: Vec<(u64, String, String, String, Option<u64>, bool)> = Vec::new(); 
+    // (job_sequence, app_instance_id, jobs_table_id, app_instance_method, next_scheduled_at, is_settlement_job)
     
     for app_instance in app_instances {
         // Get Jobs table ID from the AppInstance
@@ -640,16 +798,55 @@ pub async fn fetch_pending_job_from_instances(
             agent_method,
         ).await?;
         
-        // Fetch each job to get its app_instance_method
+        // Check if there's a settlement job first
+        let settlement_job_id = crate::settlement::get_settlement_job_id_for_instance(client, app_instance).await
+            .unwrap_or(None);
+        
+        // If there's a settlement job and it's in the pending jobs, check it first
+        if let Some(settle_id) = settlement_job_id {
+            if job_sequences.contains(&settle_id) {
+                if let Some(job) = fetch_job_by_id(client, &jobs_table_id, settle_id).await? {
+                    // Check if it's ready to run (next_scheduled_at)
+                    if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+                        all_jobs.push((
+                            settle_id,
+                            app_instance.clone(),
+                            jobs_table_id.clone(),
+                            job.app_instance_method.clone(),
+                            job.next_scheduled_at,
+                            true // is_settlement_job
+                        ));
+                    } else {
+                        debug!("Settlement job {} not ready yet, scheduled for {}", 
+                            settle_id, job.next_scheduled_at.unwrap());
+                    }
+                }
+            }
+        }
+        
+        // Fetch each job to get its app_instance_method and check if it's ready to run
         for job_sequence in job_sequences {
+            // Skip if this is the settlement job we already processed
+            if Some(job_sequence) == settlement_job_id {
+                continue;
+            }
+            
             match fetch_job_by_id(client, &jobs_table_id, job_sequence).await? {
                 Some(job) => {
-                    all_jobs.push((
-                        job_sequence, 
-                        app_instance.clone(), 
-                        jobs_table_id.clone(),
-                        job.app_instance_method.clone()
-                    ));
+                    // Check if job is ready to run (next_scheduled_at)
+                    if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+                        all_jobs.push((
+                            job_sequence, 
+                            app_instance.clone(), 
+                            jobs_table_id.clone(),
+                            job.app_instance_method.clone(),
+                            job.next_scheduled_at,
+                            false // not a settlement job
+                        ));
+                    } else {
+                        debug!("Job {} not ready yet, scheduled for {}", 
+                            job_sequence, job.next_scheduled_at.unwrap());
+                    }
                 }
                 None => {
                     warn!("Could not fetch job {} from table {}", job_sequence, jobs_table_id);
@@ -663,32 +860,44 @@ pub async fn fetch_pending_job_from_instances(
         return Ok(None);
     }
     
-    // Separate merge jobs from non-merge jobs
+    // Separate jobs by priority: settlement > merge > others
+    let mut settlement_jobs: Vec<_> = all_jobs.iter()
+        .filter(|(_, _, _, _, _, is_settlement)| *is_settlement)
+        .collect();
     let mut merge_jobs: Vec<_> = all_jobs.iter()
-        .filter(|(_, _, _, method)| method == "merge")
+        .filter(|(_, _, _, method, _, is_settlement)| !is_settlement && method == "merge")
         .collect();
-    let mut non_merge_jobs: Vec<_> = all_jobs.iter()
-        .filter(|(_, _, _, method)| method != "merge")
+    let mut other_jobs: Vec<_> = all_jobs.iter()
+        .filter(|(_, _, _, method, _, is_settlement)| !is_settlement && method != "merge")
         .collect();
     
-    // Sort both lists by job_sequence
-    merge_jobs.sort_by_key(|(job_seq, _, _, _)| *job_seq);
-    non_merge_jobs.sort_by_key(|(job_seq, _, _, _)| *job_seq);
+    // Sort all lists by job_sequence
+    settlement_jobs.sort_by_key(|(job_seq, _, _, _, _, _)| *job_seq);
+    merge_jobs.sort_by_key(|(job_seq, _, _, _, _, _)| *job_seq);
+    other_jobs.sort_by_key(|(job_seq, _, _, _, _, _)| *job_seq);
     
-    // Prioritize merge jobs, but fall back to non-merge if no merge jobs exist
-    let selected_job = if !merge_jobs.is_empty() {
+    // Prioritize: settlement > merge > others
+    let selected_job = if !settlement_jobs.is_empty() {
+        let job = settlement_jobs[0];
+        info!(
+            "Found {} settlement, {} merge, and {} other jobs for {}/{}/{}. Selecting settlement job {} from {}",
+            settlement_jobs.len(), merge_jobs.len(), other_jobs.len(), 
+            developer, agent, agent_method, job.0, job.1
+        );
+        job
+    } else if !merge_jobs.is_empty() {
         let job = merge_jobs[0];
         info!(
-            "Found {} merge jobs and {} non-merge jobs for {}/{}/{}. Selecting merge job {} from {}",
-            merge_jobs.len(), non_merge_jobs.len(), developer, agent, agent_method, 
+            "Found {} merge jobs and {} other jobs for {}/{}/{}. Selecting merge job {} from {}",
+            merge_jobs.len(), other_jobs.len(), developer, agent, agent_method, 
             job.0, job.1
         );
         job
-    } else if !non_merge_jobs.is_empty() {
-        let job = non_merge_jobs[0];
+    } else if !other_jobs.is_empty() {
+        let job = other_jobs[0];
         info!(
-            "Found {} non-merge jobs for {}/{}/{}. Selecting job {} from {}",
-            non_merge_jobs.len(), developer, agent, agent_method, 
+            "Found {} other jobs for {}/{}/{}. Selecting job {} from {}",
+            other_jobs.len(), developer, agent, agent_method, 
             job.0, job.1
         );
         job
@@ -697,28 +906,62 @@ pub async fn fetch_pending_job_from_instances(
         return Ok(None);
     };
     
-    let (lowest_job_sequence, _app_instance, jobs_table_id, _app_instance_method) = selected_job;
+    let (lowest_job_sequence, _app_instance, jobs_table_id, _app_instance_method, _next_scheduled_at, _is_settlement) = selected_job;
     
     // Fetch the specific job by ID
     fetch_job_by_id(client, jobs_table_id, *lowest_job_sequence).await
 }
 
 /// Fetch the pending job with the smallest job_sequence from multiple app_instances
+/// Prioritizes: settlement jobs > merge jobs > other jobs
+/// Also checks next_scheduled_at to ensure jobs are ready to run
 pub async fn fetch_all_pending_jobs(
     client: &mut Client,
     app_instance_ids: &[String],
     state: &SharedState,
     only_check: bool,
 ) -> Result<Option<Job>> {
+    // Get current time for checking next_scheduled_at
+    let current_time_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    
     let mut all_pending_jobs = Vec::new();
     
     for app_instance_id in app_instance_ids {
+        // First check for settlement job if not in check-only mode
+        if !only_check {
+            if let Ok(Some(settle_job_id)) = crate::settlement::get_settlement_job_id_for_instance(client, app_instance_id).await {
+                // Fetch the settlement job to check if it's pending and ready
+                if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(client, app_instance_id).await {
+                    if let Ok(Some(settle_job)) = fetch_job_by_id(client, &jobs_table_id, settle_job_id).await {
+                        // Check if it's pending and ready to run
+                        if matches!(settle_job.status, crate::fetch::jobs_types::JobStatus::Pending) &&
+                           (settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() <= current_time_ms) {
+                            debug!("Found pending settlement job {} in app_instance {}", settle_job.job_sequence, app_instance_id);
+                            all_pending_jobs.push((settle_job, true)); // true = is_settlement
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fetch regular pending jobs
         match fetch_pending_jobs_from_app_instance(client, app_instance_id, state, only_check).await {
             Ok(job_opt) => {
                 if !only_check {
                     if let Some(job) = job_opt {
-                        debug!("Found pending job with job_sequence {} in app_instance {}", job.job_sequence, app_instance_id);
-                        all_pending_jobs.push(job);
+                        // Check if job is ready to run (next_scheduled_at)
+                        if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+                            debug!("Found pending job with job_sequence {} in app_instance {}", job.job_sequence, app_instance_id);
+                            // Check if it's a merge job or other
+                            let is_settlement = false; // We handled settlement jobs separately above
+                            all_pending_jobs.push((job, is_settlement));
+                        } else {
+                            debug!("Job {} not ready yet, scheduled for {}", 
+                                job.job_sequence, job.next_scheduled_at.unwrap());
+                        }
                     }
                 }
             }
@@ -728,16 +971,44 @@ pub async fn fetch_all_pending_jobs(
         }
     }
     
-    // Sort all collected jobs and return the one with smallest job_sequence
+    // Sort all collected jobs by priority: settlement > merge > others
     if all_pending_jobs.is_empty() {
         if !only_check {
             debug!("No pending jobs found across all app_instances");
         }
         Ok(None)
     } else {
-        all_pending_jobs.sort_by_key(|job| job.job_sequence);
-        let job = all_pending_jobs.into_iter().next().unwrap();
-        info!("Returning pending job with smallest job_sequence: {}", job.job_sequence);
-        Ok(Some(job))
+        // Separate jobs by type
+        let mut settlement_jobs: Vec<_> = all_pending_jobs.iter()
+            .filter(|(_, is_settlement)| *is_settlement)
+            .map(|(job, _)| job.clone())
+            .collect();
+        let mut merge_jobs: Vec<_> = all_pending_jobs.iter()
+            .filter(|(job, is_settlement)| !is_settlement && job.app_instance_method == "merge")
+            .map(|(job, _)| job.clone())
+            .collect();
+        let mut other_jobs: Vec<_> = all_pending_jobs.iter()
+            .filter(|(job, is_settlement)| !is_settlement && job.app_instance_method != "merge")
+            .map(|(job, _)| job.clone())
+            .collect();
+        
+        // Sort each category by job_sequence
+        settlement_jobs.sort_by_key(|job| job.job_sequence);
+        merge_jobs.sort_by_key(|job| job.job_sequence);
+        other_jobs.sort_by_key(|job| job.job_sequence);
+        
+        // Return the highest priority job
+        let selected_job = if !settlement_jobs.is_empty() {
+            info!("Returning settlement job with job_sequence: {}", settlement_jobs[0].job_sequence);
+            settlement_jobs.into_iter().next().unwrap()
+        } else if !merge_jobs.is_empty() {
+            info!("Returning merge job with job_sequence: {}", merge_jobs[0].job_sequence);
+            merge_jobs.into_iter().next().unwrap()
+        } else {
+            info!("Returning other job with job_sequence: {}", other_jobs[0].job_sequence);
+            other_jobs.into_iter().next().unwrap()
+        };
+        
+        Ok(Some(selected_job))
     }
 }

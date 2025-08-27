@@ -11,6 +11,9 @@ pub struct BlockInfo {
     pub start_sequence: u64,
     pub end_sequence: u64,
     pub name: String,
+    pub proof_data_availability: Option<String>,
+    pub settlement_tx_hash: Option<String>,
+    pub settlement_tx_included_in_block: bool,
 }
 
 /// Fetch Block information from AppInstance by block number
@@ -317,6 +320,9 @@ fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u
         let mut name = String::new();
         let mut start_sequence = 0u64;
         let mut end_sequence = 0u64;
+        let mut proof_data_availability = None;
+        let mut settlement_tx_hash = None;
+        let mut settlement_tx_included_in_block = false;
         
         if let Some(name_field) = struct_value.fields.get("name") {
             if let Some(prost_types::value::Kind::StringValue(name_str)) = &name_field.kind {
@@ -336,11 +342,47 @@ fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u
             }
         }
         
+        // Extract proof_data_availability (Option<String>)
+        if let Some(proof_field) = struct_value.fields.get("proof_data_availability") {
+            match &proof_field.kind {
+                Some(prost_types::value::Kind::StringValue(proof_str)) => {
+                    proof_data_availability = Some(proof_str.clone());
+                }
+                Some(prost_types::value::Kind::NullValue(_)) => {
+                    proof_data_availability = None;
+                }
+                _ => {}
+            }
+        }
+        
+        // Extract settlement_tx_hash (Option<String>)
+        if let Some(tx_field) = struct_value.fields.get("settlement_tx_hash") {
+            match &tx_field.kind {
+                Some(prost_types::value::Kind::StringValue(tx_str)) => {
+                    settlement_tx_hash = Some(tx_str.clone());
+                }
+                Some(prost_types::value::Kind::NullValue(_)) => {
+                    settlement_tx_hash = None;
+                }
+                _ => {}
+            }
+        }
+        
+        // Extract settlement_tx_included_in_block (bool)
+        if let Some(included_field) = struct_value.fields.get("settlement_tx_included_in_block") {
+            if let Some(prost_types::value::Kind::BoolValue(included)) = &included_field.kind {
+                settlement_tx_included_in_block = *included;
+            }
+        }
+        
         let block_info = BlockInfo {
             block_number,
             start_sequence,
             end_sequence,
             name: name.clone(),
+            proof_data_availability,
+            settlement_tx_hash,
+            settlement_tx_included_in_block,
         };
         debug!("✅ Successfully extracted block info: {:?}", block_info);
         return Ok(Some(block_info));

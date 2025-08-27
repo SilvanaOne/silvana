@@ -119,6 +119,9 @@ impl SuiJobInterface {
         sequences1: Option<Vec<u64>>,
         sequences2: Option<Vec<u64>>,
         data: Vec<u8>,
+        interval_ms: Option<u64>,
+        next_scheduled_at: Option<u64>,
+        is_settlement_job: bool,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!(
             "Attempting to create app job for method '{}' on Sui blockchain (data size: {} bytes)",
@@ -135,6 +138,9 @@ impl SuiJobInterface {
             sequences1,
             sequences2,
             data,
+            interval_ms,
+            next_scheduled_at,
+            is_settlement_job,
         )
         .await
         {
@@ -392,6 +398,41 @@ impl SuiJobInterface {
             Err(e) => {
                 error!("Failed to submit proof for job {} on blockchain: {}", job_id, e);
                 Err(format!("Failed to submit proof: {}", e).into())
+            }
+        }
+    }
+
+    /// Terminate an app job on the Sui blockchain
+    pub async fn terminate_app_job(
+        &mut self,
+        app_instance: &str,
+        job_id: u64,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to terminate app job {} on Sui blockchain",
+            job_id
+        );
+
+        match sui::transactions::terminate_app_job_tx(
+            &mut self.client,
+            app_instance,
+            job_id,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully terminated app job {} on blockchain, tx: {}",
+                    job_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to terminate app job {} on blockchain: {}",
+                    job_id, e
+                );
+                Err(e.into())
             }
         }
     }

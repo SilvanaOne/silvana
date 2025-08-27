@@ -97,7 +97,7 @@ export async function deployAddContract(): Promise<{
   const tx = await Mina.transaction(
     {
       sender: deployerPublicKey,
-      fee: 400_000_000,
+      fee: 100_000_000,
       memo: "Deploy AddContract",
     },
     async () => {

@@ -593,11 +593,13 @@ public fun update_block_settlement_tx_included_in_block(
         option::some(settled_at),
     );
 
-    // Update last_settled_block_number by checking all blocks from 
+    // Update last_settled_block_number by checking all blocks from
     // last_settled_block_number + 1 up to and including the current block_number
     // to find the highest consecutive settled block
     let mut i = app_instance.last_settled_block_number + 1;
-    while (i <= block_number && object_table::contains(&app_instance.blocks, i)) {
+    while (
+        i <= block_number && object_table::contains(&app_instance.blocks, i)
+    ) {
         let check_block = borrow(&app_instance.blocks, i);
         if (block::get_settlement_tx_included_in_block(check_block)) {
             // This block is settled, update last_settled_block_number
@@ -608,11 +610,13 @@ public fun update_block_settlement_tx_included_in_block(
             break
         };
     };
-    
+
     // Also check if there are any blocks after block_number that were settled out of order
     if (app_instance.last_settled_block_number == block_number) {
         let mut j = block_number + 1;
-        while (j < app_instance.block_number && object_table::contains(&app_instance.blocks, j)) {
+        while (
+            j < app_instance.block_number && object_table::contains(&app_instance.blocks, j)
+        ) {
             let next_block = borrow(&app_instance.blocks, j);
             if (block::get_settlement_tx_included_in_block(next_block)) {
                 app_instance.last_settled_block_number = j;
@@ -822,6 +826,7 @@ public fun create_app_job(
     data: vector<u8>,
     interval_ms: Option<u64>,
     next_scheduled_at: Option<u64>,
+    is_settlement_job: bool,
     clock: &Clock,
     ctx: &mut TxContext,
 ): u64 {
@@ -848,6 +853,7 @@ public fun create_app_job(
         data,
         interval_ms,
         next_scheduled_at,
+        is_settlement_job,
         clock,
         ctx,
     )

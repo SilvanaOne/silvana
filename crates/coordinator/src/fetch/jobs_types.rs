@@ -94,6 +94,10 @@ pub struct Job {
     pub status: JobStatus,
     /// Number of attempts
     pub attempts: u8,
+    /// Interval in milliseconds for periodic jobs
+    pub interval_ms: Option<u64>,
+    /// Next scheduled time for periodic jobs (absolute timestamp in ms)
+    pub next_scheduled_at: Option<u64>,
     /// Creation timestamp
     pub created_at: u64,
     /// Last update timestamp
@@ -118,6 +122,8 @@ pub struct Jobs {
     pub next_job_sequence: u64,
     /// Maximum attempts allowed
     pub max_attempts: u8,
+    /// The settlement job ID if one exists
+    pub settlement_job: Option<u64>,
 }
 
 impl Jobs {
@@ -206,6 +212,17 @@ impl Jobs {
         // Parse pending_jobs_indexes - complex nested VecMap structure
         let pending_jobs_indexes = parse_nested_vecmap_indexes(&struct_value.fields);
         
+        // Parse settlement_job field (Option<u64>)
+        let settlement_job = struct_value.fields.get("settlement_job")
+            .and_then(|field| {
+                match &field.kind {
+                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
+                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
+                    Some(prost_types::value::Kind::NullValue(_)) => None,
+                    _ => None,
+                }
+            });
+        
         Some(Jobs {
             id: get_string("id").unwrap_or_default(),
             jobs_table_id,
@@ -214,6 +231,7 @@ impl Jobs {
             pending_jobs_indexes,
             next_job_sequence: get_u64("next_job_sequence"),
             max_attempts: get_u8("max_attempts"),
+            settlement_job,
         })
     }
 }

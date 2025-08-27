@@ -3,6 +3,7 @@ use crate::coordination::ProofCalculation;
 use crate::fetch::fetch_pending_job_from_instances;
 use crate::fetch::app_instance::AppInstance;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
+use crate::settlement;
 use crate::state::SharedState;
 use sui::start_job_tx;
 use std::path::Path;
@@ -1726,13 +1727,14 @@ pub async fn analyze_proof_completion(
     info!("🔍 Starting proof completion analysis for app: {}", app_instance.silvana_app_name);
     
     let last_proved_block_number = app_instance.last_proved_block_number;
+    let last_settled_block_number = app_instance.last_settled_block_number;
     let current_block_number = app_instance.block_number;
     let previous_block_last_sequence = app_instance.previous_block_last_sequence;
     let current_sequence = app_instance.sequence;
     let app_instance_id = &app_instance.id;
     
-    info!("📊 AppInstance status: last_proved_block={}, current_block={}, prev_block_last_seq={}, current_seq={}", 
-        last_proved_block_number, current_block_number, previous_block_last_sequence, current_sequence);
+    info!("📊 AppInstance status: last_proved_block={}, last_settled_block={}, current_block={}, prev_block_last_seq={}, current_seq={}", 
+        last_proved_block_number, last_settled_block_number, current_block_number, previous_block_last_sequence, current_sequence);
     
     // Check if we're at the start of a new block with no sequences processed yet
     if last_proved_block_number + 1 == current_block_number && 
@@ -1743,8 +1745,66 @@ pub async fn analyze_proof_completion(
         return Ok(());
     }
     
+    // Check for settlement opportunities (skip block 0 as it cannot be settled)
+    let mut found_settlement_opportunity = false;
     
-    // Step 2: Process blocks in order from last_proved_block_number + 1 to current_block_number
+    // Only check for settlement if there are proved blocks > 0 that haven't been settled
+    // Block 0 is the genesis/initial state and cannot be settled
+    if last_proved_block_number > 0 && last_proved_block_number > last_settled_block_number {
+        let start_block = std::cmp::max(1, last_settled_block_number + 1);
+        info!("🔍 Checking for settlement opportunities from block {} to {}", 
+            start_block, last_proved_block_number);
+        
+        for block_number in start_block..=last_proved_block_number {
+            if let Ok(has_opportunity) = settlement::check_settlement_opportunity(
+                app_instance,
+                block_number,
+                client
+            ).await {
+                if has_opportunity {
+                    found_settlement_opportunity = true;
+                    info!("💰 Found settlement opportunity for block {}", block_number);
+                    break; // Found at least one opportunity
+                }
+            }
+        }
+    } else {
+        debug!("📊 No valid blocks to settle yet (last_proved={}, last_settled={}). Block 0 cannot be settled.", 
+            last_proved_block_number, last_settled_block_number);
+    }
+    
+    // Check for existing settlement job
+    let existing_settle_job_id = settlement::get_settlement_job_id(app_instance, client).await
+        .unwrap_or(None);
+    
+    if found_settlement_opportunity {
+        // Create settlement job if it doesn't exist
+        if existing_settle_job_id.is_none() {
+            info!("📝 Creating periodic settle job for app instance {} (will settle blocks 1 to {})", 
+                app_instance.silvana_app_name, last_proved_block_number);
+            if let Err(e) = settlement::create_periodic_settle_job(app_instance, client).await {
+                warn!("Failed to create settle job: {}", e);
+            } else {
+                info!("✅ Successfully created periodic settle job");
+            }
+        } else {
+            info!("📋 Settlement job already exists with ID {}, will handle blocks 1 to {}", 
+                existing_settle_job_id.unwrap(), last_proved_block_number);
+        }
+    } else {
+        // No settlement opportunities - terminate existing settlement job if it exists
+        if let Some(job_id) = existing_settle_job_id {
+            info!("🚫 No valid blocks to settle (only block 0 or no new proved blocks), terminating settlement job {}", job_id);
+            let mut sui_interface = crate::sui_interface::SuiJobInterface::new(client.clone());
+            if let Err(e) = sui_interface.terminate_app_job(&app_instance.id, job_id).await {
+                warn!("Failed to terminate settlement job {}: {}", job_id, e);
+            } else {
+                info!("✅ Successfully terminated settlement job {}", job_id);
+            }
+        }
+    }
+    
+    // Step 2: Process blocks in order from last_proved_block_number + 1 to current_block_number for merge opportunities
     let blocks_to_analyze = (current_block_number - last_proved_block_number).saturating_sub(0);
     info!("🔄 Processing {} blocks from {} to {} for merge opportunities", 
         blocks_to_analyze, last_proved_block_number + 1, current_block_number);
@@ -1808,7 +1868,7 @@ pub async fn analyze_proof_completion(
     }
     
     let analysis_duration = analysis_start.elapsed();
-    info!("🎉 Completed proof completion analysis for {} blocks in {:.2}s", 
+    info!("🎉 Completed proof completion and settlement analysis for {} blocks in {:.2}s", 
         analyzed_blocks, analysis_duration.as_secs_f64());
     Ok(())
 }

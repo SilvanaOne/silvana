@@ -34,8 +34,8 @@ public struct Job has key, store {
     status: JobStatus,
     attempts: u8,
     // Periodic scheduling fields (None => one-time job)
-    interval_ms: Option<u64>,        // e.g. Some(60000) for 1 min
-    next_scheduled_at: Option<u64>,  // absolute ms timestamp for next run, if periodic
+    interval_ms: Option<u64>, // e.g. Some(60000) for 1 min
+    next_scheduled_at: Option<u64>, // absolute ms timestamp for next run, if periodic
     // Metadata of the job
     created_at: u64,
     updated_at: u64,
@@ -53,6 +53,7 @@ public struct Jobs has key, store {
     >,
     next_job_sequence: u64,
     max_attempts: u8,
+    settlement_job: Option<u64>,
 }
 
 public struct JobCreatedEvent has copy, drop {
@@ -146,6 +147,10 @@ const EIntervalTooShort: vector<u8> = b"Interval must be >= 60000 ms";
 #[error]
 const ENotDueYet: vector<u8> = b"Periodic job is not due yet";
 
+#[error]
+const ESettlementJobAlreadyExists: vector<u8> =
+    b"Settlement job already exists";
+
 // Initialize Jobs storage with optional max_attempts
 public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
     let attempts = if (option::is_some(&max_attempts)) {
@@ -162,6 +167,7 @@ public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
         pending_jobs_indexes: vec_map::empty(),
         next_job_sequence: 1,
         max_attempts: attempts,
+        settlement_job: option::none(),
     }
 }
 
@@ -182,6 +188,7 @@ public fun create_job(
     data: vector<u8>,
     interval_ms: Option<u64>,
     next_scheduled_at: Option<u64>,
+    is_settlement_job: bool,
     clock: &Clock,
     ctx: &mut TxContext,
 ): u64 {
@@ -193,6 +200,13 @@ public fun create_job(
 
     let job_sequence = jobs.next_job_sequence;
     let timestamp = clock::timestamp_ms(clock);
+    if (is_settlement_job) {
+        assert!(
+            option::is_none(&jobs.settlement_job),
+            ESettlementJobAlreadyExists,
+        );
+        jobs.settlement_job = option::some(job_sequence);
+    };
 
     let job = Job {
         id: object::new(ctx),
@@ -303,7 +317,7 @@ public fun start_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
         attempts,
         updated_at: now,
     });
-    
+
     // Emit JobStartedEvent for transparency
     event::emit(JobStartedEvent {
         job_sequence,
@@ -379,13 +393,13 @@ public fun complete_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
     } else {
         // One-time: remove and delete
         let job = object_table::remove(&mut jobs.jobs, job_sequence);
-        
+
         event::emit(JobDeletedEvent {
             job_sequence,
             app_instance,
             deleted_at: now,
         });
-        
+
         let Job { id, .. } = job;
         object::delete(id);
     }
@@ -512,25 +526,28 @@ public fun fail_job(
 }
 
 // Terminate a job (one-time or periodic) - removes it completely
-public fun terminate_job(
-    jobs: &mut Jobs,
-    job_sequence: u64,
-    clock: &Clock,
-) {
+public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
     assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
+
+    if (
+        option::is_some(&jobs.settlement_job)
+        && *option::borrow(&jobs.settlement_job) == job_sequence
+    ) {
+        jobs.settlement_job = option::none();
+    };
 
     let now = clock::timestamp_ms(clock);
 
     // Get job info before removal
     let (was_pending, developer, agent, agent_method, app_instance) = {
         let job = object_table::borrow(&jobs.jobs, job_sequence);
-        
+
         let was_pend = vec_set::contains(&jobs.pending_jobs, &job_sequence);
         let dev = job.developer;
         let ag = job.agent;
         let meth = job.agent_method;
         let app_inst = job.app_instance;
-        
+
         (was_pend, dev, ag, meth, app_inst)
     };
 
@@ -538,24 +555,30 @@ public fun terminate_job(
     if (was_pending) {
         vec_set::remove(&mut jobs.pending_jobs, &job_sequence);
         jobs.pending_jobs_count = jobs.pending_jobs_count - 1;
-        remove_from_index(jobs, job_sequence, &developer, &agent, &agent_method);
+        remove_from_index(
+            jobs,
+            job_sequence,
+            &developer,
+            &agent,
+            &agent_method,
+        );
     };
 
     // Remove and delete the job
     let job = object_table::remove(&mut jobs.jobs, job_sequence);
-    
+
     event::emit(JobTerminatedEvent {
         job_sequence,
         app_instance,
         terminated_at: now,
     });
-    
+
     event::emit(JobDeletedEvent {
         job_sequence,
         app_instance,
         deleted_at: now,
     });
-    
+
     let Job { id, .. } = job;
     object::delete(id);
 }

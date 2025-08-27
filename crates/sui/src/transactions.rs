@@ -303,6 +303,9 @@ pub async fn create_app_job_tx(
     sequences1: Option<Vec<u64>>,
     sequences2: Option<Vec<u64>>,
     data: Vec<u8>,
+    interval_ms: Option<u64>,
+    next_scheduled_at: Option<u64>,
+    is_settlement_job: bool,
 ) -> Result<String> {
     info!("Creating app job transaction for method: {}, data size: {} bytes", 
         method_name, data.len());
@@ -320,9 +323,10 @@ pub async fn create_app_job_tx(
             let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&sequences1));
             let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&sequences2));
             let data_arg = tb.input(sui_transaction_builder::Serialized(&data));
-            // Add the missing periodic job parameters - None for non-periodic jobs
-            let interval_ms_arg = tb.input(sui_transaction_builder::Serialized(&None::<u64>));
-            let next_scheduled_at_arg = tb.input(sui_transaction_builder::Serialized(&None::<u64>));
+            // Add the periodic job parameters and is_settlement_job flag
+            let interval_ms_arg = tb.input(sui_transaction_builder::Serialized(&interval_ms));
+            let next_scheduled_at_arg = tb.input(sui_transaction_builder::Serialized(&next_scheduled_at));
+            let is_settlement_job_arg = tb.input(sui_transaction_builder::Serialized(&is_settlement_job));
             
             vec![
                 app_instance_arg,
@@ -333,8 +337,9 @@ pub async fn create_app_job_tx(
                 sequences1_arg,
                 sequences2_arg,
                 data_arg,
-                interval_ms_arg,         // Add interval_ms parameter (None for non-periodic)
-                next_scheduled_at_arg,   // Add next_scheduled_at parameter (None for non-periodic)
+                interval_ms_arg,
+                next_scheduled_at_arg,
+                is_settlement_job_arg,
                 clock_arg,
             ]
         },
@@ -437,6 +442,9 @@ pub async fn create_merge_job_tx(
         Some(sequences1),           // Pass sequences1
         Some(sequences2),           // Pass sequences2
         vec![],                     // Empty data since we're using the Job fields now
+        None,                       // No interval for merge jobs
+        None,                       // No scheduled time for merge jobs
+        false,                      // Not a settlement job
     ).await
 }
 
@@ -470,6 +478,13 @@ pub async fn create_settle_job_tx(
     job_description: Option<String>,
 ) -> Result<String> {
     // Call the general create_app_job_tx function with settle method
+    // Settlement jobs are periodic with 1 minute interval
+    let interval_ms = 60000u64; // 1 minute in milliseconds
+    let next_scheduled_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    
     create_app_job_tx(
         client,
         app_instance_str,
@@ -480,6 +495,33 @@ pub async fn create_settle_job_tx(
         None,                       // No sequences1 for settle
         None,                       // No sequences2 for settle
         vec![],                     // Empty data
+        Some(interval_ms),          // 1 minute interval for periodic settle jobs
+        Some(next_scheduled_at),    // Start now
+        true,                       // This is a settlement job
+    ).await
+}
+
+/// Terminate an app job
+pub async fn terminate_app_job_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    job_id: u64,
+) -> Result<String> {
+    info!("Creating terminate_app_job transaction for job_id: {}", job_id);
+    
+    execute_app_instance_function(
+        client,
+        app_instance_str,
+        "terminate_app_job",
+        move |tb, app_instance_arg, clock_arg| {
+            let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
+            
+            vec![
+                app_instance_arg,
+                job_id_arg,
+                clock_arg,
+            ]
+        },
     ).await
 }
 
