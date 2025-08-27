@@ -5,6 +5,7 @@ pub mod error;
 pub mod fetch;
 pub mod interface;
 pub mod keypair;
+pub mod parse;
 pub mod transactions;
 
 // Re-export commonly used types
