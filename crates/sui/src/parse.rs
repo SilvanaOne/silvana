@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use anyhow::Result;
+use serde_json;
 
 /// Helper function to extract string value from prost_types::Struct
 pub fn get_string(struct_value: &prost_types::Struct, field_name: &str) -> Option<String> {
@@ -98,6 +99,32 @@ pub fn parse_string_vecmap(struct_value: &prost_types::Struct, field_name: &str)
                                         Some(prost_types::value::Kind::StringValue(value))) = 
                                     (&key_field.kind, &value_field.kind) {
                                     map.insert(key.clone(), value.clone());
+                                }
+                            }
+                        }
+                    }
+                    return map;
+                }
+            }
+        }
+    }
+    HashMap::new()
+}
+
+/// Helper function to parse VecMap<String, Struct> into HashMap<String, serde_json::Value>
+/// This is used for VecMap fields where the value is a struct (like AppMethod)
+pub fn parse_struct_vecmap(struct_value: &prost_types::Struct, field_name: &str) -> HashMap<String, serde_json::Value> {
+    if let Some(field) = struct_value.fields.get(field_name) {
+        if let Some(prost_types::value::Kind::StructValue(vecmap_struct)) = &field.kind {
+            if let Some(contents_field) = vecmap_struct.fields.get("contents") {
+                if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
+                    let mut map = HashMap::new();
+                    for entry in &list.values {
+                        if let Some(prost_types::value::Kind::StructValue(entry_struct)) = &entry.kind {
+                            if let (Some(key_field), Some(value_field)) = 
+                                (entry_struct.fields.get("key"), entry_struct.fields.get("value")) {
+                                if let Some(prost_types::value::Kind::StringValue(key)) = &key_field.kind {
+                                    map.insert(key.clone(), proto_to_json(value_field));
                                 }
                             }
                         }

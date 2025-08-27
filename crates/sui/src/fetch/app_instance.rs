@@ -4,7 +4,7 @@ use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
 use sui_rpc::Client;
 use tracing::debug;
 use crate::error::SilvanaSuiInterfaceError;
-use crate::parse::{get_string, get_u64, get_bool, get_table_id, proto_to_json, parse_string_vecmap};
+use crate::parse::{get_string, get_u64, get_bool, get_table_id, proto_to_json, parse_string_vecmap, parse_struct_vecmap};
 use super::jobs::Jobs;
 use std::collections::HashMap;
 
@@ -123,35 +123,8 @@ pub fn parse_app_instance_from_struct(
         struct_value.fields.keys().collect::<Vec<_>>());
     
     
-    // Parse methods VecMap into HashMap
-    let methods = if let Some(methods_field) = struct_value.fields.get("methods") {
-        if let Some(prost_types::value::Kind::StructValue(methods_struct)) = &methods_field.kind {
-            if let Some(contents_field) = methods_struct.fields.get("contents") {
-                if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
-                    let mut map = HashMap::new();
-                    for entry in &list.values {
-                        if let Some(prost_types::value::Kind::StructValue(entry_struct)) = &entry.kind {
-                            if let (Some(key_field), Some(value_field)) = 
-                                (entry_struct.fields.get("key"), entry_struct.fields.get("value")) {
-                                if let Some(prost_types::value::Kind::StringValue(key)) = &key_field.kind {
-                                    map.insert(key.clone(), proto_to_json(value_field));
-                                }
-                            }
-                        }
-                    }
-                    map
-                } else {
-                    HashMap::new()
-                }
-            } else {
-                HashMap::new()
-            }
-        } else {
-            HashMap::new()
-        }
-    } else {
-        HashMap::new()
-    };
+    // Parse methods VecMap<String, AppMethod> into HashMap
+    let methods = parse_struct_vecmap(struct_value, "methods");
     
     // Build the AppInstance struct
     let app_instance = AppInstance {
