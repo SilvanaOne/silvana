@@ -1,4 +1,4 @@
-use crate::error::{CoordinatorError, Result};
+use crate::error::{SilvanaSuiInterfaceError, Result};
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, warn};
@@ -43,7 +43,7 @@ pub async fn fetch_block_info(
         }),
     };
     
-    let object_response = client.ledger_client().get_object(request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+    let object_response = client.ledger_client().get_object(request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
         format!("Failed to fetch app_instance {}: {}", app_instance, e)
     ))?;
     
@@ -118,7 +118,7 @@ async fn fetch_block_from_table(
             }),
         };
         
-        let fields_response = client.live_data_client().list_dynamic_fields(request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+        let fields_response = client.live_data_client().list_dynamic_fields(request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
             format!("Failed to list dynamic fields: {}", e)
         ))?;
         
@@ -194,7 +194,7 @@ async fn fetch_block_object_by_field_id(
         }),
     };
     
-    let block_response = client.ledger_client().get_object(block_request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+    let block_response = client.ledger_client().get_object(block_request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
         format!("Failed to fetch block {}: {}", block_number, e)
     ))?;
     
@@ -219,7 +219,7 @@ async fn fetch_block_object_by_field_id(
                             }),
                         };
                         
-                        let actual_block_response = client.ledger_client().get_object(actual_block_request).await.map_err(|e| CoordinatorError::RpcConnectionError(
+                        let actual_block_response = client.ledger_client().get_object(actual_block_request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
                             format!("Failed to fetch actual block {}: {}", block_number, e)
                         ))?;
                         

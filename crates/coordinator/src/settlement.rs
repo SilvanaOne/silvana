@@ -1,5 +1,4 @@
-use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance};
-use crate::fetch::blocks::fetch_block_info;
+use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info};
 use crate::fetch::fetch_proof_calculations;
 use anyhow::{anyhow, Result};
 use sui_rpc::Client;
