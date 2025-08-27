@@ -71,6 +71,18 @@ message FailJobResponse {
   string message = 2;
 }
 
+// Request message for terminating a job
+message TerminateJobRequest {
+  string session_id = 1;
+  string job_id = 2;
+}
+
+// Response message for terminating a job
+message TerminateJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // Request message for submitting a proof
 message SubmitProofRequest {
   string session_id = 1;
@@ -186,6 +198,7 @@ service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
   rpc FailJob(FailJobRequest) returns (FailJobResponse);
+  rpc TerminateJob(TerminateJobRequest) returns (TerminateJobResponse);
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
   rpc SubmitState(SubmitStateRequest) returns (SubmitStateResponse);
   rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);

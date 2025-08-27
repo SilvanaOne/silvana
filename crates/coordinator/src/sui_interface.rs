@@ -1,4 +1,4 @@
-use sui::transactions::{start_job_tx, complete_job_tx, fail_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
+use sui::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use sui_rpc::Client;
 use tracing::{info, warn, error, debug};
 
@@ -61,6 +61,24 @@ impl SuiJobInterface {
             }
             Err(e) => {
                 error!("Failed to fail job {} on blockchain: {}", job_sequence, e);
+                false
+            }
+        }
+    }
+
+    /// Terminate a job on the Sui blockchain by calling the terminate_job Move function
+    /// This permanently removes a job (useful for canceling periodic jobs)
+    /// Returns true if the transaction was successful, false if it failed
+    pub async fn terminate_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
+        info!("Attempting to terminate job {} on Sui blockchain", job_sequence);
+        
+        match terminate_job_tx(&mut self.client, app_instance, job_sequence).await {
+            Ok(tx_digest) => {
+                info!("Successfully terminated job {} on blockchain, tx: {}", job_sequence, tx_digest);
+                true
+            }
+            Err(e) => {
+                error!("Failed to terminate job {} on blockchain: {}", job_sequence, e);
                 false
             }
         }

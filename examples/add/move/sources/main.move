@@ -229,6 +229,8 @@ public fun add(
         option::none(), // sequences1
         option::none(), // sequences2
         transition_data_bytes,
+        option::none(), // interval_ms - not periodic
+        option::none(), // next_scheduled_at - not periodic
         clock,
         ctx,
     );
@@ -322,6 +324,8 @@ public fun multiply(
         option::none(), // sequences1
         option::none(), // sequences2
         transition_data_bytes,
+        option::none(), // interval_ms - not periodic
+        option::none(), // next_scheduled_at - not periodic
         clock,
         ctx,
     );

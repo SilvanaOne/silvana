@@ -770,6 +770,8 @@ public fun create_app_job(
     sequences1: Option<vector<u64>>,
     sequences2: Option<vector<u64>>,
     data: vector<u8>,
+    interval_ms: Option<u64>,
+    next_scheduled_at: Option<u64>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): u64 {
@@ -794,6 +796,8 @@ public fun create_app_job(
         sequences1,
         sequences2,
         data,
+        interval_ms,
+        next_scheduled_at,
         clock,
         ctx,
     )
@@ -822,6 +826,14 @@ public fun fail_app_job(
     clock: &Clock,
 ) {
     jobs::fail_job(&mut app_instance.jobs, job_id, error, clock)
+}
+
+public fun terminate_app_job(
+    app_instance: &mut AppInstance,
+    job_id: u64,
+    clock: &Clock,
+) {
+    jobs::terminate_job(&mut app_instance.jobs, job_id, clock)
 }
 
 public fun get_app_job(app_instance: &AppInstance, job_id: u64): &jobs::Job {

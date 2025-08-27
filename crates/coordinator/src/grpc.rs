@@ -20,6 +20,7 @@ use coordinator::{
     GetJobRequest, GetJobResponse, Job,
     CompleteJobRequest, CompleteJobResponse,
     FailJobRequest, FailJobResponse,
+    TerminateJobRequest, TerminateJobResponse,
     SubmitProofRequest, SubmitProofResponse,
     SubmitStateRequest, SubmitStateResponse,
     GetSequenceStatesRequest, GetSequenceStatesResponse, SequenceState,
@@ -341,6 +342,60 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(Response::new(FailJobResponse {
                 success: false,
                 message: format!("Failed to fail job {} on blockchain", req.job_id),
+            }))
+        }
+    }
+
+    async fn terminate_job(
+        &self,
+        request: Request<TerminateJobRequest>,
+    ) -> Result<Response<TerminateJobResponse>, Status> {
+        let req = request.into_inner();
+        
+        // Validate session
+        if req.session_id.is_empty() {
+            return Ok(Response::new(TerminateJobResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+            }));
+        }
+
+        // Get job from database
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => job,
+            None => {
+                return Ok(Response::new(TerminateJobResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                }))
+            }
+        };
+
+        info!(
+            "TerminateJob request for job_id: {} (sequence: {}, app_instance: {})",
+            req.job_id, agent_job.job_sequence, agent_job.app_instance
+        );
+
+        // Execute terminate_job transaction on Sui
+        let sui_client = self.state.get_sui_client();
+        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        
+        let success = sui_interface.terminate_job(&agent_job.app_instance, agent_job.job_sequence).await;
+
+        if success {
+            // Remove job from agent database
+            self.state.get_agent_job_db().terminate_job(&req.job_id).await;
+            
+            info!("Successfully terminated job {}", req.job_id);
+            Ok(Response::new(TerminateJobResponse {
+                success: true,
+                message: format!("Job {} terminated successfully", req.job_id),
+            }))
+        } else {
+            error!("Failed to terminate job {} on blockchain", req.job_id);
+            Ok(Response::new(TerminateJobResponse {
+                success: false,
+                message: format!("Failed to terminate job {} on blockchain", req.job_id),
             }))
         }
     }

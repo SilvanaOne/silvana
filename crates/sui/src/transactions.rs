@@ -191,6 +191,25 @@ pub async fn fail_job_tx(
     ).await
 }
 
+/// Create and submit a transaction to terminate a job
+pub async fn terminate_job_tx(
+    client: &mut GrpcClient,
+    app_instance_str: &str,
+    job_sequence: u64,
+) -> Result<String> {
+    info!("Creating terminate_app_job transaction for job_sequence: {}", job_sequence);
+    
+    execute_app_instance_function(
+        client,
+        app_instance_str,
+        "terminate_app_job",
+        move |tb, app_instance_arg, clock_arg| {
+            let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
+            vec![app_instance_arg, job_sequence_arg, clock_arg]
+        },
+    ).await
+}
+
 /// Create and submit a transaction to submit a proof
 pub async fn submit_proof_tx(
     client: &mut GrpcClient,

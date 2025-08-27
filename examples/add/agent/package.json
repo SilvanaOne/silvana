@@ -21,7 +21,7 @@
     "deploy": "npm run test test/deploy.test.ts",
     "send": "npm run test test/send.test.ts",
     "compile": "npm run test test/compile.test.ts",
-    "proto:generate": "rm -rf src/proto && cd ../../../ && buf generate --template buf.gen.agent.yaml"
+    "proto": "rm -rf src/proto && cd ../../../ && buf generate --template buf.gen.agent.yaml"
   },
   "node": {
     "version": ">=22.0.0"

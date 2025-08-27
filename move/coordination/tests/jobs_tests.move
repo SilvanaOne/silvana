@@ -8,6 +8,7 @@ use coordination::jobs::{
     start_job,
     complete_job,
     fail_job,
+    terminate_job,
     get_job,
     job_exists,
     get_pending_jobs,
@@ -86,6 +87,8 @@ fun test_create_job() {
             option::none(),
             option::none(),
             b"test_data",
+            option::none(), // interval_ms - not periodic
+            option::none(), // next_scheduled_at - not periodic  
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -128,6 +131,8 @@ fun test_start_job() {
             option::none(),
             option::none(),
             b"test_data",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -172,6 +177,8 @@ fun test_start_job_not_pending() {
             option::none(),
             option::none(),
             b"test_data",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -209,6 +216,8 @@ fun test_complete_job() {
             option::none(),
             option::none(),
             b"test_data",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -249,6 +258,8 @@ fun test_fail_job_with_retry() {
             option::none(),
             option::none(),
             b"test_data",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -308,6 +319,8 @@ fun test_multiple_pending_jobs() {
             option::none(),
             option::none(),
             b"data1",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -326,6 +339,8 @@ fun test_multiple_pending_jobs() {
             option::none(),
             option::none(),
             b"data2",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -344,6 +359,8 @@ fun test_multiple_pending_jobs() {
             option::none(),
             option::none(),
             b"data3",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -452,6 +469,8 @@ fun test_pending_jobs_index() {
             option::none(),
             option::none(),
             b"data1",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -470,6 +489,8 @@ fun test_pending_jobs_index() {
             option::none(),
             option::none(),
             b"data2",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -489,6 +510,8 @@ fun test_pending_jobs_index() {
             option::none(),
             option::none(),
             b"data3",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -567,6 +590,8 @@ fun test_pending_jobs_count_tracking() {
             option::none(),
             option::none(),
             b"data1",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -587,6 +612,8 @@ fun test_pending_jobs_count_tracking() {
             option::none(),
             option::none(),
             b"data2",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -642,6 +669,8 @@ fun test_complete_job_not_running() {
             option::none(),
             option::none(),
             b"data",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -679,6 +708,8 @@ fun test_fail_job_not_running() {
             option::none(),
             option::none(),
             b"data",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -715,6 +746,8 @@ fun test_index_with_retry() {
             option::none(),
             option::none(),
             b"data",
+            option::none(),  // interval_ms
+            option::none(),  // next_scheduled_at
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -761,6 +794,499 @@ fun test_index_with_retry() {
             &b"method1".to_string(),
         );
         assert!(vector::is_empty(&jobs_final), 4);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+// ============= Periodic Task Tests =============
+
+#[test]
+fun test_create_periodic_job() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let interval = 60_000u64; // 1 minute
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time + interval;
+        
+        let job_sequence = create_job(
+            &mut jobs,
+            option::some(b"Periodic Task".to_string()),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"periodic_data",
+            option::some(interval),  // interval_ms
+            option::some(next_scheduled),  // next_scheduled_at
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Verify job was created with periodic fields
+        assert!(job_exists(&jobs, job_sequence), 0);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 1);
+        assert!(get_pending_jobs_count(&jobs) == 1, 2);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = jobs::EIntervalTooShort)]
+fun test_periodic_job_interval_too_short() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let interval = 30_000u64; // 30 seconds - too short!
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time + interval;
+        
+        // This should fail - interval must be >= 60000ms
+        let _job_sequence = create_job(
+            &mut jobs,
+            option::none(),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data",
+            option::some(interval),  // interval_ms - too short!
+            option::some(next_scheduled),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+#[expected_failure(abort_code = jobs::ENotDueYet)]
+fun test_periodic_job_cannot_start_before_due() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let interval = 60_000u64; // 1 minute
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time + interval; // Due in 1 minute
+        
+        let job_sequence = create_job(
+            &mut jobs,
+            option::none(),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data",
+            option::some(interval),
+            option::some(next_scheduled),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Try to start immediately - should fail because not due yet
+        start_job(&mut jobs, job_sequence, &clock);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_periodic_job_can_start_when_due() {
+    let (mut scenario, mut clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let interval = 60_000u64; // 1 minute
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time + interval;
+        
+        let job_sequence = create_job(
+            &mut jobs,
+            option::none(),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data",
+            option::some(interval),
+            option::some(next_scheduled),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Advance clock to due time
+        clock::increment_for_testing(&mut clock, interval);
+        
+        // Now should be able to start
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(is_job_running(get_job(&jobs, job_sequence)), 0);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_periodic_job_reschedule_on_complete() {
+    let (mut scenario, mut clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let interval = 60_000u64; // 1 minute
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time; // Can start immediately
+        
+        let job_sequence = create_job(
+            &mut jobs,
+            option::none(),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data",
+            option::some(interval),
+            option::some(next_scheduled),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Start and complete the job
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(is_job_running(get_job(&jobs, job_sequence)), 0);
+        
+        complete_job(&mut jobs, job_sequence, &clock);
+        
+        // Job should still exist and be pending (rescheduled)
+        assert!(job_exists(&jobs, job_sequence), 1);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 2);
+        assert!(get_pending_jobs_count(&jobs) == 1, 3);
+        
+        // Job attempts should be reset to 0
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 0, 4);
+        
+        // Cannot start immediately - must wait for next interval
+        clock::increment_for_testing(&mut clock, interval - 1); // Not quite there
+        // This would fail with ENotDueYet if we tried to start
+        
+        // Advance to next interval
+        clock::increment_for_testing(&mut clock, 1); // Now at next interval
+        
+        // Can start again
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(is_job_running(get_job(&jobs, job_sequence)), 5);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_periodic_job_reschedule_after_max_failures() {
+    let (mut scenario, mut clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::some(2), ts::ctx(&mut scenario)); // Max 2 attempts
+        
+        let interval = 60_000u64; // 1 minute
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time; // Can start immediately
+        
+        let job_sequence = create_job(
+            &mut jobs,
+            option::none(),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data",
+            option::some(interval),
+            option::some(next_scheduled),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // First attempt - fail
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 0);
+        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 1); // Should retry
+        
+        // Second attempt - fail again (max attempts reached)
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 2);
+        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock);
+        
+        // Job should still exist but be rescheduled for next interval
+        assert!(job_exists(&jobs, job_sequence), 3);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 4);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 0, 5); // Reset attempts
+        
+        // Cannot start immediately - must wait for next interval
+        // Would fail with ENotDueYet if we tried
+        
+        // Advance to next interval
+        clock::increment_for_testing(&mut clock, interval);
+        
+        // Can start again in new interval
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 6); // Fresh attempt count
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_periodic_job_retry_within_interval() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::some(3), ts::ctx(&mut scenario)); // Max 3 attempts
+        
+        let interval = 60_000u64; // 1 minute
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time; // Can start immediately
+        
+        let job_sequence = create_job(
+            &mut jobs,
+            option::none(),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data",
+            option::some(interval),
+            option::some(next_scheduled),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // First attempt - fail
+        start_job(&mut jobs, job_sequence, &clock);
+        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 0);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 1);
+        
+        // Can immediately retry (still within same interval)
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 2);
+        
+        // Complete successfully on second attempt
+        complete_job(&mut jobs, job_sequence, &clock);
+        
+        // Job should be rescheduled for next interval with attempts reset
+        assert!(job_exists(&jobs, job_sequence), 3);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 4);
+        assert!(job_attempts(get_job(&jobs, job_sequence)) == 0, 5);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_terminate_periodic_job() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        let interval = 60_000u64; // 1 minute
+        let start_time = clock::timestamp_ms(&clock);
+        let next_scheduled = start_time;
+        
+        let job_sequence = create_job(
+            &mut jobs,
+            option::none(),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data",
+            option::some(interval),
+            option::some(next_scheduled),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Start the job
+        start_job(&mut jobs, job_sequence, &clock);
+        assert!(is_job_running(get_job(&jobs, job_sequence)), 0);
+        
+        // Complete it once
+        complete_job(&mut jobs, job_sequence, &clock);
+        assert!(is_job_pending(get_job(&jobs, job_sequence)), 1);
+        
+        // Terminate the periodic job
+        terminate_job(&mut jobs, job_sequence, &clock);
+        
+        // Job should be completely removed
+        assert!(!job_exists(&jobs, job_sequence), 2);
+        assert!(get_pending_jobs_count(&jobs) == 0, 3);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_mixed_periodic_and_onetime_jobs() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
+        
+        // Create one-time job
+        let onetime_job = create_job(
+            &mut jobs,
+            option::some(b"One-time Job".to_string()),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"onetime_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method1".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"onetime_data",
+            option::none(),  // No interval - one-time job
+            option::none(),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Create periodic job
+        let interval = 60_000u64;
+        let periodic_job = create_job(
+            &mut jobs,
+            option::some(b"Periodic Job".to_string()),
+            b"developer1".to_string(),
+            b"agent1".to_string(),
+            b"periodic_method".to_string(),
+            b"app1".to_string(),
+            b"instance1".to_string(),
+            b"app_method2".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"periodic_data",
+            option::some(interval),
+            option::some(clock::timestamp_ms(&clock)),
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        assert!(get_pending_jobs_count(&jobs) == 2, 0);
+        
+        // Start and complete one-time job
+        start_job(&mut jobs, onetime_job, &clock);
+        complete_job(&mut jobs, onetime_job, &clock);
+        
+        // One-time job should be deleted
+        assert!(!job_exists(&jobs, onetime_job), 1);
+        assert!(get_pending_jobs_count(&jobs) == 1, 2);
+        
+        // Start and complete periodic job
+        start_job(&mut jobs, periodic_job, &clock);
+        complete_job(&mut jobs, periodic_job, &clock);
+        
+        // Periodic job should still exist (rescheduled)
+        assert!(job_exists(&jobs, periodic_job), 3);
+        assert!(is_job_pending(get_job(&jobs, periodic_job)), 4);
+        assert!(get_pending_jobs_count(&jobs) == 1, 5);
         
         transfer::public_share_object(jobs);
     };

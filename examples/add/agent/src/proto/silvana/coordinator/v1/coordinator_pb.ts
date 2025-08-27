@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file silvana/coordinator/v1/coordinator.proto.
  */
 export const file_silvana_coordinator_v1_coordinator: GenFile = /*@__PURE__*/
-  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIvwCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSGQoMYmxvY2tfbnVtYmVyGAkgASgESAGIAQESEQoJc2VxdWVuY2VzGAogAygEEhIKCnNlcXVlbmNlczEYCyADKAQSEgoKc2VxdWVuY2VzMhgMIAMoBBIMCgRkYXRhGA0gASgMEg4KBmpvYl9pZBgOIAEoCRIQCghhdHRlbXB0cxgPIAEoDRISCgpjcmVhdGVkX2F0GBAgASgEEhIKCnVwZGF0ZWRfYXQYESABKARCDgoMX2Rlc2NyaXB0aW9uQg8KDV9ibG9ja19udW1iZXIiWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkirgEKElN1Ym1pdFN0YXRlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEg4KBmpvYl9pZBgDIAEoCRIbCg5uZXdfc3RhdGVfZGF0YRgEIAEoDEgAiAEBEh0KEHNlcmlhbGl6ZWRfc3RhdGUYBSABKAlIAYgBAUIRCg9fbmV3X3N0YXRlX2RhdGFCEwoRX3NlcmlhbGl6ZWRfc3RhdGUiSAoTU3VibWl0U3RhdGVSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEhQKB2RhX2hhc2gYAiABKAlIAIgBAUIKCghfZGFfaGFzaCKoAQoNU2VxdWVuY2VTdGF0ZRIQCghzZXF1ZW5jZRgBIAEoBBISCgVzdGF0ZRgCIAEoDEgAiAEBEh4KEWRhdGFfYXZhaWxhYmlsaXR5GAMgASgJSAGIAQESGAoQb3B0aW1pc3RpY19zdGF0ZRgEIAEoDBIXCg90cmFuc2l0aW9uX2RhdGEYBSABKAxCCAoGX3N0YXRlQhQKEl9kYXRhX2F2YWlsYWJpbGl0eSJQChhHZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZqb2JfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQiUgoZR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRI1CgZzdGF0ZXMYASADKAsyJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNlcXVlbmNlU3RhdGUiQgobUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg8KB2RhX2hhc2gYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJcChxSZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEhEKBGRhdGEYASABKAlIAIgBARIPCgdzdWNjZXNzGAIgASgIEg8KB21lc3NhZ2UYAyABKAlCBwoFX2RhdGEiXgoPR2V0UHJvb2ZSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSFAoMYmxvY2tfbnVtYmVyGAIgASgEEhEKCXNlcXVlbmNlcxgDIAMoBBIOCgZqb2JfaWQYBCABKAkiYwoQR2V0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhIKBXByb29mGAIgASgJSACIAQESFAoHbWVzc2FnZRgDIAEoCUgBiAEBQggKBl9wcm9vZkIKCghfbWVzc2FnZSJQChRHZXRCbG9ja1Byb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIOCgZqb2JfaWQYAyABKAkidAoVR2V0QmxvY2tQcm9vZlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSGAoLYmxvY2tfcHJvb2YYAiABKAlIAIgBARIUCgdtZXNzYWdlGAMgASgJSAGIAQFCDgoMX2Jsb2NrX3Byb29mQgoKCF9tZXNzYWdlIkkKFVJldHJpZXZlU2VjcmV0UmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJImYKFlJldHJpZXZlU2VjcmV0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhkKDHNlY3JldF92YWx1ZRgDIAEoCUgAiAEBQg8KDV9zZWNyZXRfdmFsdWUyvQgKEkNvb3JkaW5hdG9yU2VydmljZRJXCgZHZXRKb2ISJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlcXVlc3QaJi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlc3BvbnNlEmYKC0NvbXBsZXRlSm9iEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5Db21wbGV0ZUpvYlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkNvbXBsZXRlSm9iUmVzcG9uc2USWgoHRmFpbEpvYhImLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuRmFpbEpvYlJlcXVlc3QaJy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkZhaWxKb2JSZXNwb25zZRJmCgtTdWJtaXRQcm9vZhIqLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0UHJvb2ZSZXF1ZXN0Gisuc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRQcm9vZlJlc3BvbnNlEmYKC1N1Ym1pdFN0YXRlEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRTdGF0ZVJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFN0YXRlUmVzcG9uc2USeAoRR2V0U2VxdWVuY2VTdGF0ZXMSMC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFNlcXVlbmNlU3RhdGVzUmVxdWVzdBoxLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRKBAQoUUmVhZERhdGFBdmFpbGFiaWxpdHkSMy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlJlYWREYXRhQXZhaWxhYmlsaXR5UmVxdWVzdBo0LnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmVhZERhdGFBdmFpbGFiaWxpdHlSZXNwb25zZRJdCghHZXRQcm9vZhInLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0UHJvb2ZSZXF1ZXN0Giguc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRQcm9vZlJlc3BvbnNlEmwKDUdldEJsb2NrUHJvb2YSLC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEJsb2NrUHJvb2ZSZXF1ZXN0Gi0uc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRCbG9ja1Byb29mUmVzcG9uc2USbwoOUmV0cmlldmVTZWNyZXQSLS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlJldHJpZXZlU2VjcmV0UmVxdWVzdBouLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmV0cmlldmVTZWNyZXRSZXNwb25zZUJDWkFnaXRodWIuY29tL1NpbHZhbmFPbmUvemstdGVzdHMvcGFja2FnZXMvYXZzL3JwYy9wcm90bztjb29yZGluYXRvcmIGcHJvdG8z", [file_google_protobuf_descriptor]);
+  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIvwCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSGQoMYmxvY2tfbnVtYmVyGAkgASgESAGIAQESEQoJc2VxdWVuY2VzGAogAygEEhIKCnNlcXVlbmNlczEYCyADKAQSEgoKc2VxdWVuY2VzMhgMIAMoBBIMCgRkYXRhGA0gASgMEg4KBmpvYl9pZBgOIAEoCRIQCghhdHRlbXB0cxgPIAEoDRISCgpjcmVhdGVkX2F0GBAgASgEEhIKCnVwZGF0ZWRfYXQYESABKARCDgoMX2Rlc2NyaXB0aW9uQg8KDV9ibG9ja19udW1iZXIiWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiOQoTVGVybWluYXRlSm9iUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg4KBmpvYl9pZBgCIAEoCSI4ChRUZXJtaW5hdGVKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkirgEKElN1Ym1pdFN0YXRlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEg4KBmpvYl9pZBgDIAEoCRIbCg5uZXdfc3RhdGVfZGF0YRgEIAEoDEgAiAEBEh0KEHNlcmlhbGl6ZWRfc3RhdGUYBSABKAlIAYgBAUIRCg9fbmV3X3N0YXRlX2RhdGFCEwoRX3NlcmlhbGl6ZWRfc3RhdGUiSAoTU3VibWl0U3RhdGVSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEhQKB2RhX2hhc2gYAiABKAlIAIgBAUIKCghfZGFfaGFzaCKoAQoNU2VxdWVuY2VTdGF0ZRIQCghzZXF1ZW5jZRgBIAEoBBISCgVzdGF0ZRgCIAEoDEgAiAEBEh4KEWRhdGFfYXZhaWxhYmlsaXR5GAMgASgJSAGIAQESGAoQb3B0aW1pc3RpY19zdGF0ZRgEIAEoDBIXCg90cmFuc2l0aW9uX2RhdGEYBSABKAxCCAoGX3N0YXRlQhQKEl9kYXRhX2F2YWlsYWJpbGl0eSJQChhHZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZqb2JfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQiUgoZR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRI1CgZzdGF0ZXMYASADKAsyJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNlcXVlbmNlU3RhdGUiQgobUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg8KB2RhX2hhc2gYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJcChxSZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEhEKBGRhdGEYASABKAlIAIgBARIPCgdzdWNjZXNzGAIgASgIEg8KB21lc3NhZ2UYAyABKAlCBwoFX2RhdGEiXgoPR2V0UHJvb2ZSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSFAoMYmxvY2tfbnVtYmVyGAIgASgEEhEKCXNlcXVlbmNlcxgDIAMoBBIOCgZqb2JfaWQYBCABKAkiYwoQR2V0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhIKBXByb29mGAIgASgJSACIAQESFAoHbWVzc2FnZRgDIAEoCUgBiAEBQggKBl9wcm9vZkIKCghfbWVzc2FnZSJQChRHZXRCbG9ja1Byb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIOCgZqb2JfaWQYAyABKAkidAoVR2V0QmxvY2tQcm9vZlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSGAoLYmxvY2tfcHJvb2YYAiABKAlIAIgBARIUCgdtZXNzYWdlGAMgASgJSAGIAQFCDgoMX2Jsb2NrX3Byb29mQgoKCF9tZXNzYWdlIkkKFVJldHJpZXZlU2VjcmV0UmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJImYKFlJldHJpZXZlU2VjcmV0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhkKDHNlY3JldF92YWx1ZRgDIAEoCUgAiAEBQg8KDV9zZWNyZXRfdmFsdWUyqAkKEkNvb3JkaW5hdG9yU2VydmljZRJXCgZHZXRKb2ISJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlcXVlc3QaJi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlc3BvbnNlEmYKC0NvbXBsZXRlSm9iEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5Db21wbGV0ZUpvYlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkNvbXBsZXRlSm9iUmVzcG9uc2USWgoHRmFpbEpvYhImLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuRmFpbEpvYlJlcXVlc3QaJy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkZhaWxKb2JSZXNwb25zZRJpCgxUZXJtaW5hdGVKb2ISKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlRlcm1pbmF0ZUpvYlJlcXVlc3QaLC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlRlcm1pbmF0ZUpvYlJlc3BvbnNlEmYKC1N1Ym1pdFByb29mEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRQcm9vZlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFByb29mUmVzcG9uc2USZgoLU3VibWl0U3RhdGUSKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFN0YXRlUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0U3RhdGVSZXNwb25zZRJ4ChFHZXRTZXF1ZW5jZVN0YXRlcxIwLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0U2VxdWVuY2VTdGF0ZXNSZXF1ZXN0GjEuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRTZXF1ZW5jZVN0YXRlc1Jlc3BvbnNlEoEBChRSZWFkRGF0YUF2YWlsYWJpbGl0eRIzLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0GjQuc2lsdmFuYS5jb29yZGluYXRvci52MS5SZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEl0KCEdldFByb29mEicuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRQcm9vZlJlcXVlc3QaKC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFByb29mUmVzcG9uc2USbAoNR2V0QmxvY2tQcm9vZhIsLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0QmxvY2tQcm9vZlJlcXVlc3QaLS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEJsb2NrUHJvb2ZSZXNwb25zZRJvCg5SZXRyaWV2ZVNlY3JldBItLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmV0cmlldmVTZWNyZXRSZXF1ZXN0Gi4uc2lsdmFuYS5jb29yZGluYXRvci52MS5SZXRyaWV2ZVNlY3JldFJlc3BvbnNlQkNaQWdpdGh1Yi5jb20vU2lsdmFuYU9uZS96ay10ZXN0cy9wYWNrYWdlcy9hdnMvcnBjL3Byb3RvO2Nvb3JkaW5hdG9yYgZwcm90bzM", [file_google_protobuf_descriptor]);
 
 /**
  * Job message matching the partial Move struct
@@ -277,6 +277,54 @@ export const FailJobResponseSchema: GenMessage<FailJobResponse> = /*@__PURE__*/
   messageDesc(file_silvana_coordinator_v1_coordinator, 6);
 
 /**
+ * Request message for terminating a job
+ *
+ * @generated from message silvana.coordinator.v1.TerminateJobRequest
+ */
+export type TerminateJobRequest = Message<"silvana.coordinator.v1.TerminateJobRequest"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string job_id = 2;
+   */
+  jobId: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.TerminateJobRequest.
+ * Use `create(TerminateJobRequestSchema)` to create a new message.
+ */
+export const TerminateJobRequestSchema: GenMessage<TerminateJobRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 7);
+
+/**
+ * Response message for terminating a job
+ *
+ * @generated from message silvana.coordinator.v1.TerminateJobResponse
+ */
+export type TerminateJobResponse = Message<"silvana.coordinator.v1.TerminateJobResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.TerminateJobResponse.
+ * Use `create(TerminateJobResponseSchema)` to create a new message.
+ */
+export const TerminateJobResponseSchema: GenMessage<TerminateJobResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 8);
+
+/**
  * Request message for submitting a proof
  *
  * @generated from message silvana.coordinator.v1.SubmitProofRequest
@@ -336,7 +384,7 @@ export type SubmitProofRequest = Message<"silvana.coordinator.v1.SubmitProofRequ
  * Use `create(SubmitProofRequestSchema)` to create a new message.
  */
 export const SubmitProofRequestSchema: GenMessage<SubmitProofRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 7);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 9);
 
 /**
  * Response message for proof submission
@@ -360,7 +408,7 @@ export type SubmitProofResponse = Message<"silvana.coordinator.v1.SubmitProofRes
  * Use `create(SubmitProofResponseSchema)` to create a new message.
  */
 export const SubmitProofResponseSchema: GenMessage<SubmitProofResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 8);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 10);
 
 /**
  * Request message for submitting state
@@ -403,7 +451,7 @@ export type SubmitStateRequest = Message<"silvana.coordinator.v1.SubmitStateRequ
  * Use `create(SubmitStateRequestSchema)` to create a new message.
  */
 export const SubmitStateRequestSchema: GenMessage<SubmitStateRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 9);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 11);
 
 /**
  * Response message for state submission
@@ -429,7 +477,7 @@ export type SubmitStateResponse = Message<"silvana.coordinator.v1.SubmitStateRes
  * Use `create(SubmitStateResponseSchema)` to create a new message.
  */
 export const SubmitStateResponseSchema: GenMessage<SubmitStateResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 10);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 12);
 
 /**
  * Sequence state message matching the Move SequenceState struct
@@ -468,7 +516,7 @@ export type SequenceState = Message<"silvana.coordinator.v1.SequenceState"> & {
  * Use `create(SequenceStateSchema)` to create a new message.
  */
 export const SequenceStateSchema: GenMessage<SequenceState> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 11);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 13);
 
 /**
  * Request message for querying sequence states
@@ -497,7 +545,7 @@ export type GetSequenceStatesRequest = Message<"silvana.coordinator.v1.GetSequen
  * Use `create(GetSequenceStatesRequestSchema)` to create a new message.
  */
 export const GetSequenceStatesRequestSchema: GenMessage<GetSequenceStatesRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 12);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 14);
 
 /**
  * Response message for sequence states query
@@ -516,7 +564,7 @@ export type GetSequenceStatesResponse = Message<"silvana.coordinator.v1.GetSeque
  * Use `create(GetSequenceStatesResponseSchema)` to create a new message.
  */
 export const GetSequenceStatesResponseSchema: GenMessage<GetSequenceStatesResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 13);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 15);
 
 /**
  * Request message for reading data availability by hash
@@ -540,7 +588,7 @@ export type ReadDataAvailabilityRequest = Message<"silvana.coordinator.v1.ReadDa
  * Use `create(ReadDataAvailabilityRequestSchema)` to create a new message.
  */
 export const ReadDataAvailabilityRequestSchema: GenMessage<ReadDataAvailabilityRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 14);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 16);
 
 /**
  * Response message for data availability read
@@ -569,7 +617,7 @@ export type ReadDataAvailabilityResponse = Message<"silvana.coordinator.v1.ReadD
  * Use `create(ReadDataAvailabilityResponseSchema)` to create a new message.
  */
 export const ReadDataAvailabilityResponseSchema: GenMessage<ReadDataAvailabilityResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 15);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 17);
 
 /**
  * Request message for getting a proof
@@ -605,7 +653,7 @@ export type GetProofRequest = Message<"silvana.coordinator.v1.GetProofRequest"> 
  * Use `create(GetProofRequestSchema)` to create a new message.
  */
 export const GetProofRequestSchema: GenMessage<GetProofRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 16);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 18);
 
 /**
  * Response message for getting a proof
@@ -638,7 +686,7 @@ export type GetProofResponse = Message<"silvana.coordinator.v1.GetProofResponse"
  * Use `create(GetProofResponseSchema)` to create a new message.
  */
 export const GetProofResponseSchema: GenMessage<GetProofResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 17);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 19);
 
 /**
  * Request message for getting a block proof
@@ -667,7 +715,7 @@ export type GetBlockProofRequest = Message<"silvana.coordinator.v1.GetBlockProof
  * Use `create(GetBlockProofRequestSchema)` to create a new message.
  */
 export const GetBlockProofRequestSchema: GenMessage<GetBlockProofRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 18);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 20);
 
 /**
  * Response message for getting a block proof
@@ -700,7 +748,7 @@ export type GetBlockProofResponse = Message<"silvana.coordinator.v1.GetBlockProo
  * Use `create(GetBlockProofResponseSchema)` to create a new message.
  */
 export const GetBlockProofResponseSchema: GenMessage<GetBlockProofResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 19);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 21);
 
 /**
  * Request message for retrieving a secret
@@ -729,7 +777,7 @@ export type RetrieveSecretRequest = Message<"silvana.coordinator.v1.RetrieveSecr
  * Use `create(RetrieveSecretRequestSchema)` to create a new message.
  */
 export const RetrieveSecretRequestSchema: GenMessage<RetrieveSecretRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 20);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 22);
 
 /**
  * Response message for secret retrieval
@@ -760,7 +808,7 @@ export type RetrieveSecretResponse = Message<"silvana.coordinator.v1.RetrieveSec
  * Use `create(RetrieveSecretResponseSchema)` to create a new message.
  */
 export const RetrieveSecretResponseSchema: GenMessage<RetrieveSecretResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_coordinator_v1_coordinator, 21);
+  messageDesc(file_silvana_coordinator_v1_coordinator, 23);
 
 /**
  * gRPC service definition
@@ -791,6 +839,14 @@ export const CoordinatorService: GenService<{
     methodKind: "unary";
     input: typeof FailJobRequestSchema;
     output: typeof FailJobResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.TerminateJob
+   */
+  terminateJob: {
+    methodKind: "unary";
+    input: typeof TerminateJobRequestSchema;
+    output: typeof TerminateJobResponseSchema;
   },
   /**
    * @generated from rpc silvana.coordinator.v1.CoordinatorService.SubmitProof

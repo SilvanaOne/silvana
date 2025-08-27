@@ -173,6 +173,27 @@ impl AgentJobDatabase {
         }
     }
 
+    /// Terminate a job and remove it from tracking
+    pub async fn terminate_job(&self, job_id: &str) -> Option<AgentJob> {
+        let job = {
+            let mut pending = self.pending_jobs.write().await;
+            pending.remove(job_id)
+        };
+
+        if let Some(job) = job {
+            {
+                let mut lookup = self.job_lookup.write().await;
+                lookup.remove(job_id);
+            }
+            
+            info!("Terminated job {}", job_id);
+            Some(job)
+        } else {
+            warn!("Attempted to terminate non-existent job: {}", job_id);
+            None
+        }
+    }
+
     /// Get a job by job_id for reference (doesn't remove it)
     pub async fn get_job_by_id(&self, job_id: &str) -> Option<AgentJob> {
         let lookup = self.job_lookup.read().await;
