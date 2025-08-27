@@ -35,39 +35,6 @@ public struct ProofCalculation has key, store {
     is_finished: bool,
 }
 
-// Struct for serializing proof merge data
-public struct ProofMergeData has copy, drop {
-    block_number: u64,
-    sequences1: vector<u64>,
-    sequences2: vector<u64>,
-}
-
-// Create a new ProofMergeData instance
-public fun create_proof_merge_data(
-    block_number: u64,
-    sequences1: vector<u64>,
-    sequences2: vector<u64>,
-): ProofMergeData {
-    ProofMergeData {
-        block_number,
-        sequences1,
-        sequences2,
-    }
-}
-
-// Getters for ProofMergeData
-public fun get_block_number(proof_merge_data: &ProofMergeData): u64 {
-    proof_merge_data.block_number
-}
-
-public fun get_sequences1(proof_merge_data: &ProofMergeData): &vector<u64> {
-    &proof_merge_data.sequences1
-}
-
-public fun get_sequences2(proof_merge_data: &ProofMergeData): &vector<u64> {
-    &proof_merge_data.sequences2
-}
-
 public struct ProofStartedEvent has copy, drop {
     block_number: u64,
     sequences: vector<u64>,

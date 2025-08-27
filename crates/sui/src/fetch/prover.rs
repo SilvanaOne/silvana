@@ -2,30 +2,76 @@ use crate::error::{SilvanaSuiInterfaceError, Result};
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, warn};
+use serde::{Deserialize, Serialize};
 
-/// Individual proof information extracted from ProofCalculation
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct ProofInfo {
-    pub sequences: Vec<u64>,
-    pub status: u8, // 0=STARTED, 1=CALCULATED, 2=REJECTED, 3=RESERVED, 4=USED
-    pub da_hash: Option<String>,
-    pub timestamp: u64,
-    pub merged_sequences_1: Option<Vec<u64>>,
-    pub merged_sequences_2: Option<Vec<u64>>,
-    pub job_id: String,
+// Constants matching Move definitions
+pub const PROOF_STATUS_STARTED: u8 = 1;
+pub const PROOF_STATUS_CALCULATED: u8 = 2;
+pub const PROOF_STATUS_REJECTED: u8 = 3;
+pub const PROOF_STATUS_RESERVED: u8 = 4;
+pub const PROOF_STATUS_USED: u8 = 5;
+
+/// Helper enum for proof status (matches Move constants)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ProofStatus {
+    Started,    // PROOF_STATUS_STARTED = 1
+    Calculated, // PROOF_STATUS_CALCULATED = 2
+    Rejected,   // PROOF_STATUS_REJECTED = 3
+    Reserved,   // PROOF_STATUS_RESERVED = 4
+    Used,       // PROOF_STATUS_USED = 5
 }
 
-/// ProofCalculation information fetched from blockchain
+impl ProofStatus {
+    pub fn from_u8(status: u8) -> Self {
+        match status {
+            1 => ProofStatus::Started,
+            2 => ProofStatus::Calculated,
+            3 => ProofStatus::Rejected,
+            4 => ProofStatus::Reserved,
+            5 => ProofStatus::Used,
+            _ => ProofStatus::Rejected, // Default for unknown status
+        }
+    }
+    
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            ProofStatus::Started => PROOF_STATUS_STARTED,
+            ProofStatus::Calculated => PROOF_STATUS_CALCULATED,
+            ProofStatus::Rejected => PROOF_STATUS_REJECTED,
+            ProofStatus::Reserved => PROOF_STATUS_RESERVED,
+            ProofStatus::Used => PROOF_STATUS_USED,
+        }
+    }
+}
+
+/// Proof struct matching Move definition
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct ProofCalculationInfo {
+pub struct Proof {
+    pub status: ProofStatus,
+    pub da_hash: Option<String>,
+    pub sequence1: Option<Vec<u64>>,
+    pub sequence2: Option<Vec<u64>>,
+    pub rejected_count: u16,
+    pub timestamp: u64,
+    pub prover: String, // address in Move
+    pub user: Option<String>, // Option<address> in Move
+    pub job_id: String,
+    // Additional field for the key in VecMap
+    pub sequences: Vec<u64>,
+}
+
+/// ProofCalculation struct matching Move definition
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ProofCalculation {
+    pub id: String, // UID in Move
     pub block_number: u64,
     pub start_sequence: u64,
     pub end_sequence: Option<u64>,
-    pub is_finished: bool,
+    pub proofs: Vec<Proof>, // VecMap<vector<u64>, Proof> in Move
     pub block_proof: Option<String>,
-    pub individual_proofs: Vec<ProofInfo>,
+    pub is_finished: bool,
 }
 
 /// Fetch all ProofCalculations for a block from AppInstance
@@ -33,7 +79,7 @@ pub async fn fetch_proof_calculations(
     client: &mut Client,
     app_instance: &str,
     block_number: u64,
-) -> Result<Vec<ProofCalculationInfo>> {
+) -> Result<Vec<ProofCalculation>> {
     debug!("Fetching ProofCalculations for block {} from app_instance {}", block_number, app_instance);
     
     // Ensure the app_instance has 0x prefix
@@ -105,7 +151,7 @@ async fn fetch_proof_calculations_from_table(
     client: &mut Client,
     table_id: &str,
     target_block_number: u64,
-) -> Result<Vec<ProofCalculationInfo>> {
+) -> Result<Vec<ProofCalculation>> {
     debug!("🔍 Optimized search for proofs for block {} in table {}", target_block_number, table_id);
     
     let mut page_token = None;
@@ -169,7 +215,7 @@ async fn fetch_proof_object_by_field_id(
     client: &mut Client,
     field_id: &str,
     target_block_number: u64,
-) -> Result<Option<ProofCalculationInfo>> {
+) -> Result<Option<ProofCalculation>> {
     debug!("📄 Fetching proof calculation from field {} (filtering for block {})", field_id, target_block_number);
     
     // Fetch each ProofCalculation
@@ -259,85 +305,123 @@ fn extract_block_number_from_json(json_value: &prost_types::Value) -> Option<u64
 }
 
 /// Extract ProofCalculation information from JSON
-fn extract_proof_calculation_from_json(json_value: &prost_types::Value) -> Option<ProofCalculationInfo> {
+fn extract_proof_calculation_from_json(json_value: &prost_types::Value) -> Option<ProofCalculation> {
     debug!("🔍 Extracting proof calculation from JSON");
     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
         debug!("🔍 Proof calculation fields: {:?}", struct_value.fields.keys().collect::<Vec<_>>());
-        let mut block_number = 0u64;
-        let mut start_sequence = 0u64;
-        let mut end_sequence: Option<u64> = None;
-        let mut is_finished = false;
-        let mut block_proof: Option<String> = None;
-        let mut individual_proofs = Vec::new();
         
-        // Extract block_number
-        if let Some(block_field) = struct_value.fields.get("block_number") {
+        // Extract id (required field)
+        let id = if let Some(id_field) = struct_value.fields.get("id") {
+            if let Some(prost_types::value::Kind::StringValue(id_str)) = &id_field.kind {
+                id_str.clone()
+            } else {
+                debug!("❌ Failed to extract id field");
+                return None;
+            }
+        } else {
+            debug!("❌ No id field found");
+            return None;
+        };
+        
+        // Extract block_number (required field)
+        let block_number = if let Some(block_field) = struct_value.fields.get("block_number") {
             if let Some(prost_types::value::Kind::StringValue(block_str)) = &block_field.kind {
-                block_number = block_str.parse().unwrap_or(0);
+                block_str.parse().ok()?
+            } else {
+                debug!("❌ Failed to parse block_number");
+                return None;
             }
-        }
+        } else {
+            debug!("❌ No block_number field found");
+            return None;
+        };
         
-        // Extract start_sequence
-        if let Some(start_field) = struct_value.fields.get("start_sequence") {
+        // Extract start_sequence (required field)
+        let start_sequence = if let Some(start_field) = struct_value.fields.get("start_sequence") {
             if let Some(prost_types::value::Kind::StringValue(start_str)) = &start_field.kind {
-                start_sequence = start_str.parse().unwrap_or(0);
+                start_str.parse().ok()?
+            } else {
+                debug!("❌ Failed to parse start_sequence");
+                return None;
             }
-        }
+        } else {
+            debug!("❌ No start_sequence field found");
+            return None;
+        };
         
         // Extract end_sequence (Option<u64>)
-        if let Some(end_field) = struct_value.fields.get("end_sequence") {
+        let end_sequence = if let Some(end_field) = struct_value.fields.get("end_sequence") {
             match &end_field.kind {
                 Some(prost_types::value::Kind::StructValue(option_struct)) => {
                     if let Some(some_field) = option_struct.fields.get("Some") {
                         if let Some(prost_types::value::Kind::StringValue(end_str)) = &some_field.kind {
-                            end_sequence = end_str.parse().ok();
+                            end_str.parse().ok()
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
                 }
                 Some(prost_types::value::Kind::StringValue(end_str)) => {
-                    end_sequence = end_str.parse().ok();
+                    end_str.parse().ok()
                 }
-                _ => {}
+                _ => None
             }
-        }
+        } else {
+            None
+        };
         
-        // Extract is_finished
-        if let Some(finished_field) = struct_value.fields.get("is_finished") {
+        // Extract is_finished (required field)
+        let is_finished = if let Some(finished_field) = struct_value.fields.get("is_finished") {
             match &finished_field.kind {
                 Some(prost_types::value::Kind::BoolValue(finished_bool)) => {
-                    is_finished = *finished_bool;
+                    *finished_bool
                 }
                 Some(prost_types::value::Kind::StringValue(finished_str)) => {
-                    is_finished = finished_str == "true";
+                    finished_str == "true"
                 }
-                _ => {}
+                _ => {
+                    debug!("❌ Failed to parse is_finished");
+                    return None;
+                }
             }
-        }
+        } else {
+            debug!("❌ No is_finished field found");
+            return None;
+        };
         
         // Extract block_proof (Option<String>)
-        if let Some(proof_field) = struct_value.fields.get("block_proof") {
+        let block_proof = if let Some(proof_field) = struct_value.fields.get("block_proof") {
             match &proof_field.kind {
                 Some(prost_types::value::Kind::StructValue(option_struct)) => {
                     if let Some(some_field) = option_struct.fields.get("Some") {
                         if let Some(prost_types::value::Kind::StringValue(proof_str)) = &some_field.kind {
-                            block_proof = Some(proof_str.clone());
+                            Some(proof_str.clone())
+                        } else {
+                            None
                         }
+                    } else {
+                        None
                     }
                 }
-                Some(prost_types::value::Kind::StringValue(proof_str)) => {
-                    block_proof = Some(proof_str.clone());
+                Some(prost_types::value::Kind::StringValue(proof_str)) if !proof_str.is_empty() => {
+                    Some(proof_str.clone())
                 }
-                _ => {}
+                _ => None
             }
-        }
+        } else {
+            None
+        };
         
-        // Extract individual proofs (from VecMap<vector<u64>, Proof>)
-        if let Some(proofs_field) = struct_value.fields.get("proofs") {
+        // Extract proofs (VecMap<vector<u64>, Proof>) - required field but can be empty
+        let proofs = if let Some(proofs_field) = struct_value.fields.get("proofs") {
             if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
                 if let Some(contents_field) = proofs_struct.fields.get("contents") {
                     if let Some(prost_types::value::Kind::ListValue(list_value)) = &contents_field.kind {
                         debug!("🔍 Found {} proofs in VecMap", list_value.values.len());
                         
+                        let mut proofs_vec = Vec::new();
                         for proof_entry in &list_value.values {
                             if let Some(prost_types::value::Kind::StructValue(entry_struct)) = &proof_entry.kind {
                                 // Extract key (sequences) and value (Proof)
@@ -358,27 +442,37 @@ fn extract_proof_calculation_from_json(json_value: &prost_types::Value) -> Optio
                                     
                                     // Extract Proof struct from value
                                     if let Some(prost_types::value::Kind::StructValue(proof_struct)) = &value_field.kind {
-                                        let proof_info = extract_individual_proof(proof_struct, sequences);
-                                        if let Some(proof) = proof_info {
+                                        if let Some(proof) = extract_individual_proof(proof_struct, sequences) {
                                             debug!("🔍 Extracted proof: {:?}", proof);
-                                            individual_proofs.push(proof);
+                                            proofs_vec.push(proof);
                                         }
                                     }
                                 }
                             }
                         }
+                        proofs_vec
+                    } else {
+                        Vec::new()
                     }
+                } else {
+                    Vec::new()
                 }
+            } else {
+                Vec::new()
             }
-        }
+        } else {
+            Vec::new()
+        };
         
-        let proof_info = ProofCalculationInfo {
+        // Create ProofCalculation with all validated fields
+        let proof_info = ProofCalculation {
+            id,
             block_number,
             start_sequence,
             end_sequence,
-            is_finished,
+            proofs,
             block_proof,
-            individual_proofs,
+            is_finished,
         };
         debug!("✅ Extracted proof info: {:?}", proof_info);
         return Some(proof_info);
@@ -388,83 +482,160 @@ fn extract_proof_calculation_from_json(json_value: &prost_types::Value) -> Optio
 }
 
 /// Extract individual Proof information from Move Proof struct
-fn extract_individual_proof(proof_struct: &prost_types::Struct, sequences: Vec<u64>) -> Option<ProofInfo> {
+fn extract_individual_proof(proof_struct: &prost_types::Struct, sequences: Vec<u64>) -> Option<Proof> {
     debug!("🔍 Extracting individual proof with sequences: {:?}", sequences);
     debug!("🔍 Proof struct fields: {:?}", proof_struct.fields.keys().collect::<Vec<_>>());
     
-    let mut status = 0u8;
-    let mut da_hash: Option<String> = None;
-    let mut timestamp = 0u64;
-    let mut merged_sequences_1: Option<Vec<u64>> = None;
-    let mut merged_sequences_2: Option<Vec<u64>> = None;
-    let mut job_id = String::new();
-    
-    // Extract status
-    if let Some(status_field) = proof_struct.fields.get("status") {
+    // Extract status (required field)
+    let status = if let Some(status_field) = proof_struct.fields.get("status") {
         match &status_field.kind {
             Some(prost_types::value::Kind::StringValue(status_str)) => {
-                status = status_str.parse().unwrap_or(0);
+                let status_u8: u8 = status_str.parse().ok()?;
+                ProofStatus::from_u8(status_u8)
             }
             Some(prost_types::value::Kind::NumberValue(status_num)) => {
-                status = *status_num as u8;
+                ProofStatus::from_u8(*status_num as u8)
             }
-            _ => {}
+            _ => {
+                debug!("❌ Failed to parse status");
+                return None;
+            }
         }
-    }
+    } else {
+        debug!("❌ No status field found");
+        return None;
+    };
     
     // Extract da_hash (Option<String>)
-    if let Some(da_field) = proof_struct.fields.get("da_hash") {
+    let da_hash = if let Some(da_field) = proof_struct.fields.get("da_hash") {
         match &da_field.kind {
             Some(prost_types::value::Kind::StructValue(option_struct)) => {
                 if let Some(some_field) = option_struct.fields.get("Some") {
                     if let Some(prost_types::value::Kind::StringValue(da_str)) = &some_field.kind {
-                        da_hash = Some(da_str.clone());
+                        Some(da_str.clone())
+                    } else {
+                        None
                     }
+                } else {
+                    None
                 }
             }
-            Some(prost_types::value::Kind::StringValue(da_str)) => {
-                da_hash = Some(da_str.clone());
+            Some(prost_types::value::Kind::StringValue(da_str)) if !da_str.is_empty() => {
+                Some(da_str.clone())
             }
-            _ => {}
+            _ => None
         }
-    }
+    } else {
+        None
+    };
     
-    // Extract timestamp
-    if let Some(timestamp_field) = proof_struct.fields.get("timestamp") {
+    // Extract timestamp (required field)
+    let timestamp = if let Some(timestamp_field) = proof_struct.fields.get("timestamp") {
         if let Some(prost_types::value::Kind::StringValue(timestamp_str)) = &timestamp_field.kind {
-            timestamp = timestamp_str.parse().unwrap_or(0);
+            timestamp_str.parse().ok()?
+        } else {
+            debug!("❌ Failed to parse timestamp");
+            return None;
         }
-    }
+    } else {
+        debug!("❌ No timestamp field found");
+        return None;
+    };
     
-    // Extract sequence1 (merged_sequences_1)
-    if let Some(seq1_field) = proof_struct.fields.get("sequence1") {
-        if let Some(sequences) = extract_optional_sequence_list(seq1_field) {
-            merged_sequences_1 = Some(sequences);
+    // Extract sequence1 (Option<vector<u64>>)
+    let sequence1 = if let Some(seq1_field) = proof_struct.fields.get("sequence1") {
+        extract_optional_sequence_list(seq1_field)
+    } else {
+        None
+    };
+    
+    // Extract sequence2 (Option<vector<u64>>)
+    let sequence2 = if let Some(seq2_field) = proof_struct.fields.get("sequence2") {
+        extract_optional_sequence_list(seq2_field)
+    } else {
+        None
+    };
+    
+    // Extract rejected_count (required field)
+    let rejected_count = if let Some(rejected_field) = proof_struct.fields.get("rejected_count") {
+        match &rejected_field.kind {
+            Some(prost_types::value::Kind::StringValue(rejected_str)) => {
+                rejected_str.parse().ok()?
+            }
+            Some(prost_types::value::Kind::NumberValue(rejected_num)) => {
+                *rejected_num as u16
+            }
+            _ => {
+                debug!("❌ Failed to parse rejected_count");
+                return None;
+            }
         }
-    }
+    } else {
+        debug!("❌ No rejected_count field found");
+        return None;
+    };
     
-    // Extract sequence2 (merged_sequences_2)
-    if let Some(seq2_field) = proof_struct.fields.get("sequence2") {
-        if let Some(sequences) = extract_optional_sequence_list(seq2_field) {
-            merged_sequences_2 = Some(sequences);
+    // Extract prover (required field - address)
+    let prover = if let Some(prover_field) = proof_struct.fields.get("prover") {
+        if let Some(prost_types::value::Kind::StringValue(prover_str)) = &prover_field.kind {
+            prover_str.clone()
+        } else {
+            debug!("❌ Failed to parse prover");
+            return None;
         }
-    }
+    } else {
+        debug!("❌ No prover field found");
+        return None;
+    };
     
-    // Extract job_id
-    if let Some(job_id_field) = proof_struct.fields.get("job_id") {
+    // Extract user (Option<address>)
+    let user = if let Some(user_field) = proof_struct.fields.get("user") {
+        match &user_field.kind {
+            Some(prost_types::value::Kind::StructValue(option_struct)) => {
+                if let Some(some_field) = option_struct.fields.get("Some") {
+                    if let Some(prost_types::value::Kind::StringValue(user_str)) = &some_field.kind {
+                        Some(user_str.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Some(prost_types::value::Kind::StringValue(user_str)) if !user_str.is_empty() => {
+                Some(user_str.clone())
+            }
+            _ => None
+        }
+    } else {
+        None
+    };
+    
+    // Extract job_id (required field)
+    let job_id = if let Some(job_id_field) = proof_struct.fields.get("job_id") {
         if let Some(prost_types::value::Kind::StringValue(job_str)) = &job_id_field.kind {
-            job_id = job_str.clone();
+            job_str.clone()
+        } else {
+            debug!("❌ Failed to parse job_id");
+            return None;
         }
-    }
+    } else {
+        debug!("❌ No job_id field found");
+        return None;
+    };
     
-    Some(ProofInfo {
-        sequences,
+    // Create Proof with all validated fields
+    Some(Proof {
         status,
         da_hash,
+        sequence1,
+        sequence2,
+        rejected_count,
         timestamp,
-        merged_sequences_1,
-        merged_sequences_2,
+        prover,
+        user,
         job_id,
+        sequences,
     })
 }
 

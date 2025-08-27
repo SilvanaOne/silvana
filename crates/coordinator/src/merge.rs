@@ -1,4 +1,4 @@
-use crate::coordination::{ProofCalculation, ProofInfo, ProofStatus};
+use crate::coordination::{ProofCalculation, Proof, ProofStatus};
 use crate::fetch::fetch_proof_calculations;
 use crate::block::settle;
 use anyhow::Result;
@@ -19,11 +19,11 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             info!("🧮 Fetched {} existing ProofCalculations for block {}:", 
                 proofs.len(), proof_calc.block_number);
             for (i, pc_info) in proofs.iter().enumerate() {
-                info!("  ProofCalculation {}: block={}, start_seq={}, end_seq={:?}, finished={}, individual_proofs={}",
+                info!("  ProofCalculation {}: block={}, start_seq={}, end_seq={:?}, finished={}, proofs={}",
                     i + 1, pc_info.block_number, pc_info.start_sequence, 
-                    pc_info.end_sequence, pc_info.is_finished, pc_info.individual_proofs.len());
-                for (j, proof) in pc_info.individual_proofs.iter().enumerate() {
-                    info!("    Individual proof {}: sequences={:?}, status={}, job_id={}", 
+                    pc_info.end_sequence, pc_info.is_finished, pc_info.proofs.len());
+                for (j, proof) in pc_info.proofs.iter().enumerate() {
+                    info!("    Individual proof {}: sequences={:?}, status={:?}, job_id={}", 
                         j + 1, proof.sequences, proof.status, proof.job_id);
                 }
             }
@@ -57,28 +57,13 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     
     // Only add existing proofs from blockchain (which already includes the current proof)
     for existing_proof_calc in &existing_proof_calculations {
-        for existing_proof in &existing_proof_calc.individual_proofs {
-            // Convert u8 status to ProofStatus enum
-            // From Move: 1=STARTED, 2=CALCULATED, 3=REJECTED, 4=RESERVED, 5=USED
-            let status = match existing_proof.status {
-                1 => ProofStatus::Started,
-                2 => ProofStatus::Calculated,
-                3 => ProofStatus::Rejected,
-                4 => ProofStatus::Reserved,
-                5 => ProofStatus::Used,
-                _ => ProofStatus::Rejected, // Unknown status defaults to Rejected
-            };
-            
-            proof_infos.push(ProofInfo {
-                sequences: existing_proof.sequences.clone(),
-                status,
-                da_hash: existing_proof.da_hash.clone(),
-                timestamp: Some(existing_proof.timestamp),
-            });
+        for existing_proof in &existing_proof_calc.proofs {
+            proof_infos.push(existing_proof.clone());
         }
     }
 
     let block_proofs = ProofCalculation {
+        id: proof_calc_info.map(|p| p.id.clone()).unwrap_or_else(|| "temp_id".to_string()),
         block_number: proof_calc.block_number,
         start_sequence: proof_calc.start_sequence,  // No Some() needed
         end_sequence: proof_calc.end_sequence,
@@ -159,37 +144,22 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             
             // Only add existing proofs from refetched data with their actual status
             for existing_proof_calc in &updated_proof_calculations {
-                for existing_proof in &existing_proof_calc.individual_proofs {
-                    // Convert u8 status to ProofStatus enum
-                    // From Move: 1=STARTED, 2=CALCULATED, 3=REJECTED, 4=RESERVED, 5=USED
-                    let status = match existing_proof.status {
-                        1 => ProofStatus::Started,
-                        2 => ProofStatus::Calculated,
-                        3 => ProofStatus::Rejected,
-                        4 => ProofStatus::Reserved,
-                        5 => ProofStatus::Used,
-                        _ => ProofStatus::Rejected, // Unknown status defaults to Rejected
-                    };
-                    
-                    updated_proof_infos.push(ProofInfo {
-                        sequences: existing_proof.sequences.clone(),
-                        status,
-                        da_hash: existing_proof.da_hash.clone(),
-                        timestamp: Some(existing_proof.timestamp),
-                    });
+                for existing_proof in &existing_proof_calc.proofs {
+                    updated_proof_infos.push(existing_proof.clone());
                 }
             }
             
             // Use the most recent ProofCalculation's start_sequence and end_sequence
             // If no updated calculations exist, use the current one's values
             let (latest_start_seq, latest_end_seq, latest_is_finished, latest_block_proof) = 
-                if let Some(latest) = updated_proof_calculations.iter().max_by_key(|p| p.individual_proofs.len()) {
+                if let Some(latest) = updated_proof_calculations.iter().max_by_key(|p| p.proofs.len()) {
                     (latest.start_sequence, latest.end_sequence, latest.is_finished, latest.block_proof.clone())
                 } else {
                     (start_sequence, end_sequence, is_finished, proof_calc.block_proof.clone())
                 };
             
             ProofCalculation {
+                id: updated_proof_calculations.first().map(|p| p.id.clone()).unwrap_or_else(|| String::new()),
                 block_number: proof_calc.block_number,
                 start_sequence: latest_start_seq,
                 end_sequence: latest_end_seq,
@@ -393,16 +363,12 @@ fn arrays_equal(a: &[u64], b: &[u64]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x == y)
 }
 
-fn is_proof_available(proof: &ProofInfo, current_time: u64) -> bool {
+fn is_proof_available(proof: &Proof, current_time: u64) -> bool {
     match proof.status {
         ProofStatus::Calculated => true,
         ProofStatus::Reserved => {
             // Check if timeout has expired (RESERVED proofs can be used if timed out)
-            if let Some(timestamp) = proof.timestamp {
-                current_time > timestamp + TIMEOUT_MS
-            } else {
-                false
-            }
+            current_time > proof.timestamp + TIMEOUT_MS
         },
         ProofStatus::Started => false, // Started proofs are still being calculated, not available for merging
         ProofStatus::Used => false, // USED proofs are NOT available for merging
@@ -410,16 +376,12 @@ fn is_proof_available(proof: &ProofInfo, current_time: u64) -> bool {
     }
 }
 
-fn is_proof_active_or_completed(proof: &ProofInfo, current_time: u64) -> bool {
+fn is_proof_active_or_completed(proof: &Proof, current_time: u64) -> bool {
     match proof.status {
         ProofStatus::Calculated | ProofStatus::Used | ProofStatus::Reserved => true,
         ProofStatus::Started => {
             // Check if it's still within timeout
-            if let Some(timestamp) = proof.timestamp {
-                current_time <= timestamp + TIMEOUT_MS
-            } else {
-                false
-            }
+            current_time <= proof.timestamp + TIMEOUT_MS
         },
         _ => false,
     }
@@ -462,37 +424,28 @@ async fn create_merge_job(
         let should_reject = match proof.status {
             ProofStatus::Started => {
                 // Only reject Started proofs if they've timed out (10+ minutes)
-                if let Some(timestamp) = proof.timestamp {
-                    let current_time = chrono::Utc::now().timestamp() as u64 * 1000; // Convert to milliseconds
-                    let time_since_start = current_time.saturating_sub(timestamp);
-                    const STARTED_TIMEOUT_MS: u64 = 10 * 60 * 1000; // 10 minutes for Started status
-                    
-                    if time_since_start > STARTED_TIMEOUT_MS {
-                        info!("⏰ Started proof has timed out ({} ms > {} ms), will reject", 
-                            time_since_start, STARTED_TIMEOUT_MS);
-                        true
-                    } else {
-                        info!("⏳ Started proof is still active ({} ms < {} ms), skipping merge", 
-                            time_since_start, STARTED_TIMEOUT_MS);
-                        // Return early - don't try to merge with an active Started proof
-                        return Err(anyhow::anyhow!(
-                            "Cannot merge: combined proof with sequences {:?} is already Started and not timed out", 
-                            combined_sequences
-                        ));
-                    }
+                let current_time = chrono::Utc::now().timestamp() as u64 * 1000; // Convert to milliseconds
+                let time_since_start = current_time.saturating_sub(proof.timestamp);
+                const STARTED_TIMEOUT_MS: u64 = 10 * 60 * 1000; // 10 minutes for Started status
+                
+                if time_since_start > STARTED_TIMEOUT_MS {
+                    info!("⏰ Started proof has timed out ({} ms > {} ms), will reject", 
+                        time_since_start, STARTED_TIMEOUT_MS);
+                    true
                 } else {
-                    // No timestamp, can't determine timeout, skip
-                    false
+                    info!("⏳ Started proof is still active ({} ms < {} ms), skipping merge", 
+                        time_since_start, STARTED_TIMEOUT_MS);
+                    // Return early - don't try to merge with an active Started proof
+                    return Err(anyhow::anyhow!(
+                        "Cannot merge: combined proof with sequences {:?} is already Started and not timed out", 
+                        combined_sequences
+                    ));
                 }
             },
             ProofStatus::Reserved => {
                 // Reserved proofs can be rejected if timed out (2 minutes)
-                if let Some(timestamp) = proof.timestamp {
-                    let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
-                    current_time > timestamp + TIMEOUT_MS
-                } else {
-                    false
-                }
+                let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
+                current_time > proof.timestamp + TIMEOUT_MS
             },
             ProofStatus::Rejected => true,  // Already rejected, can try again
             ProofStatus::Calculated | ProofStatus::Used => false, // Don't reject completed proofs
@@ -599,21 +552,34 @@ mod tests {
     #[test]
     fn test_find_proofs_to_merge() {
         let block_proofs = ProofCalculation {
+            id: "test_id".to_string(),
             block_number: 1,
             start_sequence: 1,  // No longer Option
             end_sequence: Some(4),
             proofs: vec![
-                ProofInfo {
+                Proof {
                     sequences: vec![1, 2],
                     status: ProofStatus::Calculated,
                     da_hash: Some("hash1".to_string()),
-                    timestamp: Some(1000),
+                    sequence1: None,
+                    sequence2: None,
+                    rejected_count: 0,
+                    timestamp: 1000,
+                    prover: "0x1234".to_string(),
+                    user: None,
+                    job_id: "job1".to_string(),
                 },
-                ProofInfo {
+                Proof {
                     sequences: vec![3, 4],
                     status: ProofStatus::Calculated,
                     da_hash: Some("hash2".to_string()),
-                    timestamp: Some(1000),
+                    sequence1: None,
+                    sequence2: None,
+                    rejected_count: 0,
+                    timestamp: 1000,
+                    prover: "0x1234".to_string(),
+                    user: None,
+                    job_id: "job2".to_string(),
                 },
             ],
             block_proof: None,

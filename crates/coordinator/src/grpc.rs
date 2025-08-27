@@ -515,19 +515,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
         .map_err(|e| Status::internal(format!("Failed to fetch ProofCalculation: {}", e)))?;
         
         // Get the first ProofCalculation for this block (should exist)
-        let proof_calc_info = proof_calculations.first()
+        let _proof_calc_info = proof_calculations.first()
             .ok_or_else(|| Status::internal(format!("No ProofCalculation found for block {}", req.block_number)))?;
         
-        // Create ProofCalculation with real data from blockchain
-        let _proof_calc = ProofCalculation {
-            block_number: req.block_number,
-            start_sequence: proof_calc_info.start_sequence,
-            end_sequence: proof_calc_info.end_sequence,
-            proofs: vec![],  // Individual proofs will be fetched later in merge analysis
-            block_proof: proof_calc_info.block_proof.clone(),
-            is_finished: proof_calc_info.is_finished,
-        };
-
         // Submit proof transaction on Sui
         let sui_client = self.state.get_sui_client();
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
@@ -1868,6 +1858,7 @@ pub async fn analyze_proof_completion(
         
         // Create a ProofCalculation struct for analysis
         let proof_calc = ProofCalculation {
+            id: proof_calc_info.id.clone(),
             block_number,
             start_sequence: proof_calc_info.start_sequence,
             end_sequence: proof_calc_info.end_sequence,
