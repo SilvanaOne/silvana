@@ -16,4 +16,3 @@ pub mod registry;
 pub mod session_id;
 pub mod settlement;
 pub mod state;
-pub mod sui_interface;

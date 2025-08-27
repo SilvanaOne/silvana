@@ -6,12 +6,7 @@ import {
   AddProgramProof,
 } from "./circuit.js";
 import { AddProgramCommitment } from "./commitment.js";
-import { createClient } from "@connectrpc/connect";
-import {
-  CoordinatorService,
-  ReadDataAvailabilityRequestSchema,
-} from "./proto/silvana/coordinator/v1/coordinator_pb.js";
-import { create } from "@bufbuild/protobuf";
+import { readDataAvailability } from "./grpc.js";
 import { UInt32, Field, VerificationKey, Cache, verify, JsonProof } from "o1js";
 import { processCommitments } from "./transition.js";
 
@@ -103,8 +98,6 @@ export async function merge(
 
 export async function getStateAndProof(params: {
   sequenceStates: SequenceState[];
-  client: ReturnType<typeof createClient<typeof CoordinatorService>>;
-  sessionId: string;
   sequence: bigint;
 }): Promise<
   | {
@@ -114,7 +107,7 @@ export async function getStateAndProof(params: {
     }
   | undefined
 > {
-  const { sequenceStates, client, sessionId, sequence } = params;
+  const { sequenceStates, sequence } = params;
 
   if (sequenceStates.length === 0) {
     return undefined;
@@ -134,13 +127,8 @@ export async function getStateAndProof(params: {
         `Reading data availability for hash: ${sortedStates[0].dataAvailability}`
       );
 
-      const readDataRequest = create(ReadDataAvailabilityRequestSchema, {
-        daHash: sortedStates[0].dataAvailability,
-        sessionId: sessionId,
-      });
-
-      const readDataResponse = await client.readDataAvailability(
-        readDataRequest
+      const readDataResponse = await readDataAvailability(
+        sortedStates[0].dataAvailability
       );
 
       if (readDataResponse.success && readDataResponse.data) {

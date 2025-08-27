@@ -441,9 +441,9 @@ async fn create_merge_job(
         block_number, sequences1, sequences2
     );
 
-    // Create SuiJobInterface following the same pattern as submit_proof in grpc.rs
+    // Create SilvanaSuiInterface following the same pattern as submit_proof in grpc.rs
     let sui_client = client.clone(); // Clone the client  
-    let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+    let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
 
     // Generate a unique job ID for this merge operation
     let job_id = format!("merge_{}_{}_{}", block_number, sequences1[0], sequences2[0]);

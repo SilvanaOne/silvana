@@ -245,7 +245,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Execute complete_job transaction on Sui
         let sui_client = self.state.get_sui_client();
-        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
         
         let success = sui_interface.complete_job(&agent_job.app_instance, agent_job.job_sequence).await;
         
@@ -321,7 +321,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Execute fail_job transaction on Sui
         let sui_client = self.state.get_sui_client();
-        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
         
         let success = sui_interface.fail_job(
             &agent_job.app_instance, 
@@ -379,7 +379,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Execute terminate_job transaction on Sui
         let sui_client = self.state.get_sui_client();
-        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
         
         let success = sui_interface.terminate_job(&agent_job.app_instance, agent_job.job_sequence).await;
 
@@ -530,7 +530,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Submit proof transaction on Sui
         let sui_client = self.state.get_sui_client();
-        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
         
         let tx_result = sui_interface.submit_proof(
             &agent_job.app_instance,
@@ -692,7 +692,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Call update_state_for_sequence on Sui
         let sui_client = self.state.get_sui_client();
-        let mut sui_interface = crate::sui_interface::SuiJobInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
         
         let tx_result = sui_interface.update_state_for_sequence(
             &agent_job.app_instance,
@@ -1823,7 +1823,7 @@ pub async fn analyze_proof_completion(
         // No settlement opportunities - terminate existing settlement job if it exists
         if let Some(job_id) = existing_settle_job_id {
             info!("🚫 No valid blocks to settle (only block 0 or no new proved blocks), terminating settlement job {}", job_id);
-            let mut sui_interface = crate::sui_interface::SuiJobInterface::new(client.clone());
+            let mut sui_interface = sui::interface::SilvanaSuiInterface::new(client.clone());
             if let Err(e) = sui_interface.terminate_app_job(&app_instance.id, job_id).await {
                 warn!("Failed to terminate settlement job {}: {}", job_id, e);
             } else {

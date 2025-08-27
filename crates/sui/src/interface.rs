@@ -1,13 +1,13 @@
-use sui::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
+use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use sui_rpc::Client;
 use tracing::{info, warn, error, debug};
 
 /// Interface for calling Sui Move functions related to job management
-pub struct SuiJobInterface {
+pub struct SilvanaSuiInterface {
     client: Client,
 }
 
-impl SuiJobInterface {
+impl SilvanaSuiInterface {
     pub fn new(client: Client) -> Self {
         Self { client }
     }
@@ -413,7 +413,7 @@ impl SuiJobInterface {
             job_id
         );
 
-        match sui::transactions::terminate_app_job_tx(
+        match crate::transactions::terminate_app_job_tx(
             &mut self.client,
             app_instance,
             job_id,

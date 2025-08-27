@@ -1,4 +1,4 @@
-use crate::sui_interface::SuiJobInterface;
+use sui::interface::SilvanaSuiInterface;
 use anyhow::Result;
 use sui_rpc::Client;
 use tracing::{info, debug, error};
@@ -16,8 +16,8 @@ pub async fn settle(
         proof_da_hash
     );
 
-    // Create a SuiJobInterface to interact with the blockchain
-    let mut sui_interface = SuiJobInterface::new(client.clone());
+    // Create a SilvanaSuiInterface to interact with the blockchain
+    let mut sui_interface = SilvanaSuiInterface::new(client.clone());
 
     // 1. First, update the block proof data availability on the blockchain
     match sui_interface.update_block_proof_data_availability(
@@ -80,7 +80,7 @@ const MIN_TIME_BETWEEN_BLOCKS: u64 = 60000; // 60 seconds in milliseconds
 /// 2. Sufficient time has passed since the last block (current_time - previous_block_timestamp > MIN_TIME_BETWEEN_BLOCKS)
 pub async fn try_create_block(
     client: &mut Client,
-    sui_interface: &mut SuiJobInterface,
+    sui_interface: &mut SilvanaSuiInterface,
     app_instance_id: &str,
 ) -> Result<bool> {
     use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;

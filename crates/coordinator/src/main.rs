@@ -16,7 +16,6 @@ mod registry;
 mod session_id;
 mod settlement;
 mod state;
-mod sui_interface;
 
 use anyhow::Result;
 use clap::Parser;
@@ -31,7 +30,7 @@ use crate::fetch::fetch_app_instance;
 use crate::grpc::analyze_proof_completion;
 use crate::job_searcher::JobSearcher;
 use crate::block::try_create_block;
-use crate::sui_interface::SuiJobInterface;
+use sui::interface::SilvanaSuiInterface;
 use crate::processor::EventProcessor;
 use crate::state::SharedState;
 
@@ -204,8 +203,8 @@ async fn main() -> Result<()> {
                 let mut created_count = 0;
                 let mut error_count = 0;
                 
-                // Create a SuiJobInterface for this iteration
-                let mut sui_interface = SuiJobInterface::new(block_creation_client_clone.clone());
+                // Create a SilvanaSuiInterface for this iteration
+                let mut sui_interface = SilvanaSuiInterface::new(block_creation_client_clone.clone());
                 let mut client = block_creation_client_clone.clone();
                 
                 for app_instance_id in app_instances.iter() {

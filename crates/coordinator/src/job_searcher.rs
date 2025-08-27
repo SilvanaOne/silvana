@@ -5,7 +5,7 @@ use crate::fetch::jobs_types::Job;
 use crate::registry::fetch_agent_method;
 use crate::session_id::generate_docker_session;
 use crate::state::SharedState;
-use crate::sui_interface::SuiJobInterface;
+use sui::interface::SilvanaSuiInterface;
 use docker::{ContainerConfig, DockerManager};
 use secrets_client::SecretsClient;
 use std::collections::HashMap;
@@ -273,7 +273,7 @@ impl JobSearcher {
         // Start the job on Sui blockchain before processing
         info!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
         let sui_client = self.state.get_sui_client();
-        let mut sui_interface = SuiJobInterface::new(sui_client);
+        let mut sui_interface = SilvanaSuiInterface::new(sui_client);
         
         // Try to start the job on blockchain with retries to prevent race conditions
         if !sui_interface.try_start_job_with_retry(&job.app_instance, job.job_sequence, 3).await {
@@ -404,7 +404,7 @@ impl JobSearcher {
             info!("Cleaning up {} uncompleted jobs after Docker termination", jobs_to_fail.len());
             
             let sui_client = self.state.get_sui_client();
-            let mut sui_interface = SuiJobInterface::new(sui_client);
+            let mut sui_interface = SilvanaSuiInterface::new(sui_client);
             
             for uncompleted_job in jobs_to_fail {
                 let error_message = "Job not completed before Docker container termination";

@@ -1,17 +1,13 @@
-import { createGrpcTransport } from "@connectrpc/connect-node";
-import { createClient } from "@connectrpc/connect";
 import {
-  CoordinatorService,
-  GetJobRequestSchema,
-  CompleteJobRequestSchema,
-  FailJobRequestSchema,
-  GetSequenceStatesRequestSchema,
-  SubmitProofRequestSchema,
-  SubmitStateRequestSchema,
-  GetProofRequestSchema,
-  GetBlockProofRequestSchema,
-} from "./proto/silvana/coordinator/v1/coordinator_pb.js";
-import { create } from "@bufbuild/protobuf";
+  getJob,
+  completeJob,
+  failJob,
+  getSequenceStates,
+  submitProof,
+  submitState,
+  getProof,
+  getBlockProof,
+} from "./grpc.js";
 import { deserializeTransitionData } from "./transition.js";
 import { getStateAndProof, SequenceState, merge } from "./state.js";
 import { serializeProofAndState, serializeState } from "./proof.js";
@@ -26,35 +22,13 @@ async function agent() {
   const maxRunTimeMs = 500 * 1000; // 500 seconds (8.33 minutes) - absolute maximum runtime
   const stopAcceptingJobsMs = 400 * 1000; // 400 seconds (6.67 minutes) - stop accepting new jobs
 
-  // Create gRPC client over TCP (accessible from Docker container)
-  const transport = createGrpcTransport({
-    baseUrl: "http://host.docker.internal:50051",
-  });
-
-  const client = createClient(CoordinatorService, transport);
-
-  // Get session_id from environment (set by coordinator)
-  const sessionId = process.env.SESSION_ID;
-  if (!sessionId) {
-    console.error("SESSION_ID environment variable is required");
-    process.exit(1);
-  }
-
-  // Job request parameters
-  const request = create(GetJobRequestSchema, {
-    developer: "AddExampleDev",
-    agent: "AddAgent",
-    agentMethod: "prove",
-    sessionId: sessionId,
-  });
-
   let jobCount = 0;
 
   try {
     while (Date.now() - startTime < maxRunTimeMs) {
       console.log("Requesting job from coordinator...");
 
-      const response = await client.getJob(request);
+      const response = await getJob();
 
       if (response.job) {
         jobCount++;
@@ -97,15 +71,7 @@ async function agent() {
 
             try {
               // Fetch the block proof using GetBlockProof
-              const getBlockProofRequest = create(GetBlockProofRequestSchema, {
-                sessionId: sessionId,
-                blockNumber: 1n,
-                jobId: response.job.jobId,
-              });
-
-              const blockProofResponse = await client.getBlockProof(
-                getBlockProofRequest
-              );
+              const blockProofResponse = await getBlockProof(blockNumber);
 
               if (
                 !blockProofResponse.success ||
@@ -151,14 +117,7 @@ async function agent() {
 
                 // Complete the job successfully
                 console.log(`\nCompleting settle job ${response.job.jobId}...`);
-                const completeRequest = create(CompleteJobRequestSchema, {
-                  jobId: response.job.jobId,
-                  sessionId: sessionId,
-                });
-
-                const completeResponse = await client.completeJob(
-                  completeRequest
-                );
+                const completeResponse = await completeJob(response.job.jobId);
                 if (completeResponse.success) {
                   console.log(
                     `✅ Settle job completed successfully: ${completeResponse.message}`
@@ -178,13 +137,10 @@ async function agent() {
               console.log(
                 `Failing job ${response.job.jobId} due to settlement error...`
               );
-              const failRequest = create(FailJobRequestSchema, {
-                jobId: response.job.jobId,
-                errorMessage: `Settlement failed: ${error}`,
-                sessionId: sessionId,
-              });
-
-              await client.failJob(failRequest);
+              await failJob(
+                response.job.jobId,
+                `Settlement failed: ${error}`
+              );
               console.log("Job marked as failed");
               continue;
             }
@@ -245,14 +201,7 @@ async function agent() {
               console.log(
                 `Fetching proof 1: sequences ${sequences1.join(", ")}`
               );
-              const getProof1Request = create(GetProofRequestSchema, {
-                sessionId: sessionId,
-                blockNumber: blockNumber,
-                sequences: sequences1,
-                jobId: response.job.jobId, // Use the current job ID
-              });
-
-              const proof1Response = await client.getProof(getProof1Request);
+              const proof1Response = await getProof(blockNumber, sequences1);
               if (!proof1Response.success || !proof1Response.proof) {
                 throw new Error(
                   `Failed to fetch proof 1: ${
@@ -272,14 +221,7 @@ async function agent() {
               console.log(
                 `Fetching proof 2: sequences ${sequences2.join(", ")}`
               );
-              const getProof2Request = create(GetProofRequestSchema, {
-                sessionId: sessionId,
-                blockNumber: blockNumber,
-                sequences: sequences2,
-                jobId: response.job.jobId, // Use the current job ID
-              });
-
-              const proof2Response = await client.getProof(getProof2Request);
+              const proof2Response = await getProof(blockNumber, sequences2);
               if (!proof2Response.success || !proof2Response.proof) {
                 throw new Error(
                   `Failed to fetch proof 2: ${
@@ -316,19 +258,14 @@ async function agent() {
               );
 
               // Submit the merged proof
-              const submitProofRequest = create(SubmitProofRequestSchema, {
-                sessionId: sessionId,
-                blockNumber: blockNumber,
-                sequences: allSequences,
-                mergedSequences1: sequences1,
-                mergedSequences2: sequences2,
-                jobId: response.job.jobId,
-                proof: mergedProof,
-                cpuTime: BigInt(mergeTimeMs),
-              });
-
-              const submitProofResponse = await client.submitProof(
-                submitProofRequest
+              const submitProofResponse = await submitProof(
+                response.job.jobId,
+                blockNumber,
+                allSequences,
+                mergedProof,
+                BigInt(mergeTimeMs),
+                sequences1,
+                sequences2
               );
               console.log(
                 `Merged proof submitted successfully! TX: ${submitProofResponse.txHash}, DA: ${submitProofResponse.daHash}`
@@ -339,12 +276,9 @@ async function agent() {
               console.log(
                 `Failing job ${response.job.jobId} due to merge error...`
               );
-              await client.failJob(
-                create(FailJobRequestSchema, {
-                  sessionId: sessionId,
-                  jobId: response.job.jobId,
-                  errorMessage: `Merge failed: ${error}`,
-                })
+              await failJob(
+                response.job.jobId,
+                `Merge failed: ${error}`
               );
               console.log(`Job ${jobCount} failed due to merge error`);
               continue; // Skip to next job without marking as complete
@@ -360,20 +294,12 @@ async function agent() {
             );
 
             // Query sequence states using the sequence from TransitionData
-            const sequenceStatesRequest = create(
-              GetSequenceStatesRequestSchema,
-              {
-                sessionId: sessionId,
-                jobId: response.job.jobId,
-                sequence: transitionData.sequence,
-              }
-            );
-
             console.log(
               `Querying sequence states for sequence ${transitionData.sequence}...`
             );
-            const sequenceStatesResponse = await client.getSequenceStates(
-              sequenceStatesRequest
+            const sequenceStatesResponse = await getSequenceStates(
+              response.job.jobId,
+              BigInt(transitionData.sequence)
             );
 
             console.log(
@@ -456,8 +382,6 @@ async function agent() {
             const startTime = Date.now();
             const result = await getStateAndProof({
               sequenceStates,
-              client,
-              sessionId,
               sequence: transitionData.sequence,
             });
             const endTime = Date.now();
@@ -494,26 +418,6 @@ async function agent() {
                 );
                 console.log(`State size: ${serializedStateOnly.length} chars`);
 
-                // Create requests for concurrent submission
-                const submitProofRequest = create(SubmitProofRequestSchema, {
-                  sessionId: sessionId,
-                  blockNumber: BigInt(transitionData.block_number),
-                  sequences: [transitionData.sequence],
-                  mergedSequences1: [], // No merged sequences for single proof
-                  mergedSequences2: [], // No merged sequences for single proof
-                  jobId: response.job.jobId,
-                  proof: serializedProofAndState,
-                  cpuTime: BigInt(cpuTimeMs),
-                });
-
-                const submitStateRequest = create(SubmitStateRequestSchema, {
-                  sessionId: sessionId,
-                  sequence: transitionData.sequence,
-                  jobId: response.job.jobId,
-                  newStateData: undefined, // No raw state data
-                  serializedState: serializedStateOnly, // Only state data for Walrus
-                });
-
                 console.log(
                   `Submitting proof and state sequentially for sequence ${transitionData.sequence}...`
                 );
@@ -523,8 +427,12 @@ async function agent() {
                   console.log(
                     `Submitting proof for sequence ${transitionData.sequence}...`
                   );
-                  const submitProofResponse = await client.submitProof(
-                    submitProofRequest
+                  const submitProofResponse = await submitProof(
+                    response.job.jobId,
+                    BigInt(transitionData.block_number),
+                    [transitionData.sequence],
+                    serializedProofAndState,
+                    BigInt(cpuTimeMs)
                   );
                   console.log(
                     `Proof submitted successfully for sequence ${transitionData.sequence}`
@@ -534,8 +442,11 @@ async function agent() {
                   console.log(
                     `Submitting state for sequence ${transitionData.sequence}...`
                   );
-                  const submitStateResponse = await client.submitState(
-                    submitStateRequest
+                  const submitStateResponse = await submitState(
+                    response.job.jobId,
+                    transitionData.sequence,
+                    undefined,
+                    serializedStateOnly
                   );
                   console.log(
                     `State submitted successfully for sequence ${transitionData.sequence}`
@@ -587,13 +498,8 @@ async function agent() {
           } // Close the else block for prove job processing
 
           // Complete the job
-          const completeRequest = create(CompleteJobRequestSchema, {
-            jobId: response.job.jobId,
-            sessionId: sessionId,
-          });
-
           console.log(`Completing job ${response.job.jobId}...`);
-          const completeResponse = await client.completeJob(completeRequest);
+          const completeResponse = await completeJob(response.job.jobId);
 
           if (completeResponse.success) {
             console.log(
@@ -628,14 +534,11 @@ async function agent() {
               errorMessage = `Job processing failed: ${JSON.stringify(error)}`;
             }
 
-            const failRequest = create(FailJobRequestSchema, {
-              jobId: response.job.jobId,
-              errorMessage: errorMessage,
-              sessionId: sessionId,
-            });
-
             console.log(`Failing job ${response.job.jobId}...`);
-            const failResponse = await client.failJob(failRequest);
+            const failResponse = await failJob(
+              response.job.jobId,
+              errorMessage
+            );
 
             if (failResponse.success) {
               console.log(

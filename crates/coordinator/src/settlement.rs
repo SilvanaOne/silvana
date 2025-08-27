@@ -208,7 +208,7 @@ pub async fn create_periodic_settle_job(
     info!("Creating periodic settle job for app instance {}", app_instance.silvana_app_name);
     
     // Create a periodic job with 1 minute interval
-    let mut sui_interface = crate::sui_interface::SuiJobInterface::new(client.clone());
+    let mut sui_interface = sui::interface::SilvanaSuiInterface::new(client.clone());
     
     // Create job description data
     let job_description = "Periodic settlement check".to_string();
