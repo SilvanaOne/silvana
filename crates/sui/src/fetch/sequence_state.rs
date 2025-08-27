@@ -1,8 +1,8 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
+use crate::parse::{get_u64, get_bytes, get_option_bytes, get_option_string};
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, info, error};
-use base64::Engine;
 
 /// Represents a sequence state from the Move SequenceState struct
 #[derive(Debug, Clone)]
@@ -17,100 +17,14 @@ pub struct SequenceState {
 /// Extract SequenceState from JSON representation
 pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Result<SequenceState> {
     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-        let mut sequence_state = SequenceState {
-            sequence: 0,
-            state: None,
-            data_availability: None,
-            optimistic_state: Vec::new(),
-            transition_data: Vec::new(),
+        // Build the SequenceState struct using helper functions
+        let sequence_state = SequenceState {
+            sequence: get_u64(struct_value, "sequence"),
+            state: get_option_bytes(struct_value, "state"),
+            data_availability: get_option_string(struct_value, "data_availability"),
+            optimistic_state: get_bytes(struct_value, "optimistic_state"),
+            transition_data: get_bytes(struct_value, "transition_data"),
         };
-        
-        // Extract sequence field
-        if let Some(field) = struct_value.fields.get("sequence") {
-            if let Some(prost_types::value::Kind::StringValue(seq_str)) = &field.kind {
-                sequence_state.sequence = seq_str.parse().unwrap_or(0);
-            }
-        }
-        
-        // Extract state field (Option<vector<u8>>)
-        if let Some(field) = struct_value.fields.get("state") {
-            match &field.kind {
-                Some(prost_types::value::Kind::StructValue(option_struct)) => {
-                    // Check if it's Some variant
-                    if let Some(some_field) = option_struct.fields.get("Some") {
-                        if let Some(prost_types::value::Kind::StringValue(state_str)) = &some_field.kind {
-                            if let Ok(state_data) = base64::engine::general_purpose::STANDARD.decode(state_str) {
-                                sequence_state.state = Some(state_data);
-                            }
-                        }
-                    }
-                    // If None variant exists or no Some field, state remains None
-                }
-                Some(prost_types::value::Kind::StringValue(state_str)) => {
-                    // Handle case where state is directly a string value
-                    if let Ok(state_data) = base64::engine::general_purpose::STANDARD.decode(state_str) {
-                        sequence_state.state = Some(state_data);
-                    }
-                }
-                Some(prost_types::value::Kind::NullValue(_)) => {
-                    sequence_state.state = None;
-                }
-                _ => {}
-            }
-        }
-        
-        // Extract data_availability field (Option<String>)
-        if let Some(field) = struct_value.fields.get("data_availability") {
-            match &field.kind {
-                Some(prost_types::value::Kind::StructValue(option_struct)) => {
-                    // Check if it's Some variant
-                    if let Some(some_field) = option_struct.fields.get("Some") {
-                        if let Some(prost_types::value::Kind::StringValue(da_str)) = &some_field.kind {
-                            sequence_state.data_availability = Some(da_str.clone());
-                        }
-                    }
-                    // If None variant exists or no Some field, data_availability remains None
-                }
-                Some(prost_types::value::Kind::StringValue(da_str)) => {
-                    // Handle case where data_availability is directly a string value
-                    sequence_state.data_availability = Some(da_str.clone());
-                }
-                Some(prost_types::value::Kind::NullValue(_)) => {
-                    sequence_state.data_availability = None;
-                }
-                _ => {}
-            }
-        }
-        
-        // Extract optimistic_state field
-        if let Some(field) = struct_value.fields.get("optimistic_state") {
-            if let Some(prost_types::value::Kind::StringValue(state_str)) = &field.kind {
-                if let Ok(state_data) = base64::engine::general_purpose::STANDARD.decode(state_str) {
-                    sequence_state.optimistic_state = state_data;
-                }
-            }
-        }
-        
-        // Extract transition_data field
-        if let Some(field) = struct_value.fields.get("transition_data") {
-            if let Some(prost_types::value::Kind::StringValue(data_str)) = &field.kind {
-                //debug!("Raw transition_data string: {}", data_str);
-                //debug!("Transition_data string length: {}", data_str.len());
-                
-                if let Ok(data) = base64::engine::general_purpose::STANDARD.decode(data_str) {
-                    //debug!("Decoded transition_data as base64, length: {}, first 20 bytes: {:?}", 
-                    //    data.len(), 
-                    //    data.iter().take(20).collect::<Vec<_>>());
-                    sequence_state.transition_data = data;
-                } else {
-                    debug!("Failed to decode transition_data as base64: {}", data_str);
-                }
-            } else {
-                debug!("transition_data field is not a string value: {:?}", field.kind);
-            }
-        } else {
-            debug!("No transition_data field found in sequence state");
-        }
         
         return Ok(sequence_state);
     }

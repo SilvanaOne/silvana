@@ -109,6 +109,68 @@ pub fn get_bytes(struct_value: &prost_types::Struct, field_name: &str) -> Vec<u8
     }).unwrap_or_default()
 }
 
+/// Helper function to extract Option<Vec<u8>> from prost_types::Struct
+pub fn get_option_bytes(struct_value: &prost_types::Struct, field_name: &str) -> Option<Vec<u8>> {
+    struct_value.fields.get(field_name).and_then(|f| {
+        match &f.kind {
+            Some(prost_types::value::Kind::StructValue(option_struct)) => {
+                // Check if it's Some variant
+                if let Some(some_field) = option_struct.fields.get("Some") {
+                    if let Some(prost_types::value::Kind::StringValue(data_str)) = &some_field.kind {
+                        // Try hex decode first, then base64
+                        if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
+                            Some(data)
+                        } else if let Ok(data) = general_purpose::STANDARD.decode(data_str) {
+                            Some(data)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Some(prost_types::value::Kind::StringValue(data_str)) => {
+                // Handle case where it's directly a string value
+                if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
+                    Some(data)
+                } else if let Ok(data) = general_purpose::STANDARD.decode(data_str) {
+                    Some(data)
+                } else {
+                    None
+                }
+            }
+            Some(prost_types::value::Kind::NullValue(_)) => None,
+            _ => None,
+        }
+    })
+}
+
+/// Helper function to extract Option<String> from prost_types::Struct  
+pub fn get_option_string(struct_value: &prost_types::Struct, field_name: &str) -> Option<String> {
+    struct_value.fields.get(field_name).and_then(|f| {
+        match &f.kind {
+            Some(prost_types::value::Kind::StructValue(option_struct)) => {
+                // Check if it's Some variant
+                if let Some(some_field) = option_struct.fields.get("Some") {
+                    if let Some(prost_types::value::Kind::StringValue(s)) = &some_field.kind {
+                        Some(s.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Some(prost_types::value::Kind::StringValue(s)) => Some(s.clone()),
+            Some(prost_types::value::Kind::NullValue(_)) => None,
+            _ => None,
+        }
+    })
+}
+
 /// Helper function to extract ObjectTable ID from nested struct
 pub fn get_table_id(struct_value: &prost_types::Struct, field_name: &str) -> Result<String> {
     struct_value.fields.get(field_name)
