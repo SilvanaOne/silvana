@@ -48,6 +48,17 @@ pub fn get_u8(struct_value: &prost_types::Struct, field_name: &str) -> u8 {
     }).unwrap_or(0)
 }
 
+/// Helper function to extract number as u16 from prost_types::Struct
+pub fn get_u16(struct_value: &prost_types::Struct, field_name: &str) -> u16 {
+    struct_value.fields.get(field_name).and_then(|f| {
+        match &f.kind {
+            Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u16>().ok(),
+            Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u16),
+            _ => None,
+        }
+    }).unwrap_or(0)
+}
+
 /// Helper function to extract Option<u64> from prost_types::Struct
 pub fn get_option_u64(struct_value: &prost_types::Struct, field_name: &str) -> Option<u64> {
     struct_value.fields.get(field_name).and_then(|f| {
