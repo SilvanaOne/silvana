@@ -117,7 +117,7 @@ async function agent() {
 
                 // Complete the job successfully
                 console.log(`\nCompleting settle job ${response.job.jobId}...`);
-                const completeResponse = await completeJob(response.job.jobId);
+                const completeResponse = await completeJob();
                 if (completeResponse.success) {
                   console.log(
                     `✅ Settle job completed successfully: ${completeResponse.message}`
@@ -137,10 +137,7 @@ async function agent() {
               console.log(
                 `Failing job ${response.job.jobId} due to settlement error...`
               );
-              await failJob(
-                response.job.jobId,
-                `Settlement failed: ${error}`
-              );
+              await failJob(`Settlement failed: ${error}`);
               console.log("Job marked as failed");
               continue;
             }
@@ -259,7 +256,6 @@ async function agent() {
 
               // Submit the merged proof
               const submitProofResponse = await submitProof(
-                response.job.jobId,
                 blockNumber,
                 allSequences,
                 mergedProof,
@@ -276,10 +272,7 @@ async function agent() {
               console.log(
                 `Failing job ${response.job.jobId} due to merge error...`
               );
-              await failJob(
-                response.job.jobId,
-                `Merge failed: ${error}`
-              );
+              await failJob(`Merge failed: ${error}`);
               console.log(`Job ${jobCount} failed due to merge error`);
               continue; // Skip to next job without marking as complete
             }
@@ -298,7 +291,6 @@ async function agent() {
               `Querying sequence states for sequence ${transitionData.sequence}...`
             );
             const sequenceStatesResponse = await getSequenceStates(
-              response.job.jobId,
               BigInt(transitionData.sequence)
             );
 
@@ -428,7 +420,6 @@ async function agent() {
                     `Submitting proof for sequence ${transitionData.sequence}...`
                   );
                   const submitProofResponse = await submitProof(
-                    response.job.jobId,
                     BigInt(transitionData.block_number),
                     [transitionData.sequence],
                     serializedProofAndState,
@@ -443,7 +434,6 @@ async function agent() {
                     `Submitting state for sequence ${transitionData.sequence}...`
                   );
                   const submitStateResponse = await submitState(
-                    response.job.jobId,
                     transitionData.sequence,
                     undefined,
                     serializedStateOnly
@@ -499,7 +489,7 @@ async function agent() {
 
           // Complete the job
           console.log(`Completing job ${response.job.jobId}...`);
-          const completeResponse = await completeJob(response.job.jobId);
+          const completeResponse = await completeJob();
 
           if (completeResponse.success) {
             console.log(
@@ -535,10 +525,7 @@ async function agent() {
             }
 
             console.log(`Failing job ${response.job.jobId}...`);
-            const failResponse = await failJob(
-              response.job.jobId,
-              errorMessage
-            );
+            const failResponse = await failJob(errorMessage);
 
             if (failResponse.success) {
               console.log(

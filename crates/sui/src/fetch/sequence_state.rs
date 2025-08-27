@@ -1,4 +1,4 @@
-use crate::error::{CoordinatorError, Result};
+use crate::error::{SilvanaSuiInterfaceError, Result};
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, info, error};
@@ -115,7 +115,7 @@ pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Resu
         return Ok(sequence_state);
     }
     
-    Err(CoordinatorError::ConfigError(
+    Err(SilvanaSuiInterfaceError::ParseError(
         "Failed to extract sequence state from JSON".to_string()
     ))
 }
@@ -146,7 +146,7 @@ pub async fn fetch_sequence_state_by_id(
         .live_data_client()
         .list_dynamic_fields(list_request)
         .await
-        .map_err(|e| CoordinatorError::RpcConnectionError(
+        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
             format!("Failed to list sequence states in table: {}", e)
         ))?;
     
@@ -178,7 +178,7 @@ pub async fn fetch_sequence_state_by_id(
                             .ledger_client()
                             .get_object(sequence_state_field_request)
                             .await
-                            .map_err(|e| CoordinatorError::RpcConnectionError(
+                            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
                                 format!("Failed to fetch sequence state field {}: {}", sequence, e)
                             ))?;
                         
@@ -204,7 +204,7 @@ pub async fn fetch_sequence_state_by_id(
                                                 .ledger_client()
                                                 .get_object(sequence_state_request)
                                                 .await
-                                                .map_err(|e| CoordinatorError::RpcConnectionError(
+                                                .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
                                                     format!("Failed to fetch sequence state {}: {}", sequence, e)
                                                 ))?;
                                             
@@ -269,7 +269,7 @@ pub async fn get_sequence_state_manager_info_from_app_instance(
         .ledger_client()
         .get_object(app_instance_request)
         .await
-        .map_err(|e| CoordinatorError::RpcConnectionError(
+        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
             format!("Failed to fetch app_instance {}: {}", formatted_id, e)
         ))?;
 
@@ -390,7 +390,7 @@ pub async fn query_sequence_states(
         },
         None => {
             error!("SequenceStateManager not found in app_instance {}", app_instance_id);
-            return Err(CoordinatorError::ConfigError(
+            return Err(SilvanaSuiInterfaceError::ParseError(
                 format!("SequenceStateManager not found in app_instance {}", app_instance_id)
             ));
         }
@@ -400,7 +400,7 @@ pub async fn query_sequence_states(
     if requested_sequence < lowest_sequence || requested_sequence > highest_sequence {
         error!("Requested sequence {} is out of bounds [{}, {}]", 
             requested_sequence, lowest_sequence, highest_sequence);
-        return Err(CoordinatorError::ConfigError(
+        return Err(SilvanaSuiInterfaceError::ParseError(
             format!("Requested sequence {} is out of bounds [{}, {}]", 
                 requested_sequence, lowest_sequence, highest_sequence)
         ));
@@ -418,7 +418,7 @@ pub async fn query_sequence_states(
         },
         None => {
             error!("Sequence state {} not found in table {}", requested_sequence, table_id);
-            return Err(CoordinatorError::ConfigError(
+            return Err(SilvanaSuiInterfaceError::ParseError(
                 format!("Sequence state {} not found", requested_sequence)
             ));
         }

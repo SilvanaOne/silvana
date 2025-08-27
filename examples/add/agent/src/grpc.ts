@@ -172,7 +172,10 @@ export async function getJob(): Promise<GetJobResponse> {
 /**
  * Completes a job
  */
-export async function completeJob(jobId: string): Promise<CompleteJobResponse> {
+export async function completeJob(): Promise<CompleteJobResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(CompleteJobRequestSchema, {
@@ -186,10 +189,10 @@ export async function completeJob(jobId: string): Promise<CompleteJobResponse> {
 /**
  * Fails a job
  */
-export async function failJob(
-  jobId: string,
-  errorMessage: string
-): Promise<FailJobResponse> {
+export async function failJob(errorMessage: string): Promise<FailJobResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(FailJobRequestSchema, {
@@ -205,9 +208,11 @@ export async function failJob(
  * Gets sequence states
  */
 export async function getSequenceStates(
-  jobId: string,
   sequence: bigint
 ): Promise<GetSequenceStatesResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(GetSequenceStatesRequestSchema, {
@@ -223,7 +228,6 @@ export async function getSequenceStates(
  * Submits a proof
  */
 export async function submitProof(
-  jobId: string,
   blockNumber: bigint,
   sequences: bigint[],
   proof: string,
@@ -231,6 +235,9 @@ export async function submitProof(
   mergedSequences1?: bigint[],
   mergedSequences2?: bigint[]
 ): Promise<SubmitProofResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(SubmitProofRequestSchema, {
@@ -251,11 +258,13 @@ export async function submitProof(
  * Submits state
  */
 export async function submitState(
-  jobId: string,
   sequence: bigint,
   newStateData?: Uint8Array,
   serializedState?: string
 ): Promise<SubmitStateResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(SubmitStateRequestSchema, {
@@ -276,12 +285,16 @@ export async function getProof(
   blockNumber: bigint,
   sequences: bigint[]
 ): Promise<GetProofResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(GetProofRequestSchema, {
     sessionId,
     blockNumber,
     sequences,
+    jobId,
   });
 
   return await client.getProof(request);
@@ -293,11 +306,15 @@ export async function getProof(
 export async function getBlockProof(
   blockNumber: bigint
 ): Promise<GetBlockProofResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(GetBlockProofRequestSchema, {
     sessionId,
     blockNumber,
+    jobId,
   });
 
   return await client.getBlockProof(request);
@@ -309,6 +326,9 @@ export async function getBlockProof(
 export async function readDataAvailability(
   daHash: string
 ): Promise<ReadDataAvailabilityResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   const { client, sessionId } = getCoordinatorClient();
 
   const request = create(ReadDataAvailabilityRequestSchema, {

@@ -4,7 +4,7 @@ use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
 use sui_rpc::Client;
 use tracing::debug;
 use crate::error::SilvanaSuiInterfaceError;
-use super::jobs_types::Jobs;
+use super::jobs::Jobs;
 use std::collections::HashMap;
 
 /// Rust representation of the Move AppInstance struct

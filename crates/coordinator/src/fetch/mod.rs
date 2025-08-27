@@ -1,6 +1,5 @@
 pub mod blocks;
 pub mod proofs;
-pub mod sequence_states;
 
 // Re-export everything from sui::fetch
 pub use sui::fetch::*;
@@ -13,4 +12,3 @@ pub use crate::settlement::{fetch_pending_job_from_instances, fetch_all_pending_
 #[allow(unused_imports)]
 pub use blocks::*;
 pub use proofs::*;
-pub use sequence_states::*;
