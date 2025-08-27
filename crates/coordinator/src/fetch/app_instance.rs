@@ -46,6 +46,12 @@ pub struct AppInstance {
     pub previous_block_actions_state: serde_json::Value,
     /// Last proved block number
     pub last_proved_block_number: u64,
+    /// Last settled block number
+    pub last_settled_block_number: u64,
+    /// Settlement chain name (optional)
+    pub settlement_chain: Option<String>,
+    /// Settlement address (optional)
+    pub settlement_address: Option<String>,
     /// Whether the app is paused
     pub is_paused: bool,
     /// Creation timestamp
@@ -287,6 +293,9 @@ fn parse_app_instance_from_struct(
             .map(proto_to_json)
             .unwrap_or(serde_json::Value::Null),
         last_proved_block_number: get_u64("last_proved_block_number"),
+        last_settled_block_number: get_u64("last_settled_block_number"),
+        settlement_chain: get_string("settlement_chain"),
+        settlement_address: get_string("settlement_address"),
         is_paused: get_bool("isPaused"),
         created_at: get_u64("created_at"),
         updated_at: get_u64("updated_at"),
@@ -326,6 +335,9 @@ mod tests {
             previous_block_last_sequence: 99,
             previous_block_actions_state: serde_json::Value::Null,
             last_proved_block_number: 9,
+            last_settled_block_number: 8,
+            settlement_chain: Some("mina".to_string()),
+            settlement_address: Some("0xsettlement".to_string()),
             is_paused: false,
             created_at: 1234567890,
             updated_at: 1234567891,

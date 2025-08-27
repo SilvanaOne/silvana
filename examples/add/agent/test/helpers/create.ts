@@ -10,7 +10,7 @@ import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
 const developerName = "AddExampleDev";
 const agentName = "AddAgent";
-const appName = "test_app";
+const appName = "add_app";
 const appDescription = "Example Add Application";
 
 export async function createApp(params: {
@@ -87,14 +87,14 @@ export async function createApp(params: {
     });
 
     console.log("Adding methods to app in registry...");
-    
+
     // Create and add the 'init' method
     const initAppMethod = methodTx.moveCall({
       target: `${
         registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
       }::app_method::new`,
       arguments: [
-        methodTx.pure.option("string", "Initialize app state"), 
+        methodTx.pure.option("string", "Initialize app state"),
         methodTx.pure.string(developerName),
         methodTx.pure.string(agentName),
         methodTx.pure.string("prove"),
@@ -107,7 +107,7 @@ export async function createApp(params: {
       }::registry::add_method_to_app`,
       arguments: [
         methodTx.object(registryAddress),
-        methodTx.pure.string("test_app"),
+        methodTx.pure.string(appName),
         methodTx.pure.string("init"),
         initAppMethod,
       ],
@@ -132,7 +132,7 @@ export async function createApp(params: {
       }::registry::add_method_to_app`,
       arguments: [
         methodTx.object(registryAddress),
-        methodTx.pure.string("test_app"),
+        methodTx.pure.string(appName),
         methodTx.pure.string("add"),
         addAppMethod,
       ],
@@ -157,7 +157,7 @@ export async function createApp(params: {
       }::registry::add_method_to_app`,
       arguments: [
         methodTx.object(registryAddress),
-        methodTx.pure.string("test_app"),
+        methodTx.pure.string(appName),
         methodTx.pure.string("multiply"),
         multiplyAppMethod,
       ],
@@ -169,7 +169,7 @@ export async function createApp(params: {
         registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
       }::app_method::new`,
       arguments: [
-        methodTx.pure.option("string", "Merge proofs"), 
+        methodTx.pure.option("string", "Merge proofs"),
         methodTx.pure.string(developerName),
         methodTx.pure.string(agentName),
         methodTx.pure.string("prove"),
@@ -182,7 +182,7 @@ export async function createApp(params: {
       }::registry::add_method_to_app`,
       arguments: [
         methodTx.object(registryAddress),
-        methodTx.pure.string("test_app"),
+        methodTx.pure.string(appName),
         methodTx.pure.string("merge"),
         mergeAppMethod,
       ],
@@ -194,7 +194,7 @@ export async function createApp(params: {
         registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
       }::app_method::new`,
       arguments: [
-        methodTx.pure.option("string", "Settle proofs"), 
+        methodTx.pure.option("string", "Settle proofs"),
         methodTx.pure.string(developerName),
         methodTx.pure.string(agentName),
         methodTx.pure.string("prove"),
@@ -207,7 +207,7 @@ export async function createApp(params: {
       }::registry::add_method_to_app`,
       arguments: [
         methodTx.object(registryAddress),
-        methodTx.pure.string("test_app"),
+        methodTx.pure.string(appName),
         methodTx.pure.string("settle"),
         settleAppMethod,
       ],
@@ -249,11 +249,13 @@ export async function createApp(params: {
 
   const tx = new Transaction();
 
-  // Call create_app with the registry and clock
+  // Call create_app with the registry, settlement info, and clock
   const app = tx.moveCall({
     target: `${packageID}::main::create_app`,
     arguments: [
       tx.object(registryAddress), // SilvanaRegistry reference
+      tx.pure.option("string", params.chain), // settlement_chain (e.g., "mina:devnet")
+      tx.pure.option("string", params.contractAddress), // settlement_address
       tx.object(SUI_CLOCK_OBJECT_ID), // Clock reference
     ],
   });
@@ -314,49 +316,55 @@ export async function createApp(params: {
   // Add metadata and kv to the AppInstance
   console.log("Adding metadata and kv to AppInstance...");
   const metadataTx = new Transaction();
-  
+
   // Add contractAddress to metadata
   metadataTx.moveCall({
-    target: `${registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE}::app_instance::add_metadata`,
+    target: `${
+      registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+    }::app_instance::add_metadata`,
     arguments: [
       metadataTx.object(appInstanceID),
       metadataTx.pure.string("contractAddress"),
       metadataTx.pure.string(params.contractAddress),
     ],
   });
-  
+
   // Add chain to metadata
   metadataTx.moveCall({
-    target: `${registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE}::app_instance::add_metadata`,
+    target: `${
+      registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+    }::app_instance::add_metadata`,
     arguments: [
       metadataTx.object(appInstanceID),
       metadataTx.pure.string("chain"),
       metadataTx.pure.string(params.chain),
     ],
   });
-  
+
   // Add nonce to kv (convert number to string)
   metadataTx.moveCall({
-    target: `${registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE}::app_instance::add_kv`,
+    target: `${
+      registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+    }::app_instance::add_kv`,
     arguments: [
       metadataTx.object(appInstanceID),
       metadataTx.pure.string("nonce"),
       metadataTx.pure.string(params.nonce.toString()),
     ],
   });
-  
+
   metadataTx.setSender(address);
   metadataTx.setGasBudget(100_000_000);
-  
+
   const metadataResult = await executeTx({
     tx: metadataTx,
     keyPair,
   });
-  
+
   if (!metadataResult) {
     throw new Error("Failed to add metadata and kv");
   }
-  
+
   const metadataWaitResult = await waitTx(metadataResult.digest);
   if (metadataWaitResult.errors) {
     console.log(
@@ -365,7 +373,7 @@ export async function createApp(params: {
     );
     throw new Error("Failed to add metadata and kv");
   }
-  
+
   console.log("Metadata and kv added successfully");
 
   // Initialize the app with the instance
@@ -375,7 +383,11 @@ export async function createApp(params: {
   // public fun init_app_with_instance(app: &App, instance: &mut AppInstance, clock: &Clock, ctx: &mut TxContext)
   initTx.moveCall({
     target: `${packageID}::main::init_app_with_instance`,
-    arguments: [initTx.object(appID), initTx.object(appInstanceID), initTx.object(SUI_CLOCK_OBJECT_ID)],
+    arguments: [
+      initTx.object(appID),
+      initTx.object(appInstanceID),
+      initTx.object(SUI_CLOCK_OBJECT_ID),
+    ],
   });
 
   initTx.setSender(address);

@@ -404,8 +404,9 @@ fn is_proof_available(proof: &ProofInfo, current_time: u64) -> bool {
                 false
             }
         },
+        ProofStatus::Started => false, // Started proofs are still being calculated, not available for merging
         ProofStatus::Used => false, // USED proofs are NOT available for merging
-        _ => false,
+        ProofStatus::Rejected => false, // REJECTED proofs are not available for merging
     }
 }
 
@@ -454,31 +455,74 @@ async fn create_merge_job(
     
     // Step 1: Check if we need to reject an existing combined proof
     // Look for an existing proof with the combined sequences
-    let combined_proof_exists = block_proofs.proofs.iter().any(|p| p.sequences == combined_sequences);
+    let combined_proof = block_proofs.proofs.iter().find(|p| p.sequences == combined_sequences);
     
-    if combined_proof_exists {
-        // The combined proof exists, so we might need to reject it
-        info!("📝 Found existing combined proof for block {} sequences {:?}, attempting to reject", 
-            block_number, combined_sequences);
-        
-        match sui_interface.reject_proof(
-            app_instance,
-            block_number,
-            combined_sequences.clone(),
-        ).await {
-            Ok(tx_digest) => {
-                info!("✅ Successfully rejected combined proof for block {}, tx: {}", block_number, tx_digest);
-                // Small delay to let the blockchain state propagate
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-            Err(e) => {
-                // Even though we found it in our data, it might have been modified by another coordinator
-                if e.to_string().contains("not available for consumption") {
-                    info!("ℹ️ Combined proof already modified by another coordinator - continuing anyway");
+    if let Some(proof) = combined_proof {
+        // Check if the proof needs to be rejected based on its status
+        let should_reject = match proof.status {
+            ProofStatus::Started => {
+                // Only reject Started proofs if they've timed out (10+ minutes)
+                if let Some(timestamp) = proof.timestamp {
+                    let current_time = chrono::Utc::now().timestamp() as u64 * 1000; // Convert to milliseconds
+                    let time_since_start = current_time.saturating_sub(timestamp);
+                    const STARTED_TIMEOUT_MS: u64 = 10 * 60 * 1000; // 10 minutes for Started status
+                    
+                    if time_since_start > STARTED_TIMEOUT_MS {
+                        info!("⏰ Started proof has timed out ({} ms > {} ms), will reject", 
+                            time_since_start, STARTED_TIMEOUT_MS);
+                        true
+                    } else {
+                        info!("⏳ Started proof is still active ({} ms < {} ms), skipping merge", 
+                            time_since_start, STARTED_TIMEOUT_MS);
+                        // Return early - don't try to merge with an active Started proof
+                        return Err(anyhow::anyhow!(
+                            "Cannot merge: combined proof with sequences {:?} is already Started and not timed out", 
+                            combined_sequences
+                        ));
+                    }
                 } else {
-                    warn!("⚠️ Failed to reject existing combined proof for block {}: {}", block_number, e);
+                    // No timestamp, can't determine timeout, skip
+                    false
+                }
+            },
+            ProofStatus::Reserved => {
+                // Reserved proofs can be rejected if timed out (2 minutes)
+                if let Some(timestamp) = proof.timestamp {
+                    let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
+                    current_time > timestamp + TIMEOUT_MS
+                } else {
+                    false
+                }
+            },
+            ProofStatus::Rejected => true,  // Already rejected, can try again
+            ProofStatus::Calculated | ProofStatus::Used => false, // Don't reject completed proofs
+        };
+        
+        if should_reject {
+            info!("📝 Found existing combined proof for block {} sequences {:?} with status {:?}, attempting to reject", 
+                block_number, combined_sequences, proof.status);
+            
+            match sui_interface.reject_proof(
+                app_instance,
+                block_number,
+                combined_sequences.clone(),
+            ).await {
+                Ok(tx_digest) => {
+                    info!("✅ Successfully rejected combined proof for block {}, tx: {}", block_number, tx_digest);
+                    // Small delay to let the blockchain state propagate
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    // Even though we found it in our data, it might have been modified by another coordinator
+                    if e.to_string().contains("not available for consumption") {
+                        info!("ℹ️ Combined proof already modified by another coordinator - continuing anyway");
+                    } else {
+                        warn!("⚠️ Failed to reject existing combined proof for block {}: {}", block_number, e);
+                    }
                 }
             }
+        } else {
+            info!("ℹ️ Combined proof exists with status {:?} but doesn't need rejection", proof.status);
         }
     } else {
         // The combined proof doesn't exist yet, no need to reject

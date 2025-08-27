@@ -32,6 +32,8 @@ public fun create_test_app(
         registry,
         b"test_app".to_string(),
         option::none(),
+        option::none(),  // settlement_chain
+        option::none(),  // settlement_address
         clock,
         ctx,
     );

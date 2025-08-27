@@ -88,6 +88,8 @@ public struct OptimisticState has copy, drop {
 
 public fun create_app(
     registry: &mut SilvanaRegistry,
+    settlement_chain: Option<String>,
+    settlement_address: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): App {
@@ -97,6 +99,8 @@ public fun create_app(
         registry,
         b"test_app".to_string(),
         option::none(), // description
+        settlement_chain,
+        settlement_address,
         clock,
         ctx,
     );

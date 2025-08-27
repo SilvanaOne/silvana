@@ -320,6 +320,9 @@ pub async fn create_app_job_tx(
             let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&sequences1));
             let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&sequences2));
             let data_arg = tb.input(sui_transaction_builder::Serialized(&data));
+            // Add the missing periodic job parameters - None for non-periodic jobs
+            let interval_ms_arg = tb.input(sui_transaction_builder::Serialized(&None::<u64>));
+            let next_scheduled_at_arg = tb.input(sui_transaction_builder::Serialized(&None::<u64>));
             
             vec![
                 app_instance_arg,
@@ -330,6 +333,8 @@ pub async fn create_app_job_tx(
                 sequences1_arg,
                 sequences2_arg,
                 data_arg,
+                interval_ms_arg,         // Add interval_ms parameter (None for non-periodic)
+                next_scheduled_at_arg,   // Add next_scheduled_at parameter (None for non-periodic)
                 clock_arg,
             ]
         },

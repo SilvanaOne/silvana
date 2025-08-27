@@ -36,6 +36,9 @@ public struct AppInstance has key, store {
     previous_block_last_sequence: u64,
     previous_block_actions_state: Element<Scalar>,
     last_proved_block_number: u64,
+    last_settled_block_number: u64,
+    settlement_chain: Option<String>,
+    settlement_address: Option<String>,
     isPaused: bool,
     created_at: u64,
     updated_at: u64,
@@ -98,6 +101,8 @@ fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
 public fun create_app_instance(
     app: &mut SilvanaApp,
     instance_description: Option<String>,
+    settlement_chain: Option<String>,
+    settlement_address: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstanceCap {
@@ -150,6 +155,9 @@ public fun create_app_instance(
         previous_block_last_sequence: 0u64,
         previous_block_actions_state: scalar_zero(),
         last_proved_block_number: 0u64,
+        last_settled_block_number: 0u64,
+        settlement_chain,
+        settlement_address,
         isPaused: false,
         created_at: timestamp,
         updated_at: timestamp,
@@ -585,6 +593,36 @@ public fun update_block_settlement_tx_included_in_block(
         option::some(settled_at),
     );
 
+    // Update last_settled_block_number by checking all blocks from 
+    // last_settled_block_number + 1 up to and including the current block_number
+    // to find the highest consecutive settled block
+    let mut i = app_instance.last_settled_block_number + 1;
+    while (i <= block_number && object_table::contains(&app_instance.blocks, i)) {
+        let check_block = borrow(&app_instance.blocks, i);
+        if (block::get_settlement_tx_included_in_block(check_block)) {
+            // This block is settled, update last_settled_block_number
+            app_instance.last_settled_block_number = i;
+            i = i + 1;
+        } else {
+            // Found a gap - this block is not settled yet
+            break
+        };
+    };
+    
+    // Also check if there are any blocks after block_number that were settled out of order
+    if (app_instance.last_settled_block_number == block_number) {
+        let mut j = block_number + 1;
+        while (j < app_instance.block_number && object_table::contains(&app_instance.blocks, j)) {
+            let next_block = borrow(&app_instance.blocks, j);
+            if (block::get_settlement_tx_included_in_block(next_block)) {
+                app_instance.last_settled_block_number = j;
+                j = j + 1;
+            } else {
+                break
+            };
+        };
+    };
+
     // Delete the proof_calculation for this block as it's no longer needed
     // All information has been preserved in events
     // Note: Block 0 (genesis) doesn't have proof_calculation, only blocks >= 1
@@ -686,6 +724,18 @@ public fun previous_block_actions_state(
 
 public fun last_proved_block_number(app_instance: &AppInstance): u64 {
     app_instance.last_proved_block_number
+}
+
+public fun last_settled_block_number(app_instance: &AppInstance): u64 {
+    app_instance.last_settled_block_number
+}
+
+public fun settlement_chain(app_instance: &AppInstance): &Option<String> {
+    &app_instance.settlement_chain
+}
+
+public fun settlement_address(app_instance: &AppInstance): &Option<String> {
+    &app_instance.settlement_address
 }
 
 public fun is_paused(app_instance: &AppInstance): bool {

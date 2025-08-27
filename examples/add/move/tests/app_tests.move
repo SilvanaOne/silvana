@@ -84,7 +84,13 @@ fun test_create_app() {
     test::next_tx(&mut scenario, @0x1);
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
-    let app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
+    let app = create_app(
+        &mut registry, 
+        option::none(), // settlement_chain
+        option::none(), // settlement_address
+        &clock, 
+        test::ctx(&mut scenario)
+    );
     test::return_shared(registry);
     
     // After creating app, the AppInstance should be shared
@@ -115,7 +121,13 @@ fun test_add_function_single_index() {
     test::next_tx(&mut scenario, @0x1);
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
-    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
+    let mut app = create_app(
+        &mut registry,
+        option::none(), // settlement_chain
+        option::none(), // settlement_address
+        &clock,
+        test::ctx(&mut scenario)
+    );
     test::return_shared(registry);
     
     test::next_tx(&mut scenario, @0x1);
@@ -151,7 +163,13 @@ fun test_multiply_function_single_index() {
     test::next_tx(&mut scenario, @0x1);
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
-    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
+    let mut app = create_app(
+        &mut registry,
+        option::none(), // settlement_chain
+        option::none(), // settlement_address
+        &clock,
+        test::ctx(&mut scenario)
+    );
     test::return_shared(registry);
     
     test::next_tx(&mut scenario, @0x1);
@@ -187,7 +205,13 @@ fun test_multiple_indexes_sequential() {
     test::next_tx(&mut scenario, @0x1);
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
-    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
+    let mut app = create_app(
+        &mut registry,
+        option::none(), // settlement_chain
+        option::none(), // settlement_address
+        &clock,
+        test::ctx(&mut scenario)
+    );
     test::return_shared(registry);
     
     test::next_tx(&mut scenario, @0x1);
@@ -244,7 +268,13 @@ fun test_add_reserved_index_0() {
     test::next_tx(&mut scenario, @0x1);
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
-    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
+    let mut app = create_app(
+        &mut registry,
+        option::none(), // settlement_chain
+        option::none(), // settlement_address
+        &clock,
+        test::ctx(&mut scenario)
+    );
     test::return_shared(registry);
     
     test::next_tx(&mut scenario, @0x1);
@@ -270,7 +300,13 @@ fun test_add_invalid_value_100() {
     test::next_tx(&mut scenario, @0x1);
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
-    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
+    let mut app = create_app(
+        &mut registry,
+        option::none(), // settlement_chain
+        option::none(), // settlement_address
+        &clock,
+        test::ctx(&mut scenario)
+    );
     test::return_shared(registry);
     
     test::next_tx(&mut scenario, @0x1);
@@ -295,7 +331,13 @@ fun test_zero_operations() {
     test::next_tx(&mut scenario, @0x1);
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
-    let mut app = create_app(&mut registry, &clock, test::ctx(&mut scenario));
+    let mut app = create_app(
+        &mut registry,
+        option::none(), // settlement_chain
+        option::none(), // settlement_address
+        &clock,
+        test::ctx(&mut scenario)
+    );
     test::return_shared(registry);
     
     test::next_tx(&mut scenario, @0x1);
