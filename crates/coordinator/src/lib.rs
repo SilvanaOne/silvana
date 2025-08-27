@@ -1,10 +1,8 @@
 pub mod agent;
 pub mod block;
 pub mod config;
-pub mod coordination;
 pub mod error;
 pub mod events;
-pub mod fetch;
 pub mod grpc;
 pub mod hardware;
 pub mod job_id;
@@ -12,6 +10,7 @@ pub mod job_searcher;
 pub mod jobs;
 pub mod merge;
 pub mod processor;
+pub mod proof;
 pub mod registry;
 pub mod session_id;
 pub mod settlement;

@@ -1,5 +1,5 @@
-use crate::coordination::{ProofCalculation, Proof, ProofStatus};
-use crate::fetch::fetch_proof_calculations;
+use sui::fetch::{ProofCalculation, Proof, ProofStatus};
+use sui::fetch::fetch_proof_calculations;
 use crate::block::settle;
 use anyhow::Result;
 use tracing::{debug, info, warn, error};
