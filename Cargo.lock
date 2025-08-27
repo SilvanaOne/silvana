@@ -4570,6 +4570,7 @@ name = "sui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "base64ct",
  "bcs",
  "bech32",
@@ -4586,6 +4587,7 @@ dependencies = [
  "sui-rpc",
  "sui-sdk-types",
  "sui-transaction-builder",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
  "tracing-subscriber",

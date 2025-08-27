@@ -1,7 +1,7 @@
 use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
 use crate::fetch::fetch_all_pending_jobs;
-use crate::fetch::jobs_types::Job;
+use sui::fetch::Job;
 use crate::registry::fetch_agent_method;
 use crate::session_id::generate_docker_session;
 use crate::state::SharedState;
@@ -180,7 +180,7 @@ impl JobSearcher {
         let mut client = self.state.get_sui_client();
         
         // Use check-only mode to quickly identify app_instances without jobs
-        match fetch_all_pending_jobs(&mut client, &app_instances, &self.state, true).await {
+        match fetch_all_pending_jobs(&mut client, &app_instances, true).await {
             Ok(_) => {
                 debug!("Quick check completed, removed app_instances without pending jobs");
             }
@@ -199,7 +199,7 @@ impl JobSearcher {
         debug!("Fetching pending jobs from {} remaining app_instances", remaining_instances.len());
         
         let mut client = self.state.get_sui_client();
-        match fetch_all_pending_jobs(&mut client, &remaining_instances, &self.state, false).await {
+        match fetch_all_pending_jobs(&mut client, &remaining_instances, false).await {
             Ok(pending_job) => {
                 if pending_job.is_none() {
                     // No pending jobs found, but we had app_instances - they might have been cleaned up
@@ -209,7 +209,7 @@ impl JobSearcher {
             }
             Err(e) => {
                 error!("Failed to fetch pending jobs: {}", e);
-                Err(e)
+                Err(CoordinatorError::Other(e))
             }
         }
     }

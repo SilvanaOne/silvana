@@ -25,7 +25,9 @@ import {
 import { create } from "@bufbuild/protobuf";
 
 // Static client instance to be reused
-let coordinatorClient: ReturnType<typeof createClient<typeof CoordinatorService>> | null = null;
+let coordinatorClient: ReturnType<
+  typeof createClient<typeof CoordinatorService>
+> | null = null;
 
 // Environment variables - cached after first initialization
 let sessionId: string | null = null;
@@ -44,7 +46,6 @@ let agentMethod: string | null = null;
 function getCoordinatorClient(): {
   client: ReturnType<typeof createClient<typeof CoordinatorService>>;
   sessionId: string;
-  jobId: string;
   chain: string;
   coordinatorId: string;
   sessionPrivateKey: string;
@@ -55,7 +56,6 @@ function getCoordinatorClient(): {
   if (coordinatorClient === null) {
     // Read all environment variables
     sessionId = process.env.SESSION_ID || null;
-    jobId = process.env.JOB_ID || null;
     chain = process.env.CHAIN || null;
     coordinatorId = process.env.COORDINATOR_ID || null;
     sessionPrivateKey = process.env.SESSION_PRIVATE_KEY || null;
@@ -67,18 +67,15 @@ function getCoordinatorClient(): {
     if (!sessionId) {
       throw new Error("SESSION_ID environment variable is required");
     }
-    if (!jobId) {
-      throw new Error("JOB_ID environment variable is required");
-    }
-    if (!chain) {
-      throw new Error("CHAIN environment variable is required");
-    }
-    if (!coordinatorId) {
-      throw new Error("COORDINATOR_ID environment variable is required");
-    }
-    if (!sessionPrivateKey) {
-      throw new Error("SESSION_PRIVATE_KEY environment variable is required");
-    }
+    // if (!chain) {
+    //   throw new Error("CHAIN environment variable is required");
+    // }
+    // if (!coordinatorId) {
+    //   throw new Error("COORDINATOR_ID environment variable is required");
+    // }
+    // if (!sessionPrivateKey) {
+    //   throw new Error("SESSION_PRIVATE_KEY environment variable is required");
+    // }
     if (!developer) {
       throw new Error("DEVELOPER environment variable is required");
     }
@@ -93,21 +90,22 @@ function getCoordinatorClient(): {
     const transport = createGrpcTransport({
       baseUrl: "http://host.docker.internal:50051",
     });
-    
+
     coordinatorClient = createClient(CoordinatorService, transport);
   }
 
   // At this point, all values are guaranteed to be non-null due to the checks above
   return {
-    client: coordinatorClient as ReturnType<typeof createClient<typeof CoordinatorService>>,
+    client: coordinatorClient as ReturnType<
+      typeof createClient<typeof CoordinatorService>
+    >,
     sessionId: sessionId as string,
-    jobId: jobId as string,
     chain: chain as string,
     coordinatorId: coordinatorId as string,
     sessionPrivateKey: sessionPrivateKey as string,
     developer: developer as string,
     agent: agent as string,
-    agentMethod: agentMethod as string
+    agentMethod: agentMethod as string,
   };
 }
 
@@ -117,8 +115,11 @@ function getCoordinatorClient(): {
  * @returns The secret value if found, null otherwise
  */
 export async function getSecret(key: string): Promise<string | null> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
   try {
-    const { client, sessionId, jobId } = getCoordinatorClient();
+    const { client, sessionId } = getCoordinatorClient();
 
     // Create the request
     const request = create(RetrieveSecretRequestSchema, {
@@ -149,31 +150,36 @@ export async function getSecret(key: string): Promise<string | null> {
  * Gets a job from the coordinator
  */
 export async function getJob(): Promise<GetJobResponse> {
-  const { client, sessionId, developer, agent, agentMethod } = getCoordinatorClient();
-  
+  const { client, sessionId, developer, agent, agentMethod } =
+    getCoordinatorClient();
+
   const request = create(GetJobRequestSchema, {
     developer,
     agent,
     agentMethod,
     sessionId,
   });
-  
-  return await client.getJob(request);
+
+  const response = await client.getJob(request);
+
+  if (response.job) {
+    jobId = response.job.jobId;
+  }
+
+  return response;
 }
 
 /**
  * Completes a job
  */
-export async function completeJob(
-  jobId: string
-): Promise<CompleteJobResponse> {
+export async function completeJob(jobId: string): Promise<CompleteJobResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(CompleteJobRequestSchema, {
     sessionId,
     jobId,
   });
-  
+
   return await client.completeJob(request);
 }
 
@@ -185,13 +191,13 @@ export async function failJob(
   errorMessage: string
 ): Promise<FailJobResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(FailJobRequestSchema, {
     sessionId,
     jobId,
     errorMessage,
   });
-  
+
   return await client.failJob(request);
 }
 
@@ -203,13 +209,13 @@ export async function getSequenceStates(
   sequence: bigint
 ): Promise<GetSequenceStatesResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(GetSequenceStatesRequestSchema, {
     sessionId,
     jobId,
     sequence,
   });
-  
+
   return await client.getSequenceStates(request);
 }
 
@@ -226,7 +232,7 @@ export async function submitProof(
   mergedSequences2?: bigint[]
 ): Promise<SubmitProofResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(SubmitProofRequestSchema, {
     sessionId,
     jobId,
@@ -237,7 +243,7 @@ export async function submitProof(
     mergedSequences1: mergedSequences1 || [],
     mergedSequences2: mergedSequences2 || [],
   });
-  
+
   return await client.submitProof(request);
 }
 
@@ -251,7 +257,7 @@ export async function submitState(
   serializedState?: string
 ): Promise<SubmitStateResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(SubmitStateRequestSchema, {
     sessionId,
     jobId,
@@ -259,7 +265,7 @@ export async function submitState(
     newStateData,
     serializedState,
   });
-  
+
   return await client.submitState(request);
 }
 
@@ -271,13 +277,13 @@ export async function getProof(
   sequences: bigint[]
 ): Promise<GetProofResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(GetProofRequestSchema, {
     sessionId,
     blockNumber,
     sequences,
   });
-  
+
   return await client.getProof(request);
 }
 
@@ -288,12 +294,12 @@ export async function getBlockProof(
   blockNumber: bigint
 ): Promise<GetBlockProofResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(GetBlockProofRequestSchema, {
     sessionId,
     blockNumber,
   });
-  
+
   return await client.getBlockProof(request);
 }
 
@@ -304,11 +310,11 @@ export async function readDataAvailability(
   daHash: string
 ): Promise<ReadDataAvailabilityResponse> {
   const { client, sessionId } = getCoordinatorClient();
-  
+
   const request = create(ReadDataAvailabilityRequestSchema, {
     sessionId,
     daHash,
   });
-  
+
   return await client.readDataAvailability(request);
 }

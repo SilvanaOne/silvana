@@ -1,6 +1,8 @@
 // Module declarations
 pub mod chain;
 pub mod coin;
+pub mod error;
+pub mod fetch;
 pub mod interface;
 pub mod keypair;
 pub mod transactions;

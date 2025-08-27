@@ -53,6 +53,7 @@ aws-config = "1.8"
 sha2 = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
+base64 = "0.22"
 
 # Sui git dependencies
 sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }

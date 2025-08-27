@@ -61,7 +61,7 @@ chrono.workspace = true
 clap.workspace = true
 dotenv = "0.15"
 hex.workspace = true
-base64 = "0.22"
+base64.workspace = true
 rustls.workspace = true
 
 # Cryptographic utilities

@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
 use sui_rpc::Client;
 use tracing::debug;
-use crate::error::CoordinatorError;
-use crate::fetch::jobs_types::Jobs;
+use crate::error::SilvanaSuiInterfaceError;
+use super::jobs_types::Jobs;
 use std::collections::HashMap;
 
 /// Rust representation of the Move AppInstance struct
@@ -90,7 +90,7 @@ pub async fn fetch_app_instance(
         .get_object(request)
         .await
         .map_err(|e| {
-            CoordinatorError::RpcConnectionError(format!(
+            SilvanaSuiInterfaceError::RpcConnectionError(format!(
                 "Failed to fetch AppInstance {}: {}",
                 instance_id, e
             ))
@@ -114,7 +114,7 @@ pub async fn fetch_app_instance(
 }
 
 /// Parse AppInstance from protobuf struct representation
-fn parse_app_instance_from_struct(
+pub fn parse_app_instance_from_struct(
     struct_value: &prost_types::Struct,
     object_id: &str,
 ) -> Result<AppInstance> {

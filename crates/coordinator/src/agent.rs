@@ -1,5 +1,5 @@
 use crate::job_id::generate_job_id;
-use crate::fetch::jobs_types::Job;
+use sui::fetch::Job;
 use crate::state::SharedState;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -359,7 +359,7 @@ impl Default for AgentJobDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fetch::jobs_types::{Job, JobStatus};
+    use sui::fetch::{Job, JobStatus};
     use sui_rpc::Client;
 
     fn create_test_state() -> SharedState {

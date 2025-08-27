@@ -1,7 +1,7 @@
 use crate::agent::AgentJob;
 use crate::coordination::ProofCalculation;
 use crate::fetch::fetch_pending_job_from_instances;
-use crate::fetch::app_instance::AppInstance;
+use sui::fetch::AppInstance;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
 use crate::settlement;
 use crate::state::SharedState;
