@@ -69,6 +69,8 @@ export class AddContract extends SmartContract {
     const sender = this.sender.getUnconstrained();
     const senderUpdate = AccountUpdate.createSigned(sender);
     senderUpdate.body.useFullCommitment = Bool(true);
+    const admin = this.admin.getAndRequireEquals();
+    admin.assertEquals(sender);
 
     // Verify the proof input matches current contract state
     const currentBlockNumber = this.blockNumber.getAndRequireEquals();

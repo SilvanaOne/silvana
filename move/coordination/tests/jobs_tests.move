@@ -89,6 +89,7 @@ fun test_create_job() {
             b"test_data",
             option::none(), // interval_ms - not periodic
             option::none(), // next_scheduled_at - not periodic  
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -133,6 +134,7 @@ fun test_start_job() {
             b"test_data",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -179,6 +181,7 @@ fun test_start_job_not_pending() {
             b"test_data",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -218,6 +221,7 @@ fun test_complete_job() {
             b"test_data",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -260,6 +264,7 @@ fun test_fail_job_with_retry() {
             b"test_data",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -321,6 +326,7 @@ fun test_multiple_pending_jobs() {
             b"data1",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -341,6 +347,7 @@ fun test_multiple_pending_jobs() {
             b"data2",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -361,6 +368,7 @@ fun test_multiple_pending_jobs() {
             b"data3",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -471,6 +479,7 @@ fun test_pending_jobs_index() {
             b"data1",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -491,6 +500,7 @@ fun test_pending_jobs_index() {
             b"data2",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -512,6 +522,7 @@ fun test_pending_jobs_index() {
             b"data3",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -592,6 +603,7 @@ fun test_pending_jobs_count_tracking() {
             b"data1",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -614,6 +626,7 @@ fun test_pending_jobs_count_tracking() {
             b"data2",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -671,6 +684,7 @@ fun test_complete_job_not_running() {
             b"data",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -710,6 +724,7 @@ fun test_fail_job_not_running() {
             b"data",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -748,6 +763,7 @@ fun test_index_with_retry() {
             b"data",
             option::none(),  // interval_ms
             option::none(),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -832,6 +848,7 @@ fun test_create_periodic_job() {
             b"periodic_data",
             option::some(interval),  // interval_ms
             option::some(next_scheduled),  // next_scheduled_at
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -878,6 +895,7 @@ fun test_periodic_job_interval_too_short() {
             b"data",
             option::some(interval),  // interval_ms - too short!
             option::some(next_scheduled),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -918,6 +936,7 @@ fun test_periodic_job_cannot_start_before_due() {
             b"data",
             option::some(interval),
             option::some(next_scheduled),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -960,6 +979,7 @@ fun test_periodic_job_can_start_when_due() {
             b"data",
             option::some(interval),
             option::some(next_scheduled),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -1006,6 +1026,7 @@ fun test_periodic_job_reschedule_on_complete() {
             b"data",
             option::some(interval),
             option::some(next_scheduled),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -1070,6 +1091,7 @@ fun test_periodic_job_reschedule_after_max_failures() {
             b"data",
             option::some(interval),
             option::some(next_scheduled),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -1135,6 +1157,7 @@ fun test_periodic_job_retry_within_interval() {
             b"data",
             option::some(interval),
             option::some(next_scheduled),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -1192,6 +1215,7 @@ fun test_terminate_periodic_job() {
             b"data",
             option::some(interval),
             option::some(next_scheduled),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -1243,6 +1267,7 @@ fun test_mixed_periodic_and_onetime_jobs() {
             b"onetime_data",
             option::none(),  // No interval - one-time job
             option::none(),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );
@@ -1265,6 +1290,7 @@ fun test_mixed_periodic_and_onetime_jobs() {
             b"periodic_data",
             option::some(interval),
             option::some(clock::timestamp_ms(&clock)),
+            false, // is_settlement_job
             &clock,
             ts::ctx(&mut scenario),
         );

@@ -23,7 +23,7 @@ fun setup_test_registry_and_app(
     let mut registry = test::take_shared<SilvanaRegistry>(scenario);
     add_app(
         &mut registry,
-        b"test_app".to_string(),
+        b"add_app".to_string(),
         option::some(b"Test application for adding values".to_string()),
         clock,
         test::ctx(scenario),
@@ -38,7 +38,7 @@ fun setup_test_registry_and_app(
     );
     coordination::registry::add_method_to_app(
         &mut registry,
-        b"test_app".to_string(),
+        b"add_app".to_string(),
         b"init".to_string(),
         init_method,
         test::ctx(scenario),
@@ -52,7 +52,7 @@ fun setup_test_registry_and_app(
     );
     coordination::registry::add_method_to_app(
         &mut registry,
-        b"test_app".to_string(),
+        b"add_app".to_string(),
         b"add".to_string(),
         add_method,
         test::ctx(scenario),
@@ -66,7 +66,7 @@ fun setup_test_registry_and_app(
     );
     coordination::registry::add_method_to_app(
         &mut registry,
-        b"test_app".to_string(),
+        b"add_app".to_string(),
         b"multiply".to_string(),
         multiply_method,
         test::ctx(scenario),
