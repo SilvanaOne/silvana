@@ -143,6 +143,7 @@ async function agent() {
             }
 
             console.log("Settle job processing complete");
+            continue; // Skip to next job to avoid duplicate completeJob call
           } else if (response.job.appInstanceMethod === "merge") {
             console.log("🔀 MERGE JOB DETECTED");
             // Print all job details

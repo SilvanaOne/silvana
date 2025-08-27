@@ -183,6 +183,8 @@ export async function completeJob(): Promise<CompleteJobResponse> {
     jobId,
   });
 
+  jobId = null;
+
   return await client.completeJob(request);
 }
 
@@ -200,6 +202,7 @@ export async function failJob(errorMessage: string): Promise<FailJobResponse> {
     jobId,
     errorMessage,
   });
+  jobId = null;
 
   return await client.failJob(request);
 }

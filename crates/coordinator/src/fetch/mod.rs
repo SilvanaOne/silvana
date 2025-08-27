@@ -1,5 +1,4 @@
 pub mod blocks;
-pub mod proofs;
 
 // Re-export everything from sui::fetch
 pub use sui::fetch::*;
@@ -11,4 +10,3 @@ pub use crate::settlement::{fetch_pending_job_from_instances, fetch_all_pending_
 // but kept for potential future use
 #[allow(unused_imports)]
 pub use blocks::*;
-pub use proofs::*;
