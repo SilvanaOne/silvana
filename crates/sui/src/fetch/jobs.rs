@@ -1,9 +1,9 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
+use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get_bytes};
 use std::collections::HashSet;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, info, warn};
-use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
 
@@ -135,37 +135,6 @@ pub struct Jobs {
 impl Jobs {
     /// Parse Jobs from protobuf struct value
     pub fn from_proto_struct(struct_value: &prost_types::Struct) -> Option<Self> {
-        // Helper to extract string value
-        let get_string = |field_name: &str| -> Option<String> {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => Some(s.clone()),
-                    _ => None,
-                }
-            })
-        };
-        
-        // Helper to extract number as u64
-        let get_u64 = |field_name: &str| -> u64 {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
-                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
-                    _ => None,
-                }
-            }).unwrap_or(0)
-        };
-        
-        // Helper to extract number as u8
-        let get_u8 = |field_name: &str| -> u8 {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u8>().ok(),
-                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u8),
-                    _ => None,
-                }
-            }).unwrap_or(0)
-        };
         
         // Extract Jobs table ID
         let jobs_table_id = struct_value.fields.get("jobs")
@@ -230,13 +199,13 @@ impl Jobs {
             });
         
         Some(Jobs {
-            id: get_string("id").unwrap_or_default(),
+            id: get_string(struct_value, "id").unwrap_or_default(),
             jobs_table_id,
             pending_jobs,
-            pending_jobs_count: get_u64("pending_jobs_count"),
+            pending_jobs_count: get_u64(struct_value, "pending_jobs_count"),
             pending_jobs_indexes,
-            next_job_sequence: get_u64("next_job_sequence"),
-            max_attempts: get_u8("max_attempts"),
+            next_job_sequence: get_u64(struct_value, "next_job_sequence"),
+            max_attempts: get_u8(struct_value, "max_attempts"),
             settlement_job,
         })
     }
@@ -338,87 +307,6 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
         //debug!("Job JSON fields: {:?}", struct_value.fields.keys().collect::<Vec<_>>());
         
-        // Helper function to extract string value
-        let get_string = |field_name: &str| -> Option<String> {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => Some(s.clone()),
-                    _ => None,
-                }
-            })
-        };
-        
-        // Helper function to extract number as u64
-        let get_u64 = |field_name: &str| -> u64 {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
-                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
-                    _ => None,
-                }
-            }).unwrap_or(0)
-        };
-        
-        // Helper function to extract number as u8
-        let get_u8 = |field_name: &str| -> u8 {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u8>().ok(),
-                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u8),
-                    _ => None,
-                }
-            }).unwrap_or(0)
-        };
-        
-        // Helper function to extract vector of u64
-        let get_vec_u64 = |field_name: &str| -> Option<Vec<u64>> {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::ListValue(list)) => {
-                        let mut values = Vec::new();
-                        for val in &list.values {
-                            match &val.kind {
-                                Some(prost_types::value::Kind::StringValue(s)) => {
-                                    if let Ok(num) = s.parse::<u64>() {
-                                        values.push(num);
-                                    }
-                                }
-                                Some(prost_types::value::Kind::NumberValue(n)) => {
-                                    values.push(n.round() as u64);
-                                }
-                                _ => {}
-                            }
-                        }
-                        if !values.is_empty() {
-                            Some(values)
-                        } else {
-                            None
-                        }
-                    }
-                    Some(prost_types::value::Kind::NullValue(_)) => None,
-                    _ => None,
-                }
-            })
-        };
-        
-        // Helper function to extract bytes data
-        let get_bytes = |field_name: &str| -> Vec<u8> {
-            struct_value.fields.get(field_name).and_then(|f| {
-                if let Some(prost_types::value::Kind::StringValue(data_str)) = &f.kind {
-                    // Try hex decode first, then base64
-                    if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
-                        Some(data)
-                    } else if let Ok(data) = general_purpose::STANDARD.decode(data_str) {
-                        Some(data)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }).unwrap_or_default()
-        };
-        
         // Extract job ID from the nested id field
         let id = struct_value.fields.get("id")
             .and_then(|field| {
@@ -464,40 +352,29 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
             })
             .unwrap_or(JobStatus::Pending);
         
-        // Helper function to extract Option<u64>
-        let get_option_u64 = |field_name: &str| -> Option<u64> {
-            struct_value.fields.get(field_name).and_then(|f| {
-                match &f.kind {
-                    Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
-                    Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
-                    Some(prost_types::value::Kind::NullValue(_)) => None,
-                    _ => None,
-                }
-            })
-        };
         
         // Build the Job struct with all fields
         let job = Job {
             id,
-            job_sequence: get_u64("job_sequence"),
-            description: get_string("description"),
-            developer: get_string("developer").unwrap_or_default(),
-            agent: get_string("agent").unwrap_or_default(),
-            agent_method: get_string("agent_method").unwrap_or_default(),
-            app: get_string("app").unwrap_or_default(),
-            app_instance: get_string("app_instance").unwrap_or_default(),
-            app_instance_method: get_string("app_instance_method").unwrap_or_default(),
-            block_number: if get_u64("block_number") > 0 { Some(get_u64("block_number")) } else { None },
-            sequences: get_vec_u64("sequences"),
-            sequences1: get_vec_u64("sequences1"),
-            sequences2: get_vec_u64("sequences2"),
-            data: get_bytes("data"),
+            job_sequence: get_u64(struct_value, "job_sequence"),
+            description: get_string(struct_value, "description"),
+            developer: get_string(struct_value, "developer").unwrap_or_default(),
+            agent: get_string(struct_value, "agent").unwrap_or_default(),
+            agent_method: get_string(struct_value, "agent_method").unwrap_or_default(),
+            app: get_string(struct_value, "app").unwrap_or_default(),
+            app_instance: get_string(struct_value, "app_instance").unwrap_or_default(),
+            app_instance_method: get_string(struct_value, "app_instance_method").unwrap_or_default(),
+            block_number: if get_u64(struct_value, "block_number") > 0 { Some(get_u64(struct_value, "block_number")) } else { None },
+            sequences: get_vec_u64(struct_value, "sequences"),
+            sequences1: get_vec_u64(struct_value, "sequences1"),
+            sequences2: get_vec_u64(struct_value, "sequences2"),
+            data: get_bytes(struct_value, "data"),
             status,
-            attempts: get_u8("attempts"),
-            interval_ms: get_option_u64("interval_ms"),
-            next_scheduled_at: get_option_u64("next_scheduled_at"),
-            created_at: get_u64("created_at"),
-            updated_at: get_u64("updated_at"),
+            attempts: get_u8(struct_value, "attempts"),
+            interval_ms: get_option_u64(struct_value, "interval_ms"),
+            next_scheduled_at: get_option_u64(struct_value, "next_scheduled_at"),
+            created_at: get_u64(struct_value, "created_at"),
+            updated_at: get_u64(struct_value, "updated_at"),
         };
         
         return Ok(job);

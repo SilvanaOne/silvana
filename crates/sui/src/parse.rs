@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use anyhow::Result;
 use serde_json;
+use base64::{engine::general_purpose, Engine as _};
 
 /// Helper function to extract string value from prost_types::Struct
 pub fn get_string(struct_value: &prost_types::Struct, field_name: &str) -> Option<String> {
@@ -34,6 +35,78 @@ pub fn get_bool(struct_value: &prost_types::Struct, field_name: &str) -> bool {
             _ => None,
         }
     }).unwrap_or(false)
+}
+
+/// Helper function to extract number as u8 from prost_types::Struct
+pub fn get_u8(struct_value: &prost_types::Struct, field_name: &str) -> u8 {
+    struct_value.fields.get(field_name).and_then(|f| {
+        match &f.kind {
+            Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u8>().ok(),
+            Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u8),
+            _ => None,
+        }
+    }).unwrap_or(0)
+}
+
+/// Helper function to extract Option<u64> from prost_types::Struct
+pub fn get_option_u64(struct_value: &prost_types::Struct, field_name: &str) -> Option<u64> {
+    struct_value.fields.get(field_name).and_then(|f| {
+        match &f.kind {
+            Some(prost_types::value::Kind::StringValue(s)) => s.parse::<u64>().ok(),
+            Some(prost_types::value::Kind::NumberValue(n)) => Some(n.round() as u64),
+            Some(prost_types::value::Kind::NullValue(_)) => None,
+            _ => None,
+        }
+    })
+}
+
+/// Helper function to extract vector of u64 from prost_types::Struct
+pub fn get_vec_u64(struct_value: &prost_types::Struct, field_name: &str) -> Option<Vec<u64>> {
+    struct_value.fields.get(field_name).and_then(|f| {
+        match &f.kind {
+            Some(prost_types::value::Kind::ListValue(list)) => {
+                let mut values = Vec::new();
+                for val in &list.values {
+                    match &val.kind {
+                        Some(prost_types::value::Kind::StringValue(s)) => {
+                            if let Ok(num) = s.parse::<u64>() {
+                                values.push(num);
+                            }
+                        }
+                        Some(prost_types::value::Kind::NumberValue(n)) => {
+                            values.push(n.round() as u64);
+                        }
+                        _ => {}
+                    }
+                }
+                if !values.is_empty() {
+                    Some(values)
+                } else {
+                    None
+                }
+            }
+            Some(prost_types::value::Kind::NullValue(_)) => None,
+            _ => None,
+        }
+    })
+}
+
+/// Helper function to extract bytes data from prost_types::Struct
+pub fn get_bytes(struct_value: &prost_types::Struct, field_name: &str) -> Vec<u8> {
+    struct_value.fields.get(field_name).and_then(|f| {
+        if let Some(prost_types::value::Kind::StringValue(data_str)) = &f.kind {
+            // Try hex decode first, then base64
+            if let Ok(data) = hex::decode(data_str.trim_start_matches("0x")) {
+                Some(data)
+            } else if let Ok(data) = general_purpose::STANDARD.decode(data_str) {
+                Some(data)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }).unwrap_or_default()
 }
 
 /// Helper function to extract ObjectTable ID from nested struct
