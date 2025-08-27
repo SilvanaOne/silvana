@@ -613,7 +613,6 @@ public fun create_app_instance_from_registry(
     registry: &mut SilvanaRegistry,
     app_name: String,
     description: Option<String>,
-    metadata: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstanceCap {
@@ -621,7 +620,6 @@ public fun create_app_instance_from_registry(
     coordination::app_instance::create_app_instance(
         app,
         description,
-        metadata,
         clock,
         ctx,
     )

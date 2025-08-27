@@ -96,8 +96,7 @@ public fun create_app(
     let instance_cap = create_app_instance_from_registry(
         registry,
         b"test_app".to_string(),
-        option::none(),
-        option::none(),
+        option::none(), // description
         clock,
         ctx,
     );

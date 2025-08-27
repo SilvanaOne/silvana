@@ -16,8 +16,10 @@ pub struct AppInstance {
     pub silvana_app_name: String,
     /// Optional description of the app
     pub description: Option<String>,
-    /// Optional metadata
-    pub metadata: Option<String>,
+    /// Metadata key-value store (VecMap in Move)
+    pub metadata: HashMap<String, String>,
+    /// Key-value store (VecMap in Move)
+    pub kv: HashMap<String, String>,
     /// Map of method names to AppMethod (stored as JSON for simplicity)
     pub methods: HashMap<String, serde_json::Value>,
     /// App state (stored as JSON for simplicity)
@@ -195,6 +197,33 @@ fn parse_app_instance_from_struct(
         }
     }
     
+    // Helper function to parse VecMap<String, String> into HashMap
+    let parse_string_vecmap = |field_name: &str| -> HashMap<String, String> {
+        if let Some(field) = struct_value.fields.get(field_name) {
+            if let Some(prost_types::value::Kind::StructValue(struct_)) = &field.kind {
+                if let Some(contents_field) = struct_.fields.get("contents") {
+                    if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
+                        let mut map = HashMap::new();
+                        for entry in &list.values {
+                            if let Some(prost_types::value::Kind::StructValue(entry_struct)) = &entry.kind {
+                                if let (Some(key_field), Some(value_field)) = 
+                                    (entry_struct.fields.get("key"), entry_struct.fields.get("value")) {
+                                    if let (Some(prost_types::value::Kind::StringValue(key)),
+                                            Some(prost_types::value::Kind::StringValue(value))) = 
+                                        (&key_field.kind, &value_field.kind) {
+                                        map.insert(key.clone(), value.clone());
+                                    }
+                                }
+                            }
+                        }
+                        return map;
+                    }
+                }
+            }
+        }
+        HashMap::new()
+    };
+    
     // Parse methods VecMap into HashMap
     let methods = if let Some(methods_field) = struct_value.fields.get("methods") {
         if let Some(prost_types::value::Kind::StructValue(methods_struct)) = &methods_field.kind {
@@ -230,7 +259,8 @@ fn parse_app_instance_from_struct(
         id: object_id.to_string(),
         silvana_app_name: get_string("silvana_app_name").unwrap_or_default(),
         description: get_string("description"),
-        metadata: get_string("metadata"),
+        metadata: parse_string_vecmap("metadata"),
+        kv: parse_string_vecmap("kv"),
         methods,
         state: struct_value.fields.get("state")
             .map(proto_to_json)
@@ -281,7 +311,8 @@ mod tests {
             id: "0x123".to_string(),
             silvana_app_name: "TestApp".to_string(),
             description: Some("Test Description".to_string()),
-            metadata: None,
+            metadata: HashMap::new(),
+            kv: HashMap::new(),
             methods: HashMap::new(),
             state: serde_json::Value::Null,
             blocks_table_id: "0xabc".to_string(),

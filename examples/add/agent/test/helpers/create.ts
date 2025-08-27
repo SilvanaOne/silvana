@@ -13,7 +13,11 @@ const agentName = "AddAgent";
 const appName = "test_app";
 const appDescription = "Example Add Application";
 
-export async function createApp(): Promise<string> {
+export async function createApp(params: {
+  contractAddress: string;
+  chain: string;
+  nonce: number;
+}): Promise<string> {
   const suiSecretKey: string = process.env.SUI_SECRET_KEY!;
 
   if (!suiSecretKey) {
@@ -306,6 +310,63 @@ export async function createApp(): Promise<string> {
   // Save AppInstance ID for use in tests
   process.env.APP_INSTANCE_ID = appInstanceID;
   console.log("AppInstance ID:", appInstanceID);
+
+  // Add metadata and kv to the AppInstance
+  console.log("Adding metadata and kv to AppInstance...");
+  const metadataTx = new Transaction();
+  
+  // Add contractAddress to metadata
+  metadataTx.moveCall({
+    target: `${registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE}::app_instance::add_metadata`,
+    arguments: [
+      metadataTx.object(appInstanceID),
+      metadataTx.pure.string("contractAddress"),
+      metadataTx.pure.string(params.contractAddress),
+    ],
+  });
+  
+  // Add chain to metadata
+  metadataTx.moveCall({
+    target: `${registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE}::app_instance::add_metadata`,
+    arguments: [
+      metadataTx.object(appInstanceID),
+      metadataTx.pure.string("chain"),
+      metadataTx.pure.string(params.chain),
+    ],
+  });
+  
+  // Add nonce to kv (convert number to string)
+  metadataTx.moveCall({
+    target: `${registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE}::app_instance::add_kv`,
+    arguments: [
+      metadataTx.object(appInstanceID),
+      metadataTx.pure.string("nonce"),
+      metadataTx.pure.string(params.nonce.toString()),
+    ],
+  });
+  
+  metadataTx.setSender(address);
+  metadataTx.setGasBudget(100_000_000);
+  
+  const metadataResult = await executeTx({
+    tx: metadataTx,
+    keyPair,
+  });
+  
+  if (!metadataResult) {
+    throw new Error("Failed to add metadata and kv");
+  }
+  
+  const metadataWaitResult = await waitTx(metadataResult.digest);
+  if (metadataWaitResult.errors) {
+    console.log(
+      `Errors for metadata tx ${metadataResult.digest}:`,
+      metadataWaitResult.errors
+    );
+    throw new Error("Failed to add metadata and kv");
+  }
+  
+  console.log("Metadata and kv added successfully");
 
   // Initialize the app with the instance
   console.log("Initializing app with instance...");

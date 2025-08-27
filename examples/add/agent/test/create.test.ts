@@ -8,7 +8,12 @@ let appID: string | undefined = undefined;
 
 describe("Create App", async () => {
   it("should create app", async () => {
-    appID = await createApp();
+    // Use default values for test
+    appID = await createApp({
+      contractAddress: "B62qmZB4E4KhmpYwoPDHe5c4yeQeAreCEwwgkGUrqSa6Ma3uC2RDZRY",
+      chain: "mina:devnet",
+      nonce: 1,
+    });
     assert.ok(appID !== undefined, "appID is not set");
   });
   it("should save circuit address to .env.circuit", async () => {

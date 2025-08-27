@@ -1,20 +1,47 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { createApp } from "./helpers/create.js";
+import { deployAddContract } from "../src/deploy.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 
 describe("Deploy App for Coordinator", async () => {
   it("should create app and save to .env.app", async () => {
-    console.log("🚀 Creating new app for coordinator testing...");
+    console.log("🚀 Deploying AddContract to Mina...");
+    
+    try {
+      const deployResult = await deployAddContract();
+      console.log("✅ AddContract deployed successfully!");
+      console.log(`  Contract Address: ${deployResult.contractAddress}`);
+      console.log(`  Transaction Hash: ${deployResult.txHash}`);
+      console.log(`  Verification Key Hash: ${deployResult.verificationKey.hash.toString()}`);
+      console.log(`  Next Nonce: ${deployResult.nonce}`);
+      
+      // Save contract info to environment for later use
+      process.env.ADD_CONTRACT_ADDRESS = deployResult.contractAddress;
+      process.env.ADD_CONTRACT_TX_HASH = deployResult.txHash;
+      process.env.ADD_CONTRACT_NONCE = deployResult.nonce.toString();
+    } catch (error) {
+      console.error("❌ AddContract deployment failed:", error);
+      console.log("⚠️ Continuing with Sui app deployment...");
+    }
+    
+    console.log("\n🚀 Creating new app for coordinator testing...");
 
     // Get package ID from environment
     const packageID = process.env.APP_PACKAGE_ID;
     assert.ok(packageID !== undefined, "APP_PACKAGE_ID is not set");
     console.log("📦 Package ID:", packageID);
 
-    // Create the app
-    const appID = await createApp();
+    // Create the app with Mina contract info
+    const contractAddress = process.env.ADD_CONTRACT_ADDRESS || "0x0";
+    const nonce = process.env.ADD_CONTRACT_NONCE ? parseInt(process.env.ADD_CONTRACT_NONCE) : 0;
+    
+    const appID = await createApp({
+      contractAddress,
+      chain: "mina:devnet",
+      nonce,
+    });
     assert.ok(appID !== undefined, "appID is not set");
 
     console.log("✅ App created successfully!");
@@ -55,6 +82,12 @@ describe("Deploy App for Coordinator", async () => {
       `SUI_CHAIN=${process.env.SUI_CHAIN || "devnet"}`,
       `SUI_ADDRESS=${process.env.SUI_ADDRESS}`,
       `SUI_SECRET_KEY=${process.env.SUI_SECRET_KEY}`,
+      ``,
+      `# Mina Contract Configuration`,
+      `MINA_CHAIN=${process.env.MINA_CHAIN || "devnet"}`,
+      process.env.ADD_CONTRACT_ADDRESS ? `ADD_CONTRACT_ADDRESS=${process.env.ADD_CONTRACT_ADDRESS}` : `# ADD_CONTRACT_ADDRESS=<not deployed>`,
+      process.env.ADD_CONTRACT_TX_HASH ? `ADD_CONTRACT_TX_HASH=${process.env.ADD_CONTRACT_TX_HASH}` : `# ADD_CONTRACT_TX_HASH=<not deployed>`,
+      `MINA_APP_ADMIN=${process.env.MINA_APP_ADMIN}`,
       ``,
     ].join("\n");
 

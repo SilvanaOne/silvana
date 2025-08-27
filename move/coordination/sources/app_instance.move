@@ -21,7 +21,8 @@ public struct AppInstance has key, store {
     id: UID,
     silvana_app_name: String,
     description: Option<String>,
-    metadata: Option<String>,
+    metadata: VecMap<String, String>,
+    kv: VecMap<String, String>,
     methods: VecMap<String, AppMethod>,
     state: AppState,
     blocks: ObjectTable<u64, Block>,
@@ -97,7 +98,6 @@ fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
 public fun create_app_instance(
     app: &mut SilvanaApp,
     instance_description: Option<String>,
-    instance_metadata: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstanceCap {
@@ -135,7 +135,8 @@ public fun create_app_instance(
         id: instance_id,
         silvana_app_name: app_name,
         description: instance_description,
-        metadata: instance_metadata,
+        metadata: vec_map::empty(),
+        kv: vec_map::empty(),
         methods,
         state,
         blocks,
@@ -598,6 +599,40 @@ public fun update_block_settlement_tx_included_in_block(
     };
 }
 
+// Methods for managing metadata and kv
+public fun add_metadata(
+    app_instance: &mut AppInstance,
+    key: String,
+    value: String,
+    ctx: &TxContext,
+) {
+    only_admin(app_instance, ctx);
+    vec_map::insert(&mut app_instance.metadata, key, value);
+}
+
+public fun add_kv(
+    app_instance: &mut AppInstance,
+    key: String,
+    value: String,
+    ctx: &TxContext,
+) {
+    only_admin(app_instance, ctx);
+    vec_map::insert(&mut app_instance.kv, key, value);
+}
+
+public fun update_kv(
+    app_instance: &mut AppInstance,
+    key: String,
+    value: String,
+    ctx: &TxContext,
+) {
+    only_admin(app_instance, ctx);
+    if (vec_map::contains(&app_instance.kv, &key)) {
+        vec_map::remove(&mut app_instance.kv, &key);
+    };
+    vec_map::insert(&mut app_instance.kv, key, value);
+}
+
 // Getter functions for AppInstance
 public fun silvana_app_name(app_instance: &AppInstance): &String {
     &app_instance.silvana_app_name
@@ -607,8 +642,12 @@ public fun description(app_instance: &AppInstance): &Option<String> {
     &app_instance.description
 }
 
-public fun metadata(app_instance: &AppInstance): &Option<String> {
+public fun metadata(app_instance: &AppInstance): &VecMap<String, String> {
     &app_instance.metadata
+}
+
+public fun kv(app_instance: &AppInstance): &VecMap<String, String> {
+    &app_instance.kv
 }
 
 public fun methods(app_instance: &AppInstance): &VecMap<String, AppMethod> {

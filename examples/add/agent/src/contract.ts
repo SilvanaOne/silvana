@@ -71,11 +71,11 @@ export class AddContract extends SmartContract {
     senderUpdate.body.useFullCommitment = Bool(true);
 
     // Verify the proof input matches current contract state
-    const currentBlockNumber = this.blockNumber.get();
+    const currentBlockNumber = this.blockNumber.getAndRequireEquals();
     currentBlockNumber
       .add(UInt64.from(1))
       .assertEquals(proof.publicInput.blockNumber);
-    const currentSequence = this.sequence.get();
+    const currentSequence = this.sequence.getAndRequireEquals();
     currentSequence
       .add(UInt64.from(1))
       .assertEquals(proof.publicInput.sequence);

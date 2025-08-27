@@ -31,7 +31,12 @@ const proofs: AddProgramProof[] = [];
 describe("Add Rollup", async () => {
   it("should create app", async () => {
     console.log("Creating a fresh app for rollup testing...");
-    appID = await createApp();
+    // Use default values for test
+    appID = await createApp({
+      contractAddress: "B62qmZB4E4KhmpYwoPDHe5c4yeQeAreCEwwgkGUrqSa6Ma3uC2RDZRY",
+      chain: "mina:devnet",
+      nonce: 1,
+    });
     assert.ok(appID !== undefined, "appID is not set");
 
     // Get the AppInstance ID from environment (set by createApp)
