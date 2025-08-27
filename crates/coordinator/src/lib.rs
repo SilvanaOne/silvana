@@ -11,7 +11,6 @@ pub mod jobs;
 pub mod merge;
 pub mod processor;
 pub mod proof;
-pub mod registry;
 pub mod session_id;
 pub mod settlement;
 pub mod state;

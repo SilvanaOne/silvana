@@ -1,4 +1,4 @@
-use crate::error::{CoordinatorError, Result};
+use crate::error::{SilvanaSuiInterfaceError, Result};
 use serde::Deserialize;
 use std::env;
 use sui_rpc::Client;
@@ -22,11 +22,11 @@ pub async fn fetch_agent_method(
 
     // Get the registry package ID from environment variable
     let _registry_package = env::var("SILVANA_REGISTRY_PACKAGE")
-        .map_err(|_| CoordinatorError::ConfigError("SILVANA_REGISTRY_PACKAGE not set".to_string()))?;
+        .map_err(|_| SilvanaSuiInterfaceError::ParseError("SILVANA_REGISTRY_PACKAGE not set".to_string()))?;
     
     // The registry object ID is a shared object at a fixed address
     let registry_id = env::var("SILVANA_REGISTRY")
-        .map_err(|_| CoordinatorError::ConfigError("SILVANA_REGISTRY not set".to_string()))?;
+        .map_err(|_| SilvanaSuiInterfaceError::ParseError("SILVANA_REGISTRY not set".to_string()))?;
 
 
     // First, fetch the registry object with JSON representation
@@ -48,7 +48,7 @@ pub async fn fetch_agent_method(
         .ledger_client()
         .get_object(registry_request)
         .await
-        .map_err(|e| CoordinatorError::RpcConnectionError(format!("Failed to fetch registry: {}", e)))?;
+        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to fetch registry: {}", e)))?;
 
     // Parse the response to extract the AgentMethod
     let response = registry_response.into_inner();
@@ -78,7 +78,7 @@ pub async fn fetch_agent_method(
         }
     }
 
-    Err(CoordinatorError::ConfigError(format!(
+    Err(SilvanaSuiInterfaceError::ParseError(format!(
         "Failed to fetch agent method {}/{}/{}",
         developer_name, agent_name, method_name
     )))
@@ -114,7 +114,7 @@ async fn fetch_developer_and_agent(
         .live_data_client()
         .list_dynamic_fields(list_request)
         .await
-        .map_err(|e| CoordinatorError::RpcConnectionError(format!("Failed to list developers: {}", e)))?;
+        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list developers: {}", e)))?;
     
     let response = list_response.into_inner();
     
@@ -144,7 +144,7 @@ async fn fetch_developer_and_agent(
                             .ledger_client()
                             .get_object(dev_request)
                             .await
-                            .map_err(|e| CoordinatorError::RpcConnectionError(format!("Failed to fetch developer: {}", e)))?;
+                            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to fetch developer: {}", e)))?;
                         
                         if let Some(dev_object) = dev_response.into_inner().object {
                             // This is a Field wrapper, extract the actual developer object ID from value
@@ -171,7 +171,7 @@ async fn fetch_developer_and_agent(
                                                 .ledger_client()
                                                 .get_object(actual_dev_request)
                                                 .await
-                                                .map_err(|e| CoordinatorError::RpcConnectionError(format!("Failed to fetch actual developer: {}", e)))?;
+                                                .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to fetch actual developer: {}", e)))?;
                                             
                                             if let Some(actual_dev_object) = actual_dev_response.into_inner().object {
                                                 // Now extract agents table from the actual developer object
@@ -208,7 +208,7 @@ async fn fetch_developer_and_agent(
         }
     }
     
-    Err(CoordinatorError::ConfigError(format!(
+    Err(SilvanaSuiInterfaceError::ParseError(format!(
         "Developer {} not found in registry",
         developer_name
     )))
@@ -243,7 +243,7 @@ async fn fetch_agent_and_method(
         .live_data_client()
         .list_dynamic_fields(list_request)
         .await
-        .map_err(|e| CoordinatorError::RpcConnectionError(format!("Failed to list agents: {}", e)))?;
+        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list agents: {}", e)))?;
     
     let response = list_response.into_inner();
     
@@ -273,7 +273,7 @@ async fn fetch_agent_and_method(
                             .ledger_client()
                             .get_object(agent_request)
                             .await
-                            .map_err(|e| CoordinatorError::RpcConnectionError(format!("Failed to fetch agent: {}", e)))?;
+                            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to fetch agent: {}", e)))?;
                         
                         if let Some(agent_object) = agent_response.into_inner().object {
                             // This is a Field wrapper, extract the actual agent object ID from value
@@ -300,7 +300,7 @@ async fn fetch_agent_and_method(
                                                 .ledger_client()
                                                 .get_object(actual_agent_request)
                                                 .await
-                                                .map_err(|e| CoordinatorError::RpcConnectionError(format!("Failed to fetch actual agent: {}", e)))?;
+                                                .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to fetch actual agent: {}", e)))?;
                                             
                                             if let Some(actual_agent_object) = actual_agent_response.into_inner().object {
                                                 // Extract methods from actual agent JSON
@@ -319,7 +319,7 @@ async fn fetch_agent_and_method(
         }
     }
     
-    Err(CoordinatorError::ConfigError(format!(
+    Err(SilvanaSuiInterfaceError::ParseError(format!(
         "Agent {} not found in developer's agents",
         agent_name
     )))
@@ -361,7 +361,7 @@ fn extract_method_from_agent_json(
         }
     }
     
-    Err(CoordinatorError::ConfigError(format!(
+    Err(SilvanaSuiInterfaceError::ParseError(format!(
         "Method {} not found in agent",
         method_name
     )))
@@ -425,7 +425,7 @@ fn extract_agent_method_from_struct(method_struct: &prost_types::Struct) -> Resu
     }
     
     if docker_image.is_empty() {
-        return Err(CoordinatorError::ConfigError(
+        return Err(SilvanaSuiInterfaceError::ParseError(
             "Docker image not found in method".to_string()
         ));
     }

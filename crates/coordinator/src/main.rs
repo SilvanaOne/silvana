@@ -11,7 +11,6 @@ mod jobs;
 mod merge;
 mod processor;
 mod proof;
-mod registry;
 mod session_id;
 mod settlement;
 mod state;

@@ -2,7 +2,7 @@ use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
 use crate::settlement::fetch_all_pending_jobs;
 use sui::fetch::Job;
-use crate::registry::fetch_agent_method;
+use sui::fetch::fetch_agent_method;
 use crate::session_id::generate_docker_session;
 use crate::state::SharedState;
 use sui::interface::SilvanaSuiInterface;
