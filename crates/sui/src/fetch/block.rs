@@ -3,17 +3,29 @@ use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, warn};
 
-/// Block information fetched from blockchain
+/// Block information fetched from blockchain, mirroring the Move struct
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct BlockInfo {
+pub struct Block {
+    pub name: String,
     pub block_number: u64,
     pub start_sequence: u64,
     pub end_sequence: u64,
-    pub name: String,
+    pub actions_commitment: Option<String>, // Element<Scalar> represented as String
+    pub state_commitment: Option<String>, // Element<Scalar> represented as String
+    pub time_since_last_block: u64,
+    pub number_of_transactions: u64,
+    pub start_actions_commitment: Option<String>, // Element<Scalar> represented as String
+    pub end_actions_commitment: Option<String>, // Element<Scalar> represented as String
+    pub state_data_availability: Option<String>,
     pub proof_data_availability: Option<String>,
     pub settlement_tx_hash: Option<String>,
     pub settlement_tx_included_in_block: bool,
+    pub created_at: u64,
+    pub state_calculated_at: Option<u64>,
+    pub proved_at: Option<u64>,
+    pub sent_to_settlement_at: Option<u64>,
+    pub settled_at: Option<u64>,
 }
 
 /// Fetch Block information from AppInstance by block number
@@ -22,7 +34,7 @@ pub async fn fetch_block_info(
     client: &mut Client,
     app_instance: &str,
     block_number: u64,
-) -> Result<Option<BlockInfo>> {
+) -> Result<Option<Block>> {
     debug!("Fetching Block info for block {} from app_instance {}", block_number, app_instance);
     
     // Ensure the app_instance has 0x prefix
@@ -95,7 +107,7 @@ async fn fetch_block_from_table(
     client: &mut Client,
     table_id: &str,
     block_number: u64,
-) -> Result<Option<BlockInfo>> {
+) -> Result<Option<Block>> {
     debug!("🔍 Optimized search for block {} in table {}", block_number, table_id);
     
     let mut page_token = None;
@@ -180,7 +192,7 @@ async fn fetch_block_object_by_field_id(
     client: &mut Client,
     field_id: &str,
     block_number: u64,
-) -> Result<Option<BlockInfo>> {
+) -> Result<Option<Block>> {
     debug!("📄 Fetching block {} content from field {}", block_number, field_id);
     
     let block_request = GetObjectRequest {
@@ -313,23 +325,39 @@ async fn debug_all_dynamic_fields(client: &mut Client, table_id: &str, target_bl
 
 /// Extract Block information from JSON
 #[allow(dead_code)]
-fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u64) -> Result<Option<BlockInfo>> {
+fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u64) -> Result<Option<Block>> {
     debug!("🔍 Extracting block info for block {} from JSON", block_number);
     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
         //debug!("🧱 Block {} fields: {:?}", block_number, struct_value.fields.keys().collect::<Vec<_>>());
+        
+        // Extract all fields according to the Move struct
         let mut name = String::new();
         let mut start_sequence = 0u64;
         let mut end_sequence = 0u64;
+        let mut actions_commitment = None;
+        let mut state_commitment = None;
+        let mut time_since_last_block = 0u64;
+        let mut number_of_transactions = 0u64;
+        let mut start_actions_commitment = None;
+        let mut end_actions_commitment = None;
+        let mut state_data_availability = None;
         let mut proof_data_availability = None;
         let mut settlement_tx_hash = None;
         let mut settlement_tx_included_in_block = false;
+        let mut created_at = 0u64;
+        let mut state_calculated_at = None;
+        let mut proved_at = None;
+        let mut sent_to_settlement_at = None;
+        let mut settled_at = None;
         
+        // Extract name
         if let Some(name_field) = struct_value.fields.get("name") {
             if let Some(prost_types::value::Kind::StringValue(name_str)) = &name_field.kind {
                 name = name_str.clone();
             }
         }
         
+        // Extract sequences
         if let Some(start_field) = struct_value.fields.get("start_sequence") {
             if let Some(prost_types::value::Kind::StringValue(start_str)) = &start_field.kind {
                 start_sequence = start_str.parse().unwrap_or(0);
@@ -342,11 +370,67 @@ fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u
             }
         }
         
-        // Extract proof_data_availability (Option<String>)
-        if let Some(proof_field) = struct_value.fields.get("proof_data_availability") {
-            match &proof_field.kind {
-                Some(prost_types::value::Kind::StringValue(proof_str)) => {
-                    proof_data_availability = Some(proof_str.clone());
+        // Extract commitment fields (Element<Scalar> as String)
+        if let Some(field) = struct_value.fields.get("actions_commitment") {
+            if let Some(prost_types::value::Kind::StringValue(s)) = &field.kind {
+                actions_commitment = Some(s.clone());
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("state_commitment") {
+            if let Some(prost_types::value::Kind::StringValue(s)) = &field.kind {
+                state_commitment = Some(s.clone());
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("start_actions_commitment") {
+            if let Some(prost_types::value::Kind::StringValue(s)) = &field.kind {
+                start_actions_commitment = Some(s.clone());
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("end_actions_commitment") {
+            if let Some(prost_types::value::Kind::StringValue(s)) = &field.kind {
+                end_actions_commitment = Some(s.clone());
+            }
+        }
+        
+        // Extract numeric fields
+        if let Some(field) = struct_value.fields.get("time_since_last_block") {
+            if let Some(prost_types::value::Kind::StringValue(s)) = &field.kind {
+                time_since_last_block = s.parse().unwrap_or(0);
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("number_of_transactions") {
+            if let Some(prost_types::value::Kind::StringValue(s)) = &field.kind {
+                number_of_transactions = s.parse().unwrap_or(0);
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("created_at") {
+            if let Some(prost_types::value::Kind::StringValue(s)) = &field.kind {
+                created_at = s.parse().unwrap_or(0);
+            }
+        }
+        
+        // Extract optional string fields
+        if let Some(field) = struct_value.fields.get("state_data_availability") {
+            match &field.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => {
+                    state_data_availability = Some(s.clone());
+                }
+                Some(prost_types::value::Kind::NullValue(_)) => {
+                    state_data_availability = None;
+                }
+                _ => {}
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("proof_data_availability") {
+            match &field.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => {
+                    proof_data_availability = Some(s.clone());
                 }
                 Some(prost_types::value::Kind::NullValue(_)) => {
                     proof_data_availability = None;
@@ -355,11 +439,10 @@ fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u
             }
         }
         
-        // Extract settlement_tx_hash (Option<String>)
-        if let Some(tx_field) = struct_value.fields.get("settlement_tx_hash") {
-            match &tx_field.kind {
-                Some(prost_types::value::Kind::StringValue(tx_str)) => {
-                    settlement_tx_hash = Some(tx_str.clone());
+        if let Some(field) = struct_value.fields.get("settlement_tx_hash") {
+            match &field.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => {
+                    settlement_tx_hash = Some(s.clone());
                 }
                 Some(prost_types::value::Kind::NullValue(_)) => {
                     settlement_tx_hash = None;
@@ -368,24 +451,85 @@ fn extract_block_info_from_json(json_value: &prost_types::Value, block_number: u
             }
         }
         
-        // Extract settlement_tx_included_in_block (bool)
-        if let Some(included_field) = struct_value.fields.get("settlement_tx_included_in_block") {
-            if let Some(prost_types::value::Kind::BoolValue(included)) = &included_field.kind {
-                settlement_tx_included_in_block = *included;
+        // Extract boolean field
+        if let Some(field) = struct_value.fields.get("settlement_tx_included_in_block") {
+            if let Some(prost_types::value::Kind::BoolValue(b)) = &field.kind {
+                settlement_tx_included_in_block = *b;
             }
         }
         
-        let block_info = BlockInfo {
+        // Extract optional timestamp fields
+        if let Some(field) = struct_value.fields.get("state_calculated_at") {
+            match &field.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => {
+                    state_calculated_at = s.parse().ok();
+                }
+                Some(prost_types::value::Kind::NullValue(_)) => {
+                    state_calculated_at = None;
+                }
+                _ => {}
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("proved_at") {
+            match &field.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => {
+                    proved_at = s.parse().ok();
+                }
+                Some(prost_types::value::Kind::NullValue(_)) => {
+                    proved_at = None;
+                }
+                _ => {}
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("sent_to_settlement_at") {
+            match &field.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => {
+                    sent_to_settlement_at = s.parse().ok();
+                }
+                Some(prost_types::value::Kind::NullValue(_)) => {
+                    sent_to_settlement_at = None;
+                }
+                _ => {}
+            }
+        }
+        
+        if let Some(field) = struct_value.fields.get("settled_at") {
+            match &field.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => {
+                    settled_at = s.parse().ok();
+                }
+                Some(prost_types::value::Kind::NullValue(_)) => {
+                    settled_at = None;
+                }
+                _ => {}
+            }
+        }
+        
+        let block = Block {
+            name,
             block_number,
             start_sequence,
             end_sequence,
-            name: name.clone(),
+            actions_commitment,
+            state_commitment,
+            time_since_last_block,
+            number_of_transactions,
+            start_actions_commitment,
+            end_actions_commitment,
+            state_data_availability,
             proof_data_availability,
             settlement_tx_hash,
             settlement_tx_included_in_block,
+            created_at,
+            state_calculated_at,
+            proved_at,
+            sent_to_settlement_at,
+            settled_at,
         };
-        debug!("✅ Successfully extracted block info: {:?}", block_info);
-        return Ok(Some(block_info));
+        debug!("✅ Successfully extracted block info: {:?}", block);
+        return Ok(Some(block));
     }
     
     Ok(None)
