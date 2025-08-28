@@ -176,7 +176,7 @@ pub async fn analyze_proof_completion(
       
       // Fetch ProofCalculation for this block
       let proof_calc_info = match sui::fetch::fetch_proof_calculation(
-          app_instance_id,
+          app_instance,
           block_number
       ).await {
           Ok(Some(proof_calc)) => {

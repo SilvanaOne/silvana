@@ -984,13 +984,25 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Err(Status::unauthenticated("Invalid session ID"));
         }
 
+        // First fetch the AppInstance object
+        let app_instance_id = agent_job.app_instance.clone();
+        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
+            Ok(app_inst) => app_inst,
+            Err(e) => {
+                error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
+                return Err(Status::internal(format!(
+                    "Failed to fetch AppInstance: {}", e
+                )));
+            }
+        };
+        
         // Query sequence states from the coordinator fetch module
         debug!(
             "🔍 Querying sequence states for app_instance={}, sequence={}",
-            agent_job.app_instance, req.sequence
+            app_instance_id, req.sequence
         );
         match sui::fetch::query_sequence_states(
-            &agent_job.app_instance,
+            &app_instance,
             req.sequence,
         )
         .await
@@ -1204,7 +1216,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Use the app_instance from the job
-        let app_instance = agent_job.app_instance.clone();
+        let app_instance_id = agent_job.app_instance.clone();
+        
+        // First fetch the AppInstance object
+        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
+            Ok(app_inst) => app_inst,
+            Err(e) => {
+                error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: Some(format!("Failed to fetch AppInstance: {}", e)),
+                }));
+            }
+        };
 
         // Fetch the ProofCalculation using the existing function from sui::fetch::prover
         let proof_calculation =
@@ -1287,7 +1312,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 let elapsed = start_time.elapsed();
                 info!(
                     "✅ GetProof: app={}, block={}, sequences={:?}, da_hash={}, proof_size={} bytes, time={:?}",
-                    agent_job.app_instance,
+                    app_instance_id,
                     req.block_number,
                     req.sequences,
                     da_hash,
@@ -1304,7 +1329,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 let elapsed = start_time.elapsed();
                 warn!(
                     "❌ GetProof: app={}, block={}, sequences={:?}, error=No data found for da_hash: {}, time={:?}",
-                    agent_job.app_instance, req.block_number, req.sequences, da_hash, elapsed
+                    app_instance_id, req.block_number, req.sequences, da_hash, elapsed
                 );
                 Ok(Response::new(GetProofResponse {
                     success: false,
@@ -1316,7 +1341,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 let elapsed = start_time.elapsed();
                 error!(
                     "❌ GetProof: app={}, block={}, sequences={:?}, da_hash={}, error={}, time={:?}",
-                    agent_job.app_instance, req.block_number, req.sequences, da_hash, e, elapsed
+                    app_instance_id, req.block_number, req.sequences, da_hash, e, elapsed
                 );
                 Ok(Response::new(GetProofResponse {
                     success: false,
@@ -1394,7 +1419,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Use the app_instance from the job
-        let app_instance = agent_job.app_instance.clone();
+        let app_instance_id = agent_job.app_instance.clone();
+        
+        // First fetch the AppInstance object
+        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
+            Ok(app_inst) => app_inst,
+            Err(e) => {
+                error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: Some(format!("Failed to fetch AppInstance: {}", e)),
+                }));
+            }
+        };
 
         // Use the fetch_proof_calculation function from prover module
         let proof_calculation = match sui::fetch::fetch_proof_calculation(&app_instance, req.block_number).await {

@@ -1,6 +1,7 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get_bytes};
 use crate::state::SharedSuiState;
+use super::AppInstance;
 use std::collections::HashSet;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
@@ -388,22 +389,16 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
 
 /// Fetch pending jobs from a specific app_instance
 pub async fn fetch_pending_jobs_from_app_instance(
-    app_instance_id: &str,
+    app_instance: &AppInstance,
     only_check: bool,
 ) -> Result<Option<Job>> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
-    // Ensure the app_instance_id has 0x prefix
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
-    } else {
-        format!("0x{}", app_instance_id)
-    };
     
-    debug!("Fetching app_instance object: {}", formatted_id);
+    debug!("Fetching app_instance object: {}", app_instance.id);
     
     // Fetch the AppInstance object
     let app_instance_request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
+        object_id: Some(app_instance.id.clone()),
         version: None,
         read_mask: Some(prost_types::FieldMask {
             paths: vec![
@@ -418,7 +413,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
         .get_object(app_instance_request)
         .await
         .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch app_instance {}: {}", formatted_id, e)
+            format!("Failed to fetch app_instance {}: {}", app_instance.id, e)
         ))?;
 
     let response = app_instance_response.into_inner();
@@ -438,7 +433,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
                                             debug!("Found {} pending jobs in app_instance (check-only mode)", count);
                                             return Ok(None);
                                         } else {
-                                            debug!("No pending jobs in app_instance {} (count=0)", app_instance_id);
+                                            debug!("No pending jobs in app_instance {} (count=0)", app_instance.id);
                                             //state.remove_app_instance(app_instance_id).await;
                                             return Ok(None);
                                         }
@@ -462,7 +457,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
                                         }
                                         
                                         if pending_job_sequences.is_empty() {
-                                            debug!("No pending jobs in app_instance {}", app_instance_id);
+                                            debug!("No pending jobs in app_instance {}", app_instance.id);
                                             //state.remove_app_instance(app_instance_id).await;
                                             return Ok(None);
                                         }
@@ -474,17 +469,11 @@ pub async fn fetch_pending_jobs_from_app_instance(
                                         
                                         debug!("Found {} pending jobs, will fetch job_sequence {}", job_sequences.len(), target_job_sequence);
                                         
-                                        // Now fetch the specific job from the jobs ObjectTable
-                                        if let Some(jobs_table_field) = jobs_struct.fields.get("jobs") {
-                                            if let Some(prost_types::value::Kind::StructValue(jobs_table_struct)) = &jobs_table_field.kind {
-                                                if let Some(table_id_field) = jobs_table_struct.fields.get("id") {
-                                                    if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
-                                                        // Fetch the specific job
-                                                        if let Some(job) = fetch_job_by_id(table_id, target_job_sequence).await? {
-                                                            return Ok(Some(job));
-                                                        }
-                                                    }
-                                                }
+                                        // Now fetch the specific job using the jobs table ID from AppInstance
+                                        if let Some(jobs) = &app_instance.jobs {
+                                            // Fetch the specific job
+                                            if let Some(job) = fetch_job_by_id(&jobs.jobs_table_id, target_job_sequence).await? {
+                                                return Ok(Some(job));
                                             }
                                         }
                                     }
@@ -497,7 +486,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
         }
     }
     
-    debug!("No jobs found in app_instance {}", app_instance_id);
+    debug!("No jobs found in app_instance {}", app_instance.id);
     Ok(None)
 }
 
@@ -835,7 +824,7 @@ async fn fetch_job_object_by_field_id(
 
 /// Fetch pending job IDs for a specific (developer, agent, agent_method) from the embedded Jobs in AppInstance
 pub async fn fetch_pending_job_sequences_from_app_instance(
-    app_instance_id: &str,
+    app_instance: &AppInstance,
     developer: &str,
     agent: &str,
     agent_method: &str,
@@ -843,19 +832,12 @@ pub async fn fetch_pending_job_sequences_from_app_instance(
     let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!(
         "Fetching pending job IDs for {}/{}/{} from app_instance {}",
-        developer, agent, agent_method, app_instance_id
+        developer, agent, agent_method, app_instance.id
     );
-    
-    // Ensure the app_instance_id has 0x prefix
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
-    } else {
-        format!("0x{}", app_instance_id)
-    };
     
     // Fetch the AppInstance object
     let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
+        object_id: Some(app_instance.id.clone()),
         version: None,
         read_mask: Some(prost_types::FieldMask {
             paths: vec!["json".to_string()],
@@ -867,7 +849,7 @@ pub async fn fetch_pending_job_sequences_from_app_instance(
         .get_object(request)
         .await
         .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch AppInstance {}: {}", formatted_id, e)
+            format!("Failed to fetch AppInstance {}: {}", app_instance.id, e)
         ))?;
 
     if let Some(proto_object) = response.into_inner().object {
@@ -969,191 +951,84 @@ pub async fn fetch_pending_job_sequences_from_app_instance(
 
 /// Get the Jobs table ID from an AppInstance (Jobs is embedded, so we just need the table ID)
 pub async fn get_jobs_info_from_app_instance(
-    app_instance_id: &str,
+    app_instance: &AppInstance,
 ) -> Result<Option<(String, String)>> {
-    let mut client = SharedSuiState::get_instance().get_sui_client();
-    // Ensure the app_instance_id has 0x prefix
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
-    } else {
-        format!("0x{}", app_instance_id)
-    };
+    debug!("Getting Jobs info from app_instance: {}", app_instance.id);
     
-    debug!("Fetching Jobs info from app_instance: {}", formatted_id);
-    
-    // Fetch the AppInstance object
-    let app_instance_request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "object_id".to_string(),
-                "json".to_string(),
-            ],
-        }),
-    };
-
-    let app_instance_response = client
-        .ledger_client()
-        .get_object(app_instance_request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch app_instance {}: {}", formatted_id, e)
-        ))?;
-
-    let response = app_instance_response.into_inner();
-    
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                // Debug: print all fields in AppInstance
-                debug!("AppInstance {} fields: {:?}", app_instance_id, struct_value.fields.keys().collect::<Vec<_>>());
-                
-                // Look for the jobs field in the AppInstance
-                if let Some(jobs_field) = struct_value.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // Debug: print all fields in Jobs struct
-                        debug!("Jobs struct fields: {:?}", jobs_struct.fields.keys().collect::<Vec<_>>());
-                        
-                        // For embedded Jobs, we return the app_instance_id as the "Jobs object ID" 
-                        // and extract the jobs table ID
-                        if let Some(jobs_table_field) = jobs_struct.fields.get("jobs") {
-                            if let Some(prost_types::value::Kind::StructValue(jobs_table_struct)) = &jobs_table_field.kind {
-                                debug!("Jobs table struct fields: {:?}", jobs_table_struct.fields.keys().collect::<Vec<_>>());
-                                if let Some(table_id_field) = jobs_table_struct.fields.get("id") {
-                                    if let Some(prost_types::value::Kind::StringValue(jobs_table_id)) = &table_id_field.kind {
-                                        //debug!("Found Jobs table ID: {}", jobs_table_id);
-                                        // Return app_instance_id as the "Jobs object" since Jobs is embedded
-                                        return Ok(Some((formatted_id, jobs_table_id.clone())));
-                                    } else {
-                                        warn!("Jobs table id field is not a string: {:?}", table_id_field.kind);
-                                    }
-                                } else {
-                                    warn!("No 'id' field in jobs table struct");
-                                }
-                            } else {
-                                warn!("Jobs table field is not a struct: {:?}", jobs_table_field.kind);
-                            }
-                        } else {
-                            warn!("No 'jobs' field in Jobs struct");
-                        }
-                    } else {
-                        warn!("Jobs field is not a struct: {:?}", jobs_field.kind);
-                    }
-                } else {
-                    warn!("No 'jobs' field found in AppInstance. Available fields: {:?}", struct_value.fields.keys().collect::<Vec<_>>());
-                }
-            }
-        }
-    } else {
-        warn!("No object returned for app_instance {}", app_instance_id);
+    // Use the jobs table ID directly from the AppInstance
+    if let Some(jobs) = &app_instance.jobs {
+        debug!("Found Jobs table ID: {}", jobs.jobs_table_id);
+        // Return app_instance.id as the "Jobs object" since Jobs is embedded
+        return Ok(Some((app_instance.id.clone(), jobs.jobs_table_id.clone())));
     }
     
+    debug!("No Jobs found in AppInstance {}", app_instance.id);
     Ok(None)
 }
 
 /// Fetch all jobs from an app instance
 pub async fn fetch_all_jobs_from_app_instance(
-    app_instance_id: &str,
+    app_instance: &AppInstance,
 ) -> Result<Vec<Job>> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
-    debug!("Fetching all jobs from app_instance {}", app_instance_id);
+    debug!("Fetching all jobs from app_instance {}", app_instance.id);
     
-    // Ensure the app_instance_id has 0x prefix
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
-    } else {
-        format!("0x{}", app_instance_id)
-    };
-    
-    // Fetch the AppInstance object
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string()],
-        }),
-    };
-
-    let response = client
-        .ledger_client()
-        .get_object(request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch AppInstance {}: {}", formatted_id, e)
-        ))?;
-
     let mut all_jobs = Vec::new();
 
-    if let Some(proto_object) = response.into_inner().object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
-                // Get the embedded jobs field
-                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // Get the jobs ObjectTable
-                        if let Some(jobs_table_field) = jobs_struct.fields.get("jobs") {
-                            if let Some(prost_types::value::Kind::StructValue(jobs_table_struct)) = &jobs_table_field.kind {
-                                if let Some(table_id_field) = jobs_table_struct.fields.get("id") {
-                                    if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
-                                        // Fetch all jobs from the ObjectTable
-                                        let mut page_token = None;
-                                        loop {
-                                            let list_request = ListDynamicFieldsRequest {
-                                                parent: Some(table_id.clone()),
-                                                page_size: Some(100),
-                                                page_token: page_token.clone(),
-                                                read_mask: Some(prost_types::FieldMask {
-                                                    paths: vec!["field_id".to_string()],
-                                                }),
-                                            };
+    // Use the jobs table ID directly from the AppInstance
+    if let Some(jobs) = &app_instance.jobs {
+        let table_id = &jobs.jobs_table_id;
+        
+        // Fetch all jobs from the ObjectTable
+        let mut page_token = None;
+        loop {
+            let list_request = ListDynamicFieldsRequest {
+                parent: Some(table_id.clone()),
+                page_size: Some(100),
+                page_token: page_token.clone(),
+                read_mask: Some(prost_types::FieldMask {
+                    paths: vec!["field_id".to_string()],
+                }),
+            };
 
-                                            let fields_response = client
-                                                .live_data_client()
-                                                .list_dynamic_fields(list_request)
-                                                .await
-                                                .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                                                    format!("Failed to list jobs: {}", e)
-                                                ))?;
+            let fields_response = client
+                .live_data_client()
+                .list_dynamic_fields(list_request)
+                .await
+                .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+                    format!("Failed to list jobs: {}", e)
+                ))?;
 
-                                            let response = fields_response.into_inner();
-                                            
-                                            // Fetch each job
-                                            for field in &response.dynamic_fields {
-                                                if let Some(field_id) = &field.field_id {
-                                                    // Extract job_sequence from name_value for debugging
-                                                    let job_sequence = field.name_value.as_ref()
-                                                        .and_then(|nv| bcs::from_bytes::<u64>(nv).ok())
-                                                        .unwrap_or(0);
-                                                    
-                                                    // Fetch the job using the helper function
-                                                    if let Ok(Some(job)) = fetch_job_object_by_field_id(&mut client, field_id, job_sequence).await {
-                                                        all_jobs.push(job);
-                                                    }
-                                                }
-                                            }
-
-                                            // Check for next page
-                                            if let Some(next_token) = response.next_page_token {
-                                                if !next_token.is_empty() {
-                                                    page_token = Some(next_token);
-                                                } else {
-                                                    break;
-                                                }
-                                            } else {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            let response = fields_response.into_inner();
+            
+            // Fetch each job
+            for field in &response.dynamic_fields {
+                if let Some(field_id) = &field.field_id {
+                    // Extract job_sequence from name_value for debugging
+                    let job_sequence = field.name_value.as_ref()
+                        .and_then(|nv| bcs::from_bytes::<u64>(nv).ok())
+                        .unwrap_or(0);
+                    
+                    // Fetch the job using the helper function
+                    if let Ok(Some(job)) = fetch_job_object_by_field_id(&mut client, field_id, job_sequence).await {
+                        all_jobs.push(job);
                     }
                 }
+            }
+
+            // Check for next page
+            if let Some(next_token) = response.next_page_token {
+                if !next_token.is_empty() {
+                    page_token = Some(next_token);
+                } else {
+                    break;
+                }
+            } else {
+                break;
             }
         }
     }
     
-    debug!("Found {} total jobs in app_instance {}", all_jobs.len(), app_instance_id);
+    debug!("Found {} total jobs in app_instance {}", all_jobs.len(), app_instance.id);
     Ok(all_jobs)
 }

@@ -82,107 +82,25 @@ pub struct ProofCalculation {
 
 /// Fetch ProofCalculation for a block from AppInstance (legacy single-block function)
 pub async fn fetch_proof_calculation(
-    app_instance: &str,
+    app_instance: &AppInstance,
     block_number: u64,
 ) -> Result<Option<ProofCalculation>> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!(
         "Fetching ProofCalculation for block {} from app_instance {}",
-        block_number, app_instance
+        block_number, app_instance.id
     );
 
-    // Ensure the app_instance has 0x prefix
-    let formatted_id = if app_instance.starts_with("0x") {
-        app_instance.to_string()
-    } else {
-        format!("0x{}", app_instance)
-    };
-
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["object_id".to_string(), "json".to_string()],
-        }),
-    };
-
-    let object_response = client
-        .ledger_client()
-        .get_object(request)
-        .await
-        .map_err(|e| {
-            SilvanaSuiInterfaceError::RpcConnectionError(format!(
-                "Failed to fetch app_instance {}: {}",
-                app_instance, e
-            ))
-        })?;
-
-    let response = object_response.into_inner();
-
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                debug!(
-                    "📋 AppInstance {} fields: {:?}",
-                    app_instance,
-                    struct_value.fields.keys().collect::<Vec<_>>()
-                );
-
-                // Get the proof_calculations ObjectTable
-                if let Some(proofs_field) = struct_value.fields.get("proof_calculations") {
-                    debug!(
-                        "🔍 Found proof_calculations field in AppInstance {}",
-                        app_instance
-                    );
-                    if let Some(prost_types::value::Kind::StructValue(proofs_struct)) =
-                        &proofs_field.kind
-                    {
-                        debug!(
-                            "🔍 Proof calculations struct fields: {:?}",
-                            proofs_struct.fields.keys().collect::<Vec<_>>()
-                        );
-                        if let Some(table_id_field) = proofs_struct.fields.get("id") {
-                            if let Some(prost_types::value::Kind::StringValue(table_id)) =
-                                &table_id_field.kind
-                            {
-                                debug!("🔍 Found proof_calculations table ID: {}", table_id);
-                                // Fetch the ProofCalculation from the ObjectTable
-                                return fetch_proof_calculation_from_table(
-                                    &mut client,
-                                    table_id,
-                                    block_number,
-                                )
-                                .await;
-                            } else {
-                                warn!(
-                                    "❌ Proof calculations table id field is not a string: {:?}",
-                                    table_id_field.kind
-                                );
-                            }
-                        } else {
-                            warn!("❌ No 'id' field in proof calculations table struct");
-                        }
-                    } else {
-                        warn!(
-                            "❌ Proof calculations field is not a struct: {:?}",
-                            proofs_field.kind
-                        );
-                    }
-                } else {
-                    warn!(
-                        "❌ No 'proof_calculations' field found in AppInstance. Available fields: {:?}",
-                        struct_value.fields.keys().collect::<Vec<_>>()
-                    );
-                }
-            }
-        } else {
-            warn!("❌ No JSON found for AppInstance {}", app_instance);
-        }
-    } else {
-        warn!("❌ No object returned for AppInstance {}", app_instance);
-    }
-
-    Ok(None)
+    // Use the proof_calculations table ID directly from the AppInstance
+    let table_id = &app_instance.proof_calculations_table_id;
+    debug!("🔍 Using proof_calculations table ID: {}", table_id);
+    
+    // Fetch the ProofCalculation from the ObjectTable
+    fetch_proof_calculation_from_table(
+        &mut client,
+        table_id,
+        block_number,
+    ).await
 }
 
 /// Fetch multiple ProofCalculations from AppInstance for a range of block numbers  

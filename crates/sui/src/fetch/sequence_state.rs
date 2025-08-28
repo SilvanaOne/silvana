@@ -1,6 +1,7 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_u64, get_bytes, get_option_bytes, get_option_string};
 use crate::state::SharedSuiState;
+use super::AppInstance;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, error};
 
@@ -156,21 +157,15 @@ pub async fn fetch_sequence_state_by_id(
 
 /// Get the SequenceStateManager information from an AppInstance
 pub async fn get_sequence_state_manager_info_from_app_instance(
-    app_instance_id: &str,
+    app_instance: &AppInstance,
 ) -> Result<Option<(u64, u64, String)>> { // (lowest_sequence, highest_sequence, table_id)
     let mut client = SharedSuiState::get_instance().get_sui_client();
-    // Ensure the app_instance_id has 0x prefix
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
-    } else {
-        format!("0x{}", app_instance_id)
-    };
     
-    debug!("Fetching SequenceStateManager info from app_instance: {}", formatted_id);
+    debug!("Fetching SequenceStateManager info from app_instance: {}", app_instance.id);
     
-    // Fetch the AppInstance object
+    // Fetch the AppInstance object to get the latest sequence_state_manager data
     let app_instance_request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
+        object_id: Some(app_instance.id.clone()),
         version: None,
         read_mask: Some(prost_types::FieldMask {
             paths: vec![
@@ -185,7 +180,7 @@ pub async fn get_sequence_state_manager_info_from_app_instance(
         .get_object(app_instance_request)
         .await
         .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch app_instance {}: {}", formatted_id, e)
+            format!("Failed to fetch app_instance {}: {}", app_instance.id, e)
         ))?;
 
     let response = app_instance_response.into_inner();
@@ -282,7 +277,7 @@ pub async fn get_sequence_state_manager_info_from_app_instance(
         }
     }
     
-    debug!("SequenceStateManager not found in app_instance {}", app_instance_id);
+    debug!("SequenceStateManager not found in app_instance {}", app_instance.id);
     Ok(None)
 }
 
@@ -291,21 +286,21 @@ pub async fn get_sequence_state_manager_info_from_app_instance(
 /// Otherwise, find the highest sequence with both state and data_availability set,
 /// and return all sequences from that one (inclusive) to the requested one.
 pub async fn query_sequence_states(
-    app_instance_id: &str,
+    app_instance: &AppInstance,
     requested_sequence: u64,
 ) -> Result<Vec<SequenceState>> {
-    debug!("Querying sequence states for app_instance: {}, sequence: {}", app_instance_id, requested_sequence);
+    debug!("Querying sequence states for app_instance: {}, sequence: {}", app_instance.id, requested_sequence);
     
     // Get SequenceStateManager info from AppInstance
-    let (lowest_sequence, highest_sequence, table_id) = match get_sequence_state_manager_info_from_app_instance(app_instance_id).await? {
+    let (lowest_sequence, highest_sequence, table_id) = match get_sequence_state_manager_info_from_app_instance(app_instance).await? {
         Some(info) => {
             debug!("SequenceStateManager found: lowest={}, highest={}, table_id={}", info.0, info.1, info.2);
             info
         },
         None => {
-            error!("SequenceStateManager not found in app_instance {}", app_instance_id);
+            error!("SequenceStateManager not found in app_instance {}", app_instance.id);
             return Err(SilvanaSuiInterfaceError::ParseError(
-                format!("SequenceStateManager not found in app_instance {}", app_instance_id)
+                format!("SequenceStateManager not found in app_instance {}", app_instance.id)
             ));
         }
     };

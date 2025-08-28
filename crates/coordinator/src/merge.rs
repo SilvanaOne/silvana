@@ -19,9 +19,21 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             .unwrap_or(&vec![])
     );
 
+    // First fetch the AppInstance to get the AppInstance object
+    let app_instance_obj = match sui::fetch::fetch_app_instance(app_instance).await {
+        Ok(app_inst) => app_inst,
+        Err(e) => {
+            error!(
+                "❌ Failed to fetch AppInstance {}: {}",
+                app_instance, e
+            );
+            return Err(anyhow::anyhow!("Failed to fetch AppInstance: {}", e));
+        }
+    };
+    
     // Fetch existing ProofCalculation for this block to get full info including start_sequence, end_sequence, is_finished
     let existing_proof_calculation = match fetch_proof_calculation(
-        app_instance,
+        &app_instance_obj,
         proof_calc.block_number,
     )
     .await
@@ -160,7 +172,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 
                 // Fetch existing ProofCalculation for this block again
                 let updated_proof_calculation =
-                    match fetch_proof_calculation(app_instance, proof_calc.block_number)
+                    match fetch_proof_calculation(&app_instance_obj, proof_calc.block_number)
                         .await
                     {
                         Ok(Some(pc)) => {

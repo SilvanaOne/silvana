@@ -34,67 +34,14 @@ pub struct Block {
 /// Fetch Block information from AppInstance by block number (legacy single-block function)
 #[allow(dead_code)]
 pub async fn fetch_block_info(
-    app_instance: &str,
+    app_instance: &AppInstance,
     block_number: u64,
 ) -> Result<Option<Block>> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
-    debug!("Fetching Block info for block {} from app_instance {}", block_number, app_instance);
+    debug!("Fetching Block info for block {} from app_instance {}", block_number, app_instance.id);
     
-    // Ensure the app_instance has 0x prefix
-    let formatted_id = if app_instance.starts_with("0x") {
-        app_instance.to_string()
-    } else {
-        format!("0x{}", app_instance)
-    };
-    
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "object_id".to_string(),
-                "json".to_string(),
-            ],
-        }),
-    };
-    
-    let object_response = client.ledger_client().get_object(request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-        format!("Failed to fetch app_instance {}: {}", app_instance, e)
-    ))?;
-    
-    let response = object_response.into_inner();
-    
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                // Get the blocks ObjectTable
-                if let Some(blocks_field) = struct_value.fields.get("blocks") {
-                    if let Some(prost_types::value::Kind::StructValue(blocks_struct)) = &blocks_field.kind {
-                        if let Some(table_id_field) = blocks_struct.fields.get("id") {
-                            if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
-                                // Fetch the Block from the ObjectTable using block_number
-                                return fetch_block_from_table(&mut client, table_id, block_number).await;
-                            } else {
-                                warn!("❌ Blocks table id field is not a string: {:?}", table_id_field.kind);
-                            }
-                        } else {
-                            warn!("❌ No 'id' field in blocks table struct");
-                        }
-                    } else {
-                        warn!("❌ Blocks field is not a struct: {:?}", blocks_field.kind);
-                    }
-                } else {
-                    warn!("❌ No 'blocks' field found in AppInstance. Available fields: {:?}", struct_value.fields.keys().collect::<Vec<_>>());
-                }
-            }
-        } else {
-            warn!("❌ No JSON found for AppInstance {}", app_instance);
-        }
-    } else {
-        warn!("❌ No object returned for AppInstance {}", app_instance);
-    }
-    
-    Ok(None)
+    // Use the blocks_table_id directly from the AppInstance struct
+    fetch_block_from_table(&mut client, &app_instance.blocks_table_id, block_number).await
 }
 
 /// Fetch multiple Blocks from AppInstance for a range of block numbers

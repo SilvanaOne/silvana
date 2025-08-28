@@ -12,7 +12,7 @@ pub async fn check_settlement_opportunity(
     debug!("Checking settlement opportunity for block {}", block_number);
     
     // Fetch Block details
-    let block_details = match fetch_block_info(&app_instance.id, block_number).await {
+    let block_details = match fetch_block_info(app_instance, block_number).await {
         Ok(Some(block)) => block,
         Ok(None) => {
             debug!("No block found for block number {}", block_number);
@@ -25,7 +25,7 @@ pub async fn check_settlement_opportunity(
     };
     
     // Fetch ProofCalculation to check for block_proof
-    let proof_calc = match fetch_proof_calculation(&app_instance.id, block_number).await {
+    let proof_calc = match fetch_proof_calculation(app_instance, block_number).await {
         Ok(proof_calc) => proof_calc,
         Err(e) => {
             warn!("Failed to fetch proof calculation for block {}: {}", block_number, e);
@@ -202,19 +202,28 @@ pub async fn fetch_pending_job_from_instances(
     let mut all_jobs: Vec<(u64, String, String, String, Option<u64>, bool)> = Vec::new(); 
     // (job_sequence, app_instance_id, jobs_table_id, app_instance_method, next_scheduled_at, is_settlement_job)
     
-    for app_instance in app_instances {
+    for app_instance_id in app_instances {
+        // First fetch the AppInstance object
+        let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+            Ok(app_inst) => app_inst,
+            Err(e) => {
+                warn!("Could not fetch AppInstance {}: {}", app_instance_id, e);
+                continue;
+            }
+        };
+        
         // Get Jobs table ID from the AppInstance
-        let (_app_instance_id, jobs_table_id) = match get_jobs_info_from_app_instance(app_instance).await? {
+        let (_app_instance_id, jobs_table_id) = match get_jobs_info_from_app_instance(&app_instance).await? {
             Some(info) => info,
             None => {
-                warn!("Could not extract Jobs info from app_instance {}", app_instance);
+                warn!("Could not extract Jobs info from app_instance {}", app_instance_id);
                 continue;
             }
         };
         
         // Use the index to get pending job IDs for this method
         let job_sequences = fetch_pending_job_sequences_from_app_instance(
-            app_instance,
+            &app_instance,
             developer,
             agent,
             agent_method,
@@ -225,7 +234,7 @@ pub async fn fetch_pending_job_from_instances(
         }
         
         // Check if there's a settlement job first
-        let settlement_job_id = sui::fetch::app_instance::get_settlement_job_id_for_instance(app_instance).await
+        let settlement_job_id = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await
             .unwrap_or(None);
         
         // Batch fetch all jobs at once
@@ -238,7 +247,7 @@ pub async fn fetch_pending_job_from_instances(
                 if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
                     all_jobs.push((
                         settle_id,
-                        app_instance.clone(),
+                        app_instance_id.clone(),
                         jobs_table_id.clone(),
                         job.app_instance_method.clone(),
                         job.next_scheduled_at,
@@ -262,7 +271,7 @@ pub async fn fetch_pending_job_from_instances(
             if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
                 all_jobs.push((
                     *job_sequence, 
-                    app_instance.clone(), 
+                    app_instance_id.clone(), 
                     jobs_table_id.clone(),
                     job.app_instance_method.clone(),
                     job.next_scheduled_at,
@@ -349,11 +358,20 @@ pub async fn fetch_all_pending_jobs(
     let mut all_pending_jobs = Vec::new();
     
     for app_instance_id in app_instance_ids {
+        // First fetch the AppInstance object
+        let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+            Ok(app_inst) => app_inst,
+            Err(e) => {
+                error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
+                continue;
+            }
+        };
+        
         // First check for settlement job if not in check-only mode
         if !only_check {
-            if let Ok(Some(settle_job_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(app_instance_id).await {
+            if let Ok(Some(settle_job_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await {
                 // Fetch the settlement job to check if it's pending and ready
-                if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(app_instance_id).await {
+                if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(&app_instance).await {
                     if let Ok(Some(settle_job)) = fetch_job_by_id(&jobs_table_id, settle_job_id).await {
                         // Check if it's pending and ready to run
                         if matches!(settle_job.status, sui::fetch::JobStatus::Pending) &&
@@ -367,7 +385,7 @@ pub async fn fetch_all_pending_jobs(
         }
         
         // Fetch regular pending jobs
-        match fetch_pending_jobs_from_app_instance(app_instance_id, only_check).await {
+        match fetch_pending_jobs_from_app_instance(&app_instance, only_check).await {
             Ok(job_opt) => {
                 if !only_check {
                     if let Some(job) = job_opt {
