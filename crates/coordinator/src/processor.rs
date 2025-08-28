@@ -4,9 +4,7 @@ use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, C
 use crate::state::SharedState;
 use std::collections::HashMap;
 use std::time::Duration;
-use sui_rpc::proto::sui::rpc::v2beta2::{
-    GetTransactionRequest, SubscribeCheckpointsResponse,
-};
+use sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsResponse;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tracing::{info, warn, error};
@@ -307,65 +305,14 @@ impl EventProcessor {
         tx_index: usize,
         event_index: usize,
     ) -> Result<Option<sui_rpc::proto::sui::rpc::v2beta2::Event>> {
-        // First, we need to get the transaction digest from the checkpoint
-        // We'll fetch all transaction digests and select the one we need
-        let checkpoint_request = sui_rpc::proto::sui::rpc::v2beta2::GetCheckpointRequest {
-            checkpoint_id: Some(sui_rpc::proto::sui::rpc::v2beta2::get_checkpoint_request::CheckpointId::SequenceNumber(checkpoint_seq)),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["transactions.digest".to_string()],
-            }),
-        };
-
-        let mut client = self.state.get_sui_client();
-        let checkpoint_response = client
-            .ledger_client()
-            .get_checkpoint(checkpoint_request)
-            .await
-            .map_err(|e| CoordinatorError::RpcConnectionError(e.to_string()))?;
-
-        // Get the transaction digest
-        let tx_digest = if let Some(checkpoint) = checkpoint_response.into_inner().checkpoint {
-            if let Some(transaction) = checkpoint.transactions.get(tx_index) {
-                transaction.digest.clone()
-            } else {
-                return Ok(None);
-            }
-        } else {
-            return Ok(None);
-        };
-
-        // Now fetch just the transaction with event contents
-        if let Some(digest) = tx_digest {
-            let tx_request = GetTransactionRequest {
-                digest: Some(digest),
-                read_mask: Some(prost_types::FieldMask {
-                    paths: vec![
-                        "events.events.package_id".to_string(),
-                        "events.events.module".to_string(),
-                        "events.events.sender".to_string(),
-                        "events.events.event_type".to_string(),
-                        "events.events.contents".to_string(),
-                    ],
-                }),
-            };
-
-            let tx_response = client
-                .ledger_client()
-                .get_transaction(tx_request)
-                .await
-                .map_err(|e| CoordinatorError::RpcConnectionError(e.to_string()))?;
-
-            // Extract the specific event from the transaction
-            if let Some(transaction) = tx_response.into_inner().transaction {
-                if let Some(tx_events) = transaction.events {
-                    if let Some(event) = tx_events.events.get(event_index) {
-                        return Ok(Some(event.clone()));
-                    }
-                }
-            }
-        }
-
-        Ok(None)
+        // Use the helper function from the sui crate's checkpoint module
+        sui::fetch::checkpoint::fetch_event_with_contents(
+            checkpoint_seq,
+            tx_index,
+            event_index,
+        )
+        .await
+        .map_err(|e| CoordinatorError::RpcConnectionError(e.to_string()))
     }
 }
 
