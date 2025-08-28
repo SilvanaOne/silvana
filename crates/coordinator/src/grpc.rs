@@ -280,7 +280,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             if removed_job.is_some() {
                 let elapsed = start_time.elapsed();
                 info!(
-                    "✅ CompleteJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, job_id={}, tx={}, time={:?}",
+                    "✅ CompleteJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, job_id={}, tx={}, time={}ms",
                     agent_job.app_instance,
                     agent_job.developer,
                     agent_job.agent,
@@ -289,7 +289,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     agent_job.pending_job.app_instance_method,
                     req.job_id,
                     tx,
-                    elapsed
+                    elapsed.as_millis()
                 );
             } else {
                 warn!("Job {} completed on blockchain but was not found in agent database", req.job_id);
@@ -301,9 +301,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
         } else {
             let elapsed = start_time.elapsed();
             warn!(
-                "❌ CompleteJob: job_id={}, failed_on_blockchain, time={:?}",
+                "❌ CompleteJob: job_id={}, failed_on_blockchain, time={}ms",
                 req.job_id,
-                elapsed
+                elapsed.as_millis()
             );
             Ok(Response::new(CompleteJobResponse {
                 success: false,
@@ -855,12 +855,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                 let elapsed = start_time.elapsed();
                 info!(
-                    "✅ GetSequenceStates: session={}, job_id={}, seq={}, count={}, time={:?}",
+                    "✅ GetSequenceStates: session={}, job_id={}, seq={}, count={}, time={}ms",
                     req.session_id,
                     req.job_id,
                     req.sequence,
                     proto_states.len(),
-                    elapsed
+                    elapsed.as_millis()
                 );
                 
                 Ok(Response::new(GetSequenceStatesResponse {
@@ -1018,105 +1018,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Get SUI client from shared state
         let mut client = self.state.get_sui_client();
 
-        // Fetch the AppInstance object
-        let formatted_id = if app_instance.starts_with("0x") {
-            app_instance.clone()
-        } else {
-            format!("0x{}", app_instance)
-        };
-
-        // Get the AppInstance to find proof_calculations ObjectTable
-        let app_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
-            object_id: Some(formatted_id.clone()),
-            version: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["json".to_string()],
-            }),
-        };
-
-        let app_response = match client.ledger_client().get_object(app_request).await {
-            Ok(resp) => resp.into_inner(),
-            Err(e) => {
-                error!("Failed to fetch AppInstance: {}", e);
-                return Ok(Response::new(GetProofResponse {
-                    success: false,
-                    proof: None,
-                    message: Some(format!("Failed to fetch AppInstance: {}", e)),
-                }));
-            }
-        };
-
-        // Extract proof_calculations ObjectTable ID
-        let proof_calc_table_id = if let Some(proto_object) = app_response.object {
-            if let Some(json_value) = &proto_object.json {
-                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                    if let Some(proofs_field) = struct_value.fields.get("proof_calculations") {
-                        if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
-                            if let Some(table_id_field) = proofs_struct.fields.get("id") {
-                                if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
-                                    Some(table_id.clone())
-                                } else { None }
-                            } else { None }
-                        } else { None }
-                    } else { None }
-                } else { None }
-            } else { None }
-        } else { None };
-
-        let proof_calc_table_id = match proof_calc_table_id {
-            Some(id) => id,
-            None => {
-                error!("Failed to extract proof_calculations table ID from AppInstance");
-                return Ok(Response::new(GetProofResponse {
-                    success: false,
-                    proof: None,
-                    message: Some("Failed to extract proof_calculations table ID".to_string()),
-                }));
-            }
-        };
-
-        debug!("Found proof_calculations table ID: {}", proof_calc_table_id);
-
-        // Fetch the ProofCalculation for the given block_number
-        // First, list dynamic fields to find the field for our block_number
-        let list_request = sui_rpc::proto::sui::rpc::v2beta2::ListDynamicFieldsRequest {
-            parent: Some(proof_calc_table_id.clone()),
-            page_size: Some(100),
-            page_token: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["field_id".to_string(), "name_value".to_string()],
-            }),
-        };
-
-        let list_response = match client.live_data_client().list_dynamic_fields(list_request).await {
-            Ok(resp) => resp.into_inner(),
-            Err(e) => {
-                error!("Failed to list dynamic fields: {}", e);
-                return Ok(Response::new(GetProofResponse {
-                    success: false,
-                    proof: None,
-                    message: Some(format!("Failed to list dynamic fields: {}", e)),
-                }));
-            }
-        };
-
-        // Find the field with our block_number
-        let mut proof_calc_field_id = None;
-        for field in &list_response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // The name_value is BCS-encoded u64 (block_number)
-                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
-                    if field_block_number == req.block_number {
-                        proof_calc_field_id = field.field_id.clone();
-                        break;
-                    }
-                }
-            }
-        }
-
-        let proof_calc_field_id = match proof_calc_field_id {
-            Some(id) => id,
-            None => {
+        // Fetch the ProofCalculation using the existing function from sui::fetch::prover
+        let proof_calculation = match sui::fetch::fetch_proof_calculation(
+            &mut client,
+            &app_instance,
+            req.block_number
+        ).await {
+            Ok(Some(proof_calc)) => proof_calc,
+            Ok(None) => {
                 warn!("No ProofCalculation found for block {}", req.block_number);
                 return Ok(Response::new(GetProofResponse {
                     success: false,
@@ -1124,21 +1033,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     message: Some(format!("No ProofCalculation found for block {}", req.block_number)),
                 }));
             }
-        };
-
-        // Fetch the ProofCalculation object
-        let proof_calc_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
-            object_id: Some(proof_calc_field_id.clone()),
-            version: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["json".to_string()],
-            }),
-        };
-
-        let proof_calc_response = match client.ledger_client().get_object(proof_calc_request).await {
-            Ok(resp) => resp.into_inner(),
             Err(e) => {
-                error!("Failed to fetch ProofCalculation field: {}", e);
+                error!("Failed to fetch ProofCalculation: {}", e);
                 return Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
@@ -1147,146 +1043,24 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Extract the actual ProofCalculation object ID from the Field wrapper
-        let proof_calc_object_id = if let Some(proof_object) = proof_calc_response.object {
-            if let Some(proof_json) = &proof_object.json {
-                debug!("ProofCalculation field JSON structure: {:?}", proof_json);
-                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_json.kind {
-                    if let Some(value_field) = struct_value.fields.get("value") {
-                        if let Some(prost_types::value::Kind::StringValue(object_id)) = &value_field.kind {
-                            Some(object_id.clone())
-                        } else { 
-                            debug!("value field is not a string: {:?}", value_field);
-                            None 
-                        }
-                    } else { 
-                        debug!("No 'value' field found in struct");
-                        None 
-                    }
-                } else { None }
-            } else { None }
-        } else { None };
+        debug!("Found ProofCalculation for block {} with {} proofs", 
+            req.block_number, proof_calculation.proofs.len());
 
-        let proof_calc_object_id = match proof_calc_object_id {
-            Some(id) => {
-                debug!("Extracted ProofCalculation object ID: {}", id);
-                id
-            },
-            None => {
-                error!("Failed to extract ProofCalculation object ID");
-                return Ok(Response::new(GetProofResponse {
-                    success: false,
-                    proof: None,
-                    message: Some("Failed to extract ProofCalculation object ID".to_string()),
-                }));
-            }
-        };
-
-        // Fetch the actual ProofCalculation object
-        let actual_proof_calc_request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
-            object_id: Some(proof_calc_object_id),
-            version: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["json".to_string()],
-            }),
-        };
-
-        let actual_proof_calc_response = match client.ledger_client().get_object(actual_proof_calc_request).await {
-            Ok(resp) => resp.into_inner(),
-            Err(e) => {
-                error!("Failed to fetch actual ProofCalculation: {}", e);
-                return Ok(Response::new(GetProofResponse {
-                    success: false,
-                    proof: None,
-                    message: Some(format!("Failed to fetch ProofCalculation: {}", e)),
-                }));
-            }
-        };
-
-        // Extract the proofs VecMap and find our proof by sequences
+        // Find the proof with matching sequences
         let mut da_hash: Option<String> = None;
-        if let Some(proof_calc_object) = actual_proof_calc_response.object {
-            if let Some(proof_calc_json) = &proof_calc_object.json {
-                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &proof_calc_json.kind {
-                    // Get the proofs VecMap
-                    if let Some(proofs_field) = struct_value.fields.get("proofs") {
-                        if let Some(prost_types::value::Kind::StructValue(proofs_struct)) = &proofs_field.kind {
-                            if let Some(contents) = proofs_struct.fields.get("contents") {
-                                if let Some(prost_types::value::Kind::ListValue(list_value)) = &contents.kind {
-                                    debug!("Found {} proofs in ProofCalculation", list_value.values.len());
-                                    // Search through the VecMap entries for matching sequences
-                                    'outer: for (i, entry) in list_value.values.iter().enumerate() {
-                                        if let Some(prost_types::value::Kind::StructValue(entry_struct)) = &entry.kind {
-                                            // Check the key (sequences)
-                                            if let Some(key_field) = entry_struct.fields.get("key") {
-                                                if let Some(prost_types::value::Kind::ListValue(key_list)) = &key_field.kind {
-                                                    let mut key_sequences = Vec::new();
-                                                    for seq_val in &key_list.values {
-                                                        if let Some(prost_types::value::Kind::StringValue(seq_str)) = &seq_val.kind {
-                                                            if let Ok(seq) = seq_str.parse::<u64>() {
-                                                                key_sequences.push(seq);
-                                                            }
-                                                        } else if let Some(prost_types::value::Kind::NumberValue(seq_num)) = &seq_val.kind {
-                                                            key_sequences.push(seq_num.round() as u64);
-                                                        }
-                                                    }
-                                                    
-                                                    debug!("Proof {}: sequences={:?}, looking for={:?}", i, key_sequences, req.sequences);
-                                                    
-                                                    // Check if sequences match
-                                                    if key_sequences == req.sequences {
-                                                        debug!("Found matching proof for sequences {:?}", req.sequences);
-                                                        // Found our proof! Extract da_hash
-                                                        if let Some(value_field) = entry_struct.fields.get("value") {
-                                                            if let Some(prost_types::value::Kind::StructValue(proof_struct)) = &value_field.kind {
-                                                                // Don't check job_id - the proof may have been calculated by a different job
-                                                                // We only care that app_instance, block_number, and sequences match
-                                                                
-                                                                // Get da_hash from the Proof (Option<String> field)
-                                                                if let Some(da_hash_field) = proof_struct.fields.get("da_hash") {
-                                                                    match &da_hash_field.kind {
-                                                                        // Direct string value (Some case)
-                                                                        Some(prost_types::value::Kind::StringValue(hash)) => {
-                                                                            da_hash = Some(hash.clone());
-                                                                            debug!("Found da_hash: {}", hash);
-                                                                            break 'outer;
-                                                                        }
-                                                                        // Null value (None case)
-                                                                        Some(prost_types::value::Kind::NullValue(_)) => {
-                                                                            debug!("da_hash is null for this proof");
-                                                                            // Continue searching for another proof with da_hash
-                                                                        }
-                                                                        // Struct with Some field (older format compatibility)
-                                                                        Some(prost_types::value::Kind::StructValue(option_struct)) => {
-                                                                            if let Some(some_field) = option_struct.fields.get("Some") {
-                                                                                if let Some(prost_types::value::Kind::StringValue(hash)) = &some_field.kind {
-                                                                                    da_hash = Some(hash.clone());
-                                                                                    debug!("Found da_hash in Some variant: {}", hash);
-                                                                                    break 'outer;
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                        _ => {
-                                                                            warn!("Unexpected da_hash field type: {:?}", da_hash_field.kind);
-                                                                        }
-                                                                    }
-                                                                } else {
-                                                                    warn!("da_hash field not found in proof struct");
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+        for proof in &proof_calculation.proofs {
+            debug!("Checking proof: sequences={:?}, looking for={:?}", proof.sequences, req.sequences);
+            if proof.sequences == req.sequences {
+                debug!("Found matching proof for sequences {:?}", req.sequences);
+                da_hash = proof.da_hash.clone();
+                if da_hash.is_some() {
+                    debug!("Found da_hash: {:?}", da_hash);
+                    break;
                 }
+                // Continue searching if this proof has no da_hash
+                debug!("da_hash is null for this proof, continuing search");
             }
-        };
+        }
 
         let da_hash = match da_hash {
             Some(hash) => hash,
@@ -1647,10 +1421,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
             None => {
                 let elapsed = start_time.elapsed();
                 info!(
-                    "⏳ GetBlockProof: block={}, job_id={}, proof_not_ready, time={:?}",
+                    "⏳ GetBlockProof: block={}, job_id={}, proof_not_ready, time={}ms",
                     req.block_number,
                     req.job_id,
-                    elapsed
+                    elapsed.as_millis()
                 );
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
@@ -1672,11 +1446,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(Some(data)) => {
                 let elapsed = start_time.elapsed();
                 info!(
-                    "✅ GetBlockProof: block={}, job_id={}, da_hash={}, time={:?}",
+                    "✅ GetBlockProof: block={}, job_id={}, da_hash={}, time={}ms",
                     req.block_number,
                     req.job_id,
                     da_hash,
-                    elapsed
+                    elapsed.as_millis()
                 );
                 Ok(Response::new(GetBlockProofResponse {
                     success: true,
@@ -1687,11 +1461,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(None) => {
                 let elapsed = start_time.elapsed();
                 warn!(
-                    "❌ GetBlockProof: block={}, job_id={}, da_hash={}, no_data, time={:?}",
+                    "❌ GetBlockProof: block={}, job_id={}, da_hash={}, no_data, time={}ms",
                     req.block_number,
                     req.job_id,
                     da_hash,
-                    elapsed
+                    elapsed.as_millis()
                 );
                 Ok(Response::new(GetBlockProofResponse {
                     success: false,

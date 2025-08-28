@@ -342,9 +342,9 @@ impl JobSearcher {
             Ok(digest) => {
                 let pull_duration = pull_start.elapsed();
                 info!(
-                    "Docker image pulled successfully with digest: {} in {} sec",
+                    "Docker image pulled successfully with digest: {} in {:.1} sec",
                     digest,
-                    pull_duration.as_secs()
+                    pull_duration.as_secs_f64()
                 );
 
                 // Verify SHA256 if provided

@@ -346,8 +346,8 @@ async fn main() -> Result<()> {
                 // Log timing for the entire cycle
                 let cycle_duration = cycle_start.elapsed();
                 info!(
-                    "🔬 Proof analysis cycle completed in {}ms for {} app_instances ({} analyzed, {} errors)",
-                    cycle_duration.as_millis(),
+                    "🔬 Proof analysis cycle completed in {:.2}s for {} app_instances ({} analyzed, {} errors)",
+                    cycle_duration.as_secs_f64(),
                     app_instances.len(),
                     analyzed_count,
                     error_count
