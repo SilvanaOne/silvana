@@ -1,9 +1,9 @@
 use crate::job_id::generate_job_id;
-use sui::fetch::Job;
 use crate::state::SharedState;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use sui::fetch::Job;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -58,10 +58,10 @@ impl AgentJob {
 pub struct AgentJobDatabase {
     /// Jobs ready to be sent (start_job transaction completed)
     ready_jobs: Arc<RwLock<HashMap<String, AgentJob>>>, // key: agent_key (dev/agent/method)
-    
+
     /// Jobs sent to agents but not yet completed/failed
     pending_jobs: Arc<RwLock<HashMap<String, AgentJob>>>, // key: job_id
-    
+
     /// Job lookup by job_id for quick access
     job_lookup: Arc<RwLock<HashMap<String, AgentJob>>>, // key: job_id
 }
@@ -79,13 +79,17 @@ impl AgentJobDatabase {
     /// This job is ready to be returned by get_job
     pub async fn add_ready_job(&self, mut agent_job: AgentJob) {
         agent_job.start_tx_sent = true;
-        let agent_key = self.get_agent_key(&agent_job.developer, &agent_job.agent, &agent_job.agent_method);
-        
+        let agent_key = self.get_agent_key(
+            &agent_job.developer,
+            &agent_job.agent,
+            &agent_job.agent_method,
+        );
+
         {
             let mut ready = self.ready_jobs.write().await;
             ready.insert(agent_key.clone(), agent_job.clone());
         }
-        
+
         {
             let mut lookup = self.job_lookup.write().await;
             lookup.insert(agent_job.job_id.clone(), agent_job.clone());
@@ -100,13 +104,13 @@ impl AgentJobDatabase {
     /// Get and remove a ready job for the specified agent method
     /// Moves the job to pending_jobs for tracking
     pub async fn get_ready_job(
-        &self, 
-        developer: &str, 
-        agent: &str, 
-        agent_method: &str
+        &self,
+        developer: &str,
+        agent: &str,
+        agent_method: &str,
     ) -> Option<AgentJob> {
         let agent_key = self.get_agent_key(developer, agent, agent_method);
-        
+
         let job = {
             let mut ready = self.ready_jobs.write().await;
             ready.remove(&agent_key)
@@ -118,15 +122,18 @@ impl AgentJobDatabase {
                 let mut pending = self.pending_jobs.write().await;
                 pending.insert(job.job_id.clone(), job.clone());
             }
-            
+
             info!(
                 "Retrieved ready job {} for agent {}/{}:{}",
                 job.job_id, developer, agent, agent_method
             );
-            
+
             Some(job)
         } else {
-            debug!("No ready jobs for agent {}/{}:{}", developer, agent, agent_method);
+            debug!(
+                "No ready jobs for agent {}/{}:{}",
+                developer, agent, agent_method
+            );
             None
         }
     }
@@ -143,7 +150,7 @@ impl AgentJobDatabase {
                 let mut lookup = self.job_lookup.write().await;
                 lookup.remove(job_id);
             }
-            
+
             info!("Completed job {}", job_id);
             Some(job)
         } else {
@@ -164,7 +171,7 @@ impl AgentJobDatabase {
                 let mut lookup = self.job_lookup.write().await;
                 lookup.remove(job_id);
             }
-            
+
             info!("Failed job {}", job_id);
             Some(job)
         } else {
@@ -185,7 +192,7 @@ impl AgentJobDatabase {
                 let mut lookup = self.job_lookup.write().await;
                 lookup.remove(job_id);
             }
-            
+
             info!("Terminated job {}", job_id);
             Some(job)
         } else {
@@ -206,12 +213,12 @@ impl AgentJobDatabase {
             let mut pending = self.pending_jobs.write().await;
             pending.insert(agent_job.job_id.clone(), agent_job.clone());
         }
-        
+
         {
             let mut lookup = self.job_lookup.write().await;
             lookup.insert(agent_job.job_id.clone(), agent_job.clone());
         }
-        
+
         info!("Added job {} to pending jobs", agent_job.job_id);
     }
 
@@ -233,16 +240,19 @@ impl AgentJobDatabase {
     ) -> Vec<AgentJob> {
         let mut jobs_to_fail = Vec::new();
         let agent_key = self.get_agent_key(developer, agent, agent_method);
-        
-        debug!("Cleanup: Looking for jobs to clean up for agent key: {}", agent_key);
-        
+
+        debug!(
+            "Cleanup: Looking for jobs to clean up for agent key: {}",
+            agent_key
+        );
+
         // Clean up ready jobs (jobs that had start_job called but were never retrieved by GetJob)
         {
             let mut ready = self.ready_jobs.write().await;
             if let Some(ready_job) = ready.remove(&agent_key) {
                 debug!("Cleanup: Found ready job to fail: {}", ready_job.job_id);
                 jobs_to_fail.push(ready_job.clone());
-                
+
                 // Also remove from lookup
                 let mut lookup = self.job_lookup.write().await;
                 lookup.remove(&ready_job.job_id);
@@ -250,27 +260,34 @@ impl AgentJobDatabase {
                 debug!("Cleanup: No ready jobs found for agent key: {}", agent_key);
             }
         }
-        
+
         // Clean up pending jobs (jobs that were retrieved by GetJob but not completed/failed)
         {
             let mut pending = self.pending_jobs.write().await;
             let mut lookup = self.job_lookup.write().await;
-            
-            debug!("Cleanup: Checking {} pending jobs for matches", pending.len());
-            
+
+            debug!(
+                "Cleanup: Checking {} pending jobs for matches",
+                pending.len()
+            );
+
             // Find jobs matching the agent method
             let matching_jobs: Vec<String> = pending
                 .iter()
                 .filter(|(_, job)| {
-                    job.developer == developer 
-                        && job.agent == agent 
+                    job.developer == developer
+                        && job.agent == agent
                         && job.agent_method == agent_method
                 })
                 .map(|(job_id, _)| job_id.clone())
                 .collect();
-            
-            debug!("Cleanup: Found {} matching pending jobs to fail: {:?}", matching_jobs.len(), matching_jobs);
-            
+
+            debug!(
+                "Cleanup: Found {} matching pending jobs to fail: {:?}",
+                matching_jobs.len(),
+                matching_jobs
+            );
+
             // Remove matching jobs and collect them for failing
             for job_id in matching_jobs {
                 if let Some(job) = pending.remove(&job_id) {
@@ -280,14 +297,17 @@ impl AgentJobDatabase {
                 }
             }
         }
-        
+
         if !jobs_to_fail.is_empty() {
             info!(
                 "Cleaned up {} total jobs (ready + pending) for agent {}/{}:{}",
-                jobs_to_fail.len(), developer, agent, agent_method
+                jobs_to_fail.len(),
+                developer,
+                agent,
+                agent_method
             );
         }
-        
+
         jobs_to_fail
     }
 
@@ -301,22 +321,22 @@ impl AgentJobDatabase {
         agent_method: &str,
     ) -> Vec<AgentJob> {
         let mut jobs_to_fail = Vec::new();
-        
+
         {
             let mut pending = self.pending_jobs.write().await;
             let mut lookup = self.job_lookup.write().await;
-            
+
             // Find jobs matching the agent method
             let matching_jobs: Vec<String> = pending
                 .iter()
                 .filter(|(_, job)| {
-                    job.developer == developer 
-                        && job.agent == agent 
+                    job.developer == developer
+                        && job.agent == agent
                         && job.agent_method == agent_method
                 })
                 .map(|(job_id, _)| job_id.clone())
                 .collect();
-            
+
             // Remove matching jobs and collect them for failing
             for job_id in matching_jobs {
                 if let Some(job) = pending.remove(&job_id) {
@@ -325,14 +345,17 @@ impl AgentJobDatabase {
                 }
             }
         }
-        
+
         if !jobs_to_fail.is_empty() {
             info!(
                 "Cleaned up {} pending jobs for agent {}/{}:{}",
-                jobs_to_fail.len(), developer, agent, agent_method
+                jobs_to_fail.len(),
+                developer,
+                agent,
+                agent_method
             );
         }
-        
+
         jobs_to_fail
     }
 
@@ -389,6 +412,8 @@ mod tests {
             data: vec![0x01, 0x02, 0x03],
             status: JobStatus::Pending,
             attempts: 1,
+            interval_ms: None,
+            next_scheduled_at: None,
             created_at: 1234567890,
             updated_at: 1234567890,
         }
@@ -398,9 +423,9 @@ mod tests {
     async fn test_agent_job_creation() {
         let state = create_test_state();
         let pending_job = create_test_pending_job();
-        
+
         let agent_job = AgentJob::new(pending_job, &state);
-        
+
         assert!(agent_job.job_id.starts_with("sn"));
         assert_eq!(agent_job.job_sequence, 1);
         assert_eq!(agent_job.developer, "TestDev");
@@ -412,32 +437,34 @@ mod tests {
         let db = AgentJobDatabase::new();
         let state = create_test_state();
         let pending_job = create_test_pending_job();
-        
+
         let agent_job = AgentJob::new(pending_job, &state);
         let job_id = agent_job.job_id.clone();
-        
+
         // Add ready job
         db.add_ready_job(agent_job).await;
-        
+
         // Check stats
         let (ready, pending) = db.get_stats().await;
         assert_eq!(ready, 1);
         assert_eq!(pending, 0);
-        
+
         // Get ready job (moves to pending)
-        let retrieved = db.get_ready_job("TestDev", "TestAgent", "test_method").await;
+        let retrieved = db
+            .get_ready_job("TestDev", "TestAgent", "test_method")
+            .await;
         assert!(retrieved.is_some());
         assert_eq!(retrieved.as_ref().unwrap().job_id, job_id);
-        
+
         // Check stats after retrieval
         let (ready, pending) = db.get_stats().await;
         assert_eq!(ready, 0);
         assert_eq!(pending, 1);
-        
+
         // Complete job
         let completed = db.complete_job(&job_id).await;
         assert!(completed.is_some());
-        
+
         // Check final stats
         let (ready, pending) = db.get_stats().await;
         assert_eq!(ready, 0);
@@ -449,17 +476,20 @@ mod tests {
         let db = AgentJobDatabase::new();
         let state = create_test_state();
         let pending_job = create_test_pending_job();
-        
+
         let agent_job = AgentJob::new(pending_job, &state);
-        
+
         // Add and retrieve job to make it pending
         db.add_ready_job(agent_job).await;
-        db.get_ready_job("TestDev", "TestAgent", "test_method").await;
-        
+        db.get_ready_job("TestDev", "TestAgent", "test_method")
+            .await;
+
         // Cleanup pending jobs
-        let jobs_to_fail = db.cleanup_pending_jobs_for_agent("TestDev", "TestAgent", "test_method").await;
+        let jobs_to_fail = db
+            .cleanup_pending_jobs_for_agent("TestDev", "TestAgent", "test_method")
+            .await;
         assert_eq!(jobs_to_fail.len(), 1);
-        
+
         // Check stats after cleanup
         let (ready, pending) = db.get_stats().await;
         assert_eq!(ready, 0);
@@ -471,35 +501,39 @@ mod tests {
         let db = AgentJobDatabase::new();
         let state = create_test_state();
         let pending_job = create_test_pending_job();
-        
+
         let agent_job = AgentJob::new(pending_job, &state);
-        
+
         // Add job as ready
         db.add_ready_job(agent_job).await;
-        
+
         // Retrieve job (becomes pending)
-        let retrieved_job = db.get_ready_job("TestDev", "TestAgent", "test_method").await;
+        let retrieved_job = db
+            .get_ready_job("TestDev", "TestAgent", "test_method")
+            .await;
         assert!(retrieved_job.is_some());
-        
+
         // Check stats: should have 0 ready, 1 pending
         let (ready, pending) = db.get_stats().await;
         assert_eq!(ready, 0);
         assert_eq!(pending, 1);
-        
+
         // Add another ready job (simulating a new job arriving)
         let pending_job2 = create_test_pending_job();
         let agent_job2 = AgentJob::new(pending_job2, &state);
         db.add_ready_job(agent_job2).await;
-        
+
         // Check stats: should have 1 ready, 1 pending
         let (ready, pending) = db.get_stats().await;
         assert_eq!(ready, 1);
         assert_eq!(pending, 1);
-        
+
         // Cleanup all jobs for this agent
-        let jobs_to_fail = db.cleanup_all_jobs_for_agent("TestDev", "TestAgent", "test_method").await;
+        let jobs_to_fail = db
+            .cleanup_all_jobs_for_agent("TestDev", "TestAgent", "test_method")
+            .await;
         assert_eq!(jobs_to_fail.len(), 2); // Should cleanup both ready and pending
-        
+
         // Check stats after cleanup
         let (ready, pending) = db.get_stats().await;
         assert_eq!(ready, 0);
