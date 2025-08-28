@@ -10,7 +10,10 @@ describe("Create App", async () => {
   it("should create app", async () => {
     // Use default values for test
     appID = await createApp({
-      contractAddress: "B62qmZB4E4KhmpYwoPDHe5c4yeQeAreCEwwgkGUrqSa6Ma3uC2RDZRY",
+      contractAddress:
+        "B62qmZB4E4KhmpYwoPDHe5c4yeQeAreCEwwgkGUrqSa6Ma3uC2RDZRY",
+      adminAddress:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       chain: "mina:devnet",
       nonce: 1,
     });

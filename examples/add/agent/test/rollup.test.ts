@@ -20,7 +20,10 @@ import {
 } from "o1js";
 import { getSum } from "./helpers/sum.js";
 import { getState } from "./helpers/state.js";
-import { deserializeTransitionData, processCommitments } from "../src/transition.js";
+import {
+  deserializeTransitionData,
+  processCommitments,
+} from "../src/transition.js";
 // Removed unused imports - scalar, R, rScalarPow now come from processCommitments
 
 let appID: string | undefined = undefined;
@@ -33,7 +36,10 @@ describe("Add Rollup", async () => {
     console.log("Creating a fresh app for rollup testing...");
     // Use default values for test
     appID = await createApp({
-      contractAddress: "B62qmZB4E4KhmpYwoPDHe5c4yeQeAreCEwwgkGUrqSa6Ma3uC2RDZRY",
+      contractAddress:
+        "B62qmZB4E4KhmpYwoPDHe5c4yeQeAreCEwwgkGUrqSa6Ma3uC2RDZRY",
+      adminAddress:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       chain: "mina:devnet",
       nonce: 1,
     });
@@ -127,7 +133,9 @@ describe("Add Rollup", async () => {
     console.time("add proof");
 
     // Deserialize TransitionData from the event
-    const transitionData = deserializeTransitionData(result.jobCreatedEvent.data);
+    const transitionData = deserializeTransitionData(
+      result.jobCreatedEvent.data
+    );
 
     // Process commitments with all calculations done in transition.ts
     const commitments = processCommitments(transitionData);
@@ -183,7 +191,9 @@ describe("Add Rollup", async () => {
     console.time("multiply proof from JobCreatedEvent");
 
     // Deserialize TransitionData from the event
-    const transitionData = deserializeTransitionData(result.jobCreatedEvent.data);
+    const transitionData = deserializeTransitionData(
+      result.jobCreatedEvent.data
+    );
 
     // Process commitments with all calculations done in transition.ts
     const commitments = processCommitments(transitionData);
