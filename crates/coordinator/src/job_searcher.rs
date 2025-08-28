@@ -138,8 +138,8 @@ impl JobSearcher {
                             }
 
                             info!(
-                                "Starting Docker container for agent {}/{}/{}",
-                                job.developer, job.agent, job.agent_method
+                                "🐳 Starting Docker: dev={}, agent={}/{}, job_seq={}, app={}",
+                                job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
                             );
 
                             // Set state to running Docker
@@ -237,11 +237,10 @@ impl JobSearcher {
     async fn run_docker_container(&mut self, job: Job) {
         let job_start = Instant::now();
 
-        info!("🐳 Starting Docker container for job {}", job.job_sequence);
-        info!("  Developer: {}", job.developer);
-        info!("  Agent: {}", job.agent);
-        info!("  Method: {}", job.agent_method);
-        info!("  App Instance: {}", job.app_instance);
+        debug!(
+            "🐳 Running Docker: dev={}, agent={}/{}, job_seq={}, app={}",
+            job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
+        );
 
         // Generate Docker session keys
         let docker_session = match generate_docker_session() {
@@ -301,11 +300,12 @@ impl JobSearcher {
             };
 
         // Start the job on Sui blockchain before processing
-        info!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
+        debug!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
         let sui_client = self.state.get_sui_client();
         let mut sui_interface = SilvanaSuiInterface::new(sui_client);
 
         // Try to start the job on blockchain with retries to prevent race conditions
+        let start_time = Instant::now();
         if !sui_interface
             .try_start_job_with_retry(&job.app_instance, job.job_sequence, 3)
             .await
@@ -319,16 +319,17 @@ impl JobSearcher {
                 .await;
             return;
         }
-
-        info!(
-            "✅ Successfully started job {} on Sui blockchain",
-            job.job_sequence
-        );
+        let start_elapsed = start_time.elapsed();
 
         // Add job to agent database as ready for gRPC retrieval
         let agent_job = AgentJob::new(job.clone(), &self.state);
+        let job_id = agent_job.job_id.clone();
         self.state.get_agent_job_db().add_ready_job(agent_job).await;
-        info!("Added job {} to agent database as ready", job.job_sequence);
+        
+        info!(
+            "✅ Started job: seq={}, dev={}, agent={}/{}, job_id={}, time={:?}",
+            job.job_sequence, job.developer, job.agent, job.agent_method, job_id, start_elapsed
+        );
 
         // Pull the Docker image
         info!("Pulling Docker image: {}", agent_method.docker_image);
@@ -340,8 +341,11 @@ impl JobSearcher {
         {
             Ok(digest) => {
                 let pull_duration = pull_start.elapsed();
-                info!("⏱️ Docker image pull time: {}ms", pull_duration.as_millis());
-                info!("Image pulled successfully with digest: {}", digest);
+                info!(
+                    "Docker image pulled successfully with digest: {} in {} sec",
+                    digest,
+                    pull_duration.as_secs()
+                );
 
                 // Verify SHA256 if provided
                 if let Some(expected_sha) = &agent_method.docker_sha256 {
@@ -433,12 +437,12 @@ impl JobSearcher {
         match container_result {
             Ok(result) => {
                 let container_duration = container_start.elapsed();
-                info!(
+                debug!(
                     "⏱️ Container execution time: {}ms",
                     container_duration.as_millis()
                 );
-                info!(
-                    "Container completed for job {}: exit_code={}, internal_duration={}ms",
+                debug!(
+                    "Container completed for job {}: exit_code={}, time={}ms",
                     job.job_sequence, result.exit_code, result.duration_ms
                 );
                 if !result.logs.is_empty() {
@@ -447,21 +451,15 @@ impl JobSearcher {
 
                 let total_duration = job_start.elapsed();
                 info!(
-                    "⏱️ Total job processing time: {}ms",
-                    total_duration.as_millis()
-                );
-
-                info!(
-                    "Docker container finished. Job completion/failure will be handled by agent via gRPC calls."
+                    "✅ Docker completed: dev={}, agent={}/{}, job_seq={}, time={:?}",
+                    job.developer, job.agent, job.agent_method, job.job_sequence, total_duration
                 );
             }
             Err(e) => {
+                let total_duration = job_start.elapsed();
                 error!(
-                    "Failed to run container for job {}: {}",
-                    job.job_sequence, e
-                );
-                info!(
-                    "Container execution failed. Job failure will be handled by cleanup logic or agent gRPC calls."
+                    "❌ Docker failed: dev={}, agent={}/{}, job_seq={}, error={}, time={:?}",
+                    job.developer, job.agent, job.agent_method, job.job_sequence, e, total_duration
                 );
             }
         }
@@ -470,7 +468,7 @@ impl JobSearcher {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Clean up any jobs (ready or pending) that weren't completed/failed via gRPC
-        info!(
+        debug!(
             "Starting cleanup of uncompleted jobs for agent {}/{}:{}",
             job.developer, job.agent, job.agent_method
         );

@@ -63,7 +63,7 @@ impl DockerManager {
     }
 
     async fn load_image_from_tar(&self, tar_path: &str) -> Result<String> {
-        info!("Loading Docker image from tar file: {}", tar_path);
+        debug!("Loading Docker image from tar file: {}", tar_path);
         
         let path = Path::new(tar_path);
         if !path.exists() {
@@ -89,12 +89,12 @@ impl DockerManager {
             }
         }
 
-        info!("Image loaded successfully from tar");
+        debug!("Image loaded successfully from tar");
         self.get_image_digest(tar_path).await
     }
 
     async fn pull_image_from_registry(&self, image_source: &str) -> Result<String> {
-        info!("Pulling Docker image from registry: {}", image_source);
+        debug!("Pulling Docker image from registry: {}", image_source);
 
         let options = Some(CreateImageOptions {
             from_image: Some(image_source.to_string()),
@@ -111,7 +111,7 @@ impl DockerManager {
             }
         }
 
-        info!("Image pulled successfully");
+        debug!("Image pulled successfully");
         self.get_image_digest(image_source).await
     }
 
@@ -156,7 +156,7 @@ impl DockerManager {
     pub async fn run_container(&self, config: &ContainerConfig) -> Result<ContainerResult> {
         let start_time = Instant::now();
         
-        info!("Creating container from image: {}", config.image_name);
+        debug!("Creating container from image: {}", config.image_name);
         
         let container_name = format!(
             "silvana-{}-{}",
@@ -175,7 +175,13 @@ impl DockerManager {
             .create_container(create_options, container_config)
             .await?;
 
-        info!("Starting container: {}", container.id);
+        debug!("Starting container: {}", container.id);
+        
+        info!(
+            "🔄 Starting Docker: image={}, container_id={}",
+            config.image_name,
+            &container.id[..12] // Show first 12 chars of container ID
+        );
         self.docker
             .start_container(&container.id, None::<StartContainerOptions>)
             .await?;
@@ -188,7 +194,7 @@ impl DockerManager {
 
         let (exit_code, logs) = match result {
             Ok(Ok((code, logs))) => {
-                info!("Container completed with exit code: {}", code);
+                debug!("Container completed with exit code: {}", code);
                 (code, logs)
             }
             Ok(Err(e)) => {
@@ -298,7 +304,7 @@ impl DockerManager {
     }
 
     async fn wait_for_container_polling(&self, container_id: &str) -> Result<(i64, String)> {
-        info!("Polling container status (TEE mode)...");
+        debug!("Polling container status (TEE mode)...");
         
         loop {
             let details = self
@@ -309,7 +315,7 @@ impl DockerManager {
             if let Some(state) = details.state {
                 if state.running == Some(false) {
                     let exit_code = state.exit_code.unwrap_or(0);
-                    info!("Container exited with code: {}", exit_code);
+                    debug!("Container exited with code: {}", exit_code);
                     
                     let logs = self.get_container_logs(container_id).await?;
                     

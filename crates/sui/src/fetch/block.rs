@@ -186,7 +186,7 @@ async fn fetch_block_from_table(
     Ok(None)
 }
 
-/// Fetch Block object content by field ID (extracted from dynamic field lookup)
+/// Fetch Block object content by field ID (already verified to be the correct block)
 #[allow(dead_code)]
 async fn fetch_block_object_by_field_id(
     client: &mut Client,
@@ -195,7 +195,8 @@ async fn fetch_block_object_by_field_id(
 ) -> Result<Option<Block>> {
     debug!("📄 Fetching block {} content from field {}", block_number, field_id);
     
-    let block_request = GetObjectRequest {
+    // Fetch the Field wrapper object
+    let field_request = GetObjectRequest {
         object_id: Some(field_id.to_string()),
         version: None,
         read_mask: Some(prost_types::FieldMask {
@@ -206,21 +207,21 @@ async fn fetch_block_object_by_field_id(
         }),
     };
     
-    let block_response = client.ledger_client().get_object(block_request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-        format!("Failed to fetch block {}: {}", block_number, e)
+    let field_response = client.ledger_client().get_object(field_request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+        format!("Failed to fetch field wrapper for block {}: {}", block_number, e)
     ))?;
     
-    let block_response_inner = block_response.into_inner();
-    if let Some(block_object) = block_response_inner.object {
-        if let Some(block_json) = &block_object.json {
-            debug!("📄 Block field wrapper JSON retrieved for block {}", block_number);
+    let field_response_inner = field_response.into_inner();
+    if let Some(field_object) = field_response_inner.object {
+        if let Some(field_json) = &field_object.json {
+            debug!("📄 Field wrapper JSON retrieved for block {}", block_number);
             // Extract the actual block object ID from the Field wrapper
-            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &block_json.kind {
+            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &field_json.kind {
                 if let Some(value_field) = struct_value.fields.get("value") {
                     if let Some(prost_types::value::Kind::StringValue(block_object_id)) = &value_field.kind {
-                        //debug!("📄 Found block object ID: {}", block_object_id);
+                        debug!("📄 Found block object ID: {}", block_object_id);
                         // Fetch the actual block object
-                        let actual_block_request = GetObjectRequest {
+                        let block_request = GetObjectRequest {
                             object_id: Some(block_object_id.clone()),
                             version: None,
                             read_mask: Some(prost_types::FieldMask {
@@ -231,14 +232,16 @@ async fn fetch_block_object_by_field_id(
                             }),
                         };
                         
-                        let actual_block_response = client.ledger_client().get_object(actual_block_request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                            format!("Failed to fetch actual block {}: {}", block_number, e)
+                        let block_response = client.ledger_client().get_object(block_request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+                            format!("Failed to fetch block object {}: {}", block_number, e)
                         ))?;
                         
-                        if let Some(actual_block_object) = actual_block_response.into_inner().object {
-                            if let Some(actual_block_json) = &actual_block_object.json {
-                                debug!("🧱 Block {} JSON retrieved successfully", block_number);
-                                return extract_block_info_from_json(actual_block_json, block_number);
+                        if let Some(block_object) = block_response.into_inner().object {
+                            if let Some(block_json) = &block_object.json {
+                                debug!("🧱 Block {} JSON retrieved, extracting data", block_number);
+                                // We already know this is the correct block from the name_value check
+                                // so we can directly extract the block data
+                                return extract_block_info_from_json(block_json, block_number);
                             } else {
                                 warn!("❌ No JSON found for block object {}", block_number);
                             }

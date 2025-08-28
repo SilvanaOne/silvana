@@ -6,7 +6,7 @@ use sui_rpc::proto::sui::rpc::v2beta2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
 use sui_crypto::SuiSigner;
-use tracing::{debug, warn, error};
+use tracing::{debug, info, warn, error};
 use tokio::time::{sleep, Duration};
 
 use crate::chain::{get_reference_gas_price, load_sender_from_env};
@@ -81,7 +81,7 @@ async fn wait_for_transaction(
         match ledger.get_transaction(req).await {
             Ok(_) => {
                 // Transaction found! It's available in the ledger
-                debug!("Transaction {} is now available in ledger (took {}ms)", 
+                info!("Transaction {} is now available in ledger (took {}ms)", 
                     tx_digest, start.elapsed().as_millis());
                 return Ok(());
             }
@@ -125,7 +125,7 @@ pub async fn start_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
 ) -> Result<String> {
-    debug!("Creating start_app_job transaction for job_sequence: {}", job_sequence);
+    info!("Creating start_app_job transaction for job_sequence: {}", job_sequence);
     
     execute_app_instance_function(
         client,
@@ -144,7 +144,7 @@ pub async fn complete_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
 ) -> Result<String> {
-    debug!("Creating complete_app_job transaction for job_sequence: {}", job_sequence);
+    info!("Creating complete_app_job transaction for job_sequence: {}", job_sequence);
     
     execute_app_instance_function(
         client,
@@ -164,14 +164,14 @@ pub async fn fail_job_tx(
     job_sequence: u64,
     error_message: &str,
 ) -> Result<String> {
-    debug!("Creating fail_app_job transaction for job_sequence: {} with error: {}", job_sequence, error_message);
+    info!("Creating fail_app_job transaction for job_sequence: {} with error: {}", job_sequence, error_message);
     
     // Debug: Query current job state before attempting to fail it
     let app_instance_id = get_app_instance_id(app_instance_str)
         .context("Failed to parse app instance ID for debug query")?;
     match query_job_status(client, app_instance_id, job_sequence).await {
         Ok(status) => {
-            debug!("Current job {} status before fail attempt: {:?}", job_sequence, status);
+            info!("Current job {} status before fail attempt: {:?}", job_sequence, status);
         }
         Err(e) => {
             warn!("Failed to query job {} status before fail: {}", job_sequence, e);
@@ -197,7 +197,7 @@ pub async fn terminate_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
 ) -> Result<String> {
-    debug!("Creating terminate_app_job transaction for job_sequence: {}", job_sequence);
+    info!("Creating terminate_app_job transaction for job_sequence: {}", job_sequence);
     
     execute_app_instance_function(
         client,
@@ -225,7 +225,7 @@ pub async fn submit_proof_tx(
     prover_memory: u64,
     cpu_time: u64,
 ) -> Result<String> {
-    debug!("Creating submit_proof transaction for block_number: {}, job_id: {}", block_number, job_id);
+    info!("Creating submit_proof transaction for block_number: {}, job_id: {}", block_number, job_id);
     
     execute_app_instance_function(
         client,
@@ -269,7 +269,7 @@ pub async fn update_state_for_sequence_tx(
     new_state_data: Option<Vec<u8>>,
     new_data_availability_hash: Option<String>,
 ) -> Result<String> {
-    debug!("Creating update_state_for_sequence transaction for sequence: {}", sequence);
+    info!("Creating update_state_for_sequence transaction for sequence: {}", sequence);
     
     execute_app_instance_function(
         client,
@@ -307,7 +307,7 @@ pub async fn create_app_job_tx(
     next_scheduled_at: Option<u64>,
     is_settlement_job: bool,
 ) -> Result<String> {
-    debug!("Creating app job transaction for method: {}, data size: {} bytes", 
+    info!("Creating app job transaction for method: {}, data size: {} bytes", 
         method_name, data.len());
     
     let method_name_clone = method_name.clone();
@@ -353,7 +353,7 @@ pub async fn reject_proof_tx(
     block_number: u64,
     sequences: Vec<u64>,
 ) -> Result<String> {
-    debug!("Creating reject_proof transaction for block_number: {}, sequences: {:?}", block_number, sequences);
+    info!("Creating reject_proof transaction for block_number: {}, sequences: {:?}", block_number, sequences);
     
     execute_app_instance_function(
         client,
@@ -377,7 +377,7 @@ pub async fn start_proving_tx(
     merged_sequences_2: Option<Vec<u64>>,
     job_id: String,
 ) -> Result<String> {
-    debug!("Creating start_proving transaction for block_number: {}, sequences: {:?}", block_number, sequences);
+    info!("Creating start_proving transaction for block_number: {}, sequences: {:?}", block_number, sequences);
     
     // Use the helper but handle expected errors specially
     execute_app_instance_function(
@@ -455,7 +455,7 @@ pub async fn update_block_proof_data_availability_tx(
     block_number: u64,
     proof_data_availability: String,
 ) -> Result<String> {
-    debug!("Creating update_block_proof_data_availability transaction for block_number: {}", block_number);
+    info!("Creating update_block_proof_data_availability transaction for block_number: {}", block_number);
     
     execute_app_instance_function(
         client,
@@ -507,7 +507,7 @@ pub async fn terminate_app_job_tx(
     app_instance_str: &str,
     job_id: u64,
 ) -> Result<String> {
-    debug!("Creating terminate_app_job transaction for job_id: {}", job_id);
+    info!("Creating terminate_app_job transaction for job_id: {}", job_id);
     
     execute_app_instance_function(
         client,
@@ -532,7 +532,7 @@ pub async fn update_block_settlement_tx_hash_tx(
     block_number: u64,
     settlement_tx_hash: String,
 ) -> Result<String> {
-    debug!("Creating update_block_settlement_tx_hash transaction for block_number: {}", block_number);
+    info!("Creating update_block_settlement_tx_hash transaction for block_number: {}", block_number);
     
     execute_app_instance_function(
         client,
@@ -554,7 +554,7 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
     block_number: u64,
     settled_at: u64,
 ) -> Result<String> {
-    debug!("Creating update_block_settlement_tx_included_in_block transaction for block_number: {}", block_number);
+    info!("Creating update_block_settlement_tx_included_in_block transaction for block_number: {}", block_number);
     
     execute_app_instance_function(
         client,
@@ -671,7 +671,7 @@ where
         sui_sdk_types::Argument, // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
-    debug!("Creating {} transaction for app_instance: {}", function_name, app_instance_str);
+    info!("Creating {} transaction for app_instance: {}", function_name, app_instance_str);
     
     // Parse IDs
     let package_id = get_coordination_package_id()
@@ -792,7 +792,7 @@ where
         .context("Failed to get transaction digest")?
         .to_string();
 
-    debug!(
+    info!(
         "{} transaction executed successfully: {} (took {}ms)",
         function_name, tx_digest, tx_elapsed_ms
     );

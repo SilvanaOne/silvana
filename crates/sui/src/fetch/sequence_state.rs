@@ -2,7 +2,7 @@ use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_u64, get_bytes, get_option_bytes, get_option_string};
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
-use tracing::{debug, info, error};
+use tracing::{debug, error};
 
 /// Represents a sequence state from the Move SequenceState struct
 #[derive(Debug, Clone)]
@@ -294,7 +294,7 @@ pub async fn query_sequence_states(
     app_instance_id: &str,
     requested_sequence: u64,
 ) -> Result<Vec<SequenceState>> {
-    info!("Querying sequence states for app_instance: {}, sequence: {}", app_instance_id, requested_sequence);
+    debug!("Querying sequence states for app_instance: {}, sequence: {}", app_instance_id, requested_sequence);
     
     // Get SequenceStateManager info from AppInstance
     let (lowest_sequence, highest_sequence, table_id) = match get_sequence_state_manager_info_from_app_instance(client, app_instance_id).await? {
@@ -341,7 +341,7 @@ pub async fn query_sequence_states(
     // Check if requested sequence has data_availability
     if requested_state.data_availability.is_some() {
         // Return just this sequence
-        info!("Requested sequence {} has data availability, returning single state", requested_sequence);
+        debug!("Requested sequence {} has data availability, returning single state", requested_sequence);
         return Ok(vec![requested_state]);
     }
     
@@ -378,13 +378,13 @@ pub async fn query_sequence_states(
                 result_states.push(requested_state);
             }
             
-            info!("Returning {} sequence states: start sequence {} (with DA) and requested sequence {}", 
+            debug!("Returning {} sequence states: start sequence {} (with DA) and requested sequence {}", 
                 result_states.len(), seq, requested_sequence);
             return Ok(result_states);
         }
         None => {
             // No sequence with data availability found, return all sequences from lowest to requested
-            info!("No sequence with data availability found, returning all sequences from {} to {}", 
+            debug!("No sequence with data availability found, returning all sequences from {} to {}", 
                 lowest_sequence, requested_sequence);
             let mut result_states = Vec::new();
             for seq in lowest_sequence..=requested_sequence {

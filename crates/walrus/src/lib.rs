@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::time::Instant;
 use tokio::time::{sleep, Duration};
-use tracing::{info, error, warn};
+use tracing::{debug, error, warn};
 
 #[derive(Debug, Clone)]
 pub enum Daemon {
@@ -91,7 +91,7 @@ impl WalrusClient {
         const RETRY_DELAY_SECS: u64 = 5;
         
         for attempt in 1..=MAX_RETRIES {
-            info!("Writing to Walrus (attempt {}/{})", attempt, MAX_RETRIES);
+            debug!("Writing to Walrus (attempt {}/{})", attempt, MAX_RETRIES);
             let start = Instant::now();
 
             // Clone the data for each attempt since body() consumes it
@@ -121,7 +121,7 @@ impl WalrusClient {
             };
 
             let elapsed = start.elapsed();
-            info!("Request completed in {:?}", elapsed);
+            debug!("Request completed in {:?}", elapsed);
 
             if response.status().is_success() {
                 let info: Value = match response.json().await {
@@ -148,7 +148,7 @@ impl WalrusClient {
                     .map(|s| s.to_string());
 
                 if let Some(ref id) = blob_id {
-                    info!("Successfully saved to Walrus. BlobId: {}", id);
+                    debug!("Successfully saved to Walrus. BlobId: {}", id);
                     return Ok(Some(id.clone()));
                 } else {
                     if attempt < MAX_RETRIES {
@@ -208,7 +208,7 @@ impl WalrusClient {
         const RETRY_DELAY_SECS: u64 = 5;
         
         for attempt in 1..=MAX_RETRIES {
-            info!("Reading walrus blob: {} (attempt {}/{})", params.blob_id, attempt, MAX_RETRIES);
+            debug!("Reading walrus blob: {} (attempt {}/{})", params.blob_id, attempt, MAX_RETRIES);
             let start = Instant::now();
 
             let response = match self
@@ -234,7 +234,7 @@ impl WalrusClient {
             };
 
             let elapsed = start.elapsed();
-            info!("Request completed in {:?}", elapsed);
+            debug!("Request completed in {:?}", elapsed);
 
             if response.status().is_success() {
                 let blob = match response.text().await {
@@ -253,7 +253,7 @@ impl WalrusClient {
                         }
                     }
                 };
-                info!("Successfully read blob from Walrus");
+                debug!("Successfully read blob from Walrus");
                 return Ok(Some(blob));
             } else {
                 let status = response.status();

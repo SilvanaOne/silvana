@@ -95,7 +95,7 @@ impl AgentJobDatabase {
             lookup.insert(agent_job.job_id.clone(), agent_job.clone());
         }
 
-        info!(
+        debug!(
             "Added ready job {} for agent {}/{}:{}",
             agent_job.job_id, agent_job.developer, agent_job.agent, agent_job.agent_method
         );
@@ -151,7 +151,7 @@ impl AgentJobDatabase {
                 lookup.remove(job_id);
             }
 
-            info!("Completed job {}", job_id);
+            debug!("Completed job {}", job_id);
             Some(job)
         } else {
             warn!("Attempted to complete non-existent job: {}", job_id);
@@ -219,7 +219,7 @@ impl AgentJobDatabase {
             lookup.insert(agent_job.job_id.clone(), agent_job.clone());
         }
 
-        info!("Added job {} to pending jobs", agent_job.job_id);
+        debug!("Added job {} to pending jobs", agent_job.job_id);
     }
 
     /// Get all pending jobs that haven't been completed/failed

@@ -5,7 +5,7 @@ use crate::parse::{
 use serde::{Deserialize, Serialize};
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 // Constants matching Move definitions
 pub const PROOF_STATUS_STARTED: u8 = 1;
@@ -239,7 +239,7 @@ async fn fetch_proof_calculation_from_table(
             if let Some(name_value) = &field.name_value {
                 // Decode the block number from BCS bytes
                 if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
-                    info!(
+                    debug!(
                         "🔍 Dynamic field - Block: {}, Field: {:?}",
                         block_number, field
                     );
@@ -247,7 +247,7 @@ async fn fetch_proof_calculation_from_table(
                     // Only fetch if this is our target block
                     if block_number == target_block_number {
                         if let Some(field_id) = &field.field_id {
-                            info!(
+                            debug!(
                                 "✅ Found matching block {}! Fetching proof calculation from field ID: {}",
                                 block_number, field_id
                             );
@@ -260,7 +260,7 @@ async fn fetch_proof_calculation_from_table(
                             )
                             .await
                             {
-                                info!(
+                                debug!(
                                     "✅ Successfully fetched proof for block {}. Full ProofCalculation: {:?}",
                                     target_block_number, proof_calculation
                                 );

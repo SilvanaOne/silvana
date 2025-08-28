@@ -20,7 +20,7 @@ impl SilvanaSuiInterface {
         
         match start_job_tx(&mut self.client, app_instance, job_sequence).await {
             Ok(tx_digest) => {
-                debug!("Successfully started job {} on blockchain, tx: {}", job_sequence, tx_digest);
+                info!("Successfully started job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 true
             }
             Err(e) => {
@@ -32,18 +32,18 @@ impl SilvanaSuiInterface {
 
     /// Complete a job on the Sui blockchain by calling the complete_job Move function
     /// This should be called after successful job completion
-    /// Returns the transaction hash if successful, or None if it failed
-    pub async fn complete_job(&mut self, app_instance: &str, job_sequence: u64) -> Option<String> {
+    /// Returns true if the transaction was successful, false if it failed
+    pub async fn complete_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
         debug!("Attempting to complete job {} on Sui blockchain", job_sequence);
         
         match complete_job_tx(&mut self.client, app_instance, job_sequence).await {
             Ok(tx_digest) => {
-                debug!("Successfully completed job {} on blockchain, tx: {}", job_sequence, tx_digest);
-                Some(tx_digest)
+                info!("Successfully completed job {} on blockchain, tx: {}", job_sequence, tx_digest);
+                true
             }
             Err(e) => {
                 error!("Failed to complete job {} on blockchain: {}", job_sequence, e);
-                None
+                false
             }
         }
     }
@@ -56,7 +56,7 @@ impl SilvanaSuiInterface {
         
         match fail_job_tx(&mut self.client, app_instance, job_sequence, error_message).await {
             Ok(tx_digest) => {
-                debug!("Successfully failed job {} on blockchain, tx: {}", job_sequence, tx_digest);
+                info!("Successfully failed job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 true
             }
             Err(e) => {
@@ -74,7 +74,7 @@ impl SilvanaSuiInterface {
         
         match terminate_job_tx(&mut self.client, app_instance, job_sequence).await {
             Ok(tx_digest) => {
-                debug!("Successfully terminated job {} on blockchain, tx: {}", job_sequence, tx_digest);
+                info!("Successfully terminated job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 true
             }
             Err(e) => {
@@ -367,7 +367,7 @@ impl SilvanaSuiInterface {
         prover_memory: u64,
         cpu_time: u64,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        debug!(
+        info!(
             "Attempting to submit proof for block {} job {} on Sui blockchain",
             block_number, job_id
         );
@@ -389,7 +389,7 @@ impl SilvanaSuiInterface {
         .await
         {
             Ok(tx_digest) => {
-                debug!(
+                info!(
                     "Successfully submitted proof for job {} on blockchain, tx: {}",
                     job_id, tx_digest
                 );
@@ -531,12 +531,12 @@ impl SilvanaSuiInterface {
         new_state_data: Option<Vec<u8>>,
         new_data_availability_hash: Option<String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        debug!(
+        info!(
             "🔄 Attempting to update state for sequence {} on Sui blockchain (app_instance={})",
             sequence, app_instance
         );
         
-        debug!(
+        info!(
             "State update details: has_state_data={}, has_da_hash={}", 
             new_state_data.is_some(), 
             new_data_availability_hash.is_some()
@@ -552,15 +552,15 @@ impl SilvanaSuiInterface {
         .await
         {
             Ok(tx_digest) => {
-                debug!(
-                    "✅ Successfully updated state for sequence {} on blockchain, tx: {}",
+                info!(
+                    "✅ Successfully updated state for sequence {} on blockchain, tx: {} - waiting for propagation",
                     sequence, tx_digest
                 );
                 
                 // Add a small delay to allow blockchain state to propagate
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 
-                debug!("State update transaction {} should now be propagated", tx_digest);
+                info!("State update transaction {} should now be propagated", tx_digest);
                 Ok(tx_digest)
             }
             Err(e) => {

@@ -10,7 +10,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     client: &mut sui_rpc::Client,
     da_hash: &str,
 ) -> Result<()> {
-    info!(
+    debug!(
         "🔍 Analyzing proof calculation for block {} with sequences: {:?}",
         proof_calc.block_number,
         proof_calc
@@ -29,31 +29,16 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     .await
     {
         Ok(Some(pc_info)) => {
-            info!(
-                "🧮 Fetched existing ProofCalculation for block {}:",
-                proof_calc.block_number
+            debug!(
+                "🧮 Fetched ProofCalculation for block {}: {} proofs, finished={}",
+                proof_calc.block_number,
+                pc_info.proofs.len(),
+                pc_info.is_finished
             );
-            info!(
-                "  ProofCalculation: block={}, start_seq={}, end_seq={:?}, finished={}, proofs={}",
-                pc_info.block_number,
-                pc_info.start_sequence,
-                pc_info.end_sequence,
-                pc_info.is_finished,
-                pc_info.proofs.len()
-            );
-            for (j, proof) in pc_info.proofs.iter().enumerate() {
-                info!(
-                    "    Individual proof {}: sequences={:?}, status={:?}, job_id={}",
-                    j + 1,
-                    proof.sequences,
-                    proof.status,
-                    proof.job_id
-                );
-            }
             Some(pc_info)
         }
         Ok(None) => {
-            info!(
+            debug!(
                 "📋 No existing ProofCalculation found for block {}",
                 proof_calc.block_number
             );
@@ -86,7 +71,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     let end_sequence = existing_proof_calculation.as_ref().and_then(|p| p.end_sequence);
     let is_finished = existing_proof_calculation.as_ref().map(|p| p.is_finished).unwrap_or(false);
 
-    info!(
+    debug!(
         "📦 Using ProofCalculation info: block_number={}, start_sequence={}, end_sequence={:?}, is_finished={}",
         proof_calc.block_number, start_sequence, end_sequence, is_finished
     );
@@ -114,39 +99,17 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         is_finished: proof_calc.is_finished,
     };
 
-    info!(
-        "🎯 Block analysis summary for app_instance {}:",
-        app_instance
-    );
-    info!(
-        "  Block {}: sequences {}-{}",
+    debug!(
+        "🎯 Block {} analysis: sequences {}-{}, {} proofs, finished={}",
         proof_calc.block_number,
-        block_proofs.start_sequence, // Direct access, no unwrap needed
+        block_proofs.start_sequence,
         block_proofs
             .end_sequence
             .map(|e| e.to_string())
-            .unwrap_or_else(|| "pending".to_string())
+            .unwrap_or_else(|| "pending".to_string()),
+        block_proofs.proofs.len(),
+        proof_calc.is_finished
     );
-    info!("  Total proofs available: {}", block_proofs.proofs.len());
-
-    // List all available proofs with their sequences
-    for (i, proof) in block_proofs.proofs.iter().enumerate() {
-        let status_str = match proof.status {
-            ProofStatus::Started => "Started",
-            ProofStatus::Calculated => "Calculated",
-            ProofStatus::Rejected => "Rejected",
-            ProofStatus::Reserved => "Reserved",
-            ProofStatus::Used => "Used",
-        };
-        info!(
-            "    Proof {}: sequences {:?} (status: {})",
-            i + 1,
-            proof.sequences,
-            status_str
-        );
-    }
-
-    info!("  Block is finished: {}", proof_calc.is_finished);
 
     // Check if the current proof covers the entire block
     if let Some(end_seq) = block_proofs.end_sequence {
@@ -160,13 +123,9 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             .map(|p| p.sequences.clone())
             .unwrap_or_default();
         if current_sequences == complete_block_sequences {
-            info!(
-                "🎉 Current proof covers the entire block {} (sequences {} to {})",
+            debug!(
+                "🎉 Current proof covers entire block {} (sequences {}-{}) - ready to settle",
                 proof_calc.block_number, block_proofs.start_sequence, end_seq
-            );
-            info!(
-                "🔒 Settling block {} as complete for app_instance {}",
-                proof_calc.block_number, app_instance
             );
 
             // Call settle for the complete block with the DA hash
@@ -181,7 +140,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             return Ok(());
         }
     } else {
-        info!(
+        debug!(
             "⏳ Block {} end_sequence not yet determined for app_instance {} (still receiving sequences)",
             proof_calc.block_number, app_instance
         );
@@ -197,7 +156,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         // This is important because other coordinators might have updated them
         let current_block_proofs =
             if attempt > 1 {
-                info!(
+                debug!(
                     "🔄 Refetching ProofCalculations to get latest state (attempt {})",
                     attempt
                 );
@@ -208,14 +167,14 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                         .await
                     {
                         Ok(Some(pc)) => {
-                            info!(
+                            debug!(
                                 "📊 Refetched ProofCalculation for block {}",
                                 proof_calc.block_number
                             );
                             Some(pc)
                         }
                         Ok(None) => {
-                            info!(
+                            debug!(
                                 "📋 Still no ProofCalculation found for block {}",
                                 proof_calc.block_number
                             );
@@ -279,13 +238,10 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         if let Some(merge_request) =
             find_proofs_to_merge_excluding(&current_block_proofs, &attempted_merges)
         {
-            info!(
-                "✨ Attempt {}/{}: Found merge opportunity:",
-                attempt, MAX_MERGE_ATTEMPTS
+            debug!(
+                "✨ Attempt {}/{}: Found merge opportunity - Sequences1: {:?}, Sequences2: {:?}, Is block proof: {}",
+                attempt, MAX_MERGE_ATTEMPTS, merge_request.sequences1, merge_request.sequences2, merge_request.block_proof
             );
-            info!("  Sequences1: {:?}", merge_request.sequences1);
-            info!("  Sequences2: {:?}", merge_request.sequences2);
-            info!("  Is block proof: {}", merge_request.block_proof);
 
             // Remember this attempt
             attempted_merges.push((
@@ -322,7 +278,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             .await
             {
                 Ok(_) => {
-                    info!(
+                    debug!(
                         "✅ Successfully created and reserved merge job for block {} on attempt {}",
                         proof_calc.block_number, attempt
                     );
@@ -330,7 +286,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     break; // Successfully created a merge job, stop trying
                 }
                 Err(e) => {
-                    info!(
+                    debug!(
                         "ℹ️ Attempt {}/{}: Could not create merge job for block {} (sequences {:?} + {:?}): {}",
                         attempt,
                         MAX_MERGE_ATTEMPTS,
@@ -342,7 +298,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 
                     // Check if we should continue trying
                     if e.to_string().contains("already reserved") {
-                        info!("   → Looking for other merge opportunities...");
+                        debug!("   → Looking for other merge opportunities...");
                         // Add a small delay before retrying to allow other coordinators to complete
                         if attempt < MAX_MERGE_ATTEMPTS {
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -369,7 +325,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             attempted_merges.len()
         );
     } else if !merge_created {
-        info!(
+        debug!(
             "🚫 No merge opportunities found for block {} in app_instance {}",
             proof_calc.block_number, app_instance
         );
@@ -438,7 +394,7 @@ fn find_proofs_to_merge_excluding(
                     && (proof2.status == ProofStatus::Calculated
                         || proof2.status == ProofStatus::Used)
                 {
-                    info!(
+                    debug!(
                         "Merging proofs to create block proof: sequences1={:?}, sequences2={:?}",
                         sequence1, sequence2
                     );
@@ -552,7 +508,7 @@ async fn create_merge_job(
     _proof2_status: &ProofStatus, // Currently unused, but kept for future use
     block_proofs: &ProofCalculation, // Add this to check if combined proof exists
 ) -> Result<()> {
-    info!(
+    debug!(
         "Attempting to create merge job for block {} with sequences1: {:?}, sequences2: {:?}",
         block_number, sequences1, sequences2
     );
@@ -586,13 +542,13 @@ async fn create_merge_job(
                 const STARTED_TIMEOUT_MS: u64 = 10 * 60 * 1000; // 10 minutes for Started status
 
                 if time_since_start > STARTED_TIMEOUT_MS {
-                    info!(
+                    debug!(
                         "⏰ Started proof has timed out ({} ms > {} ms), will reject",
                         time_since_start, STARTED_TIMEOUT_MS
                     );
                     true
                 } else {
-                    info!(
+                    debug!(
                         "⏳ Started proof is still active ({} ms < {} ms), skipping merge",
                         time_since_start, STARTED_TIMEOUT_MS
                     );
@@ -613,7 +569,7 @@ async fn create_merge_job(
         };
 
         if should_reject {
-            info!(
+            debug!(
                 "📝 Found existing combined proof for block {} sequences {:?} with status {:?}, attempting to reject",
                 block_number, combined_sequences, proof.status
             );
@@ -623,7 +579,7 @@ async fn create_merge_job(
                 .await
             {
                 Ok(tx_digest) => {
-                    info!(
+                    debug!(
                         "✅ Successfully rejected combined proof for block {}, tx: {}",
                         block_number, tx_digest
                     );
@@ -633,7 +589,7 @@ async fn create_merge_job(
                 Err(e) => {
                     // Even though we found it in our data, it might have been modified by another coordinator
                     if e.to_string().contains("not available for consumption") {
-                        info!(
+                        debug!(
                             "ℹ️ Combined proof already modified by another coordinator - continuing anyway"
                         );
                     } else {
@@ -645,21 +601,21 @@ async fn create_merge_job(
                 }
             }
         } else {
-            info!(
+            debug!(
                 "ℹ️ Combined proof exists with status {:?} but doesn't need rejection",
                 proof.status
             );
         }
     } else {
         // The combined proof doesn't exist yet, no need to reject
-        info!(
+        debug!(
             "ℹ️ No existing combined proof found for sequences {:?} - skipping rejection",
             combined_sequences
         );
     }
 
     // Step 2: Try to reserve the proofs with start_proving
-    info!("🔒 Attempting to reserve proofs for merge job: {}", job_id);
+    debug!("🔒 Attempting to reserve proofs for merge job: {}", job_id);
     match sui_interface
         .start_proving(
             app_instance,
@@ -672,7 +628,7 @@ async fn create_merge_job(
         .await
     {
         Ok(tx_digest) => {
-            info!(
+            debug!(
                 "✅ Successfully reserved proofs for block {}, tx: {}",
                 block_number, tx_digest
             );
@@ -698,8 +654,8 @@ async fn create_merge_job(
             {
                 Ok(tx_digest) => {
                     info!(
-                        "✅ Successfully created merge job for block {} - Transaction: {}",
-                        block_number, tx_digest
+                        "✅ Merge job: block={}, sequences={:?}+{:?}, tx={}",
+                        block_number, sequences1, sequences2, tx_digest
                     );
                     Ok(())
                 }

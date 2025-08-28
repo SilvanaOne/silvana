@@ -46,7 +46,7 @@ pub async fn check_settlement_opportunity(
     let no_settlement_tx = block_details.settlement_tx_hash.is_none();
     
     if proof_available && no_settlement_tx {
-        info!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
+        debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
         return Ok(true);
     }
     
@@ -55,7 +55,7 @@ pub async fn check_settlement_opportunity(
     let not_included = !block_details.settlement_tx_included_in_block;
     
     if has_settlement_tx && not_included {
-        info!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
+        debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
         return Ok(true);
     }
     
@@ -173,7 +173,7 @@ pub async fn get_settlement_job_id(
                             match &settlement_job_field.kind {
                                 Some(prost_types::value::Kind::StringValue(s)) => {
                                     if let Ok(job_id) = s.parse::<u64>() {
-                                        info!("Found existing settlement job with ID {}", job_id);
+                                        debug!("Found existing settlement job with ID {}", job_id);
                                         return Ok(Some(job_id));
                                     }
                                 }
@@ -204,7 +204,7 @@ pub async fn create_periodic_settle_job(
     app_instance: &AppInstance,
     client: &mut Client,
 ) -> Result<()> {
-    info!("Creating periodic settle job for app instance {}", app_instance.silvana_app_name);
+    debug!("Creating periodic settle job for app instance {}", app_instance.silvana_app_name);
     
     // Create a periodic job with 1 minute interval
     let mut sui_interface = sui::interface::SilvanaSuiInterface::new(client.clone());
@@ -241,7 +241,7 @@ pub async fn create_periodic_settle_job(
         true, // This is a settlement job
     ).await {
         Ok(tx_digest) => {
-            info!("Successfully created periodic settle job - tx: {}", tx_digest);
+            debug!("Successfully created periodic settle job - tx: {}", tx_digest);
             Ok(())
         }
         Err(e) => {
@@ -370,7 +370,7 @@ pub async fn fetch_pending_job_from_instances(
     // Prioritize: settlement > merge > others
     let selected_job = if !settlement_jobs.is_empty() {
         let job = settlement_jobs[0];
-        info!(
+        debug!(
             "Found {} settlement, {} merge, and {} other jobs for {}/{}/{}. Selecting settlement job {} from {}",
             settlement_jobs.len(), merge_jobs.len(), other_jobs.len(), 
             developer, agent, agent_method, job.0, job.1
@@ -378,7 +378,7 @@ pub async fn fetch_pending_job_from_instances(
         job
     } else if !merge_jobs.is_empty() {
         let job = merge_jobs[0];
-        info!(
+        debug!(
             "Found {} merge jobs and {} other jobs for {}/{}/{}. Selecting merge job {} from {}",
             merge_jobs.len(), other_jobs.len(), developer, agent, agent_method, 
             job.0, job.1
@@ -386,7 +386,7 @@ pub async fn fetch_pending_job_from_instances(
         job
     } else if !other_jobs.is_empty() {
         let job = other_jobs[0];
-        info!(
+        debug!(
             "Found {} other jobs for {}/{}/{}. Selecting job {} from {}",
             other_jobs.len(), developer, agent, agent_method, 
             job.0, job.1
@@ -490,13 +490,13 @@ pub async fn fetch_all_pending_jobs(
         
         // Return the highest priority job
         let selected_job = if !settlement_jobs.is_empty() {
-            info!("Returning settlement job with job_sequence: {}", settlement_jobs[0].job_sequence);
+            debug!("Returning settlement job with job_sequence: {}", settlement_jobs[0].job_sequence);
             settlement_jobs.into_iter().next().unwrap()
         } else if !merge_jobs.is_empty() {
-            info!("Returning merge job with job_sequence: {}", merge_jobs[0].job_sequence);
+            debug!("Returning merge job with job_sequence: {}", merge_jobs[0].job_sequence);
             merge_jobs.into_iter().next().unwrap()
         } else {
-            info!("Returning other job with job_sequence: {}", other_jobs[0].job_sequence);
+            debug!("Returning other job with job_sequence: {}", other_jobs[0].job_sequence);
             other_jobs.into_iter().next().unwrap()
         };
         

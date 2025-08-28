@@ -3,7 +3,7 @@ use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get
 use std::collections::HashSet;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
 
@@ -539,9 +539,57 @@ pub async fn fetch_job_by_id(
             if let Ok(field_job_sequence) = bcs::from_bytes::<u64>(name_value) {
                 if field_job_sequence == job_sequence {
                     if let Some(field_id) = &field.field_id {
-                        // Fetch the job field wrapper
-                        let job_field_request = GetObjectRequest {
-                            object_id: Some(field_id.clone()),
+                        // Found the job, fetch its content
+                        return fetch_job_object_by_field_id(client, field_id, job_sequence).await;
+                    }
+                }
+            }
+        }
+    }
+    
+    debug!("Job {} not found in jobs table", job_sequence);
+    Ok(None)
+}
+
+/// Fetch Job object by field ID (already verified to be the correct job)
+async fn fetch_job_object_by_field_id(
+    client: &mut Client,
+    field_id: &str,
+    job_sequence: u64,
+) -> Result<Option<Job>> {
+    debug!("📄 Fetching job {} from field {}", job_sequence, field_id);
+    
+    // Fetch the Field wrapper object
+    let field_request = GetObjectRequest {
+        object_id: Some(field_id.to_string()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec![
+                "object_id".to_string(),
+                "json".to_string(),
+            ],
+        }),
+    };
+    
+    let field_response = client
+        .ledger_client()
+        .get_object(field_request)
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+            format!("Failed to fetch field wrapper for job {}: {}", job_sequence, e)
+        ))?;
+    
+    if let Some(field_object) = field_response.into_inner().object {
+        if let Some(field_json) = &field_object.json {
+            debug!("📄 Field wrapper JSON retrieved for job {}", job_sequence);
+            // Extract the actual job object ID from the Field wrapper
+            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &field_json.kind {
+                if let Some(value_field) = struct_value.fields.get("value") {
+                    if let Some(prost_types::value::Kind::StringValue(job_object_id)) = &value_field.kind {
+                        debug!("📄 Found job object ID: {}", job_object_id);
+                        // Fetch the actual job object
+                        let job_request = GetObjectRequest {
+                            object_id: Some(job_object_id.clone()),
                             version: None,
                             read_mask: Some(prost_types::FieldMask {
                                 paths: vec![
@@ -551,51 +599,29 @@ pub async fn fetch_job_by_id(
                             }),
                         };
                         
-                        let job_field_response = client
+                        let job_response = client
                             .ledger_client()
-                            .get_object(job_field_request)
+                            .get_object(job_request)
                             .await
                             .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                                format!("Failed to fetch job field {}: {}", job_sequence, e)
+                                format!("Failed to fetch job object {}: {}", job_sequence, e)
                             ))?;
                         
-                        if let Some(job_field_object) = job_field_response.into_inner().object {
-                            // Extract the actual job object ID from the Field wrapper
-                            if let Some(json_value) = &job_field_object.json {
-                                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                                    if let Some(value_field) = struct_value.fields.get("value") {
-                                        if let Some(prost_types::value::Kind::StringValue(job_object_id)) = &value_field.kind {
-                                            // Fetch the actual job object
-                                            let job_request = GetObjectRequest {
-                                                object_id: Some(job_object_id.clone()),
-                                                version: None,
-                                                read_mask: Some(prost_types::FieldMask {
-                                                    paths: vec![
-                                                        "object_id".to_string(),
-                                                        "json".to_string(),
-                                                    ],
-                                                }),
-                                            };
-                                            
-                                            let job_response = client
-                                                .ledger_client()
-                                                .get_object(job_request)
-                                                .await
-                                                .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                                                    format!("Failed to fetch job {}: {}", job_sequence, e)
-                                                ))?;
-                                            
-                                            if let Some(job_object) = job_response.into_inner().object {
-                                                if let Some(job_json) = &job_object.json {
-                                                    if let Ok(job) = extract_job_from_json(job_json) {
-                                                        return Ok(Some(job));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                        if let Some(job_object) = job_response.into_inner().object {
+                            if let Some(job_json) = &job_object.json {
+                                debug!("📗 Job {} JSON retrieved, extracting data", job_sequence);
+                                // We already know this is the correct job from the name_value check
+                                // so we can directly extract the job data
+                                if let Ok(job) = extract_job_from_json(job_json) {
+                                    return Ok(Some(job));
+                                } else {
+                                    warn!("❌ Failed to extract job {} from JSON", job_sequence);
                                 }
+                            } else {
+                                warn!("❌ No JSON found for job object {}", job_sequence);
                             }
+                        } else {
+                            warn!("❌ No job object found for job {}", job_sequence);
                         }
                     }
                 }
@@ -603,7 +629,6 @@ pub async fn fetch_job_by_id(
         }
     }
     
-    debug!("Job {} not found in jobs table", job_sequence);
     Ok(None)
 }
 
@@ -615,7 +640,7 @@ pub async fn fetch_pending_job_sequences_from_app_instance(
     agent: &str,
     agent_method: &str,
 ) -> Result<Vec<u64>> {
-    info!(
+    debug!(
         "Fetching pending job IDs for {}/{}/{} from app_instance {}",
         developer, agent, agent_method, app_instance_id
     );
@@ -895,45 +920,14 @@ pub async fn fetch_all_jobs_from_app_instance(
                                             // Fetch each job
                                             for field in &response.dynamic_fields {
                                                 if let Some(field_id) = &field.field_id {
-                                                    // Fetch the job field wrapper
-                                                    let job_request = GetObjectRequest {
-                                                        object_id: Some(field_id.clone()),
-                                                        version: None,
-                                                        read_mask: Some(prost_types::FieldMask {
-                                                            paths: vec!["json".to_string()],
-                                                        }),
-                                                    };
-
-                                                    if let Ok(job_response) = client.ledger_client().get_object(job_request).await {
-                                                        if let Some(job_object) = job_response.into_inner().object {
-                                                            if let Some(job_json) = &job_object.json {
-                                                                // Extract actual job ID from field wrapper
-                                                                if let Some(prost_types::value::Kind::StructValue(field_struct)) = &job_json.kind {
-                                                                    if let Some(value_field) = field_struct.fields.get("value") {
-                                                                        if let Some(prost_types::value::Kind::StringValue(job_object_id)) = &value_field.kind {
-                                                                            // Fetch actual job object
-                                                                            let actual_job_request = GetObjectRequest {
-                                                                                object_id: Some(job_object_id.clone()),
-                                                                                version: None,
-                                                                                read_mask: Some(prost_types::FieldMask {
-                                                                                    paths: vec!["json".to_string()],
-                                                                                }),
-                                                                            };
-
-                                                                            if let Ok(actual_job_response) = client.ledger_client().get_object(actual_job_request).await {
-                                                                                if let Some(actual_job_object) = actual_job_response.into_inner().object {
-                                                                                    if let Some(actual_job_json) = &actual_job_object.json {
-                                                                                        if let Ok(job) = extract_job_from_json(actual_job_json) {
-                                                                                            all_jobs.push(job);
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
+                                                    // Extract job_sequence from name_value for debugging
+                                                    let job_sequence = field.name_value.as_ref()
+                                                        .and_then(|nv| bcs::from_bytes::<u64>(nv).ok())
+                                                        .unwrap_or(0);
+                                                    
+                                                    // Fetch the job using the helper function
+                                                    if let Ok(Some(job)) = fetch_job_object_by_field_id(client, field_id, job_sequence).await {
+                                                        all_jobs.push(job);
                                                     }
                                                 }
                                             }

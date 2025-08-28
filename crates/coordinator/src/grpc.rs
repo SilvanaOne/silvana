@@ -45,9 +45,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<GetJobRequest>,
     ) -> Result<Response<GetJobResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
-        info!(
+        debug!(
             developer = %req.developer,
             agent = %req.agent,
             agent_method = %req.agent_method,
@@ -59,9 +60,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
         if let Some(agent_job) = self.state.get_agent_job_db()
             .get_ready_job(&req.developer, &req.agent, &req.agent_method).await {
             
+            let elapsed = start_time.elapsed();
             info!(
-                "Returning ready job {} from agent database",
-                agent_job.job_id
+                "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, source=db, time={:?}",
+                agent_job.app_instance,
+                req.developer,
+                req.agent,
+                req.agent_method,
+                agent_job.job_sequence,
+                elapsed
             );
             
             // Convert AgentJob to protobuf Job
@@ -100,7 +107,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 let current_instances = self.state.get_current_app_instances(&req.session_id).await;
                 
                 if !current_instances.is_empty() {
-                    info!("Found {} current app_instances for this agent", current_instances.len());
+                    debug!("Found {} current app_instances for this agent", current_instances.len());
                     
                     // Get a cloned Sui client
                     let mut client = self.state.get_sui_client();
@@ -114,7 +121,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         &req.agent_method,
                     ).await {
                         Ok(Some(pending_job)) => {
-                            info!("Found pending job {} using index", pending_job.job_sequence);
+                            debug!("Found pending job {} using index", pending_job.job_sequence);
                             
                             // Execute start_job transaction on Sui before returning the job
                             match start_job_tx(
@@ -123,7 +130,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                 pending_job.job_sequence,
                             ).await {
                                 Ok(tx_digest) => {
-                                    info!("Successfully started job {} with tx: {}", pending_job.job_sequence, tx_digest);
+                                    debug!("Successfully started job {} with tx: {}", pending_job.job_sequence, tx_digest);
                                     
                                     // Create AgentJob and add it to agent database
                                     let agent_job = AgentJob::new(pending_job, &self.state);
@@ -131,8 +138,19 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     // Add to pending jobs (job has been started and is being returned to agent)
                                     self.state.get_agent_job_db().add_to_pending(agent_job.clone()).await;
                                     
-                                    info!("Added job {} to agent database with job_id: {}", 
+                                    debug!("Added job {} to agent database with job_id: {}", 
                                         agent_job.job_sequence, agent_job.job_id);
+                                    
+                                    let elapsed = start_time.elapsed();
+                                    info!(
+                                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, source=sui, time={:?}",
+                                        agent_job.app_instance,
+                                        req.developer,
+                                        req.agent,
+                                        req.agent_method,
+                                        agent_job.job_sequence,
+                                        elapsed
+                                    );
                                     
                                     // Convert AgentJob to protobuf Job
                                     let job = Job {
@@ -158,21 +176,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     return Ok(Response::new(GetJobResponse { job: Some(job) }));
                                 }
                                 Err(e) => {
-                                    error!("Failed to start job {} on Sui: {}", pending_job.job_sequence, e);
+                                    warn!("Failed to start job {} on Sui: {}", pending_job.job_sequence, e);
                                     // Don't return the job if start_job transaction failed
                                     // Continue to check for other jobs or return None
                                 }
                             }
                         }
                         Ok(None) => {
-                            info!("No pending jobs found using index for {}/{}/{}", 
+                            debug!("No pending jobs found using index for {}/{}/{}", 
                                 req.developer, req.agent, req.agent_method);
                         }
                         Err(e) => {
-                            error!("Failed to fetch jobs using index: {}", e);
+                            warn!("Failed to fetch jobs using index: {}", e);
                             // If it's a not found error, remove the stale app_instance
                             if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                                error!("Jobs object not found: {}", current_instances.join(", "));
+                                warn!("Jobs object not found: {}", current_instances.join(", "));
                                 // for instance in &current_instances {
                                 //     self.state.remove_app_instance(instance).await;
                                 // }
@@ -180,15 +198,22 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         }
                     }
                     
-                    info!("No pending jobs found in any current app_instances");
+                    debug!("No pending jobs found in any current app_instances");
                 } else {
-                    info!("No current app_instances for this agent");
+                    debug!("No current app_instances for this agent");
                 }
             }
         }
 
         // No matching job found
-        info!("No matching job for {}/{}/{}", req.developer, req.agent, req.agent_method);
+        let elapsed = start_time.elapsed();
+        info!(
+            "⭕ GetJob: dev={}, agent={}/{}, no_job_found, time={:?}",
+            req.developer,
+            req.agent, 
+            req.agent_method,
+            elapsed
+        );
         Ok(Response::new(GetJobResponse { job: None }))
     }
 
@@ -196,9 +221,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<CompleteJobRequest>,
     ) -> Result<Response<CompleteJobResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
-        info!(
+        debug!(
             job_id = %req.job_id,
             session_id = %req.session_id,
             "Received CompleteJob request"
@@ -244,13 +270,24 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let sui_client = self.state.get_sui_client();
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
         
-        let success = sui_interface.complete_job(&agent_job.app_instance, agent_job.job_sequence).await;
+        let tx_hash = sui_interface.complete_job(&agent_job.app_instance, agent_job.job_sequence).await;
         
-        if success {
+        if let Some(tx) = tx_hash {
             // Remove job from agent database
             let removed_job = self.state.get_agent_job_db().complete_job(&req.job_id).await;
             if removed_job.is_some() {
-                info!("Successfully completed and removed job {} from agent database", req.job_id);
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ CompleteJob: app={}, dev={}, agent={}/{}, job_seq={}, job_id={}, tx={}, time={:?}",
+                    agent_job.app_instance,
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    agent_job.job_sequence,
+                    req.job_id,
+                    tx,
+                    elapsed
+                );
             } else {
                 warn!("Job {} completed on blockchain but was not found in agent database", req.job_id);
             }
@@ -259,7 +296,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 message: format!("Job {} completed successfully", req.job_id),
             }))
         } else {
-            error!("Failed to complete job {} on blockchain", req.job_id);
+            let elapsed = start_time.elapsed();
+            warn!(
+                "❌ CompleteJob: job_id={}, failed_on_blockchain, time={:?}",
+                req.job_id,
+                elapsed
+            );
             Ok(Response::new(CompleteJobResponse {
                 success: false,
                 message: format!("Failed to complete job {} on blockchain", req.job_id),
@@ -402,6 +444,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<SubmitProofRequest>,
     ) -> Result<Response<SubmitProofResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
         // Get job early to log app_instance
@@ -413,7 +456,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
         
-        info!(
+        debug!(
             app_instance = %agent_job.app_instance,
             session_id = %req.session_id,
             block_number = %req.block_number,
@@ -460,7 +503,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Save proof to Walrus DA
-        info!("Saving proof to Walrus DA for job {}", req.job_id);
+        debug!("Saving proof to Walrus DA for job {}", req.job_id);
         let walrus_client = walrus::WalrusClient::new();
         
         let save_params = walrus::SaveToWalrusParams {
@@ -473,7 +516,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let da_hash = match walrus_client.save_to_walrus(save_params).await {
             Ok(Some(blob_id)) => {
                 let walrus_save_duration = walrus_save_start.elapsed();
-                info!("Successfully saved proof to Walrus with blob_id: {} (took {}ms)", 
+                debug!("Successfully saved proof to Walrus with blob_id: {} (took {}ms)", 
                     blob_id, walrus_save_duration.as_millis());
                 blob_id
             }
@@ -503,18 +546,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Fetch the real ProofCalculation from blockchain to get start_sequence and end_sequence
-        let mut sui_fetch_client = self.state.get_sui_client();
-        let proof_calculations = sui::fetch::fetch_proof_calculation(
-            &mut sui_fetch_client,
-            &agent_job.app_instance,
-            req.block_number
-        ).await
-        .map_err(|e| Status::internal(format!("Failed to fetch ProofCalculation: {}", e)))?;
-        
-        // Get the ProofCalculation for this block (should exist)
-        let _proof_calc_info = proof_calculations
-            .ok_or_else(|| Status::internal(format!("No ProofCalculation found for block {}", req.block_number)))?;
-        
+
+               
         // Submit proof transaction on Sui
         let sui_client = self.state.get_sui_client();
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
@@ -535,7 +568,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match tx_result {
             Ok(tx_hash) => {
-                info!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
+                debug!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
 
                 // Spawn merge analysis in background to not delay the response
                 let app_instance_id = agent_job.app_instance.clone();
@@ -543,7 +576,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 let job_id_clone = req.job_id.clone();
                 
                 tokio::spawn(async move {
-                    info!("🔄 Starting background merge analysis for job {}", job_id_clone);
+                    debug!("🔄 Starting background merge analysis for job {}", job_id_clone);
                     
                     // Fetch the AppInstance first
                     match sui::fetch::fetch_app_instance(&mut client_clone, &app_instance_id).await {
@@ -554,7 +587,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             ).await {
                                 warn!("Failed to analyze proof completion in background: {}", e);
                             } else {
-                                info!("✅ Background merge analysis completed for job {}", job_id_clone);
+                                debug!("✅ Background merge analysis completed for job {}", job_id_clone);
                             }
                         }
                         Err(e) => {
@@ -598,6 +631,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     }
                 });
 
+                let elapsed = start_time.elapsed();
+                warn!(
+                    "❌ SubmitProof: job_id={}, error={}, time={:?}",
+                    req.job_id,
+                    e,
+                    elapsed
+                );
                 Err(Status::internal(format!("Failed to submit proof transaction: {}", e)))
             }
         }
@@ -607,9 +647,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<SubmitStateRequest>,
     ) -> Result<Response<SubmitStateResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
-        info!(
+        debug!(
             session_id = %req.session_id,
             sequence = %req.sequence,
             job_id = %req.job_id,
@@ -647,7 +688,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Save serialized state to Walrus DA if provided
         let da_hash = if let Some(serialized_state) = req.serialized_state {
-            info!("Saving state to Walrus DA for sequence {}", req.sequence);
+            debug!("Saving state to Walrus DA for sequence {}", req.sequence);
             let walrus_client = walrus::WalrusClient::new();
             
             let save_params = walrus::SaveToWalrusParams {
@@ -660,7 +701,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             match walrus_client.save_to_walrus(save_params).await {
                 Ok(Some(blob_id)) => {
                     let walrus_save_duration = walrus_save_start.elapsed();
-                    info!("Successfully saved state to Walrus with blob_id: {} (took {}ms)", 
+                    debug!("Successfully saved state to Walrus with blob_id: {} (took {}ms)", 
                         blob_id, walrus_save_duration.as_millis());
                     Some(blob_id)
                 }
@@ -690,7 +731,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match tx_result {
             Ok(tx_hash) => {
-                info!("Successfully updated state for sequence {} with tx: {}", req.sequence, tx_hash);
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ SubmitState: app={}, dev={}, agent={}/{}, seq={}, job_id={}, da={:?}, time={:?}",
+                    agent_job.app_instance,
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    req.sequence,
+                    req.job_id,
+                    da_hash,
+                    elapsed
+                );
 
                 Ok(Response::new(SubmitStateResponse {
                     tx_hash,
@@ -698,7 +750,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to update state for sequence {} on blockchain: {}", req.sequence, e);
+                let elapsed = start_time.elapsed();
+                warn!(
+                    "❌ SubmitState: seq={}, job_id={}, error={}, time={:?}",
+                    req.sequence,
+                    req.job_id,
+                    e,
+                    elapsed
+                );
                 Err(Status::internal(format!("Failed to update state transaction: {}", e)))
             }
         }
@@ -708,9 +767,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<GetSequenceStatesRequest>,
     ) -> Result<Response<GetSequenceStatesResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
-        info!(
+        debug!(
             session_id = %req.session_id,
             job_id = %req.job_id,
             sequence = %req.sequence,
@@ -775,7 +835,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     })
                     .collect();
 
-                info!("✅ Successfully retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence);
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ GetSequenceStates: session={}, job_id={}, seq={}, count={}, time={:?}",
+                    req.session_id,
+                    req.job_id,
+                    req.sequence,
+                    proto_states.len(),
+                    elapsed
+                );
                 
                 Ok(Response::new(GetSequenceStatesResponse {
                     states: proto_states,
@@ -792,9 +860,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<ReadDataAvailabilityRequest>,
     ) -> Result<Response<ReadDataAvailabilityResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
-        info!(
+        debug!(
             session_id = %req.session_id,
             da_hash = %req.da_hash,
             "Received ReadDataAvailability request"
@@ -829,7 +898,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match walrus_client.read_from_walrus(read_params).await {
             Ok(Some(data)) => {
-                info!("Successfully read data from Walrus for da_hash: {}", req.da_hash);
+                info!(
+                    "✅ ReadDA: session={}, da_hash={}, size={} bytes, time={:?}",
+                    req.session_id,
+                    req.da_hash,
+                    data.len(),
+                    start_time.elapsed()
+                );
                 Ok(Response::new(ReadDataAvailabilityResponse {
                     data: Some(data),
                     success: true,
@@ -1246,9 +1321,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<GetBlockProofRequest>,
     ) -> Result<Response<GetBlockProofResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
-        info!(
+        debug!(
             session_id = %req.session_id,
             block_number = %req.block_number,
             job_id = %req.job_id,
@@ -1488,7 +1564,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             // Direct string value (Some case)
                             Some(prost_types::value::Kind::StringValue(proof)) => {
                                 block_proof = Some(proof.clone());
-                                info!("Found block_proof for block {}", req.block_number);
+                                debug!("Found block_proof for block {}", req.block_number);
                             }
                             // Null value (None case)
                             Some(prost_types::value::Kind::NullValue(_)) => {
@@ -1499,7 +1575,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                 if let Some(some_field) = option_struct.fields.get("Some") {
                                     if let Some(prost_types::value::Kind::StringValue(proof)) = &some_field.kind {
                                         block_proof = Some(proof.clone());
-                                        info!("Found block_proof in Some variant for block {}", req.block_number);
+                                        debug!("Found block_proof in Some variant for block {}", req.block_number);
                                     }
                                 }
                             }
@@ -1524,7 +1600,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let da_hash = match block_proof {
             Some(hash) => hash,
             None => {
-                info!("No block proof available yet for block {}", req.block_number);
+                let elapsed = start_time.elapsed();
+                info!(
+                    "⏳ GetBlockProof: block={}, job_id={}, proof_not_ready, time={:?}",
+                    req.block_number,
+                    req.job_id,
+                    elapsed
+                );
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
@@ -1543,7 +1625,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match walrus_client.read_from_walrus(read_params).await {
             Ok(Some(data)) => {
-                info!("Successfully read block proof from Walrus for da_hash: {}", da_hash);
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ GetBlockProof: block={}, job_id={}, da_hash={}, time={:?}",
+                    req.block_number,
+                    req.job_id,
+                    da_hash,
+                    elapsed
+                );
                 Ok(Response::new(GetBlockProofResponse {
                     success: true,
                     block_proof: Some(data),
@@ -1551,7 +1640,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Ok(None) => {
-                warn!("No data found for da_hash: {}", da_hash);
+                let elapsed = start_time.elapsed();
+                warn!(
+                    "❌ GetBlockProof: block={}, job_id={}, da_hash={}, no_data, time={:?}",
+                    req.block_number,
+                    req.job_id,
+                    da_hash,
+                    elapsed
+                );
                 Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,

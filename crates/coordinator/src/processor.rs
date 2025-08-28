@@ -137,8 +137,6 @@ impl EventProcessor {
                     {
                         // Parse and display the event details
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
-                            info!("📝 JobCreatedEvent detected: {}", job_details);
-
                             // Extract and track the job in shared state
                             if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
                                 if let Some(job_sequence_str) = extract_field(&job_details, "job_sequence: ") {
@@ -147,6 +145,10 @@ impl EventProcessor {
                                         let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
                                         let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
                                         let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
+                                        let block_number = extract_field(&job_details, "block_number: ")
+                                            .and_then(|s| s.parse::<u64>().ok())
+                                            .unwrap_or(0);
+                                        let sequences = extract_field(&job_details, "sequences: ").unwrap_or_default();
                                         
                                         // Add to shared state - this will trigger the job searcher
                                         self.state.add_job(
@@ -156,8 +158,12 @@ impl EventProcessor {
                                             agent_method.clone(),
                                             app_instance.clone(),
                                         ).await;
-                                        info!("✅ Added job {} to shared state: {} ({}/{}/{})", 
-                                            job_sequence, app_instance, developer, agent, agent_method);
+                                        
+                                        info!(
+                                            "📝 JobCreated: seq={}, dev={}, agent={}/{}, block={}, seqs={}, app={}",
+                                            job_sequence, developer, agent, agent_method, block_number, sequences, 
+                                            &app_instance[..16.min(app_instance.len())]
+                                        );
                                     }
                                 }
                             }
