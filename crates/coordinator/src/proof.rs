@@ -103,28 +103,25 @@ pub async fn analyze_proof_completion(
       let block_start = std::time::Instant::now();
       info!("📦 Analyzing block {} for merge opportunities", block_number);
       
-      // Fetch ProofCalculations for this block
-      let proof_calculations = match sui::fetch::fetch_proof_calculations(
+      // Fetch ProofCalculation for this block
+      let proof_calc_info = match sui::fetch::fetch_proof_calculation(
           client,
           app_instance_id,
           block_number
       ).await {
-          Ok(proofs) => {
-              if proofs.is_empty() {
-                  info!("⏭️ No ProofCalculations found for block {}, skipping", block_number);
-                  continue;
-              }
-              info!("📊 Found {} ProofCalculation(s) for block {}", proofs.len(), block_number);
-              proofs
+          Ok(Some(proof_calc)) => {
+              info!("📊 Found ProofCalculation for block {}", block_number);
+              proof_calc
+          }
+          Ok(None) => {
+              info!("⏭️ No ProofCalculation found for block {}, skipping", block_number);
+              continue;
           }
           Err(e) => {
-              warn!("Failed to fetch ProofCalculations for block {}: {}, skipping", block_number, e);
+              warn!("Failed to fetch ProofCalculation for block {}: {}, skipping", block_number, e);
               continue;
           }
       };
-      
-      // Use the first ProofCalculation for this block
-      let proof_calc_info = &proof_calculations[0];
       
       // Create a ProofCalculation struct for analysis
       let proof_calc = ProofCalculation {

@@ -25,8 +25,8 @@ public struct AppInstance has key, store {
     kv: VecMap<String, String>,
     methods: VecMap<String, AppMethod>,
     state: AppState,
-    blocks: ObjectTable<u64, Block>,
-    proof_calculations: ObjectTable<u64, ProofCalculation>,
+    blocks: ObjectTable<u64, Block>, // key is block number
+    proof_calculations: ObjectTable<u64, ProofCalculation>, // key is block number
     sequence_state_manager: SequenceStateManager,
     jobs: Jobs,
     sequence: u64,

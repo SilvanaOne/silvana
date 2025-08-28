@@ -1,5 +1,5 @@
 use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info};
-use sui::fetch::fetch_proof_calculations;
+use sui::fetch::fetch_proof_calculation;
 use anyhow::{anyhow, Result};
 use sui_rpc::Client;
 use tracing::{debug, info, warn, error};
@@ -26,16 +26,16 @@ pub async fn check_settlement_opportunity(
     };
     
     // Fetch ProofCalculation to check for block_proof
-    let proof_calculations = match fetch_proof_calculations(client, &app_instance.id, block_number).await {
-        Ok(proofs) => proofs,
+    let proof_calc = match fetch_proof_calculation(client, &app_instance.id, block_number).await {
+        Ok(proof_calc) => proof_calc,
         Err(e) => {
-            warn!("Failed to fetch proof calculations for block {}: {}", block_number, e);
+            warn!("Failed to fetch proof calculation for block {}: {}", block_number, e);
             return Ok(false);
         }
     };
     
-    let proof_calc = proof_calculations.first();
     let has_block_proof = proof_calc
+        .as_ref()
         .and_then(|pc| pc.block_proof.as_ref())
         .map(|bp| !bp.is_empty())
         .unwrap_or(false);

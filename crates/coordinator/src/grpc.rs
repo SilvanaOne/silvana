@@ -504,15 +504,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Fetch the real ProofCalculation from blockchain to get start_sequence and end_sequence
         let mut sui_fetch_client = self.state.get_sui_client();
-        let proof_calculations = sui::fetch::fetch_proof_calculations(
+        let proof_calculations = sui::fetch::fetch_proof_calculation(
             &mut sui_fetch_client,
             &agent_job.app_instance,
             req.block_number
         ).await
         .map_err(|e| Status::internal(format!("Failed to fetch ProofCalculation: {}", e)))?;
         
-        // Get the first ProofCalculation for this block (should exist)
-        let _proof_calc_info = proof_calculations.first()
+        // Get the ProofCalculation for this block (should exist)
+        let _proof_calc_info = proof_calculations
             .ok_or_else(|| Status::internal(format!("No ProofCalculation found for block {}", req.block_number)))?;
         
         // Submit proof transaction on Sui
