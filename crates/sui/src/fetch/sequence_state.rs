@@ -159,125 +159,75 @@ pub async fn fetch_sequence_state_by_id(
 pub async fn get_sequence_state_manager_info_from_app_instance(
     app_instance: &AppInstance,
 ) -> Result<Option<(u64, u64, String)>> { // (lowest_sequence, highest_sequence, table_id)
-    let mut client = SharedSuiState::get_instance().get_sui_client();
+    debug!("Getting SequenceStateManager info from app_instance: {}", app_instance.id);
     
-    debug!("Fetching SequenceStateManager info from app_instance: {}", app_instance.id);
+    // Use the sequence_state_manager field that's already in the AppInstance
+    if app_instance.sequence_state_manager.is_null() {
+        debug!("SequenceStateManager not found in app_instance {}", app_instance.id);
+        return Ok(None);
+    }
     
-    // Fetch the AppInstance object to get the latest sequence_state_manager data
-    let app_instance_request = GetObjectRequest {
-        object_id: Some(app_instance.id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "object_id".to_string(),
-                "json".to_string(),
-            ],
-        }),
-    };
-
-    let app_instance_response = client
-        .ledger_client()
-        .get_object(app_instance_request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch app_instance {}: {}", app_instance.id, e)
-        ))?;
-
-    let response = app_instance_response.into_inner();
+    let manager = &app_instance.sequence_state_manager;
+    let mut lowest_sequence = 0u64;
+    let mut highest_sequence = 0u64;
+    let mut table_id = String::new();
     
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                // Look for the sequence_state_manager field in the AppInstance
-                if let Some(manager_field) = struct_value.fields.get("sequence_state_manager") {
-                    if let Some(prost_types::value::Kind::StructValue(manager_struct)) = &manager_field.kind {
-                        let mut lowest_sequence = 0u64;
-                        let mut highest_sequence = 0u64;
-                        let mut table_id = String::new();
-                        
-                        // Extract lowest_sequence
-                        if let Some(lowest_field) = manager_struct.fields.get("lowest_sequence") {
-                            debug!("Found lowest_sequence field: {:?}", lowest_field);
-                            match &lowest_field.kind {
-                                Some(prost_types::value::Kind::StructValue(option_struct)) => {
-                                    if let Some(some_field) = option_struct.fields.get("Some") {
-                                        if let Some(prost_types::value::Kind::StringValue(seq_str)) = &some_field.kind {
-                                            lowest_sequence = seq_str.parse().unwrap_or(0);
-                                            debug!("Parsed lowest_sequence from Some: {}", lowest_sequence);
-                                        }
-                                    } else {
-                                        debug!("lowest_sequence is None (empty Some field)");
-                                    }
-                                }
-                                Some(prost_types::value::Kind::StringValue(seq_str)) => {
-                                    // Handle direct string value
-                                    lowest_sequence = seq_str.parse().unwrap_or(0);
-                                    debug!("Parsed lowest_sequence from direct string: {}", lowest_sequence);
-                                }
-                                Some(prost_types::value::Kind::NullValue(_)) => {
-                                    debug!("lowest_sequence is null");
-                                }
-                                _ => {
-                                    debug!("lowest_sequence has unexpected type: {:?}", lowest_field.kind);
-                                }
-                            }
-                        } else {
-                            debug!("lowest_sequence field not found");
-                        }
-                        
-                        // Extract highest_sequence
-                        if let Some(highest_field) = manager_struct.fields.get("highest_sequence") {
-                            debug!("Found highest_sequence field: {:?}", highest_field);
-                            match &highest_field.kind {
-                                Some(prost_types::value::Kind::StructValue(option_struct)) => {
-                                    if let Some(some_field) = option_struct.fields.get("Some") {
-                                        if let Some(prost_types::value::Kind::StringValue(seq_str)) = &some_field.kind {
-                                            highest_sequence = seq_str.parse().unwrap_or(0);
-                                            debug!("Parsed highest_sequence from Some: {}", highest_sequence);
-                                        }
-                                    } else {
-                                        debug!("highest_sequence is None (empty Some field)");
-                                    }
-                                }
-                                Some(prost_types::value::Kind::StringValue(seq_str)) => {
-                                    // Handle direct string value
-                                    highest_sequence = seq_str.parse().unwrap_or(0);
-                                    debug!("Parsed highest_sequence from direct string: {}", highest_sequence);
-                                }
-                                Some(prost_types::value::Kind::NullValue(_)) => {
-                                    debug!("highest_sequence is null");
-                                }
-                                _ => {
-                                    debug!("highest_sequence has unexpected type: {:?}", highest_field.kind);
-                                }
-                            }
-                        } else {
-                            debug!("highest_sequence field not found");
-                        }
-                        
-                        // Extract sequence_states table ID
-                        if let Some(table_field) = manager_struct.fields.get("sequence_states") {
-                            if let Some(prost_types::value::Kind::StructValue(table_struct)) = &table_field.kind {
-                                if let Some(id_field) = table_struct.fields.get("id") {
-                                    if let Some(prost_types::value::Kind::StringValue(id_str)) = &id_field.kind {
-                                        table_id = id_str.clone();
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if !table_id.is_empty() {
-                            debug!("Found SequenceStateManager: lowest={}, highest={}, table_id={}", 
-                                lowest_sequence, highest_sequence, table_id);
-                            return Ok(Some((lowest_sequence, highest_sequence, table_id)));
-                        }
-                    }
-                }
+    // Extract lowest_sequence
+    if let Some(lowest_value) = manager.get("lowest_sequence") {
+        if let Some(seq_str) = lowest_value.as_str() {
+            lowest_sequence = seq_str.parse().unwrap_or(0);
+            debug!("Parsed lowest_sequence: {}", lowest_sequence);
+        } else if let Some(seq_num) = lowest_value.as_u64() {
+            lowest_sequence = seq_num;
+            debug!("Parsed lowest_sequence as u64: {}", lowest_sequence);
+        } else if let Some(option_obj) = lowest_value.get("Some") {
+            // Handle Option::Some case
+            if let Some(seq_str) = option_obj.as_str() {
+                lowest_sequence = seq_str.parse().unwrap_or(0);
+                debug!("Parsed lowest_sequence from Some: {}", lowest_sequence);
+            } else if let Some(seq_num) = option_obj.as_u64() {
+                lowest_sequence = seq_num;
+                debug!("Parsed lowest_sequence from Some as u64: {}", lowest_sequence);
             }
         }
     }
     
-    debug!("SequenceStateManager not found in app_instance {}", app_instance.id);
+    // Extract highest_sequence
+    if let Some(highest_value) = manager.get("highest_sequence") {
+        if let Some(seq_str) = highest_value.as_str() {
+            highest_sequence = seq_str.parse().unwrap_or(0);
+            debug!("Parsed highest_sequence: {}", highest_sequence);
+        } else if let Some(seq_num) = highest_value.as_u64() {
+            highest_sequence = seq_num;
+            debug!("Parsed highest_sequence as u64: {}", highest_sequence);
+        } else if let Some(option_obj) = highest_value.get("Some") {
+            // Handle Option::Some case
+            if let Some(seq_str) = option_obj.as_str() {
+                highest_sequence = seq_str.parse().unwrap_or(0);
+                debug!("Parsed highest_sequence from Some: {}", highest_sequence);
+            } else if let Some(seq_num) = option_obj.as_u64() {
+                highest_sequence = seq_num;
+                debug!("Parsed highest_sequence from Some as u64: {}", highest_sequence);
+            }
+        }
+    }
+    
+    // Extract sequence_states table ID
+    if let Some(states_value) = manager.get("sequence_states") {
+        if let Some(id_value) = states_value.get("id") {
+            if let Some(id_str) = id_value.as_str() {
+                table_id = id_str.to_string();
+            }
+        }
+    }
+    
+    if !table_id.is_empty() {
+        debug!("Found SequenceStateManager: lowest={}, highest={}, table_id={}", 
+            lowest_sequence, highest_sequence, table_id);
+        return Ok(Some((lowest_sequence, highest_sequence, table_id)));
+    }
+    
+    debug!("SequenceStateManager table_id not found in app_instance {}", app_instance.id);
     Ok(None)
 }
 

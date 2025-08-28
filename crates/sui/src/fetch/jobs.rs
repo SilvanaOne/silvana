@@ -2,8 +2,6 @@ use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get_bytes};
 use crate::state::SharedSuiState;
 use super::AppInstance;
-use std::collections::HashSet;
-use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
 use tracing::{debug, warn};
 use serde::{Deserialize, Serialize};
@@ -392,97 +390,37 @@ pub async fn fetch_pending_jobs_from_app_instance(
     app_instance: &AppInstance,
     only_check: bool,
 ) -> Result<Option<Job>> {
-    let mut client = SharedSuiState::get_instance().get_sui_client();
+    debug!("Checking pending jobs for app_instance: {}", app_instance.id);
     
-    debug!("Fetching app_instance object: {}", app_instance.id);
-    
-    // Fetch the AppInstance object
-    let app_instance_request = GetObjectRequest {
-        object_id: Some(app_instance.id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "object_id".to_string(),
-                "json".to_string(),
-            ],
-        }),
-    };
-
-    let app_instance_response = client
-        .ledger_client()
-        .get_object(app_instance_request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch app_instance {}: {}", app_instance.id, e)
-        ))?;
-
-    let response = app_instance_response.into_inner();
-    
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                // Look for the jobs field in the AppInstance
-                if let Some(jobs_field) = struct_value.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // For check-only mode, just look at pending_jobs_count
-                        if only_check {
-                            if let Some(count_field) = jobs_struct.fields.get("pending_jobs_count") {
-                                if let Some(prost_types::value::Kind::StringValue(count_str)) = &count_field.kind {
-                                    if let Ok(count) = count_str.parse::<u64>() {
-                                        if count > 0 {
-                                            debug!("Found {} pending jobs in app_instance (check-only mode)", count);
-                                            return Ok(None);
-                                        } else {
-                                            debug!("No pending jobs in app_instance {} (count=0)", app_instance.id);
-                                            //state.remove_app_instance(app_instance_id).await;
-                                            return Ok(None);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Get the pending_jobs VecSet
-                        if let Some(pending_jobs_field) = jobs_struct.fields.get("pending_jobs") {
-                            if let Some(prost_types::value::Kind::StructValue(pending_jobs_struct)) = &pending_jobs_field.kind {
-                                if let Some(contents_field) = pending_jobs_struct.fields.get("contents") {
-                                    if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
-                                        let mut pending_job_sequences = HashSet::new();
-                                        for job_sequence_value in &list.values {
-                                            if let Some(prost_types::value::Kind::StringValue(job_sequence_str)) = &job_sequence_value.kind {
-                                                if let Ok(job_sequence) = job_sequence_str.parse::<u64>() {
-                                                    pending_job_sequences.insert(job_sequence);
-                                                }
-                                            }
-                                        }
-                                        
-                                        if pending_job_sequences.is_empty() {
-                                            debug!("No pending jobs in app_instance {}", app_instance.id);
-                                            //state.remove_app_instance(app_instance_id).await;
-                                            return Ok(None);
-                                        }
-                                        
-                                        // Get the smallest job_sequence
-                                        let mut job_sequences: Vec<u64> = pending_job_sequences.iter().cloned().collect();
-                                        job_sequences.sort();
-                                        let target_job_sequence = job_sequences[0];
-                                        
-                                        debug!("Found {} pending jobs, will fetch job_sequence {}", job_sequences.len(), target_job_sequence);
-                                        
-                                        // Now fetch the specific job using the jobs table ID from AppInstance
-                                        if let Some(jobs) = &app_instance.jobs {
-                                            // Fetch the specific job
-                                            if let Some(job) = fetch_job_by_id(&jobs.jobs_table_id, target_job_sequence).await? {
-                                                return Ok(Some(job));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+    // Use the Jobs struct that's already in the AppInstance
+    if let Some(jobs) = &app_instance.jobs {
+        // For check-only mode, just look at pending_jobs_count
+        if only_check {
+            if jobs.pending_jobs_count > 0 {
+                debug!("Found {} pending jobs in app_instance (check-only mode)", jobs.pending_jobs_count);
+                return Ok(None);
+            } else {
+                debug!("No pending jobs in app_instance {} (count=0)", app_instance.id);
+                return Ok(None);
             }
+        }
+        
+        // Check if there are pending jobs
+        if jobs.pending_jobs.is_empty() {
+            debug!("No pending jobs in app_instance {}", app_instance.id);
+            return Ok(None);
+        }
+        
+        // Get the smallest job_sequence (pending_jobs Vec should already be sorted or we sort it)
+        let mut job_sequences = jobs.pending_jobs.clone();
+        job_sequences.sort();
+        let target_job_sequence = job_sequences[0];
+        
+        debug!("Found {} pending jobs, will fetch job_sequence {}", job_sequences.len(), target_job_sequence);
+        
+        // Fetch the specific job using the jobs table ID
+        if let Some(job) = fetch_job_by_id(&jobs.jobs_table_id, target_job_sequence).await? {
+            return Ok(Some(job));
         }
     }
     
@@ -730,7 +668,7 @@ pub async fn fetch_job_by_id(
                 if field_job_sequence == job_sequence {
                     if let Some(field_id) = &field.field_id {
                         // Found the job, fetch its content
-                        return fetch_job_object_by_field_id(&mut client, field_id, job_sequence).await;
+                        return fetch_job_object_by_field_id(field_id, job_sequence).await;
                     }
                 }
             }
@@ -743,10 +681,10 @@ pub async fn fetch_job_by_id(
 
 /// Fetch Job object by field ID (already verified to be the correct job)
 async fn fetch_job_object_by_field_id(
-    client: &mut Client,
     field_id: &str,
     job_sequence: u64,
 ) -> Result<Option<Job>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("📄 Fetching job {} from field {}", job_sequence, field_id);
     
     // Fetch the Field wrapper object
@@ -829,117 +767,20 @@ pub async fn fetch_pending_job_sequences_from_app_instance(
     agent: &str,
     agent_method: &str,
 ) -> Result<Vec<u64>> {
-    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!(
         "Fetching pending job IDs for {}/{}/{} from app_instance {}",
         developer, agent, agent_method, app_instance.id
     );
     
-    // Fetch the AppInstance object
-    let request = GetObjectRequest {
-        object_id: Some(app_instance.id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string()],
-        }),
-    };
-
-    let response = client
-        .ledger_client()
-        .get_object(request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to fetch AppInstance {}: {}", app_instance.id, e)
-        ))?;
-
-    if let Some(proto_object) = response.into_inner().object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
-                // Get the embedded jobs field
-                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // Look for the pending_jobs_indexes field
-                        if let Some(indexes_field) = jobs_struct.fields.get("pending_jobs_indexes") {
-                            if let Some(prost_types::value::Kind::StructValue(indexes_struct)) = &indexes_field.kind {
-                                // Navigate through the nested VecMap structure
-                                if let Some(contents_field) = indexes_struct.fields.get("contents") {
-                                    if let Some(prost_types::value::Kind::ListValue(dev_list)) = &contents_field.kind {
-                                        // Look for the developer entry
-                                        for dev_entry in &dev_list.values {
-                                            if let Some(prost_types::value::Kind::StructValue(dev_struct)) = &dev_entry.kind {
-                                                if let Some(key_field) = dev_struct.fields.get("key") {
-                                                    if let Some(prost_types::value::Kind::StringValue(dev_key)) = &key_field.kind {
-                                                        if dev_key == developer {
-                                                            // Found the developer, now look for agent
-                                                            if let Some(value_field) = dev_struct.fields.get("value") {
-                                                                if let Some(prost_types::value::Kind::StructValue(agent_map)) = &value_field.kind {
-                                                                    if let Some(agent_contents) = agent_map.fields.get("contents") {
-                                                                        if let Some(prost_types::value::Kind::ListValue(agent_list)) = &agent_contents.kind {
-                                                                            // Look for the agent entry
-                                                                            for agent_entry in &agent_list.values {
-                                                                                if let Some(prost_types::value::Kind::StructValue(agent_struct)) = &agent_entry.kind {
-                                                                                    if let Some(agent_key_field) = agent_struct.fields.get("key") {
-                                                                                        if let Some(prost_types::value::Kind::StringValue(agent_key)) = &agent_key_field.kind {
-                                                                                            if agent_key == agent {
-                                                                                                // Found the agent, now look for agent_method
-                                                                                                if let Some(agent_value_field) = agent_struct.fields.get("value") {
-                                                                                                    if let Some(prost_types::value::Kind::StructValue(method_map)) = &agent_value_field.kind {
-                                                                                                        if let Some(method_contents) = method_map.fields.get("contents") {
-                                                                                                            if let Some(prost_types::value::Kind::ListValue(method_list)) = &method_contents.kind {
-                                                                                                                // Look for the agent_method entry
-                                                                                                                for method_entry in &method_list.values {
-                                                                                                                    if let Some(prost_types::value::Kind::StructValue(method_struct)) = &method_entry.kind {
-                                                                                                                        if let Some(method_key_field) = method_struct.fields.get("key") {
-                                                                                                                            if let Some(prost_types::value::Kind::StringValue(method_key)) = &method_key_field.kind {
-                                                                                                                                if method_key == agent_method {
-                                                                                                                                    // Found the method, extract job IDs
-                                                                                                                                    if let Some(method_value_field) = method_struct.fields.get("value") {
-                                                                                                                                        if let Some(prost_types::value::Kind::StructValue(job_set)) = &method_value_field.kind {
-                                                                                                                                            if let Some(job_contents) = job_set.fields.get("contents") {
-                                                                                                                                                if let Some(prost_types::value::Kind::ListValue(job_list)) = &job_contents.kind {
-                                                                                                                                                    let mut job_sequences = Vec::new();
-                                                                                                                                                    for job_value in &job_list.values {
-                                                                                                                                                        if let Some(prost_types::value::Kind::StringValue(job_sequence_str)) = &job_value.kind {
-                                                                                                                                                            if let Ok(job_sequence) = job_sequence_str.parse::<u64>() {
-                                                                                                                                                                job_sequences.push(job_sequence);
-                                                                                                                                                            }
-                                                                                                                                                        }
-                                                                                                                                                    }
-                                                                                                                                                    debug!("Found {} pending job sequences for {}/{}/{}", 
-                                                                                                                                                        job_sequences.len(), developer, agent, agent_method);
-                                                                                                                                                    return Ok(job_sequences);
-                                                                                                                                                }
-                                                                                                                                            }
-                                                                                                                                        }
-                                                                                                                                    }
-                                                                                                                                }
-                                                                                                                            }
-                                                                                                                        }
-                                                                                                                    }
-                                                                                                                }
-                                                                                                            }
-                                                                                                        }
-                                                                                                    }
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+    // Use the Jobs struct that's already in the AppInstance
+    if let Some(jobs) = &app_instance.jobs {
+        // Navigate through the nested pending_jobs_indexes structure
+        if let Some(dev_agents) = jobs.pending_jobs_indexes.get(developer) {
+            if let Some(agent_methods) = dev_agents.get(agent) {
+                if let Some(job_sequences) = agent_methods.get(agent_method) {
+                    debug!("Found {} pending job sequences for {}/{}/{}", 
+                        job_sequences.len(), developer, agent, agent_method);
+                    return Ok(job_sequences.clone());
                 }
             }
         }
@@ -1010,7 +851,7 @@ pub async fn fetch_all_jobs_from_app_instance(
                         .unwrap_or(0);
                     
                     // Fetch the job using the helper function
-                    if let Ok(Some(job)) = fetch_job_object_by_field_id(&mut client, field_id, job_sequence).await {
+                    if let Ok(Some(job)) = fetch_job_object_by_field_id(field_id, job_sequence).await {
                         all_jobs.push(job);
                     }
                 }
