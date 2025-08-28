@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod app_instance;
+pub mod app_instance_bcs;
 pub mod block;
 pub mod checkpoint;
 pub mod jobs;

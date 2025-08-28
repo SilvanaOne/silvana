@@ -82,7 +82,7 @@ tonic-build.workspace = true
 # For tests
 uuid = { version = "1.0", features = ["v4"] }
 dotenvy.workspace = true
-rustls = { workspace = true }
+rustls.workspace = true
 
 [[bin]]
 name = "coordinator"

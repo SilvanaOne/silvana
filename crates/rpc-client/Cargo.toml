@@ -13,7 +13,7 @@ proto = { path = "../proto" }
 tonic = { workspace = true, features = ["tls-webpki-roots"] }
 
 # TLS support for rustls crypto provider
-rustls = { workspace = true }
+rustls.workspace = true
 
 # Async runtime
 tokio.workspace = true

@@ -36,6 +36,9 @@ blake2 = "0.10"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand.workspace = true
 tracing-subscriber.workspace = true
-
 # For parallel coin management
 parking_lot.workspace = true
+
+[dev-dependencies]
+dotenvy.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
