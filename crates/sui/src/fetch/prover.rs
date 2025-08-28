@@ -1,10 +1,12 @@
 use crate::error::{Result, SilvanaSuiInterfaceError};
+use crate::fetch::AppInstance;
 use crate::parse::{
     get_bool, get_option_string, get_option_u64, get_string, get_u8, get_u16, get_u64,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use sui_rpc::Client;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
 use tracing::{debug, warn};
 
 // Constants matching Move definitions
@@ -77,7 +79,7 @@ pub struct ProofCalculation {
     pub is_finished: bool,
 }
 
-/// Fetch ProofCalculation for a block from AppInstance
+/// Fetch ProofCalculation for a block from AppInstance (legacy single-block function)
 pub async fn fetch_proof_calculation(
     client: &mut Client,
     app_instance: &str,
@@ -118,8 +120,6 @@ pub async fn fetch_proof_calculation(
 
     if let Some(proto_object) = response.object {
         if let Some(json_value) = &proto_object.json {
-            //debug!("🏗️ AppInstance JSON structure for {}: {:#?}", app_instance, json_value);
-
             if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
                 debug!(
                     "📋 AppInstance {} fields: {:?}",
@@ -145,7 +145,7 @@ pub async fn fetch_proof_calculation(
                                 &table_id_field.kind
                             {
                                 debug!("🔍 Found proof_calculations table ID: {}", table_id);
-                                // Fetch all ProofCalculations from the ObjectTable
+                                // Fetch the ProofCalculation from the ObjectTable
                                 return fetch_proof_calculation_from_table(
                                     client,
                                     table_id,
@@ -184,7 +184,243 @@ pub async fn fetch_proof_calculation(
     Ok(None)
 }
 
-/// Fetch ProofCalculation from ObjectTable for a specific block number
+/// Fetch multiple ProofCalculations from AppInstance for a range of block numbers  
+/// Returns a HashMap of block_number -> ProofCalculation for all found proofs in the range
+pub async fn fetch_proof_calculations_range(
+    client: &mut Client,
+    app_instance: &AppInstance,
+    start_block: u64,
+    end_block: u64,
+) -> Result<HashMap<u64, ProofCalculation>> {
+    debug!("Fetching ProofCalculations from {} to {} for app_instance {}",
+        start_block, end_block, app_instance.id);
+    
+    // Get the proof_calculations table ID from the AppInstance
+    let proof_calculations_table_id = &app_instance.proof_calculations_table_id;
+    
+    // Fetch all proof calculations in the range from the table
+    fetch_proof_calculations_from_table_range(
+        client,
+        proof_calculations_table_id, 
+        start_block,
+        end_block
+    ).await
+}
+
+/// Fetch multiple ProofCalculations from ObjectTable for a range of block numbers
+/// Returns a HashMap of block_number -> ProofCalculation for all found proofs
+async fn fetch_proof_calculations_from_table_range(
+    client: &mut Client,
+    table_id: &str,
+    start_block: u64,
+    end_block: u64,
+) -> Result<HashMap<u64, ProofCalculation>> {
+    debug!(
+        "🔍 Fetching proof calculations {} to {} from table {}",
+        start_block, end_block, table_id
+    );
+
+    // First, collect all field IDs for blocks in the range
+    let mut field_ids_to_fetch = Vec::new(); // (field_id, block_number)
+    let mut page_token = None;
+    const PAGE_SIZE: u32 = 100;
+    let mut pages_searched = 0;
+    const MAX_PAGES: u32 = 200;
+
+    loop {
+        let request = ListDynamicFieldsRequest {
+            parent: Some(table_id.to_string()),
+            page_size: Some(PAGE_SIZE),
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                ],
+            }),
+        };
+
+        let fields_response = client
+            .live_data_client()
+            .list_dynamic_fields(request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to list dynamic fields: {}",
+                    e
+                ))
+            })?;
+
+        let response = fields_response.into_inner();
+        pages_searched += 1;
+        debug!(
+            "📋 Page {}: Found {} dynamic fields in proof_calculations table",
+            pages_searched,
+            response.dynamic_fields.len()
+        );
+
+        // Collect field IDs for blocks in our range
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
+                    // Check if this block is in our desired range
+                    if block_number >= start_block && block_number <= end_block {
+                        if let Some(field_id) = &field.field_id {
+                            field_ids_to_fetch.push((field_id.clone(), block_number));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if we should continue pagination
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() && pages_searched < MAX_PAGES {
+                page_token = Some(next_token);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    debug!(
+        "📋 Collected {} field IDs for proof calculations in range {}-{}",
+        field_ids_to_fetch.len(), start_block, end_block
+    );
+
+    if field_ids_to_fetch.is_empty() {
+        warn!(
+            "❌ No proof calculations found in range {}-{} after searching {} pages",
+            start_block, end_block, pages_searched
+        );
+        return Ok(HashMap::new());
+    }
+
+    // Now batch fetch all proof calculations
+    fetch_proof_objects_batch(client, field_ids_to_fetch).await
+}
+
+/// Batch fetch multiple proof calculations at once
+async fn fetch_proof_objects_batch(
+    client: &mut Client,
+    field_ids_with_blocks: Vec<(String, u64)>, // (field_id, block_number)
+) -> Result<HashMap<u64, ProofCalculation>> {
+    let mut proofs_map = HashMap::new();
+    
+    // Process in batches of 50 to avoid overwhelming the RPC
+    const BATCH_SIZE: usize = 50;
+    
+    for chunk in field_ids_with_blocks.chunks(BATCH_SIZE) {
+        debug!("📦 Batch fetching {} proof field wrappers", chunk.len());
+        
+        // First batch: fetch all field wrapper objects to get the actual proof object IDs
+        let field_requests: Vec<GetObjectRequest> = chunk
+            .iter()
+            .map(|(field_id, _)| GetObjectRequest {
+                object_id: Some(field_id.clone()),
+                version: None,
+                read_mask: None, // Use batch-level mask instead
+            })
+            .collect();
+        
+        let batch_request = BatchGetObjectsRequest {
+            requests: field_requests,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            }),
+        };
+        
+        let batch_response = client
+            .ledger_client()
+            .batch_get_objects(batch_request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to batch fetch field wrappers: {}",
+                    e
+                ))
+            })?;
+        
+        let field_results = batch_response.into_inner().objects;
+        
+        // Extract proof object IDs from field wrappers
+        let mut proof_object_ids = Vec::new(); // (proof_object_id, block_number)
+        for (i, get_result) in field_results.iter().enumerate() {
+            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(field_object)) = &get_result.result {
+                if let Some(field_json) = &field_object.json {
+                    if let Some(prost_types::value::Kind::StructValue(struct_value)) = &field_json.kind {
+                        if let Some(value_field) = struct_value.fields.get("value") {
+                            if let Some(prost_types::value::Kind::StringValue(proof_object_id)) = &value_field.kind {
+                                let (_, block_number) = chunk[i];
+                                proof_object_ids.push((proof_object_id.clone(), block_number));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if proof_object_ids.is_empty() {
+            continue;
+        }
+        
+        debug!("📦 Batch fetching {} proof calculation objects", proof_object_ids.len());
+        
+        // Second batch: fetch all actual proof calculation objects
+        let proof_requests: Vec<GetObjectRequest> = proof_object_ids
+            .iter()
+            .map(|(proof_id, _)| GetObjectRequest {
+                object_id: Some(proof_id.clone()),
+                version: None,
+                read_mask: None, // Use batch-level mask instead
+            })
+            .collect();
+        
+        let batch_request = BatchGetObjectsRequest {
+            requests: proof_requests,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            }),
+        };
+        
+        let batch_response = client
+            .ledger_client()
+            .batch_get_objects(batch_request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to batch fetch proof calculations: {}",
+                    e
+                ))
+            })?;
+        
+        let proof_results = batch_response.into_inner().objects;
+        
+        // Extract ProofCalculation data from results
+        for (i, get_result) in proof_results.iter().enumerate() {
+            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(proof_object)) = &get_result.result {
+                if let Some(proof_json) = &proof_object.json {
+                    if let Some(proof_info) = extract_proof_calculation_from_json(proof_json) {
+                        let (_, block_number) = proof_object_ids[i];
+                        proofs_map.insert(block_number, proof_info);
+                    }
+                }
+            }
+        }
+    }
+    
+    debug!(
+        "📊 Successfully fetched {} proof calculations",
+        proofs_map.len()
+    );
+    
+    Ok(proofs_map)
+}
+
+/// Fetch ProofCalculation from ObjectTable for a specific block number (legacy single-block function)
 async fn fetch_proof_calculation_from_table(
     client: &mut Client,
     table_id: &str,

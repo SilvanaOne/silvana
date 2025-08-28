@@ -1,6 +1,6 @@
 
 use anyhow::Result;
-use sui::fetch::{AppInstance, ProofCalculation};
+use sui::fetch::{AppInstance, ProofCalculation, fetch_blocks_range, fetch_proof_calculations_range};
 use tracing::{debug, info, warn};
 use crate::settlement;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
@@ -32,6 +32,11 @@ pub async fn analyze_proof_completion(
       return Ok(());
   }
   
+  // Track statistics
+  let mut blocks_checked_for_settlement = 0;
+  let mut blocks_fetched = 0;
+  let mut proofs_fetched = 0;
+  
   // Check for settlement opportunities (skip block 0 as it cannot be settled)
   let mut found_settlement_opportunity = false;
   
@@ -42,16 +47,73 @@ pub async fn analyze_proof_completion(
       debug!("🔍 Checking for settlement opportunities from block {} to {}", 
           start_block, last_proved_block_number);
       
+      // Fetch all blocks and proof calculations in the range with a single iteration
+      let fetch_blocks_start = std::time::Instant::now();
+      let blocks_map = match fetch_blocks_range(
+          client,
+          app_instance,
+          start_block,
+          last_proved_block_number
+      ).await {
+          Ok(blocks) => {
+              blocks_fetched = blocks.len();
+              debug!("Fetched {} blocks in {:.2}s", blocks.len(), fetch_blocks_start.elapsed().as_secs_f64());
+              blocks
+          },
+          Err(e) => {
+              warn!("Failed to fetch blocks range: {}", e);
+              Default::default()
+          }
+      };
+      
+      let fetch_proofs_start = std::time::Instant::now();
+      let proofs_map = match fetch_proof_calculations_range(
+          client,
+          app_instance,
+          start_block,
+          last_proved_block_number
+      ).await {
+          Ok(proofs) => {
+              proofs_fetched = proofs.len();
+              debug!("Fetched {} proof calculations in {:.2}s", proofs.len(), fetch_proofs_start.elapsed().as_secs_f64());
+              proofs
+          },
+          Err(e) => {
+              warn!("Failed to fetch proof calculations range: {}", e);
+              Default::default()
+          }
+      };
+      
+      // Check each block for settlement opportunities
       for block_number in start_block..=last_proved_block_number {
-          if let Ok(has_opportunity) = settlement::check_settlement_opportunity(
-              app_instance,
-              block_number,
-              client
-          ).await {
-              if has_opportunity {
+          blocks_checked_for_settlement += 1;
+          if let Some(block_details) = blocks_map.get(&block_number) {
+              let proof_calc = proofs_map.get(&block_number);
+              
+              let has_block_proof = proof_calc
+                  .and_then(|pc| pc.block_proof.as_ref())
+                  .map(|bp| !bp.is_empty())
+                  .unwrap_or(false);
+              
+              // Check settlement opportunities:
+              // 1. Proof is available but no settlement transaction
+              let proof_available = block_details.proof_data_availability.is_some() || has_block_proof;
+              let no_settlement_tx = block_details.settlement_tx_hash.is_none();
+              
+              if proof_available && no_settlement_tx {
+                  debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
                   found_settlement_opportunity = true;
-                  debug!("💰 Found settlement opportunity for block {}", block_number);
-                  break; // Found at least one opportunity
+                  break;
+              }
+              
+              // 2. Settlement transaction exists but not included in block
+              let has_settlement_tx = block_details.settlement_tx_hash.is_some();
+              let not_included = !block_details.settlement_tx_included_in_block;
+              
+              if has_settlement_tx && not_included {
+                  debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
+                  found_settlement_opportunity = true;
+                  break;
               }
           }
       }
@@ -153,29 +215,34 @@ pub async fn analyze_proof_completion(
   }
   
   let analysis_duration = analysis_start.elapsed();
-  // Single summary message for the entire analysis
-  if found_settlement_opportunity || analyzed_blocks > 0 {
-      let settlement_status = if found_settlement_opportunity {
-          if existing_settle_job_id.is_some() {
-              format!("settle_job_exists(id={})", existing_settle_job_id.unwrap())
-          } else {
-              "settle_job_created".to_string()
-          }
+  
+  // Prepare comprehensive stats
+  let settlement_status = if found_settlement_opportunity {
+      if existing_settle_job_id.is_some() {
+          format!("settle_job_exists(id={})", existing_settle_job_id.unwrap())
       } else {
-          "no_settlement".to_string()
-      };
-      
-      info!(
-          "✅ Analysis: app={}, blocks_analyzed={}, proved={}, settled={}, {}, time={:.2}s",
-          app_instance.silvana_app_name,
-          analyzed_blocks,
-          last_proved_block_number,
-          last_settled_block_number,
-          settlement_status,
-          analysis_duration.as_secs_f64()
-      );
+          "settle_job_created".to_string()
+      }
+  } else if existing_settle_job_id.is_some() {
+      "settle_job_terminated".to_string()
   } else {
-      debug!("Analysis complete: no blocks to process, time={:.2}s", analysis_duration.as_secs_f64());
-  }
+      "no_settlement_needed".to_string()
+  };
+  
+  // Always log comprehensive stats at info level
+  info!(
+      "📊 Proof analysis complete | app: {} | current_block: {} | last_proved: {} | last_settled: {} | blocks_checked_settlement: {} | blocks_fetched: {} | proofs_fetched: {} | blocks_analyzed_merge: {} | settlement: {} | duration: {:.3}s",
+      app_instance.silvana_app_name,
+      current_block_number,
+      last_proved_block_number,
+      last_settled_block_number,
+      blocks_checked_for_settlement,
+      blocks_fetched,
+      proofs_fetched,
+      analyzed_blocks,
+      settlement_status,
+      analysis_duration.as_secs_f64()
+  );
+  
   Ok(())
 }

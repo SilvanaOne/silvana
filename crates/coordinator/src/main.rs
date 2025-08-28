@@ -198,8 +198,8 @@ async fn main() -> Result<()> {
                 // Start timing the entire cycle
                 let cycle_start = std::time::Instant::now();
                 
-                let mut created_count = 0;
                 let mut error_count = 0;
+                let mut created_blocks = Vec::new(); // Store (app_id, tx_digest, sequences, time_ms)
                 
                 // Create a SilvanaSuiInterface for this iteration
                 let mut sui_interface = SilvanaSuiInterface::new(block_creation_client_clone.clone());
@@ -209,11 +209,11 @@ async fn main() -> Result<()> {
                     let instance_start = std::time::Instant::now();
                     
                     match try_create_block(&mut client, &mut sui_interface, &app_instance_id).await {
-                        Ok(true) => {
-                            created_count += 1;
-                            info!("Block created for app_instance {}", app_instance_id);
+                        Ok(Some((tx_digest, new_sequences, time_since_last))) => {
+                            created_blocks.push((app_instance_id.clone(), tx_digest, new_sequences, time_since_last));
+                            debug!("Block created for app_instance {}", app_instance_id);
                         }
-                        Ok(false) => {
+                        Ok(None) => {
                             // Conditions not met or another coordinator created it
                             debug!("Block not created for app_instance {} (conditions not met)", app_instance_id);
                         }
@@ -232,12 +232,23 @@ async fn main() -> Result<()> {
                 
                 // Log timing for the entire cycle
                 let cycle_duration = cycle_start.elapsed();
-                if created_count > 0 || error_count > 0 {
-                info!(
-                    "⏱️ Block creation cycle completed in {:.2}s for {} app_instances ({} created, {} errors)",
-                    cycle_duration.as_secs_f64(),
-                    app_instances.len(),
-                        created_count,
+                if !created_blocks.is_empty() {
+                    // Log detailed info for each created block
+                    for (app_id, tx_digest, sequences, time_ms) in created_blocks {
+                        info!(
+                            "✅ Block created | app: {} | tx: {} | sequences: {} | time_since_last: {}ms | cycle_time: {:.2}s",
+                            app_id,
+                            tx_digest,
+                            sequences,
+                            time_ms,
+                            cycle_duration.as_secs_f64()
+                        );
+                    }
+                } else if error_count > 0 {
+                    info!(
+                        "Block creation cycle completed in {:.2}s for {} app_instances (0 created, {} errors)",
+                        cycle_duration.as_secs_f64(),
+                        app_instances.len(),
                         error_count
                     );
                 } else {
@@ -335,8 +346,8 @@ async fn main() -> Result<()> {
                 // Log timing for the entire cycle
                 let cycle_duration = cycle_start.elapsed();
                 info!(
-                    "🔬 Proof analysis cycle completed in {:.2}s for {} app_instances ({} analyzed, {} errors)",
-                    cycle_duration.as_secs_f64(),
+                    "🔬 Proof analysis cycle completed in {}ms for {} app_instances ({} analyzed, {} errors)",
+                    cycle_duration.as_millis(),
                     app_instances.len(),
                     analyzed_count,
                     error_count

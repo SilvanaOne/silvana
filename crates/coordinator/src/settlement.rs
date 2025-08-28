@@ -1,10 +1,11 @@
-use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info};
-use sui::fetch::fetch_proof_calculation;
+use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info, fetch_blocks_range};
+use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use anyhow::{anyhow, Result};
 use sui_rpc::Client;
 use tracing::{debug, info, warn, error};
 
-/// Check if there's a settlement opportunity for a given block
+/// Check if there's a settlement opportunity for a given block (legacy single-block function)
+#[allow(dead_code)]
 pub async fn check_settlement_opportunity(
     app_instance: &AppInstance,
     block_number: u64,
@@ -61,6 +62,77 @@ pub async fn check_settlement_opportunity(
     
     debug!("No settlement opportunity for block {}", block_number);
     Ok(false)
+}
+
+/// Check for settlement opportunities across a range of blocks using batch fetching
+/// Returns a vector of block numbers that have settlement opportunities
+#[allow(dead_code)]
+pub async fn check_settlement_opportunities_range(
+    app_instance: &AppInstance,
+    start_block: u64,
+    end_block: u64,
+    client: &mut Client,
+) -> Result<Vec<u64>> {
+    debug!("Checking settlement opportunities for blocks {} to {}", start_block, end_block);
+    
+    // Fetch all blocks and proof calculations in the range with single iterations
+    let blocks_map = match fetch_blocks_range(client, app_instance, start_block, end_block).await {
+        Ok(blocks) => blocks,
+        Err(e) => {
+            warn!("Failed to fetch blocks range: {}", e);
+            return Ok(Vec::new());
+        }
+    };
+    
+    let proofs_map = match fetch_proof_calculations_range(client, app_instance, start_block, end_block).await {
+        Ok(proofs) => proofs,
+        Err(e) => {
+            warn!("Failed to fetch proof calculations range: {}", e);
+            return Ok(Vec::new());
+        }
+    };
+    
+    let mut opportunities = Vec::new();
+    
+    // Check each block for settlement opportunities
+    for block_number in start_block..=end_block {
+        if let Some(block_details) = blocks_map.get(&block_number) {
+            let proof_calc = proofs_map.get(&block_number);
+            
+            let has_block_proof = proof_calc
+                .and_then(|pc| pc.block_proof.as_ref())
+                .map(|bp| !bp.is_empty())
+                .unwrap_or(false);
+            
+            // Check settlement opportunities:
+            // 1. Proof is available but no settlement transaction
+            let proof_available = block_details.proof_data_availability.is_some() || has_block_proof;
+            let no_settlement_tx = block_details.settlement_tx_hash.is_none();
+            
+            if proof_available && no_settlement_tx {
+                debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
+                opportunities.push(block_number);
+                continue;
+            }
+            
+            // 2. Settlement transaction exists but not included in block
+            let has_settlement_tx = block_details.settlement_tx_hash.is_some();
+            let not_included = !block_details.settlement_tx_included_in_block;
+            
+            if has_settlement_tx && not_included {
+                debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
+                opportunities.push(block_number);
+            }
+        }
+    }
+    
+    if opportunities.is_empty() {
+        debug!("No settlement opportunities found in range {}-{}", start_block, end_block);
+    } else {
+        debug!("Found {} settlement opportunities in range {}-{}", opportunities.len(), start_block, end_block);
+    }
+    
+    Ok(opportunities)
 }
 
 /// Get the settlement job ID for a specific app instance ID
@@ -289,59 +361,57 @@ pub async fn fetch_pending_job_from_instances(
             agent_method,
         ).await?;
         
+        if job_sequences.is_empty() {
+            continue;
+        }
+        
         // Check if there's a settlement job first
         let settlement_job_id = crate::settlement::get_settlement_job_id_for_instance(client, app_instance).await
             .unwrap_or(None);
         
-        // If there's a settlement job and it's in the pending jobs, check it first
+        // Batch fetch all jobs at once
+        let jobs_map = fetch_jobs_batch(client, &jobs_table_id, &job_sequences).await?;
+        
+        // Process settlement job if it exists and is in the pending jobs
         if let Some(settle_id) = settlement_job_id {
-            if job_sequences.contains(&settle_id) {
-                if let Some(job) = fetch_job_by_id(client, &jobs_table_id, settle_id).await? {
-                    // Check if it's ready to run (next_scheduled_at)
-                    if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
-                        all_jobs.push((
-                            settle_id,
-                            app_instance.clone(),
-                            jobs_table_id.clone(),
-                            job.app_instance_method.clone(),
-                            job.next_scheduled_at,
-                            true // is_settlement_job
-                        ));
-                    } else {
-                        debug!("Settlement job {} not ready yet, scheduled for {}", 
-                            settle_id, job.next_scheduled_at.unwrap());
-                    }
+            if let Some(job) = jobs_map.get(&settle_id) {
+                // Check if it's ready to run (next_scheduled_at)
+                if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+                    all_jobs.push((
+                        settle_id,
+                        app_instance.clone(),
+                        jobs_table_id.clone(),
+                        job.app_instance_method.clone(),
+                        job.next_scheduled_at,
+                        true // is_settlement_job
+                    ));
+                } else {
+                    debug!("Settlement job {} not ready yet, scheduled for {}", 
+                        settle_id, job.next_scheduled_at.unwrap());
                 }
             }
         }
         
-        // Fetch each job to get its app_instance_method and check if it's ready to run
-        for job_sequence in job_sequences {
+        // Process all other jobs
+        for (job_sequence, job) in jobs_map.iter() {
             // Skip if this is the settlement job we already processed
-            if Some(job_sequence) == settlement_job_id {
+            if Some(*job_sequence) == settlement_job_id {
                 continue;
             }
             
-            match fetch_job_by_id(client, &jobs_table_id, job_sequence).await? {
-                Some(job) => {
-                    // Check if job is ready to run (next_scheduled_at)
-                    if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
-                        all_jobs.push((
-                            job_sequence, 
-                            app_instance.clone(), 
-                            jobs_table_id.clone(),
-                            job.app_instance_method.clone(),
-                            job.next_scheduled_at,
-                            false // not a settlement job
-                        ));
-                    } else {
-                        debug!("Job {} not ready yet, scheduled for {}", 
-                            job_sequence, job.next_scheduled_at.unwrap());
-                    }
-                }
-                None => {
-                    warn!("Could not fetch job {} from table {}", job_sequence, jobs_table_id);
-                }
+            // Check if job is ready to run (next_scheduled_at)
+            if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+                all_jobs.push((
+                    *job_sequence, 
+                    app_instance.clone(), 
+                    jobs_table_id.clone(),
+                    job.app_instance_method.clone(),
+                    job.next_scheduled_at,
+                    false // not a settlement job
+                ));
+            } else {
+                debug!("Job {} not ready yet, scheduled for {}", 
+                    job_sequence, job.next_scheduled_at.unwrap());
             }
         }
     }

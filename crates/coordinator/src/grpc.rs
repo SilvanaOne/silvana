@@ -62,12 +62,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
             
             let elapsed = start_time.elapsed();
             info!(
-                "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, source=db, time={:?}",
+                "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db, time={:?}",
                 agent_job.app_instance,
                 req.developer,
                 req.agent,
                 req.agent_method,
                 agent_job.job_sequence,
+                agent_job.pending_job.app_instance_method,
                 elapsed
             );
             
@@ -143,12 +144,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     
                                     let elapsed = start_time.elapsed();
                                     info!(
-                                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, source=sui, time={:?}",
+                                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=sui, time={:?}",
                                         agent_job.app_instance,
                                         req.developer,
                                         req.agent,
                                         req.agent_method,
                                         agent_job.job_sequence,
+                                        agent_job.pending_job.app_instance_method,
                                         elapsed
                                     );
                                     
@@ -278,12 +280,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
             if removed_job.is_some() {
                 let elapsed = start_time.elapsed();
                 info!(
-                    "✅ CompleteJob: app={}, dev={}, agent={}/{}, job_seq={}, job_id={}, tx={}, time={:?}",
+                    "✅ CompleteJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, job_id={}, tx={}, time={:?}",
                     agent_job.app_instance,
                     agent_job.developer,
                     agent_job.agent,
                     agent_job.agent_method,
                     agent_job.job_sequence,
+                    agent_job.pending_job.app_instance_method,
                     req.job_id,
                     tx,
                     elapsed
@@ -555,7 +558,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let tx_result = sui_interface.submit_proof(
             &agent_job.app_instance,
             req.block_number,
-            sequences,
+            sequences.clone(),
             merged_sequences_1,
             merged_sequences_2,
             req.job_id.clone(),
@@ -568,6 +571,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match tx_result {
             Ok(tx_hash) => {
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ SubmitProof: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, block={}, seqs={:?}, da={}, tx={}, time={:?}",
+                    agent_job.app_instance,
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    agent_job.job_sequence,
+                    agent_job.pending_job.app_instance_method,
+                    req.block_number,
+                    sequences,
+                    da_hash,
+                    tx_hash,
+                    elapsed
+                );
                 debug!("Successfully submitted proof for job {} with tx: {}", req.job_id, tx_hash);
 
                 // Spawn merge analysis in background to not delay the response
@@ -934,9 +952,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<GetProofRequest>,
     ) -> Result<Response<GetProofResponse>, Status> {
+        let start_time = std::time::Instant::now();
         let req = request.into_inner();
         
-        info!(
+        debug!(
             session_id = %req.session_id,
             block_number = %req.block_number,
             sequences = ?req.sequences,
@@ -1216,7 +1235,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                                     
                                                     // Check if sequences match
                                                     if key_sequences == req.sequences {
-                                                        info!("Found matching proof for sequences {:?}", req.sequences);
+                                                        debug!("Found matching proof for sequences {:?}", req.sequences);
                                                         // Found our proof! Extract da_hash
                                                         if let Some(value_field) = entry_struct.fields.get("value") {
                                                             if let Some(prost_types::value::Kind::StructValue(proof_struct)) = &value_field.kind {
@@ -1229,7 +1248,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                                                         // Direct string value (Some case)
                                                                         Some(prost_types::value::Kind::StringValue(hash)) => {
                                                                             da_hash = Some(hash.clone());
-                                                                            info!("Found da_hash: {}", hash);
+                                                                            debug!("Found da_hash: {}", hash);
                                                                             break 'outer;
                                                                         }
                                                                         // Null value (None case)
@@ -1242,7 +1261,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                                                             if let Some(some_field) = option_struct.fields.get("Some") {
                                                                                 if let Some(prost_types::value::Kind::StringValue(hash)) = &some_field.kind {
                                                                                     da_hash = Some(hash.clone());
-                                                                                    info!("Found da_hash in Some variant: {}", hash);
+                                                                                    debug!("Found da_hash in Some variant: {}", hash);
                                                                                     break 'outer;
                                                                                 }
                                                                             }
@@ -1291,7 +1310,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match walrus_client.read_from_walrus(read_params).await {
             Ok(Some(data)) => {
-                info!("Successfully read proof from Walrus for da_hash: {}", da_hash);
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ GetProof: app={}, block={}, sequences={:?}, da_hash={}, proof_size={} bytes, time={:?}",
+                    agent_job.app_instance,
+                    req.block_number,
+                    req.sequences,
+                    da_hash,
+                    data.len(),
+                    elapsed
+                );
                 Ok(Response::new(GetProofResponse {
                     success: true,
                     proof: Some(data),
@@ -1299,7 +1327,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Ok(None) => {
-                warn!("No data found for da_hash: {}", da_hash);
+                let elapsed = start_time.elapsed();
+                warn!(
+                    "❌ GetProof: app={}, block={}, sequences={:?}, error=No data found for da_hash: {}, time={:?}",
+                    agent_job.app_instance,
+                    req.block_number,
+                    req.sequences,
+                    da_hash,
+                    elapsed
+                );
                 Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
@@ -1307,7 +1343,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to read proof from Walrus for da_hash {}: {}", da_hash, e);
+                let elapsed = start_time.elapsed();
+                error!(
+                    "❌ GetProof: app={}, block={}, sequences={:?}, da_hash={}, error={}, time={:?}",
+                    agent_job.app_instance,
+                    req.block_number,
+                    req.sequences,
+                    da_hash,
+                    e,
+                    elapsed
+                );
                 Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,

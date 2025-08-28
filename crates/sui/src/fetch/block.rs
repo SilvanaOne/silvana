@@ -1,6 +1,8 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
+use crate::fetch::AppInstance;
+use std::collections::HashMap;
 use sui_rpc::Client;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
 use tracing::{debug, warn};
 
 /// Block information fetched from blockchain, mirroring the Move struct
@@ -28,7 +30,7 @@ pub struct Block {
     pub settled_at: Option<u64>,
 }
 
-/// Fetch Block information from AppInstance by block number
+/// Fetch Block information from AppInstance by block number (legacy single-block function)
 #[allow(dead_code)]
 pub async fn fetch_block_info(
     client: &mut Client,
@@ -63,19 +65,12 @@ pub async fn fetch_block_info(
     
     if let Some(proto_object) = response.object {
         if let Some(json_value) = &proto_object.json {
-            //debug!("🏗️ AppInstance JSON structure for {}: {:#?}", app_instance, json_value);
-            
             if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                //debug!("📋 AppInstance {} fields: {:?}", app_instance, struct_value.fields.keys().collect::<Vec<_>>());
-                
                 // Get the blocks ObjectTable
                 if let Some(blocks_field) = struct_value.fields.get("blocks") {
-                    //debug!("🧱 Found blocks field in AppInstance {}", app_instance);
                     if let Some(prost_types::value::Kind::StructValue(blocks_struct)) = &blocks_field.kind {
-                        //debug!("🧱 Blocks struct fields: {:?}", blocks_struct.fields.keys().collect::<Vec<_>>());
                         if let Some(table_id_field) = blocks_struct.fields.get("id") {
                             if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
-                                //debug!("🧱 Found blocks table ID: {}", table_id);
                                 // Fetch the Block from the ObjectTable using block_number
                                 return fetch_block_from_table(client, table_id, block_number).await;
                             } else {
@@ -101,7 +96,226 @@ pub async fn fetch_block_info(
     Ok(None)
 }
 
-/// Fetch Block from ObjectTable by block number using optimized pagination
+/// Fetch multiple Blocks from AppInstance for a range of block numbers
+/// Returns a HashMap of block_number -> Block for all found blocks in the range
+#[allow(dead_code)]
+pub async fn fetch_blocks_range(
+    client: &mut Client,
+    app_instance: &AppInstance,
+    start_block: u64,
+    end_block: u64,
+) -> Result<HashMap<u64, Block>> {
+    debug!("Fetching Blocks from {} to {} for app_instance {}", 
+        start_block, end_block, app_instance.id);
+    
+    // Get the blocks table ID from the AppInstance
+    let blocks_table_id = &app_instance.blocks_table_id;
+    
+    // Fetch all blocks in the range from the table
+    fetch_blocks_from_table_range(client, blocks_table_id, start_block, end_block).await
+}
+
+/// Fetch multiple Blocks from ObjectTable for a range of block numbers
+/// Returns a HashMap of block_number -> Block for all found blocks
+#[allow(dead_code)]
+async fn fetch_blocks_from_table_range(
+    client: &mut Client,
+    table_id: &str,
+    start_block: u64,
+    end_block: u64,
+) -> Result<HashMap<u64, Block>> {
+    debug!("🔍 Fetching blocks {} to {} from table {}", start_block, end_block, table_id);
+    
+    // First, collect all field IDs for blocks in the range
+    let mut field_ids_to_fetch = Vec::new(); // (field_id, block_number)
+    let mut page_token = None;
+    const PAGE_SIZE: u32 = 100;
+    let mut pages_searched = 0;
+    const MAX_PAGES: u32 = 200;
+    
+    loop {
+        let request = ListDynamicFieldsRequest {
+            parent: Some(table_id.to_string()),
+            page_size: Some(PAGE_SIZE),
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                ],
+            }),
+        };
+        
+        let fields_response = client.live_data_client().list_dynamic_fields(request).await.map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+            format!("Failed to list dynamic fields: {}", e)
+        ))?;
+        
+        let response = fields_response.into_inner();
+        pages_searched += 1;
+        debug!("📋 Page {}: Found {} dynamic fields in blocks table", pages_searched, response.dynamic_fields.len());
+        
+        // Collect field IDs for blocks in our range
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+                    // Check if this block is in our desired range
+                    if field_block_number >= start_block && field_block_number <= end_block {
+                        if let Some(field_id) = &field.field_id {
+                            field_ids_to_fetch.push((field_id.clone(), field_block_number));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check if we should continue pagination
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() && pages_searched < MAX_PAGES {
+                page_token = Some(next_token);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    
+    debug!(
+        "📋 Collected {} field IDs for blocks in range {}-{}",
+        field_ids_to_fetch.len(), start_block, end_block
+    );
+    
+    if field_ids_to_fetch.is_empty() {
+        warn!(
+            "❌ No blocks found in range {}-{} after searching {} pages",
+            start_block, end_block, pages_searched
+        );
+        return Ok(HashMap::new());
+    }
+    
+    // Now batch fetch all blocks
+    fetch_block_objects_batch(client, field_ids_to_fetch).await
+}
+
+/// Batch fetch multiple blocks at once
+async fn fetch_block_objects_batch(
+    client: &mut Client,
+    field_ids_with_blocks: Vec<(String, u64)>, // (field_id, block_number)
+) -> Result<HashMap<u64, Block>> {
+    let mut blocks_map = HashMap::new();
+    
+    // Process in batches of 50 to avoid overwhelming the RPC
+    const BATCH_SIZE: usize = 50;
+    
+    for chunk in field_ids_with_blocks.chunks(BATCH_SIZE) {
+        debug!("📦 Batch fetching {} block field wrappers", chunk.len());
+        
+        // First batch: fetch all field wrapper objects to get the actual block object IDs
+        let field_requests: Vec<GetObjectRequest> = chunk
+            .iter()
+            .map(|(field_id, _)| GetObjectRequest {
+                object_id: Some(field_id.clone()),
+                version: None,
+                read_mask: None, // Use batch-level mask instead
+            })
+            .collect();
+        
+        let batch_request = BatchGetObjectsRequest {
+            requests: field_requests,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            }),
+        };
+        
+        let batch_response = client
+            .ledger_client()
+            .batch_get_objects(batch_request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to batch fetch field wrappers: {}",
+                    e
+                ))
+            })?;
+        
+        let field_results = batch_response.into_inner().objects;
+        
+        // Extract block object IDs from field wrappers
+        let mut block_object_ids = Vec::new(); // (block_object_id, block_number)
+        for (i, get_result) in field_results.iter().enumerate() {
+            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(field_object)) = &get_result.result {
+                if let Some(field_json) = &field_object.json {
+                    if let Some(prost_types::value::Kind::StructValue(struct_value)) = &field_json.kind {
+                        if let Some(value_field) = struct_value.fields.get("value") {
+                            if let Some(prost_types::value::Kind::StringValue(block_object_id)) = &value_field.kind {
+                                let (_, block_number) = chunk[i];
+                                block_object_ids.push((block_object_id.clone(), block_number));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if block_object_ids.is_empty() {
+            continue;
+        }
+        
+        debug!("📦 Batch fetching {} block objects", block_object_ids.len());
+        
+        // Second batch: fetch all actual block objects
+        let block_requests: Vec<GetObjectRequest> = block_object_ids
+            .iter()
+            .map(|(block_id, _)| GetObjectRequest {
+                object_id: Some(block_id.clone()),
+                version: None,
+                read_mask: None, // Use batch-level mask instead
+            })
+            .collect();
+        
+        let batch_request = BatchGetObjectsRequest {
+            requests: block_requests,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            }),
+        };
+        
+        let batch_response = client
+            .ledger_client()
+            .batch_get_objects(batch_request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to batch fetch blocks: {}",
+                    e
+                ))
+            })?;
+        
+        let block_results = batch_response.into_inner().objects;
+        
+        // Extract Block data from results
+        for (i, get_result) in block_results.iter().enumerate() {
+            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(block_object)) = &get_result.result {
+                if let Some(block_json) = &block_object.json {
+                    let (_, block_number) = block_object_ids[i];
+                    if let Ok(Some(block)) = extract_block_info_from_json(block_json, block_number) {
+                        blocks_map.insert(block_number, block);
+                    }
+                }
+            }
+        }
+    }
+    
+    debug!(
+        "📊 Successfully fetched {} blocks",
+        blocks_map.len()
+    );
+    
+    Ok(blocks_map)
+}
+
+/// Fetch Block from ObjectTable by block number using optimized pagination (legacy single-block function)
 #[allow(dead_code)]
 async fn fetch_block_from_table(
     client: &mut Client,

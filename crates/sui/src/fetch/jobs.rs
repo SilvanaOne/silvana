@@ -2,7 +2,7 @@ use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get_bytes};
 use std::collections::HashSet;
 use sui_rpc::Client;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
 use tracing::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
@@ -500,7 +500,207 @@ pub async fn fetch_pending_jobs_from_app_instance(
     Ok(None)
 }
 
-/// Fetch a specific job by ID from the jobs ObjectTable
+/// Batch fetch multiple jobs by their IDs from the jobs ObjectTable
+/// Returns a HashMap of job_sequence -> Job for all found jobs
+pub async fn fetch_jobs_batch(
+    client: &mut Client,
+    jobs_table_id: &str,
+    job_sequences: &[u64],
+) -> Result<HashMap<u64, Job>> {
+    if job_sequences.is_empty() {
+        return Ok(HashMap::new());
+    }
+    
+    debug!("Batch fetching {} jobs from jobs table {}", job_sequences.len(), jobs_table_id);
+    
+    // First, find the field IDs for all requested jobs
+    let mut field_ids_map = HashMap::new(); // job_sequence -> field_id
+    let mut page_token = None;
+    const PAGE_SIZE: u32 = 100;
+    
+    loop {
+        let list_request = ListDynamicFieldsRequest {
+            parent: Some(jobs_table_id.to_string()),
+            page_size: Some(PAGE_SIZE),
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                ],
+            }),
+        };
+        
+        let list_response = client
+            .live_data_client()
+            .list_dynamic_fields(list_request)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+                format!("Failed to list jobs in table: {}", e)
+            ))?;
+        
+        let response = list_response.into_inner();
+        
+        // Check each field to see if it's one of our requested jobs
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                if let Ok(field_job_seq) = bcs::from_bytes::<u64>(name_value) {
+                    if job_sequences.contains(&field_job_seq) {
+                        if let Some(field_id) = &field.field_id {
+                            field_ids_map.insert(field_job_seq, field_id.clone());
+                            
+                            // Stop if we found all requested jobs
+                            if field_ids_map.len() == job_sequences.len() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check if we should continue pagination
+        if field_ids_map.len() == job_sequences.len() {
+            break; // Found all requested jobs
+        }
+        
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() {
+                page_token = Some(next_token);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    
+    if field_ids_map.is_empty() {
+        debug!("No matching jobs found in table");
+        return Ok(HashMap::new());
+    }
+    
+    debug!("Found {} job field IDs, fetching job objects", field_ids_map.len());
+    
+    // Now batch fetch all job objects
+    let mut jobs_map = HashMap::new();
+    const BATCH_SIZE: usize = 50;
+    
+    // Process in batches
+    let field_ids_vec: Vec<(u64, String)> = field_ids_map.into_iter().collect();
+    
+    for chunk in field_ids_vec.chunks(BATCH_SIZE) {
+        debug!("📦 Batch fetching {} job field wrappers", chunk.len());
+        
+        // First batch: fetch field wrapper objects
+        let field_requests: Vec<GetObjectRequest> = chunk
+            .iter()
+            .map(|(_, field_id)| GetObjectRequest {
+                object_id: Some(field_id.clone()),
+                version: None,
+                read_mask: None, // Use batch-level mask instead
+            })
+            .collect();
+        
+        let batch_request = BatchGetObjectsRequest {
+            requests: field_requests,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            }),
+        };
+        
+        let batch_response = client
+            .ledger_client()
+            .batch_get_objects(batch_request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to batch fetch job field wrappers: {}",
+                    e
+                ))
+            })?;
+        
+        let field_results = batch_response.into_inner().objects;
+        
+        // Extract job object IDs from field wrappers
+        let mut job_object_ids = Vec::new(); // (job_object_id, job_sequence)
+        for (i, get_result) in field_results.iter().enumerate() {
+            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(field_object)) = &get_result.result {
+                if let Some(field_json) = &field_object.json {
+                    if let Some(prost_types::value::Kind::StructValue(struct_value)) = &field_json.kind {
+                        if let Some(value_field) = struct_value.fields.get("value") {
+                            if let Some(prost_types::value::Kind::StringValue(job_object_id)) = &value_field.kind {
+                                let (job_seq, _) = chunk[i];
+                                job_object_ids.push((job_object_id.clone(), job_seq));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if job_object_ids.is_empty() {
+            continue;
+        }
+        
+        debug!("📦 Batch fetching {} job objects", job_object_ids.len());
+        
+        // Second batch: fetch actual job objects
+        let job_requests: Vec<GetObjectRequest> = job_object_ids
+            .iter()
+            .map(|(job_id, _)| GetObjectRequest {
+                object_id: Some(job_id.clone()),
+                version: None,
+                read_mask: None, // Use batch-level mask instead
+            })
+            .collect();
+        
+        let batch_request = BatchGetObjectsRequest {
+            requests: job_requests,
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            }),
+        };
+        
+        let batch_response = client
+            .ledger_client()
+            .batch_get_objects(batch_request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to batch fetch job objects: {}",
+                    e
+                ))
+            })?;
+        
+        let job_results = batch_response.into_inner().objects;
+        
+        // Extract Job data from results
+        for (i, get_result) in job_results.iter().enumerate() {
+            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(job_object)) = &get_result.result {
+                if let Some(job_json) = &job_object.json {
+                    match extract_job_from_json(job_json) {
+                        Ok(mut job) => {
+                            // Update the job ID from the object ID
+                            job.id = job_object_ids[i].0.clone();
+                            let (_, job_seq) = job_object_ids[i];
+                            jobs_map.insert(job_seq, job);
+                        }
+                        Err(e) => {
+                            debug!("Failed to extract job from JSON: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    debug!("✅ Successfully fetched {} jobs", jobs_map.len());
+    Ok(jobs_map)
+}
+
+/// Fetch a specific job by ID from the jobs ObjectTable (legacy single-job function)
 pub async fn fetch_job_by_id(
     client: &mut Client,
     jobs_table_id: &str,

@@ -82,7 +82,7 @@ pub async fn try_create_block(
     client: &mut Client,
     sui_interface: &mut SilvanaSuiInterface,
     app_instance_id: &str,
-) -> Result<bool> {
+) -> Result<Option<(String, u64, u64)>> { // Returns Some((tx_digest, new_sequences_count, time_since_last_block)) on success
     use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
     use crate::error::CoordinatorError;
     
@@ -167,7 +167,7 @@ pub async fn try_create_block(
         
         // Both conditions must be met to create a block
         if has_new_sequences && sufficient_time_passed {
-            info!(
+            debug!(
                 "Conditions met for creating block in app_instance {}: {} new sequences, {}ms since last block",
                 app_instance_id, 
                 sequence - previous_block_last_sequence - 1,
@@ -177,8 +177,9 @@ pub async fn try_create_block(
             // Call the blockchain to try creating the block
             match sui_interface.try_create_block(app_instance_id).await {
                 Ok(tx_digest) => {
-                    info!("Successfully created block for app_instance {}, tx: {}", app_instance_id, tx_digest);
-                    Ok(true)
+                    debug!("Successfully created block for app_instance {}, tx: {}", app_instance_id, tx_digest);
+                    let new_sequences = sequence - previous_block_last_sequence - 1;
+                    Ok(Some((tx_digest, new_sequences, time_since_last_block)))
                 }
                 Err(e) => {
                     let error_str = e.to_string();
@@ -189,7 +190,7 @@ pub async fn try_create_block(
                     } else {
                         // Expected failures (conditions not met, another coordinator created it, etc.)
                         debug!("Block not created for app_instance {} (expected): {}", app_instance_id, error_str);
-                        Ok(false)
+                        Ok(None)
                     }
                 }
             }
@@ -198,7 +199,7 @@ pub async fn try_create_block(
                 "Conditions not met for creating block in app_instance {}: has_new_sequences={}, sufficient_time_passed={}",
                 app_instance_id, has_new_sequences, sufficient_time_passed
             );
-            Ok(false)
+            Ok(None)
         }
     } else {
         Err(CoordinatorError::RpcConnectionError(

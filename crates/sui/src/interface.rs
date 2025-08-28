@@ -584,7 +584,7 @@ impl SilvanaSuiInterface {
 
         match try_create_block_tx(&mut self.client, app_instance).await {
             Ok(tx_digest) => {
-                info!(
+                debug!(
                     "Successfully created block for app_instance {} on blockchain, tx: {}",
                     app_instance, tx_digest
                 );
