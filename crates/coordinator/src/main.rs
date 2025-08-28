@@ -17,7 +17,7 @@ mod state;
 
 use anyhow::Result;
 use clap::Parser;
-use dotenv::dotenv;
+use dotenvy::dotenv;
 use tokio::task;
 use tokio::time::Duration;
 use tracing::{debug, info, warn, error};
@@ -72,13 +72,12 @@ async fn main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     info!("🚀 Starting Silvana Coordinator");
+    info!("🔗 Sui RPC URL: {}", args.rpc_url);
     info!("📦 Monitoring package: {}", args.package_id);
-    info!("📝 Module: jobs");
-    info!("🔗 RPC URL: {}", args.rpc_url);
+    
 
-    // Create Sui client once
-    let sui_client = sui_rpc::Client::new(&args.rpc_url)
-        .map_err(|e| anyhow::anyhow!("Failed to create Sui client: {}", e))?;
+    // Initialize the global SharedSuiState
+    sui::SharedSuiState::initialize(&args.rpc_url).await?;
     info!("✅ Connected to Sui RPC");
 
     let config = Config {
@@ -86,8 +85,8 @@ async fn main() -> Result<()> {
         modules: vec!["jobs".to_string()],
     };
 
-    // Create shared state with a cloned Sui client
-    let state = SharedState::new(sui_client.clone());
+    // Create shared state
+    let state = SharedState::new();
 
     info!("✅ Coordinator initialized, starting services...");
 
@@ -103,7 +102,7 @@ async fn main() -> Result<()> {
 
     // 2. Start reconciliation task in a separate thread (runs every 10 minutes)
     let reconciliation_state = state.clone();
-    let reconciliation_client = sui_client.clone();
+    let reconciliation_client = state.get_sui_client();
     
     // Test fetch_app_instance with the provided app instance ID
     // {
@@ -153,7 +152,6 @@ async fn main() -> Result<()> {
 
     // 3. Start block creation task in a separate thread (runs every minute)
     let block_creation_state = state.clone();
-    let block_creation_client = sui_client.clone();
     let block_creation_handle = task::spawn(async move {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -175,7 +173,6 @@ async fn main() -> Result<()> {
             // Clone Arc for the spawned task
             let task_running_clone = task_running.clone();
             let block_creation_state_clone = block_creation_state.clone();
-            let block_creation_client_clone = block_creation_client.clone();
             
             // Spawn the actual block creation work as a separate task
             tokio::spawn(async move {
@@ -202,13 +199,12 @@ async fn main() -> Result<()> {
                 let mut created_blocks = Vec::new(); // Store (app_id, tx_digest, sequences, time_ms)
                 
                 // Create a SilvanaSuiInterface for this iteration
-                let mut sui_interface = SilvanaSuiInterface::new(block_creation_client_clone.clone());
-                let mut client = block_creation_client_clone.clone();
+                let mut sui_interface = SilvanaSuiInterface::new();
                 
                 for app_instance_id in app_instances.iter() {
                     let instance_start = std::time::Instant::now();
                     
-                    match try_create_block(&mut client, &mut sui_interface, &app_instance_id).await {
+                    match try_create_block(&mut sui_interface, &app_instance_id).await {
                         Ok(Some((tx_digest, new_sequences, time_since_last))) => {
                             created_blocks.push((app_instance_id.clone(), tx_digest, new_sequences, time_since_last));
                             debug!("Block created for app_instance {}", app_instance_id);
@@ -264,7 +260,7 @@ async fn main() -> Result<()> {
 
     // 4. Start proof completion analysis task in a separate thread (runs every 5 minutes)
     let proof_analysis_state = state.clone();
-    let proof_analysis_client = sui_client.clone();
+    let proof_analysis_client = state.get_sui_client();
     let proof_analysis_handle = task::spawn(async move {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -319,7 +315,7 @@ async fn main() -> Result<()> {
                     let instance_start = std::time::Instant::now();
                     
                     debug!("🔍 Analyzing proof completion for app_instance {}", app_instance_id);
-                    match fetch_app_instance(&mut client, &app_instance_id).await {
+                    match fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
                             analyzed_count += 1;
                             if let Err(e) = analyze_proof_completion(&app_instance, &mut client).await {

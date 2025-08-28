@@ -1,5 +1,4 @@
 use anyhow::{Result, Context, anyhow};
-use std::env;
 use std::str::FromStr;
 use sui_rpc::field::FieldMask;
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
@@ -9,8 +8,9 @@ use sui_crypto::SuiSigner;
 use tracing::{debug, warn, error};
 use tokio::time::{sleep, Duration};
 
-use crate::chain::{get_reference_gas_price, load_sender_from_env};
+use crate::chain::get_reference_gas_price;
 use crate::coin::fetch_coin;
+use crate::state::SharedSuiState;
 
 /// Helper function to check transaction effects for errors
 fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operation: &str) -> Result<()> {
@@ -110,12 +110,6 @@ fn get_app_instance_id(app_instance_str: &str) -> Result<sui::Address> {
 fn get_clock_object_id() -> sui::Address {
     sui::Address::from_str("0x0000000000000000000000000000000000000000000000000000000000000006")
         .expect("Valid clock object ID")
-}
-
-/// Get the coordination package ID from environment variables
-fn get_coordination_package_id() -> Result<sui::Address> {
-    let package_id = env::var("SILVANA_REGISTRY_PACKAGE")?;
-    Ok(sui::Address::from_str(&package_id)?)
 }
 
 
@@ -673,9 +667,11 @@ where
 {
     debug!("Creating {} transaction for app_instance: {}", function_name, app_instance_str);
     
+    // Get shared state
+    let shared_state = SharedSuiState::get_instance();
+    
     // Parse IDs
-    let package_id = get_coordination_package_id()
-        .context("Failed to get coordination package ID")?;
+    let package_id = shared_state.get_coordination_package_id();
     let app_instance_id = get_app_instance_id(app_instance_str)
         .context("Failed to parse app instance ID")?;
     let clock_object_id = get_clock_object_id();
@@ -683,8 +679,9 @@ where
     debug!("Package ID: {}", package_id);
     debug!("App instance ID: {}", app_instance_id);
     
-    // Parse sender and secret key
-    let (sender, sk) = load_sender_from_env()?;
+    // Get sender and secret key from shared state
+    let sender = shared_state.get_sui_address();
+    let sk = shared_state.get_sui_private_key().clone();
     debug!("Sender: {}", sender);
 
     // Build transaction using TransactionBuilder

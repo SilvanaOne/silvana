@@ -1,5 +1,6 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get_bytes};
+use crate::state::SharedSuiState;
 use std::collections::HashSet;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
@@ -387,10 +388,10 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
 
 /// Fetch pending jobs from a specific app_instance
 pub async fn fetch_pending_jobs_from_app_instance(
-    client: &mut Client,
     app_instance_id: &str,
     only_check: bool,
 ) -> Result<Option<Job>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     // Ensure the app_instance_id has 0x prefix
     let formatted_id = if app_instance_id.starts_with("0x") {
         app_instance_id.to_string()
@@ -479,7 +480,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
                                                 if let Some(table_id_field) = jobs_table_struct.fields.get("id") {
                                                     if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
                                                         // Fetch the specific job
-                                                        if let Some(job) = fetch_job_by_id(client, table_id, target_job_sequence).await? {
+                                                        if let Some(job) = fetch_job_by_id(table_id, target_job_sequence).await? {
                                                             return Ok(Some(job));
                                                         }
                                                     }
@@ -503,10 +504,10 @@ pub async fn fetch_pending_jobs_from_app_instance(
 /// Batch fetch multiple jobs by their IDs from the jobs ObjectTable
 /// Returns a HashMap of job_sequence -> Job for all found jobs
 pub async fn fetch_jobs_batch(
-    client: &mut Client,
     jobs_table_id: &str,
     job_sequences: &[u64],
 ) -> Result<HashMap<u64, Job>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     if job_sequences.is_empty() {
         return Ok(HashMap::new());
     }
@@ -702,10 +703,10 @@ pub async fn fetch_jobs_batch(
 
 /// Fetch a specific job by ID from the jobs ObjectTable (legacy single-job function)
 pub async fn fetch_job_by_id(
-    client: &mut Client,
     jobs_table_id: &str,
     job_sequence: u64,
 ) -> Result<Option<Job>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching job {} from jobs table {}", job_sequence, jobs_table_id);
     
     // List dynamic fields to find the specific job
@@ -740,7 +741,7 @@ pub async fn fetch_job_by_id(
                 if field_job_sequence == job_sequence {
                     if let Some(field_id) = &field.field_id {
                         // Found the job, fetch its content
-                        return fetch_job_object_by_field_id(client, field_id, job_sequence).await;
+                        return fetch_job_object_by_field_id(&mut client, field_id, job_sequence).await;
                     }
                 }
             }
@@ -834,12 +835,12 @@ async fn fetch_job_object_by_field_id(
 
 /// Fetch pending job IDs for a specific (developer, agent, agent_method) from the embedded Jobs in AppInstance
 pub async fn fetch_pending_job_sequences_from_app_instance(
-    client: &mut Client,
     app_instance_id: &str,
     developer: &str,
     agent: &str,
     agent_method: &str,
 ) -> Result<Vec<u64>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!(
         "Fetching pending job IDs for {}/{}/{} from app_instance {}",
         developer, agent, agent_method, app_instance_id
@@ -968,9 +969,9 @@ pub async fn fetch_pending_job_sequences_from_app_instance(
 
 /// Get the Jobs table ID from an AppInstance (Jobs is embedded, so we just need the table ID)
 pub async fn get_jobs_info_from_app_instance(
-    client: &mut Client,
     app_instance_id: &str,
 ) -> Result<Option<(String, String)>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     // Ensure the app_instance_id has 0x prefix
     let formatted_id = if app_instance_id.starts_with("0x") {
         app_instance_id.to_string()
@@ -1053,9 +1054,9 @@ pub async fn get_jobs_info_from_app_instance(
 
 /// Fetch all jobs from an app instance
 pub async fn fetch_all_jobs_from_app_instance(
-    client: &mut Client,
     app_instance_id: &str,
 ) -> Result<Vec<Job>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching all jobs from app_instance {}", app_instance_id);
     
     // Ensure the app_instance_id has 0x prefix
@@ -1126,7 +1127,7 @@ pub async fn fetch_all_jobs_from_app_instance(
                                                         .unwrap_or(0);
                                                     
                                                     // Fetch the job using the helper function
-                                                    if let Ok(Some(job)) = fetch_job_object_by_field_id(client, field_id, job_sequence).await {
+                                                    if let Ok(Some(job)) = fetch_job_object_by_field_id(&mut client, field_id, job_sequence).await {
                                                         all_jobs.push(job);
                                                     }
                                                 }

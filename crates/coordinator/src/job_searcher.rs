@@ -301,8 +301,7 @@ impl JobSearcher {
 
         // Start the job on Sui blockchain before processing
         debug!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
-        let sui_client = self.state.get_sui_client();
-        let mut sui_interface = SilvanaSuiInterface::new(sui_client);
+        let mut sui_interface = SilvanaSuiInterface::new();
 
         // Try to start the job on blockchain with retries to prevent race conditions
         let start_time = Instant::now();
@@ -484,8 +483,7 @@ impl JobSearcher {
                 jobs_to_fail.len()
             );
 
-            let sui_client = self.state.get_sui_client();
-            let mut sui_interface = SilvanaSuiInterface::new(sui_client);
+            let mut sui_interface = SilvanaSuiInterface::new();
 
             for uncompleted_job in jobs_to_fail {
                 let error_message = "Job not completed before Docker container termination";

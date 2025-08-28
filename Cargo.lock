@@ -1152,7 +1152,7 @@ dependencies = [
  "chrono",
  "clap",
  "docker",
- "dotenv",
+ "dotenvy",
  "futures",
  "hex",
  "num-bigint",
@@ -1396,12 +1396,6 @@ dependencies = [
  "tokio",
  "tracing",
 ]
-
-[[package]]
-name = "dotenv"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "dotenvy"
@@ -3632,7 +3626,7 @@ name = "rpc-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dotenv",
+ "dotenvy",
  "proto",
  "rustls 0.23.31",
  "thiserror 2.0.12",
@@ -5921,7 +5915,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dotenv",
+ "dotenvy",
  "duct",
  "secrets-client",
  "tokio",

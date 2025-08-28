@@ -1,5 +1,6 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::fetch::AppInstance;
+use crate::state::SharedSuiState;
 use std::collections::HashMap;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
@@ -33,10 +34,10 @@ pub struct Block {
 /// Fetch Block information from AppInstance by block number (legacy single-block function)
 #[allow(dead_code)]
 pub async fn fetch_block_info(
-    client: &mut Client,
     app_instance: &str,
     block_number: u64,
 ) -> Result<Option<Block>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching Block info for block {} from app_instance {}", block_number, app_instance);
     
     // Ensure the app_instance has 0x prefix
@@ -72,7 +73,7 @@ pub async fn fetch_block_info(
                         if let Some(table_id_field) = blocks_struct.fields.get("id") {
                             if let Some(prost_types::value::Kind::StringValue(table_id)) = &table_id_field.kind {
                                 // Fetch the Block from the ObjectTable using block_number
-                                return fetch_block_from_table(client, table_id, block_number).await;
+                                return fetch_block_from_table(&mut client, table_id, block_number).await;
                             } else {
                                 warn!("❌ Blocks table id field is not a string: {:?}", table_id_field.kind);
                             }
@@ -100,11 +101,11 @@ pub async fn fetch_block_info(
 /// Returns a HashMap of block_number -> Block for all found blocks in the range
 #[allow(dead_code)]
 pub async fn fetch_blocks_range(
-    client: &mut Client,
     app_instance: &AppInstance,
     start_block: u64,
     end_block: u64,
 ) -> Result<HashMap<u64, Block>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching Blocks from {} to {} for app_instance {}", 
         start_block, end_block, app_instance.id);
     
@@ -112,7 +113,7 @@ pub async fn fetch_blocks_range(
     let blocks_table_id = &app_instance.blocks_table_id;
     
     // Fetch all blocks in the range from the table
-    fetch_blocks_from_table_range(client, blocks_table_id, start_block, end_block).await
+    fetch_blocks_from_table_range(&mut client, blocks_table_id, start_block, end_block).await
 }
 
 /// Fetch multiple Blocks from ObjectTable for a range of block numbers

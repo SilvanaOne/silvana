@@ -5,7 +5,7 @@ use secrets_client::SecretsClient;
 /// Get the default RPC server endpoint from environment or fallback
 fn get_default_endpoint() -> String {
     // Load .env file if it exists
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     
     // Get SILVANA_RPC_SERVER from environment, fallback to default if not set
     std::env::var("SILVANA_RPC_SERVER")

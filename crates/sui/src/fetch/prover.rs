@@ -3,6 +3,7 @@ use crate::fetch::AppInstance;
 use crate::parse::{
     get_bool, get_option_string, get_option_u64, get_string, get_u8, get_u16, get_u64,
 };
+use crate::state::SharedSuiState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sui_rpc::Client;
@@ -81,10 +82,10 @@ pub struct ProofCalculation {
 
 /// Fetch ProofCalculation for a block from AppInstance (legacy single-block function)
 pub async fn fetch_proof_calculation(
-    client: &mut Client,
     app_instance: &str,
     block_number: u64,
 ) -> Result<Option<ProofCalculation>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!(
         "Fetching ProofCalculation for block {} from app_instance {}",
         block_number, app_instance
@@ -147,7 +148,7 @@ pub async fn fetch_proof_calculation(
                                 debug!("🔍 Found proof_calculations table ID: {}", table_id);
                                 // Fetch the ProofCalculation from the ObjectTable
                                 return fetch_proof_calculation_from_table(
-                                    client,
+                                    &mut client,
                                     table_id,
                                     block_number,
                                 )
@@ -187,11 +188,11 @@ pub async fn fetch_proof_calculation(
 /// Fetch multiple ProofCalculations from AppInstance for a range of block numbers  
 /// Returns a HashMap of block_number -> ProofCalculation for all found proofs in the range
 pub async fn fetch_proof_calculations_range(
-    client: &mut Client,
     app_instance: &AppInstance,
     start_block: u64,
     end_block: u64,
 ) -> Result<HashMap<u64, ProofCalculation>> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching ProofCalculations from {} to {} for app_instance {}",
         start_block, end_block, app_instance.id);
     
@@ -200,7 +201,7 @@ pub async fn fetch_proof_calculations_range(
     
     // Fetch all proof calculations in the range from the table
     fetch_proof_calculations_from_table_range(
-        client,
+        &mut client,
         proof_calculations_table_id, 
         start_block,
         end_block

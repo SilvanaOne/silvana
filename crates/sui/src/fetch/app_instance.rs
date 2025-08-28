@@ -1,10 +1,10 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
-use sui_rpc::Client;
 use tracing::debug;
 use crate::error::SilvanaSuiInterfaceError;
 use crate::parse::{get_string, get_u64, get_bool, get_table_id, proto_to_json, parse_string_vecmap, parse_struct_vecmap};
+use crate::state::SharedSuiState;
 use super::jobs::Jobs;
 use std::collections::HashMap;
 
@@ -64,9 +64,9 @@ pub struct AppInstance {
 /// Fetch an AppInstance from the blockchain by its ID
 /// This only fetches the AppInstance object itself, not the contents of its ObjectTables
 pub async fn fetch_app_instance(
-    client: &mut Client,
     instance_id: &str,
 ) -> Result<AppInstance> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching AppInstance with ID: {}", instance_id);
     
     // Ensure the instance_id has 0x prefix

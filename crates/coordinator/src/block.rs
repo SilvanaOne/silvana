@@ -1,6 +1,5 @@
 use sui::interface::SilvanaSuiInterface;
 use anyhow::Result;
-use sui_rpc::Client;
 use tracing::{info, debug, error};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,7 +7,6 @@ pub async fn settle(
     app_instance: &str,
     block_number: u64,
     proof_da_hash: String,
-    client: &mut Client,
 ) -> Result<()> {
     info!(
         "Settling complete block {} (da_hash: {})",
@@ -17,7 +15,7 @@ pub async fn settle(
     );
 
     // Create a SilvanaSuiInterface to interact with the blockchain
-    let mut sui_interface = SilvanaSuiInterface::new(client.clone());
+    let mut sui_interface = SilvanaSuiInterface::new();
 
     // 1. First, update the block proof data availability on the blockchain
     match sui_interface.update_block_proof_data_availability(
@@ -79,10 +77,10 @@ const MIN_TIME_BETWEEN_BLOCKS: u64 = 60000; // 60 seconds in milliseconds
 /// 1. No new sequences pending (sequence != previous_block_last_sequence + 1)
 /// 2. Sufficient time has passed since the last block (current_time - previous_block_timestamp > MIN_TIME_BETWEEN_BLOCKS)
 pub async fn try_create_block(
-    client: &mut Client,
     sui_interface: &mut SilvanaSuiInterface,
     app_instance_id: &str,
-) -> Result<Option<(String, u64, u64)>> { // Returns Some((tx_digest, new_sequences_count, time_since_last_block)) on success
+) -> Result<Option<(String, u64, u64)>> {
+    let mut client = sui::SharedSuiState::get_instance().get_sui_client(); // Returns Some((tx_digest, new_sequences_count, time_since_last_block)) on success
     use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
     use crate::error::CoordinatorError;
     

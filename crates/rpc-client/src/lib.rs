@@ -61,7 +61,7 @@ impl RpcClientConfig {
     /// Create a configuration from environment variables
     pub fn from_env() -> Self {
         // Load .env file if it exists
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         // Get SILVANA_RPC_SERVER from environment, fallback to default if not set
         let endpoint = std::env::var("SILVANA_RPC_SERVER").unwrap_or_else(|_| {

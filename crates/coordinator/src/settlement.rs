@@ -9,12 +9,11 @@ use tracing::{debug, info, warn, error};
 pub async fn check_settlement_opportunity(
     app_instance: &AppInstance,
     block_number: u64,
-    client: &mut Client,
 ) -> Result<bool> {
     debug!("Checking settlement opportunity for block {}", block_number);
     
     // Fetch Block details
-    let block_details = match fetch_block_info(client, &app_instance.id, block_number).await {
+    let block_details = match fetch_block_info(&app_instance.id, block_number).await {
         Ok(Some(block)) => block,
         Ok(None) => {
             debug!("No block found for block number {}", block_number);
@@ -27,7 +26,7 @@ pub async fn check_settlement_opportunity(
     };
     
     // Fetch ProofCalculation to check for block_proof
-    let proof_calc = match fetch_proof_calculation(client, &app_instance.id, block_number).await {
+    let proof_calc = match fetch_proof_calculation(&app_instance.id, block_number).await {
         Ok(proof_calc) => proof_calc,
         Err(e) => {
             warn!("Failed to fetch proof calculation for block {}: {}", block_number, e);
@@ -71,12 +70,11 @@ pub async fn check_settlement_opportunities_range(
     app_instance: &AppInstance,
     start_block: u64,
     end_block: u64,
-    client: &mut Client,
 ) -> Result<Vec<u64>> {
     debug!("Checking settlement opportunities for blocks {} to {}", start_block, end_block);
     
     // Fetch all blocks and proof calculations in the range with single iterations
-    let blocks_map = match fetch_blocks_range(client, app_instance, start_block, end_block).await {
+    let blocks_map = match fetch_blocks_range(app_instance, start_block, end_block).await {
         Ok(blocks) => blocks,
         Err(e) => {
             warn!("Failed to fetch blocks range: {}", e);
@@ -84,7 +82,7 @@ pub async fn check_settlement_opportunities_range(
         }
     };
     
-    let proofs_map = match fetch_proof_calculations_range(client, app_instance, start_block, end_block).await {
+    let proofs_map = match fetch_proof_calculations_range(app_instance, start_block, end_block).await {
         Ok(proofs) => proofs,
         Err(e) => {
             warn!("Failed to fetch proof calculations range: {}", e);
@@ -274,12 +272,11 @@ pub async fn get_settlement_job_id(
 /// Create a periodic settle job
 pub async fn create_periodic_settle_job(
     app_instance: &AppInstance,
-    client: &mut Client,
 ) -> Result<()> {
     debug!("Creating periodic settle job for app instance {}", app_instance.silvana_app_name);
     
     // Create a periodic job with 1 minute interval
-    let mut sui_interface = sui::interface::SilvanaSuiInterface::new(client.clone());
+    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
     
     // Create job description data
     let job_description = "Periodic settlement check".to_string();
@@ -344,7 +341,7 @@ pub async fn fetch_pending_job_from_instances(
     
     for app_instance in app_instances {
         // Get Jobs table ID from the AppInstance
-        let (_app_instance_id, jobs_table_id) = match get_jobs_info_from_app_instance(client, app_instance).await? {
+        let (_app_instance_id, jobs_table_id) = match get_jobs_info_from_app_instance(app_instance).await? {
             Some(info) => info,
             None => {
                 warn!("Could not extract Jobs info from app_instance {}", app_instance);
@@ -354,7 +351,6 @@ pub async fn fetch_pending_job_from_instances(
         
         // Use the index to get pending job IDs for this method
         let job_sequences = fetch_pending_job_sequences_from_app_instance(
-            client,
             app_instance,
             developer,
             agent,
@@ -370,7 +366,7 @@ pub async fn fetch_pending_job_from_instances(
             .unwrap_or(None);
         
         // Batch fetch all jobs at once
-        let jobs_map = fetch_jobs_batch(client, &jobs_table_id, &job_sequences).await?;
+        let jobs_map = fetch_jobs_batch(&jobs_table_id, &job_sequences).await?;
         
         // Process settlement job if it exists and is in the pending jobs
         if let Some(settle_id) = settlement_job_id {
@@ -470,7 +466,7 @@ pub async fn fetch_pending_job_from_instances(
     let (lowest_job_sequence, _app_instance, jobs_table_id, _app_instance_method, _next_scheduled_at, _is_settlement) = selected_job;
     
     // Fetch the specific job by ID
-    fetch_job_by_id(client, jobs_table_id, *lowest_job_sequence).await
+    fetch_job_by_id(jobs_table_id, *lowest_job_sequence).await
         .map_err(|e| anyhow::anyhow!("Failed to fetch job: {}", e))
 }
 
@@ -495,8 +491,8 @@ pub async fn fetch_all_pending_jobs(
         if !only_check {
             if let Ok(Some(settle_job_id)) = crate::settlement::get_settlement_job_id_for_instance(client, app_instance_id).await {
                 // Fetch the settlement job to check if it's pending and ready
-                if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(client, app_instance_id).await {
-                    if let Ok(Some(settle_job)) = fetch_job_by_id(client, &jobs_table_id, settle_job_id).await {
+                if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(app_instance_id).await {
+                    if let Ok(Some(settle_job)) = fetch_job_by_id(&jobs_table_id, settle_job_id).await {
                         // Check if it's pending and ready to run
                         if matches!(settle_job.status, sui::fetch::JobStatus::Pending) &&
                            (settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() <= current_time_ms) {
@@ -509,7 +505,7 @@ pub async fn fetch_all_pending_jobs(
         }
         
         // Fetch regular pending jobs
-        match fetch_pending_jobs_from_app_instance(client, app_instance_id, only_check).await {
+        match fetch_pending_jobs_from_app_instance(app_instance_id, only_check).await {
             Ok(job_opt) => {
                 if !only_check {
                     if let Some(job) = job_opt {

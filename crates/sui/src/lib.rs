@@ -6,6 +6,7 @@ pub mod fetch;
 pub mod interface;
 pub mod keypair;
 pub mod parse;
+pub mod state;
 pub mod transactions;
 
 // Re-export commonly used types
@@ -18,6 +19,7 @@ pub use keypair::{
     bcs_serialize, generate_ed25519, parse_address, parse_sui_private_key, sign_message,
     verify_with_address,
 };
+pub use state::SharedSuiState;
 pub use transactions::{
     complete_job_tx, fail_job_tx, start_job_tx, submit_proof_tx, update_state_for_sequence_tx,
 };

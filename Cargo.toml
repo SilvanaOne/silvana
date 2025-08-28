@@ -27,6 +27,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Dependencies with consistent versions across all crates
+dotenvy = "0.15"
 tracing = "0.1"
 prost = "0.13"
 async-trait = "0.1"

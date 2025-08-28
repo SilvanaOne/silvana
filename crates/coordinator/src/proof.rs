@@ -50,7 +50,6 @@ pub async fn analyze_proof_completion(
       // Fetch all blocks and proof calculations in the range with a single iteration
       let fetch_blocks_start = std::time::Instant::now();
       let blocks_map = match fetch_blocks_range(
-          client,
           app_instance,
           start_block,
           last_proved_block_number
@@ -68,7 +67,6 @@ pub async fn analyze_proof_completion(
       
       let fetch_proofs_start = std::time::Instant::now();
       let proofs_map = match fetch_proof_calculations_range(
-          client,
           app_instance,
           start_block,
           last_proved_block_number
@@ -131,7 +129,7 @@ pub async fn analyze_proof_completion(
       if existing_settle_job_id.is_none() {
           debug!("📝 Creating periodic settle job for app instance {} (will settle blocks 1 to {})", 
               app_instance.silvana_app_name, last_proved_block_number);
-          if let Err(e) = settlement::create_periodic_settle_job(app_instance, client).await {
+          if let Err(e) = settlement::create_periodic_settle_job(app_instance).await {
               warn!("Failed to create settle job: {}", e);
           } else {
               debug!("✅ Successfully created periodic settle job");
@@ -144,7 +142,7 @@ pub async fn analyze_proof_completion(
       // No settlement opportunities - terminate existing settlement job if it exists
       if let Some(job_id) = existing_settle_job_id {
           debug!("🚫 No valid blocks to settle (only block 0 or no new proved blocks), terminating settlement job {}", job_id);
-          let mut sui_interface = sui::interface::SilvanaSuiInterface::new(client.clone());
+          let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
           if let Err(e) = sui_interface.terminate_app_job(&app_instance.id, job_id).await {
               warn!("Failed to terminate settlement job {}: {}", job_id, e);
           } else {
@@ -166,7 +164,6 @@ pub async fn analyze_proof_completion(
       
       // Fetch ProofCalculation for this block
       let proof_calc_info = match sui::fetch::fetch_proof_calculation(
-          client,
           app_instance_id,
           block_number
       ).await {
@@ -200,7 +197,6 @@ pub async fn analyze_proof_completion(
       if let Err(e) = analyze_and_create_merge_jobs_with_blockchain_data(
           &proof_calc,
           app_instance_id,
-          client,
           "", // No specific da_hash for general analysis
       ).await {
           let block_duration = block_start.elapsed();

@@ -4,8 +4,6 @@ use rpc_client::{RpcClient, RpcClientConfig, create_rpc_client};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
-use sui_rpc::Client;
 use tokio::sync::RwLock;
 use tracing::{debug, info, error};
 
@@ -26,21 +24,13 @@ pub struct SharedState {
     current_agents: Arc<RwLock<HashMap<String, CurrentAgent>>>,
     jobs_tracker: JobsTracker,
     agent_job_db: AgentJobDatabase,  // Memory database for agent job tracking
-    sui_client: Client,  // Sui client (cloneable)
     has_pending_jobs: Arc<AtomicBool>,  // Fast check for pending jobs availability
     rpc_client: Arc<RwLock<Option<RpcClient>>>,  // Silvana RPC service client
 }
 
-// Global static values initialized once from environment variables
-static COORDINATOR_ID: OnceLock<String> = OnceLock::new();
-static CHAIN: OnceLock<String> = OnceLock::new();
 
 impl SharedState {
-    pub fn new(sui_client: Client) -> Self {
-        // Initialize static values from environment variables
-        Self::init_coordinator_id();
-        Self::init_chain();
-        
+    pub fn new() -> Self {
         // Initialize the Silvana RPC client asynchronously
         let rpc_client = Arc::new(RwLock::new(None));
         let rpc_client_clone = rpc_client.clone();
@@ -62,38 +52,19 @@ impl SharedState {
             current_agents: Arc::new(RwLock::new(HashMap::new())),
             jobs_tracker: JobsTracker::new(),
             agent_job_db: AgentJobDatabase::new(),
-            sui_client,
             has_pending_jobs: Arc::new(AtomicBool::new(false)),
             rpc_client,
         }
     }
     
-    /// Initialize coordinator ID from SUI_ADDRESS environment variable
-    fn init_coordinator_id() {
-        COORDINATOR_ID.get_or_init(|| {
-            std::env::var("SUI_ADDRESS")
-                .expect("SUI_ADDRESS environment variable must be set")
-        });
-    }
-    
-    /// Initialize chain from SUI_CHAIN environment variable
-    fn init_chain() {
-        CHAIN.get_or_init(|| {
-            std::env::var("SUI_CHAIN")
-                .expect("SUI_CHAIN environment variable must be set")
-        });
-    }
-    
     /// Get the coordinator ID
-    pub fn get_coordinator_id(&self) -> &String {
-        COORDINATOR_ID.get()
-            .expect("Coordinator ID should be initialized")
+    pub fn get_coordinator_id(&self) -> String {
+        sui::SharedSuiState::get_instance().get_coordinator_id().clone()
     }
     
     /// Get the chain
-    pub fn get_chain(&self) -> &String {
-        CHAIN.get()
-            .expect("Chain should be initialized")
+    pub fn get_chain(&self) -> String {
+        sui::SharedSuiState::get_instance().get_chain().clone()
     }
 
     pub async fn set_current_agent(&self, session_id: String, developer: String, agent: String, agent_method: String) {
@@ -210,8 +181,8 @@ impl SharedState {
     }
 
 
-    pub fn get_sui_client(&self) -> Client {
-        self.sui_client.clone()
+    pub fn get_sui_client(&self) -> sui_rpc::Client {
+        sui::SharedSuiState::get_instance().get_sui_client()
     }
     
     /// Get the Silvana RPC client (if initialized)

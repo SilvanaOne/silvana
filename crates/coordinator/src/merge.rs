@@ -7,7 +7,6 @@ use tracing::{debug, error, info, warn};
 pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     proof_calc: &ProofCalculation,
     app_instance: &str,
-    client: &mut sui_rpc::Client,
     da_hash: &str,
 ) -> Result<()> {
     debug!(
@@ -22,7 +21,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 
     // Fetch existing ProofCalculation for this block to get full info including start_sequence, end_sequence, is_finished
     let existing_proof_calculation = match fetch_proof_calculation(
-        client,
         app_instance,
         proof_calc.block_number,
     )
@@ -133,7 +131,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 app_instance,
                 proof_calc.block_number,
                 da_hash.to_string(),
-                client,
             )
             .await?;
 
@@ -163,7 +160,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 
                 // Fetch existing ProofCalculation for this block again
                 let updated_proof_calculation =
-                    match fetch_proof_calculation(client, app_instance, proof_calc.block_number)
+                    match fetch_proof_calculation(app_instance, proof_calc.block_number)
                         .await
                     {
                         Ok(Some(pc)) => {
@@ -270,7 +267,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 merge_request.sequences2.clone(),
                 proof_calc.block_number,
                 app_instance,
-                client,
                 proof1_status,
                 proof2_status,
                 &current_block_proofs,
@@ -339,10 +335,9 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 pub async fn analyze_and_create_merge_jobs(
     proof_calc: &ProofCalculation,
     app_instance: &str,
-    client: &mut sui_rpc::Client,
     da_hash: &str,
 ) -> Result<()> {
-    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, client, da_hash)
+    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, da_hash)
         .await
 }
 
@@ -503,7 +498,6 @@ async fn create_merge_job(
     sequences2: Vec<u64>,
     block_number: u64,
     app_instance: &str,
-    client: &mut sui_rpc::Client,
     _proof1_status: &ProofStatus, // Currently unused, but kept for future use
     _proof2_status: &ProofStatus, // Currently unused, but kept for future use
     block_proofs: &ProofCalculation, // Add this to check if combined proof exists
@@ -514,8 +508,7 @@ async fn create_merge_job(
     );
 
     // Create SilvanaSuiInterface following the same pattern as submit_proof in grpc.rs
-    let sui_client = client.clone(); // Clone the client  
-    let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
+    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
 
     // Generate a unique job ID for this merge operation
     let job_id = format!("merge_{}_{}_{}", block_number, sequences1[0], sequences2[0]);

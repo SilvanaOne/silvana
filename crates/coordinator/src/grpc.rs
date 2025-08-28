@@ -269,8 +269,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Execute complete_job transaction on Sui
-        let sui_client = self.state.get_sui_client();
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         
         let tx_hash = sui_interface.complete_job(&agent_job.app_instance, agent_job.job_sequence).await;
         
@@ -362,8 +361,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Execute fail_job transaction on Sui
-        let sui_client = self.state.get_sui_client();
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         
         let success = sui_interface.fail_job(
             &agent_job.app_instance, 
@@ -420,8 +418,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         );
 
         // Execute terminate_job transaction on Sui
-        let sui_client = self.state.get_sui_client();
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         
         let success = sui_interface.terminate_job(&agent_job.app_instance, agent_job.job_sequence).await;
 
@@ -552,8 +549,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                
         // Submit proof transaction on Sui
-        let sui_client = self.state.get_sui_client();
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         
         let tx_result = sui_interface.submit_proof(
             &agent_job.app_instance,
@@ -597,7 +593,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     debug!("🔄 Starting background merge analysis for job {}", job_id_clone);
                     
                     // Fetch the AppInstance first
-                    match sui::fetch::fetch_app_instance(&mut client_clone, &app_instance_id).await {
+                    match sui::fetch::fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
                             if let Err(e) = analyze_proof_completion(
                                 &app_instance,
@@ -632,7 +628,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     info!("🔄 Starting background merge analysis for failed job {}", job_id_clone);
                     
                     // Fetch the AppInstance first
-                    match sui::fetch::fetch_app_instance(&mut client_clone, &app_instance_id).await {
+                    match sui::fetch::fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
                             if let Err(analysis_err) = analyze_proof_completion(
                                 &app_instance,
@@ -737,8 +733,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Call update_state_for_sequence on Sui
-        let sui_client = self.state.get_sui_client();
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new(sui_client);
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         
         let tx_result = sui_interface.update_state_for_sequence(
             &agent_job.app_instance,
@@ -1015,12 +1010,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Use the app_instance from the job
         let app_instance = agent_job.app_instance.clone();
 
-        // Get SUI client from shared state
-        let mut client = self.state.get_sui_client();
-
         // Fetch the ProofCalculation using the existing function from sui::fetch::prover
         let proof_calculation = match sui::fetch::fetch_proof_calculation(
-            &mut client,
             &app_instance,
             req.block_number
         ).await {

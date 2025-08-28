@@ -40,7 +40,7 @@ chrono.workspace = true
 
 
 # Environment and Config
-dotenvy = "0.15"
+dotenvy.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 
