@@ -115,7 +115,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     
                     // Use index-based fetching to get the job with lowest job_sequence
                     match fetch_pending_job_from_instances(
-                        &mut client,
                         &current_instances,
                         &req.developer,
                         &req.agent,
@@ -586,7 +585,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                 // Spawn merge analysis in background to not delay the response
                 let app_instance_id = agent_job.app_instance.clone();
-                let mut client_clone = self.state.get_sui_client();
                 let job_id_clone = req.job_id.clone();
                 
                 tokio::spawn(async move {
@@ -596,8 +594,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     match sui::fetch::fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
                             if let Err(e) = analyze_proof_completion(
-                                &app_instance,
-                                &mut client_clone
+                                &app_instance
                             ).await {
                                 warn!("Failed to analyze proof completion in background: {}", e);
                             } else {
@@ -621,7 +618,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 
                 // Even after failure, spawn merge analysis in background
                 let app_instance_id = agent_job.app_instance.clone();
-                let mut client_clone = self.state.get_sui_client();
                 let job_id_clone = req.job_id.clone();
                 
                 tokio::spawn(async move {
@@ -631,8 +627,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     match sui::fetch::fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
                             if let Err(analysis_err) = analyze_proof_completion(
-                                &app_instance,
-                                &mut client_clone
+                                &app_instance
                             ).await {
                                 warn!("Failed to analyze failed proof for merge opportunities: {}", analysis_err);
                             } else {

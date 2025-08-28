@@ -1,8 +1,7 @@
 use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info, fetch_blocks_range};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use anyhow::{anyhow, Result};
-use sui_rpc::Client;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, warn, error};
 
 /// Check if there's a settlement opportunity for a given block (legacy single-block function)
 #[allow(dead_code)]
@@ -133,141 +132,6 @@ pub async fn check_settlement_opportunities_range(
     Ok(opportunities)
 }
 
-/// Get the settlement job ID for a specific app instance ID
-pub async fn get_settlement_job_id_for_instance(
-    client: &mut Client,
-    app_instance_id: &str,
-) -> Result<Option<u64>> {
-    debug!("Getting settlement job ID for app instance {}", app_instance_id);
-    
-    // Fetch the Jobs object to check the settlement_job field
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
-    } else {
-        format!("0x{}", app_instance_id)
-    };
-    
-    // Fetch the AppInstance object
-    let request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string()],
-        }),
-    };
-
-    let response = match client.ledger_client().get_object(request).await {
-        Ok(resp) => resp.into_inner(),
-        Err(e) => {
-            warn!("Failed to fetch AppInstance {}: {}", formatted_id, e);
-            return Ok(None);
-        }
-    };
-
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
-                // Get the embedded jobs field
-                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // Get the settlement_job field
-                        if let Some(settlement_job_field) = jobs_struct.fields.get("settlement_job") {
-                            match &settlement_job_field.kind {
-                                Some(prost_types::value::Kind::StringValue(s)) => {
-                                    if let Ok(job_id) = s.parse::<u64>() {
-                                        debug!("Found existing settlement job with ID {}", job_id);
-                                        return Ok(Some(job_id));
-                                    }
-                                }
-                                Some(prost_types::value::Kind::NumberValue(n)) => {
-                                    let job_id = n.round() as u64;
-                                    debug!("Found existing settlement job with ID {}", job_id);
-                                    return Ok(Some(job_id));
-                                }
-                                Some(prost_types::value::Kind::NullValue(_)) => {
-                                    debug!("Settlement job field is null");
-                                    return Ok(None);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    debug!("No settlement job found");
-    Ok(None)
-}
-
-/// Get the settlement job ID if it exists
-pub async fn get_settlement_job_id(
-    app_instance: &AppInstance,
-    client: &mut Client,
-) -> Result<Option<u64>> {
-    debug!("Getting settlement job ID for app instance {}", app_instance.id);
-    
-    // Fetch the Jobs object to check the settlement_job field
-    let formatted_id = if app_instance.id.starts_with("0x") {
-        app_instance.id.clone()
-    } else {
-        format!("0x{}", app_instance.id)
-    };
-    
-    // Fetch the AppInstance object
-    let request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string()],
-        }),
-    };
-
-    let response = match client.ledger_client().get_object(request).await {
-        Ok(resp) => resp.into_inner(),
-        Err(e) => {
-            warn!("Failed to fetch AppInstance {}: {}", formatted_id, e);
-            return Ok(None);
-        }
-    };
-
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
-                // Get the embedded jobs field
-                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // Get the settlement_job field
-                        if let Some(settlement_job_field) = jobs_struct.fields.get("settlement_job") {
-                            match &settlement_job_field.kind {
-                                Some(prost_types::value::Kind::StringValue(s)) => {
-                                    if let Ok(job_id) = s.parse::<u64>() {
-                                        debug!("Found existing settlement job with ID {}", job_id);
-                                        return Ok(Some(job_id));
-                                    }
-                                }
-                                Some(prost_types::value::Kind::NumberValue(n)) => {
-                                    let job_id = n.round() as u64;
-                                    info!("Found existing settlement job with ID {}", job_id);
-                                    return Ok(Some(job_id));
-                                }
-                                Some(prost_types::value::Kind::NullValue(_)) => {
-                                    debug!("Settlement job field is null");
-                                    return Ok(None);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    debug!("No settlement job found");
-    Ok(None)
-}
 
 /// Create a periodic settle job
 pub async fn create_periodic_settle_job(
@@ -323,7 +187,6 @@ pub async fn create_periodic_settle_job(
 
 /// Try to fetch a pending job from any of the given app_instances using the index
 pub async fn fetch_pending_job_from_instances(
-    client: &mut Client,
     app_instances: &[String],
     developer: &str,
     agent: &str,
@@ -362,7 +225,7 @@ pub async fn fetch_pending_job_from_instances(
         }
         
         // Check if there's a settlement job first
-        let settlement_job_id = crate::settlement::get_settlement_job_id_for_instance(client, app_instance).await
+        let settlement_job_id = sui::fetch::app_instance::get_settlement_job_id_for_instance(app_instance).await
             .unwrap_or(None);
         
         // Batch fetch all jobs at once
@@ -474,7 +337,6 @@ pub async fn fetch_pending_job_from_instances(
 /// Prioritizes: settlement jobs > merge jobs > other jobs
 /// Also checks next_scheduled_at to ensure jobs are ready to run
 pub async fn fetch_all_pending_jobs(
-    client: &mut Client,
     app_instance_ids: &[String],
     only_check: bool,
 ) -> Result<Option<Job>> {
@@ -489,7 +351,7 @@ pub async fn fetch_all_pending_jobs(
     for app_instance_id in app_instance_ids {
         // First check for settlement job if not in check-only mode
         if !only_check {
-            if let Ok(Some(settle_job_id)) = crate::settlement::get_settlement_job_id_for_instance(client, app_instance_id).await {
+            if let Ok(Some(settle_job_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(app_instance_id).await {
                 // Fetch the settlement job to check if it's pending and ready
                 if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(app_instance_id).await {
                     if let Ok(Some(settle_job)) = fetch_job_by_id(&jobs_table_id, settle_job_id).await {

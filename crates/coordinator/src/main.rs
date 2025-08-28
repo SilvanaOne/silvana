@@ -260,7 +260,6 @@ async fn main() -> Result<()> {
 
     // 4. Start proof completion analysis task in a separate thread (runs every 5 minutes)
     let proof_analysis_state = state.clone();
-    let proof_analysis_client = state.get_sui_client();
     let proof_analysis_handle = task::spawn(async move {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -282,7 +281,6 @@ async fn main() -> Result<()> {
             // Clone Arc for the spawned task
             let task_running_clone = task_running.clone();
             let proof_analysis_state_clone = proof_analysis_state.clone();
-            let proof_analysis_client_clone = proof_analysis_client.clone();
             
             // Spawn the actual proof analysis work as a separate task
             tokio::spawn(async move {
@@ -309,7 +307,6 @@ async fn main() -> Result<()> {
                 let mut error_count = 0;
                 let mut merge_opportunities_found = 0;
                 
-                let mut client = proof_analysis_client_clone.clone();
                 
                 for app_instance_id in app_instances.iter() {
                     let instance_start = std::time::Instant::now();
@@ -318,7 +315,7 @@ async fn main() -> Result<()> {
                     match fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
                             analyzed_count += 1;
-                            if let Err(e) = analyze_proof_completion(&app_instance, &mut client).await {
+                            if let Err(e) = analyze_proof_completion(&app_instance).await {
                                 error_count += 1;
                                 debug!("Failed to analyze proof completion for {}: {}", app_instance_id, e);
                             } else {

@@ -8,7 +8,6 @@ use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
 // Helper function to analyze proof completion and determine next action
 pub async fn analyze_proof_completion(
   app_instance: &AppInstance,
-  client: &mut sui_rpc::Client,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let analysis_start = std::time::Instant::now();
   debug!("🔍 Starting proof completion analysis for app: {}", app_instance.silvana_app_name);
@@ -121,7 +120,7 @@ pub async fn analyze_proof_completion(
   }
   
   // Check for existing settlement job
-  let existing_settle_job_id = settlement::get_settlement_job_id(app_instance, client).await
+  let existing_settle_job_id = sui::fetch::app_instance::get_settlement_job_id(app_instance).await
       .unwrap_or(None);
   
   if found_settlement_opportunity {

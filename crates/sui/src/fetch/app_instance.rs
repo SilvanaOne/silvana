@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
-use tracing::debug;
+use tracing::{debug, info, warn};
 use crate::error::SilvanaSuiInterfaceError;
 use crate::parse::{get_string, get_u64, get_bool, get_table_id, proto_to_json, parse_string_vecmap, parse_struct_vecmap};
 use crate::state::SharedSuiState;
@@ -214,4 +214,141 @@ mod tests {
         assert_eq!(app.last_proved_block_number, 9);
         assert!(!app.is_paused);
     }
+}
+
+
+/// Get the settlement job ID for a specific app instance ID
+pub async fn get_settlement_job_id_for_instance(
+    app_instance_id: &str,
+) -> Result<Option<u64>> {
+    debug!("Getting settlement job ID for app instance {}", app_instance_id);
+    let mut client = SharedSuiState::get_instance().get_sui_client();
+    
+    // Fetch the Jobs object to check the settlement_job field
+    let formatted_id = if app_instance_id.starts_with("0x") {
+        app_instance_id.to_string()
+    } else {
+        format!("0x{}", app_instance_id)
+    };
+    
+    // Fetch the AppInstance object
+    let request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+        object_id: Some(formatted_id.clone()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec!["json".to_string()],
+        }),
+    };
+
+    let response = match client.ledger_client().get_object(request).await {
+        Ok(resp) => resp.into_inner(),
+        Err(e) => {
+            warn!("Failed to fetch AppInstance {}: {}", formatted_id, e);
+            return Ok(None);
+        }
+    };
+
+    if let Some(proto_object) = response.object {
+        if let Some(json_value) = &proto_object.json {
+            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
+                // Get the embedded jobs field
+                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
+                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
+                        // Get the settlement_job field
+                        if let Some(settlement_job_field) = jobs_struct.fields.get("settlement_job") {
+                            match &settlement_job_field.kind {
+                                Some(prost_types::value::Kind::StringValue(s)) => {
+                                    if let Ok(job_id) = s.parse::<u64>() {
+                                        debug!("Found existing settlement job with ID {}", job_id);
+                                        return Ok(Some(job_id));
+                                    }
+                                }
+                                Some(prost_types::value::Kind::NumberValue(n)) => {
+                                    let job_id = n.round() as u64;
+                                    debug!("Found existing settlement job with ID {}", job_id);
+                                    return Ok(Some(job_id));
+                                }
+                                Some(prost_types::value::Kind::NullValue(_)) => {
+                                    debug!("Settlement job field is null");
+                                    return Ok(None);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    debug!("No settlement job found");
+    Ok(None)
+}
+
+/// Get the settlement job ID if it exists
+pub async fn get_settlement_job_id(
+    app_instance: &AppInstance,
+) -> Result<Option<u64>> {
+    debug!("Getting settlement job ID for app instance {}", app_instance.id);
+    let mut client = SharedSuiState::get_instance().get_sui_client();
+    
+    // Fetch the Jobs object to check the settlement_job field
+    let formatted_id = if app_instance.id.starts_with("0x") {
+        app_instance.id.clone()
+    } else {
+        format!("0x{}", app_instance.id)
+    };
+    
+    // Fetch the AppInstance object
+    let request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
+        object_id: Some(formatted_id.clone()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec!["json".to_string()],
+        }),
+    };
+
+    let response = match client.ledger_client().get_object(request).await {
+        Ok(resp) => resp.into_inner(),
+        Err(e) => {
+            warn!("Failed to fetch AppInstance {}: {}", formatted_id, e);
+            return Ok(None);
+        }
+    };
+
+    if let Some(proto_object) = response.object {
+        if let Some(json_value) = &proto_object.json {
+            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
+                // Get the embedded jobs field
+                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
+                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
+                        // Get the settlement_job field
+                        if let Some(settlement_job_field) = jobs_struct.fields.get("settlement_job") {
+                            match &settlement_job_field.kind {
+                                Some(prost_types::value::Kind::StringValue(s)) => {
+                                    if let Ok(job_id) = s.parse::<u64>() {
+                                        debug!("Found existing settlement job with ID {}", job_id);
+                                        return Ok(Some(job_id));
+                                    }
+                                }
+                                Some(prost_types::value::Kind::NumberValue(n)) => {
+                                    let job_id = n.round() as u64;
+                                    info!("Found existing settlement job with ID {}", job_id);
+                                    return Ok(Some(job_id));
+                                }
+                                Some(prost_types::value::Kind::NullValue(_)) => {
+                                    debug!("Settlement job field is null");
+                                    return Ok(None);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    debug!("No settlement job found");
+    Ok(None)
 }

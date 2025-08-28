@@ -193,10 +193,8 @@ impl JobSearcher {
         );
 
         // First do a quick check to remove app_instances without pending jobs
-        let mut client = self.state.get_sui_client();
-
         // Use check-only mode to quickly identify app_instances without jobs
-        match fetch_all_pending_jobs(&mut client, &app_instances, true).await {
+        match fetch_all_pending_jobs(&app_instances, true).await {
             Ok(_) => {
                 debug!("Quick check completed, removed app_instances without pending jobs");
             }
@@ -217,8 +215,7 @@ impl JobSearcher {
             remaining_instances.len()
         );
 
-        let mut client = self.state.get_sui_client();
-        match fetch_all_pending_jobs(&mut client, &remaining_instances, false).await {
+        match fetch_all_pending_jobs(&remaining_instances, false).await {
             Ok(pending_job) => {
                 if pending_job.is_none() {
                     // No pending jobs found, but we had app_instances - they might have been cleaned up
