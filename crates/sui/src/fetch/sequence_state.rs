@@ -1,6 +1,6 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_u64, get_bytes, get_option_bytes, get_option_string};
-use sui_rpc::Client;
+use crate::state::SharedSuiState;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, error};
 
@@ -36,11 +36,12 @@ pub fn extract_sequence_state_from_json(json_value: &prost_types::Value) -> Resu
 
 /// Fetch a specific SequenceState by sequence number from the sequence_states ObjectTable
 pub async fn fetch_sequence_state_by_id(
-    client: &mut Client,
     sequence_states_table_id: &str,
     sequence: u64,
 ) -> Result<Option<SequenceState>> {
     debug!("🔍 Fetching sequence {} from sequence_states table {}", sequence, sequence_states_table_id);
+    
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     
     // List dynamic fields to find the specific sequence state
     let list_request = ListDynamicFieldsRequest {
@@ -155,9 +156,9 @@ pub async fn fetch_sequence_state_by_id(
 
 /// Get the SequenceStateManager information from an AppInstance
 pub async fn get_sequence_state_manager_info_from_app_instance(
-    client: &mut Client,
     app_instance_id: &str,
 ) -> Result<Option<(u64, u64, String)>> { // (lowest_sequence, highest_sequence, table_id)
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     // Ensure the app_instance_id has 0x prefix
     let formatted_id = if app_instance_id.starts_with("0x") {
         app_instance_id.to_string()
@@ -290,14 +291,13 @@ pub async fn get_sequence_state_manager_info_from_app_instance(
 /// Otherwise, find the highest sequence with both state and data_availability set,
 /// and return all sequences from that one (inclusive) to the requested one.
 pub async fn query_sequence_states(
-    client: &mut Client,
     app_instance_id: &str,
     requested_sequence: u64,
 ) -> Result<Vec<SequenceState>> {
     debug!("Querying sequence states for app_instance: {}, sequence: {}", app_instance_id, requested_sequence);
     
     // Get SequenceStateManager info from AppInstance
-    let (lowest_sequence, highest_sequence, table_id) = match get_sequence_state_manager_info_from_app_instance(client, app_instance_id).await? {
+    let (lowest_sequence, highest_sequence, table_id) = match get_sequence_state_manager_info_from_app_instance(app_instance_id).await? {
         Some(info) => {
             debug!("SequenceStateManager found: lowest={}, highest={}, table_id={}", info.0, info.1, info.2);
             info
@@ -324,7 +324,7 @@ pub async fn query_sequence_states(
         requested_sequence, lowest_sequence, highest_sequence);
     
     // Fetch the requested sequence state first
-    let requested_state = match fetch_sequence_state_by_id(client, &table_id, requested_sequence).await? {
+    let requested_state = match fetch_sequence_state_by_id(&table_id, requested_sequence).await? {
         Some(state) => {
             debug!("Successfully fetched requested sequence state {}: has_state={}, has_data_availability={}", 
                 requested_sequence, state.state.is_some(), state.data_availability.is_some());
@@ -350,7 +350,7 @@ pub async fn query_sequence_states(
     let mut start_sequence = None;
     for seq in (lowest_sequence..requested_sequence).rev() {
         debug!("Checking sequence {} for data availability", seq);
-        if let Ok(Some(state)) = fetch_sequence_state_by_id(client, &table_id, seq).await {
+        if let Ok(Some(state)) = fetch_sequence_state_by_id(&table_id, seq).await {
             debug!("Sequence {}: has_state={}, has_data_availability={}", 
                 seq, state.state.is_some(), state.data_availability.is_some());
             if state.data_availability.is_some() {
@@ -369,7 +369,7 @@ pub async fn query_sequence_states(
             let mut result_states = Vec::new();
             
             // Add the start sequence (highest with DA)
-            if let Ok(Some(start_state)) = fetch_sequence_state_by_id(client, &table_id, seq).await {
+            if let Ok(Some(start_state)) = fetch_sequence_state_by_id(&table_id, seq).await {
                 result_states.push(start_state);
             }
             
@@ -388,7 +388,7 @@ pub async fn query_sequence_states(
                 lowest_sequence, requested_sequence);
             let mut result_states = Vec::new();
             for seq in lowest_sequence..=requested_sequence {
-                if let Ok(Some(state)) = fetch_sequence_state_by_id(client, &table_id, seq).await {
+                if let Ok(Some(state)) = fetch_sequence_state_by_id(&table_id, seq).await {
                     result_states.push(state);
                 }
             }

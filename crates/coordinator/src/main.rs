@@ -102,7 +102,6 @@ async fn main() -> Result<()> {
 
     // 2. Start reconciliation task in a separate thread (runs every 10 minutes)
     let reconciliation_state = state.clone();
-    let reconciliation_client = state.get_sui_client();
     
     // Test fetch_app_instance with the provided app instance ID
     // {
@@ -135,8 +134,7 @@ async fn main() -> Result<()> {
                 stats.agent_methods_count
             );
             
-            let mut client = reconciliation_client.clone();
-            match reconciliation_state.get_jobs_tracker().reconcile_with_chain(&mut client).await {
+            match reconciliation_state.get_jobs_tracker().reconcile_with_chain().await {
                 Ok(has_jobs) => {
                     // Update the pending jobs flag based on reconciliation result
                     reconciliation_state.update_pending_jobs_flag().await;

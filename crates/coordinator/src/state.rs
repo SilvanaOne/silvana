@@ -190,9 +190,6 @@ impl SharedState {
         }
     }
 
-    pub fn get_sui_client(&self) -> sui_rpc::Client {
-        sui::SharedSuiState::get_instance().get_sui_client()
-    }
 
     /// Get the Silvana RPC client (if initialized)
     pub async fn get_rpc_client(&self) -> Option<RpcClient> {

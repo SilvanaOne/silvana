@@ -1,17 +1,12 @@
 use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
-use crate::state::SharedSuiState;
-use sui_rpc::Client;
 use tracing::{info, warn, error, debug};
 
 /// Interface for calling Sui Move functions related to job management
-pub struct SilvanaSuiInterface {
-    client: Client,
-}
+pub struct SilvanaSuiInterface;
 
 impl SilvanaSuiInterface {
     pub fn new() -> Self {
-        let client = SharedSuiState::get_instance().get_sui_client();
-        Self { client }
+        Self
     }
 
     /// Start a job on the Sui blockchain by calling the start_job Move function
@@ -20,7 +15,7 @@ impl SilvanaSuiInterface {
     pub async fn start_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
         debug!("Attempting to start job {} on Sui blockchain", job_sequence);
         
-        match start_job_tx(&mut self.client, app_instance, job_sequence).await {
+        match start_job_tx(app_instance, job_sequence).await {
             Ok(tx_digest) => {
                 debug!("Successfully started job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 true
@@ -38,7 +33,7 @@ impl SilvanaSuiInterface {
     pub async fn complete_job(&mut self, app_instance: &str, job_sequence: u64) -> Option<String> {
         debug!("Attempting to complete job {} on Sui blockchain", job_sequence);
         
-        match complete_job_tx(&mut self.client, app_instance, job_sequence).await {
+        match complete_job_tx(app_instance, job_sequence).await {
             Ok(tx_digest) => {
                 debug!("Successfully completed job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 Some(tx_digest)
@@ -56,7 +51,7 @@ impl SilvanaSuiInterface {
     pub async fn fail_job(&mut self, app_instance: &str, job_sequence: u64, error_message: &str) -> bool {
         debug!("Attempting to fail job {} on Sui blockchain with error: {}", job_sequence, error_message);
         
-        match fail_job_tx(&mut self.client, app_instance, job_sequence, error_message).await {
+        match fail_job_tx(app_instance, job_sequence, error_message).await {
             Ok(tx_digest) => {
                 debug!("Successfully failed job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 true
@@ -74,7 +69,7 @@ impl SilvanaSuiInterface {
     pub async fn terminate_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
         debug!("Attempting to terminate job {} on Sui blockchain", job_sequence);
         
-        match terminate_job_tx(&mut self.client, app_instance, job_sequence).await {
+        match terminate_job_tx(app_instance, job_sequence).await {
             Ok(tx_digest) => {
                 debug!("Successfully terminated job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 true
@@ -131,7 +126,6 @@ impl SilvanaSuiInterface {
         );
 
         match create_app_job_tx(
-            &mut self.client,
             app_instance,
             method_name.clone(),
             job_description,
@@ -179,7 +173,6 @@ impl SilvanaSuiInterface {
         );
 
         match create_merge_job_tx(
-            &mut self.client,
             app_instance,
             block_number,
             sequences1.clone(),
@@ -218,7 +211,6 @@ impl SilvanaSuiInterface {
         );
 
         match create_settle_job_tx(
-            &mut self.client,
             app_instance,
             block_number,
             job_description,
@@ -255,7 +247,6 @@ impl SilvanaSuiInterface {
         );
 
         match update_block_proof_data_availability_tx(
-            &mut self.client,
             app_instance,
             block_number,
             proof_data_availability.clone(),
@@ -292,7 +283,6 @@ impl SilvanaSuiInterface {
         );
 
         match update_block_settlement_tx_hash_tx(
-            &mut self.client,
             app_instance,
             block_number,
             settlement_tx_hash.clone(),
@@ -329,7 +319,6 @@ impl SilvanaSuiInterface {
         );
 
         match update_block_settlement_tx_included_in_block_tx(
-            &mut self.client,
             app_instance,
             block_number,
             settled_at,
@@ -375,7 +364,6 @@ impl SilvanaSuiInterface {
         );
 
         match submit_proof_tx(
-            &mut self.client,
             app_instance,
             block_number,
             sequences,
@@ -416,7 +404,6 @@ impl SilvanaSuiInterface {
         );
 
         match crate::transactions::terminate_app_job_tx(
-            &mut self.client,
             app_instance,
             job_id,
         )
@@ -453,7 +440,6 @@ impl SilvanaSuiInterface {
         );
 
         match reject_proof_tx(
-            &mut self.client,
             app_instance,
             block_number,
             sequences.clone(),
@@ -495,7 +481,6 @@ impl SilvanaSuiInterface {
         );
 
         match start_proving_tx(
-            &mut self.client,
             app_instance,
             block_number,
             sequences.clone(),
@@ -545,7 +530,6 @@ impl SilvanaSuiInterface {
         );
 
         match update_state_for_sequence_tx(
-            &mut self.client,
             app_instance,
             sequence,
             new_state_data,
@@ -584,7 +568,7 @@ impl SilvanaSuiInterface {
             app_instance
         );
 
-        match try_create_block_tx(&mut self.client, app_instance).await {
+        match try_create_block_tx(app_instance).await {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully created block for app_instance {} on blockchain, tx: {}",

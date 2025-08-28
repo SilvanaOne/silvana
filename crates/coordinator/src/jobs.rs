@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{debug, warn, info};
-use sui_rpc::Client;
 use crate::error::Result;
 
 /// Key for agent method lookup: (developer, agent, agent_method)
@@ -143,7 +142,7 @@ impl JobsTracker {
     /// Reconcile with on-chain state by checking pending_jobs_count for each tracked app_instance
     /// Only removes app_instances that haven't been updated during the reconciliation
     /// Returns true if there are still pending jobs after reconciliation
-    pub async fn reconcile_with_chain(&self, client: &mut Client) -> Result<bool> {
+    pub async fn reconcile_with_chain(&self) -> Result<bool> {
         let initial_count = self.app_instances_count().await;
         debug!("Starting reconciliation with on-chain state ({} app_instances tracked)", initial_count);
         
@@ -164,7 +163,7 @@ impl JobsTracker {
         for (app_instance_id, original_timestamp) in &instances_to_check {
             // First check if the AppInstance is ready for removal
             // (all sequences are in blocks and all blocks are proved)
-            match is_app_instance_ready_for_removal(client, app_instance_id).await {
+            match is_app_instance_ready_for_removal(app_instance_id).await {
                 Ok(ready_for_removal) => {
                     if !ready_for_removal {
                         // AppInstance has pending sequences or unproved blocks, keep it
@@ -174,7 +173,7 @@ impl JobsTracker {
                     }
                     
                     // AppInstance is ready for removal, now check if it has pending jobs
-                    match fetch_pending_jobs_count_from_app_instance(client, app_instance_id).await {
+                    match fetch_pending_jobs_count_from_app_instance(app_instance_id).await {
                         Ok(count) => {
                             if count == 0 {
                                 // Check if the timestamp has changed (new events arrived)
@@ -279,147 +278,39 @@ pub struct TrackerStats {
 
 /// Helper function to check if AppInstance is ready for removal
 /// Returns true if all sequences are in blocks and all blocks are proved
-async fn is_app_instance_ready_for_removal(client: &mut Client, app_instance_id: &str) -> Result<bool> {
-    use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
-    use crate::error::CoordinatorError;
+async fn is_app_instance_ready_for_removal(app_instance_id: &str) -> Result<bool> {
+    // Use the fetch_app_instance function from sui crate
+    let app_instance = sui::fetch::fetch_app_instance(app_instance_id).await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch AppInstance {}: {}", app_instance_id, e))?;
     
-    // Ensure the app_instance_id has 0x prefix
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
-    } else {
-        format!("0x{}", app_instance_id)
-    };
+    // Check conditions using the fetched AppInstance:
+    // 1. sequence == previous_block_last_sequence + 1 (no new sequences not in blocks)
+    // 2. last_proved_block_number + 1 == block_number (all blocks are proved)
+    let no_pending_sequences = app_instance.sequence == app_instance.previous_block_last_sequence + 1;
+    let all_blocks_proved = app_instance.last_proved_block_number + 1 == app_instance.block_number;
     
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "json".to_string(),
-            ],
-        }),
-    };
+    debug!(
+        "AppInstance {} state: sequence={}, prev_block_last_seq={}, last_proved_block={}, block_number={} -> ready_for_removal={}",
+        app_instance_id, app_instance.sequence, app_instance.previous_block_last_sequence, 
+        app_instance.last_proved_block_number, app_instance.block_number,
+        no_pending_sequences && all_blocks_proved
+    );
     
-    let response = client.ledger_client().get_object(request).await
-        .map_err(|e| CoordinatorError::RpcConnectionError(
-            format!("Failed to fetch AppInstance {}: {}", app_instance_id, e)
-        ))?;
-    
-    let object = response.into_inner().object
-        .ok_or_else(|| CoordinatorError::RpcConnectionError(
-            format!("AppInstance not found: {}", app_instance_id)
-        ))?;
-    
-    let json_value = object.json
-        .ok_or_else(|| CoordinatorError::RpcConnectionError(
-            format!("No JSON data for AppInstance: {}", app_instance_id)
-        ))?;
-    
-    // Extract fields from AppInstance
-    if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-        let mut sequence = 0u64;
-        let mut previous_block_last_sequence = 0u64;
-        let mut last_proved_block_number = 0u64;
-        let mut block_number = 0u64;
-        
-        // Extract sequence
-        if let Some(seq_field) = struct_value.fields.get("sequence") {
-            if let Some(prost_types::value::Kind::StringValue(seq_str)) = &seq_field.kind {
-                sequence = seq_str.parse().unwrap_or(0);
-            }
-        }
-        
-        // Extract previous_block_last_sequence
-        if let Some(prev_seq_field) = struct_value.fields.get("previous_block_last_sequence") {
-            if let Some(prost_types::value::Kind::StringValue(prev_seq_str)) = &prev_seq_field.kind {
-                previous_block_last_sequence = prev_seq_str.parse().unwrap_or(0);
-            }
-        }
-        
-        // Extract last_proved_block_number
-        if let Some(last_proved_field) = struct_value.fields.get("last_proved_block_number") {
-            if let Some(prost_types::value::Kind::StringValue(last_proved_str)) = &last_proved_field.kind {
-                last_proved_block_number = last_proved_str.parse().unwrap_or(0);
-            }
-        }
-        
-        // Extract block_number
-        if let Some(block_num_field) = struct_value.fields.get("block_number") {
-            if let Some(prost_types::value::Kind::StringValue(block_num_str)) = &block_num_field.kind {
-                block_number = block_num_str.parse().unwrap_or(0);
-            }
-        }
-        
-        // Check conditions:
-        // 1. sequence == previous_block_last_sequence + 1 (no new sequences not in blocks)
-        // 2. last_proved_block_number + 1 == block_number (all blocks are proved)
-        let no_pending_sequences = sequence == previous_block_last_sequence + 1;
-        let all_blocks_proved = last_proved_block_number + 1 == block_number;
-        
-        debug!(
-            "AppInstance {} state: sequence={}, prev_block_last_seq={}, last_proved_block={}, block_number={} -> ready_for_removal={}",
-            app_instance_id, sequence, previous_block_last_sequence, last_proved_block_number, block_number,
-            no_pending_sequences && all_blocks_proved
-        );
-        
-        Ok(no_pending_sequences && all_blocks_proved)
-    } else {
-        Err(CoordinatorError::RpcConnectionError(
-            format!("Invalid JSON structure for AppInstance: {}", app_instance_id)
-        ))
-    }
+    Ok(no_pending_sequences && all_blocks_proved)
 }
 
 /// Helper function to fetch pending_jobs_count from embedded Jobs in AppInstance
-async fn fetch_pending_jobs_count_from_app_instance(client: &mut Client, app_instance_id: &str) -> Result<u64> {
-    use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
-    use crate::error::CoordinatorError;
+async fn fetch_pending_jobs_count_from_app_instance(app_instance_id: &str) -> Result<u64> {
+    // Use the fetch_app_instance function from sui crate
+    let app_instance = sui::fetch::fetch_app_instance(app_instance_id).await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch AppInstance {}: {}", app_instance_id, e))?;
     
-    let formatted_id = if app_instance_id.starts_with("0x") {
-        app_instance_id.to_string()
+    // Get pending_jobs_count from the Jobs struct if it exists
+    if let Some(jobs) = app_instance.jobs {
+        Ok(jobs.pending_jobs_count)
     } else {
-        format!("0x{}", app_instance_id)
-    };
-    
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string()],
-        }),
-    };
-
-    let response = client
-        .ledger_client()
-        .get_object(request)
-        .await
-        .map_err(|e| CoordinatorError::RpcConnectionError(
-            format!("Failed to fetch AppInstance {}: {}", formatted_id, e)
-        ))?;
-
-    if let Some(proto_object) = response.into_inner().object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
-                // Get the embedded jobs field
-                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // Extract pending_jobs_count from the embedded Jobs
-                        if let Some(count_field) = jobs_struct.fields.get("pending_jobs_count") {
-                            if let Some(prost_types::value::Kind::StringValue(count_str)) = &count_field.kind {
-                                if let Ok(count) = count_str.parse::<u64>() {
-                                    return Ok(count);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        Ok(0) // No jobs struct means no pending jobs
     }
-    
-    Err(CoordinatorError::ConfigError(
-        format!("Could not extract pending_jobs_count from AppInstance {}", app_instance_id)
-    ))
 }
 
 #[cfg(test)]

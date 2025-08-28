@@ -105,7 +105,7 @@ impl SharedSuiState {
             .expect("Chain should be initialized")
     }
     
-    pub fn get_sui_client(&self) -> Client {
+    pub(crate) fn get_sui_client(&self) -> Client {
         self.sui_client.clone()
     }
     

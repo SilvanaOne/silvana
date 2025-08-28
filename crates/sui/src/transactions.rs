@@ -2,7 +2,6 @@ use anyhow::{Result, Context, anyhow};
 use std::str::FromStr;
 use sui_rpc::field::FieldMask;
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
-use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
 use sui_crypto::SuiSigner;
 use tracing::{debug, warn, error};
@@ -54,12 +53,12 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
 /// Wait for a transaction to be available in the ledger
 /// This polls GetTransaction until the transaction is found or timeout occurs
 async fn wait_for_transaction(
-    client: &mut GrpcClient,
     tx_digest: &str,
     max_wait_ms: Option<u64>,
 ) -> Result<()> {
     let timeout = max_wait_ms.unwrap_or(5000); // Default to 5000ms if not specified
     let start = std::time::Instant::now();
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut ledger = client.ledger_client();
     
     debug!("Waiting for transaction {} to be available in ledger (max {}ms)", tx_digest, timeout);
@@ -115,14 +114,12 @@ fn get_clock_object_id() -> sui::Address {
 
 /// Create and submit a transaction to start a job
 pub async fn start_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     job_sequence: u64,
 ) -> Result<String> {
     debug!("Creating start_app_job transaction for job_sequence: {}", job_sequence);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "start_app_job",
         move |tb, app_instance_arg, clock_arg| {
@@ -134,14 +131,12 @@ pub async fn start_job_tx(
 
 /// Create and submit a transaction to complete a job
 pub async fn complete_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     job_sequence: u64,
 ) -> Result<String> {
     debug!("Creating complete_app_job transaction for job_sequence: {}", job_sequence);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "complete_app_job",
         move |tb, app_instance_arg, clock_arg| {
@@ -153,7 +148,6 @@ pub async fn complete_job_tx(
 
 /// Create and submit a transaction to fail a job
 pub async fn fail_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     job_sequence: u64,
     error_message: &str,
@@ -163,7 +157,7 @@ pub async fn fail_job_tx(
     // Debug: Query current job state before attempting to fail it
     let app_instance_id = get_app_instance_id(app_instance_str)
         .context("Failed to parse app instance ID for debug query")?;
-    match query_job_status(client, app_instance_id, job_sequence).await {
+    match query_job_status(app_instance_id, job_sequence).await {
         Ok(status) => {
             debug!("Current job {} status before fail attempt: {:?}", job_sequence, status);
         }
@@ -174,7 +168,6 @@ pub async fn fail_job_tx(
     
     let error_msg = error_message.to_string();
     execute_app_instance_function(
-        client,
         app_instance_str,
         "fail_app_job",
         move |tb, app_instance_arg, clock_arg| {
@@ -187,14 +180,12 @@ pub async fn fail_job_tx(
 
 /// Create and submit a transaction to terminate a job
 pub async fn terminate_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     job_sequence: u64,
 ) -> Result<String> {
     debug!("Creating terminate_app_job transaction for job_sequence: {}", job_sequence);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "terminate_app_job",
         move |tb, app_instance_arg, clock_arg| {
@@ -206,7 +197,6 @@ pub async fn terminate_job_tx(
 
 /// Create and submit a transaction to submit a proof
 pub async fn submit_proof_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,
@@ -222,7 +212,6 @@ pub async fn submit_proof_tx(
     debug!("Creating submit_proof transaction for block_number: {}, job_id: {}", block_number, job_id);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "submit_proof",
         move |tb, app_instance_arg, clock_arg| {
@@ -257,7 +246,6 @@ pub async fn submit_proof_tx(
 
 /// Create and submit a transaction to update state for a sequence
 pub async fn update_state_for_sequence_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     sequence: u64,
     new_state_data: Option<Vec<u8>>,
@@ -266,7 +254,6 @@ pub async fn update_state_for_sequence_tx(
     debug!("Creating update_state_for_sequence transaction for sequence: {}", sequence);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "update_state_for_sequence",
         move |tb, app_instance_arg, clock_arg| {
@@ -288,7 +275,6 @@ pub async fn update_state_for_sequence_tx(
 /// Create and submit a transaction to create an app job
 /// This is a general function that can create any type of job by specifying method_name and data
 pub async fn create_app_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     method_name: String,
     job_description: Option<String>,
@@ -306,7 +292,6 @@ pub async fn create_app_job_tx(
     
     let method_name_clone = method_name.clone();
     execute_app_instance_function(
-        client,
         app_instance_str,
         "create_app_job",
         move |tb, app_instance_arg, clock_arg| {
@@ -342,7 +327,6 @@ pub async fn create_app_job_tx(
 
 /// Create and submit a transaction to reject a proof
 pub async fn reject_proof_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,
@@ -350,7 +334,6 @@ pub async fn reject_proof_tx(
     debug!("Creating reject_proof transaction for block_number: {}, sequences: {:?}", block_number, sequences);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "reject_proof",
         move |tb, app_instance_arg, clock_arg| {
@@ -363,7 +346,6 @@ pub async fn reject_proof_tx(
 
 /// Create and submit a transaction to start proving (reserve proofs)
 pub async fn start_proving_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,
@@ -375,7 +357,6 @@ pub async fn start_proving_tx(
     
     // Use the helper but handle expected errors specially
     execute_app_instance_function(
-        client,
         app_instance_str,
         "start_proving",
         move |tb, app_instance_arg, clock_arg| {
@@ -409,7 +390,6 @@ pub async fn start_proving_tx(
 
 /// Convenience function to create a merge job
 pub async fn create_merge_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     sequences1: Vec<u64>,
@@ -427,7 +407,6 @@ pub async fn create_merge_job_tx(
 
     // Call the general create_app_job_tx function with the new fields
     create_app_job_tx(
-        client,
         app_instance_str,
         "merge".to_string(),
         job_description,
@@ -444,7 +423,6 @@ pub async fn create_merge_job_tx(
 
 /// Update block proof data availability
 pub async fn update_block_proof_data_availability_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     proof_data_availability: String,
@@ -452,7 +430,6 @@ pub async fn update_block_proof_data_availability_tx(
     debug!("Creating update_block_proof_data_availability transaction for block_number: {}", block_number);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "update_block_proof_data_availability",
         move |tb, app_instance_arg, clock_arg| {
@@ -466,7 +443,6 @@ pub async fn update_block_proof_data_availability_tx(
 
 /// Convenience function to create a settle job
 pub async fn create_settle_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     job_description: Option<String>,
@@ -480,7 +456,6 @@ pub async fn create_settle_job_tx(
         .as_millis() as u64;
     
     create_app_job_tx(
-        client,
         app_instance_str,
         "settle".to_string(),
         job_description,
@@ -497,14 +472,12 @@ pub async fn create_settle_job_tx(
 
 /// Terminate an app job
 pub async fn terminate_app_job_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     job_id: u64,
 ) -> Result<String> {
     debug!("Creating terminate_app_job transaction for job_id: {}", job_id);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "terminate_app_job",
         move |tb, app_instance_arg, clock_arg| {
@@ -521,7 +494,6 @@ pub async fn terminate_app_job_tx(
 
 /// Update block settlement transaction hash
 pub async fn update_block_settlement_tx_hash_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     settlement_tx_hash: String,
@@ -529,7 +501,6 @@ pub async fn update_block_settlement_tx_hash_tx(
     debug!("Creating update_block_settlement_tx_hash transaction for block_number: {}", block_number);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "update_block_settlement_tx_hash",
         move |tb, app_instance_arg, clock_arg| {
@@ -543,7 +514,6 @@ pub async fn update_block_settlement_tx_hash_tx(
 
 /// Update block settlement transaction included in block
 pub async fn update_block_settlement_tx_included_in_block_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     block_number: u64,
     settled_at: u64,
@@ -551,7 +521,6 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
     debug!("Creating update_block_settlement_tx_included_in_block transaction for block_number: {}", block_number);
     
     execute_app_instance_function(
-        client,
         app_instance_str,
         "update_block_settlement_tx_included_in_block",
         move |tb, app_instance_arg, clock_arg| {
@@ -565,10 +534,10 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
 
 /// Debug function to query job status from the blockchain
 async fn query_job_status(
-    client: &mut GrpcClient,
     app_instance_id: sui::Address,
     job_sequence: u64,
 ) -> Result<String> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut ledger = client.ledger_client();
     
     // Query the app_instance object to get the jobs field
@@ -595,9 +564,9 @@ async fn query_job_status(
 
 /// Get object details including ownership information and initial_shared_version
 async fn get_object_details(
-    client: &mut GrpcClient,
     object_id: sui::Address,
 ) -> Result<(sui::ObjectReference, Option<u64>)> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut ledger = client.ledger_client();
     
     let response = ledger
@@ -653,7 +622,6 @@ async fn get_object_details(
 /// Common helper function to execute app instance transactions
 /// This reduces code duplication while maintaining all error detection and features
 async fn execute_app_instance_function<F>(
-    client: &mut GrpcClient,
     app_instance_str: &str,
     function_name: &str,
     build_args: F,
@@ -667,8 +635,9 @@ where
 {
     debug!("Creating {} transaction for app_instance: {}", function_name, app_instance_str);
     
-    // Get shared state
+    // Get shared state and client
     let shared_state = SharedSuiState::get_instance();
+    let mut client = shared_state.get_sui_client();
     
     // Parse IDs
     let package_id = shared_state.get_coordination_package_id();
@@ -690,12 +659,12 @@ where
     tb.set_gas_budget(100_000_000); // 0.1 SUI
 
     // Get gas price and gas coin
-    let gas_price = get_reference_gas_price(client).await?;
+    let gas_price = get_reference_gas_price(&mut client).await?;
     tb.set_gas_price(gas_price);
     debug!("Gas price: {}", gas_price);
 
     // Select gas coin using parallel-safe coin management
-    let (gas_coin, _gas_guard) = match fetch_coin(client, sender, 100_000_000).await? {
+    let (gas_coin, _gas_guard) = match fetch_coin(&mut client, sender, 100_000_000).await? {
         Some((coin, guard)) => (coin, guard),
         None => {
             error!("No available coins with sufficient balance for gas");
@@ -713,7 +682,7 @@ where
         gas_coin.object_id(), gas_coin.object_ref.version(), gas_coin.object_ref.digest(), gas_coin.balance);
 
     // Get current version and ownership info of app_instance object
-    let (app_instance_ref, initial_shared_version) = get_object_details(client, app_instance_id).await
+    let (app_instance_ref, initial_shared_version) = get_object_details(app_instance_id).await
         .context("Failed to get app instance details")?;
     
     // Create input based on whether object is shared or owned
@@ -795,7 +764,7 @@ where
     );
 
     // Wait for the transaction to be available in the ledger
-    if let Err(e) = wait_for_transaction(client, &tx_digest, None).await {
+    if let Err(e) = wait_for_transaction(&tx_digest, None).await {
         warn!("Failed to wait for {} transaction to be available: {}", function_name, e);
         // Continue anyway, the transaction was successful
     }
@@ -807,11 +776,9 @@ where
 /// This function calls the try_create_block Move function on the blockchain
 /// which will check if conditions are met to create a new block
 pub async fn try_create_block_tx(
-    client: &mut GrpcClient,
     app_instance_str: &str,
 ) -> Result<String> {
     execute_app_instance_function(
-        client,
         app_instance_str,
         "try_create_block",
         |_tb, app_instance_arg, clock_arg| {
