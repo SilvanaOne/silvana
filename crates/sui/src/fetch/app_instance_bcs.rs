@@ -352,7 +352,6 @@ fn vecmap_nested_to_hashmap(m: VecMap<MoveString, VecMap<MoveString, VecMap<Move
 /// Notes:
 /// - This requests only the Move struct contents (BCS) over gRPC.
 /// - Fully decoding the BCS requires Rust mirror types for every nested Move type.
-/// - Until those mirrors are implemented, this function returns a descriptive error after fetching bytes.
 pub async fn fetch_app_instance_bcs(
     instance_id: &str,
 ) -> Result<AppInstance> {
@@ -405,10 +404,8 @@ pub async fn fetch_app_instance_bcs(
     // block with: `let bcs_value: AppInstanceBcs = bcs::from_bytes(&contents_bcs)?;` and then
     // map it into your high-level `AppInstance` below.
 
-    // For now, return a clear error explaining what’s missing, so callers know BCS decoding
-    // must be completed before this path can succeed.
     // Decode into BCS mirror
-    let raw: AppInstanceBcs = bcs::from_bytes(&contents_bcs)?;
+    let raw: AppInstanceBcs = bcs::from_bytes::<AppInstanceBcs>(&contents_bcs)?;
 
     // Map MoveString and ids into your high-level AppInstance used elsewhere
     let to_utf8 = |s: &MoveString| String::from_utf8_lossy(&s.bytes).to_string();

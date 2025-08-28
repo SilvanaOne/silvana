@@ -22,6 +22,7 @@ async fn compare_app_instance_bcs_and_json() -> Result<()> {
         .expect("SUI_RPC_URL must be set (e.g., https://fullnode.devnet.sui.io:443)");
     SharedSuiState::initialize(&rpc_url).await?;
 
+    // devnet, needs redeployment every week and changing the id
     let id = "0x322483d8620f5ce9ded4aa3d72b4dac890e585ba6afe6dd9475b8c1cef99b6b5";
 
     // Measure timings: run 10 times each
