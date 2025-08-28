@@ -383,15 +383,13 @@ impl Default for AgentJobDatabase {
 mod tests {
     use super::*;
     use sui::fetch::{Job, JobStatus};
-    use sui_rpc::Client;
 
     fn create_test_state() -> SharedState {
         unsafe {
             std::env::set_var("SUI_ADDRESS", "0x123");
             std::env::set_var("SUI_CHAIN", "testnet");
         }
-        let client = Client::new("https://test.com".to_string()).unwrap();
-        SharedState::new(client)
+        SharedState::new()
     }
 
     fn create_test_pending_job() -> Job {
