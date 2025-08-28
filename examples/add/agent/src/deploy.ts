@@ -14,23 +14,6 @@ import {
   sendTx,
 } from "@silvana-one/mina-utils";
 
-// Get chain from environment
-const chain = process.env.MINA_CHAIN as "devnet" | "zeko" | "mainnet";
-if (!chain || !["devnet", "zeko", "mainnet"].includes(chain)) {
-  throw new Error(`Invalid or missing MINA_CHAIN: ${chain}`);
-}
-
-// Get keys from environment
-const MINA_PRIVATE_KEY = process.env.MINA_PRIVATE_KEY;
-const MINA_PUBLIC_KEY = process.env.MINA_PUBLIC_KEY;
-const MINA_APP_ADMIN = process.env.MINA_APP_ADMIN;
-
-if (!MINA_PRIVATE_KEY || !MINA_PUBLIC_KEY || !MINA_APP_ADMIN) {
-  throw new Error(
-    "Missing required environment variables: MINA_PRIVATE_KEY, MINA_PUBLIC_KEY, or MINA_APP_ADMIN"
-  );
-}
-
 const expectedTxStatus = "pending";
 
 export async function deployAddContract(): Promise<{
@@ -42,6 +25,22 @@ export async function deployAddContract(): Promise<{
 }> {
   console.time("AddContract deployment");
   console.log("🚀 Starting AddContract deployment...");
+  // Get chain from environment
+  const chain = process.env.MINA_CHAIN as "devnet" | "zeko" | "mainnet";
+  if (!chain || !["devnet", "zeko", "mainnet"].includes(chain)) {
+    console.error(`Invalid or missing MINA_CHAIN: ${chain}`);
+  }
+
+  // Get keys from environment
+  const MINA_PRIVATE_KEY = process.env.MINA_PRIVATE_KEY;
+  const MINA_PUBLIC_KEY = process.env.MINA_PUBLIC_KEY;
+  const MINA_APP_ADMIN = process.env.MINA_APP_ADMIN;
+
+  if (!MINA_PRIVATE_KEY || !MINA_PUBLIC_KEY || !MINA_APP_ADMIN) {
+    throw new Error(
+      "Missing required environment variables: MINA_PRIVATE_KEY, MINA_PUBLIC_KEY, or MINA_APP_ADMIN"
+    );
+  }
   console.log(`Chain: ${chain}`);
 
   // Initialize blockchain connection
@@ -155,14 +154,14 @@ export async function deployAddContract(): Promise<{
   };
 }
 
-export async function checkAddContractDeployment(
-  contractAddress: string
-): Promise<boolean> {
+export async function checkAddContractDeployment(params: {
+  contractAddress: string;
+  adminAddress: string;
+}): Promise<boolean> {
+  const { contractAddress, adminAddress } = params;
   console.log("🔍 Checking AddContract deployment...");
-  console.log(`  Chain: ${chain}`);
   console.log(`  Contract Address: ${contractAddress}`);
-
-  await initBlockchain(chain);
+  console.log(`  Admin Address: ${adminAddress}`);
 
   const contractPublicKey = PublicKey.fromBase58(contractAddress);
   const contract = new AddContract(contractPublicKey);
@@ -176,7 +175,7 @@ export async function checkAddContractDeployment(
   }
 
   // Check if admin matches expected
-  const adminPublicKey = PublicKey.fromBase58(MINA_APP_ADMIN!);
+  const adminPublicKey = PublicKey.fromBase58(adminAddress);
   const onChainAdmin = contract.admin.get();
 
   if (onChainAdmin.toBase58() !== adminPublicKey.toBase58()) {
@@ -193,44 +192,4 @@ export async function checkAddContractDeployment(
   console.log(`  Sum: ${contract.sum.get().toString()}`);
 
   return true;
-}
-
-// Main execution if run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  console.log("=====================================");
-  console.log("    AddContract Deployment Script    ");
-  console.log("=====================================\n");
-
-  deployAddContract()
-    .then(async (result) => {
-      console.log("\n🎉 Deployment completed successfully!");
-      console.log("\nSave these values:");
-      console.log(`CONTRACT_ADDRESS=${result.contractAddress}`);
-      console.log(`DEPLOYMENT_TX_HASH=${result.txHash}`);
-      console.log(
-        `VERIFICATION_KEY_HASH=${result.verificationKey.hash.toString()}`
-      );
-      console.log(`NEXT_NONCE=${result.nonce}`);
-
-      // Wait a bit for the transaction to be included
-      console.log("\n⏳ Waiting 30 seconds for transaction to be included...");
-      await new Promise((resolve) => setTimeout(resolve, 30000));
-
-      // Check deployment
-      const isDeployed = await checkAddContractDeployment(
-        result.contractAddress
-      );
-      if (isDeployed) {
-        console.log("\n✅ Contract verified on-chain!");
-      } else {
-        console.log(
-          "\n⚠️ Contract not yet visible on-chain. It may take a few more minutes."
-        );
-      }
-    })
-    .catch((error) => {
-      console.error("\n❌ Deployment failed:");
-      console.error(error);
-      process.exit(1);
-    });
 }

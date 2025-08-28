@@ -156,6 +156,7 @@ async function agent() {
               `App Instance Method: ${response.job.appInstanceMethod}`
             );
             console.log(`Sequences: [${response.job.sequences.join(", ")}]`);
+            console.log(`Block Number: ${response.job.blockNumber}`);
             console.log(`Attempts: ${response.job.attempts}`);
             console.log(`Created At: ${response.job.createdAt}`);
             console.log(`Updated At: ${response.job.updatedAt}`);
@@ -279,6 +280,30 @@ async function agent() {
             const transitionData = deserializeTransitionData(
               Array.from(response.job.data)
             );
+            console.log("=== JOB DETAILS ===");
+            console.log(`Job Sequence: ${response.job.jobSequence}`);
+            console.log(`Job ID: ${response.job.jobId}`);
+            console.log(`Description: ${response.job.description || "none"}`);
+            console.log(`Developer: ${response.job.developer}`);
+            console.log(`Agent: ${response.job.agent}`);
+            console.log(`Agent Method: ${response.job.agentMethod}`);
+            console.log(`App: ${response.job.app}`);
+            console.log(`App Instance: ${response.job.appInstance}`);
+            console.log(
+              `App Instance Method: ${response.job.appInstanceMethod}`
+            );
+            console.log(`Sequences: [${response.job.sequences.join(", ")}]`);
+            console.log(`Block Number: ${response.job.blockNumber}`);
+            console.log(`Attempts: ${response.job.attempts}`);
+            console.log(`Created At: ${response.job.createdAt}`);
+            console.log(`Updated At: ${response.job.updatedAt}`);
+            console.log(`Data Length: ${response.job.data.length}`);
+            console.log(
+              `Data First 20 bytes: ${Array.from(
+                response.job.data.slice(0, 20)
+              )}`
+            );
+            console.log("==================");
             console.log(
               `Job ${response.job.jobSequence} has transition data with sequence: ${transitionData.sequence}`
             );
@@ -372,6 +397,7 @@ async function agent() {
             const result = await getStateAndProof({
               sequenceStates,
               sequence: transitionData.sequence,
+              blockNumber: transitionData.block_number,
             });
             const endTime = Date.now();
             const cpuTimeMs = endTime - startTime;

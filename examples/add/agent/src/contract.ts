@@ -63,9 +63,11 @@ export class AddContract extends SmartContract {
   };
 
   @method async settle(proof: AddProgramProof) {
+    // verify the proof
     proof.verify();
     proof.publicInput.blockNumber.assertEquals(proof.publicOutput.blockNumber);
 
+    // verify the sender is the admin
     const sender = this.sender.getUnconstrained();
     const senderUpdate = AccountUpdate.createSigned(sender);
     senderUpdate.body.useFullCommitment = Bool(true);
@@ -78,15 +80,10 @@ export class AddContract extends SmartContract {
       .add(UInt64.from(1))
       .assertEquals(proof.publicInput.blockNumber);
     const currentSequence = this.sequence.getAndRequireEquals();
-    currentSequence
-      .add(UInt64.from(1))
-      .assertEquals(proof.publicInput.sequence);
+    currentSequence.assertEquals(proof.publicInput.sequence);
     this.sum.requireEquals(proof.publicInput.sum);
     this.root.requireEquals(proof.publicInput.root);
     this.length.requireEquals(proof.publicInput.length);
-    this.blockNumber.requireEquals(
-      proof.publicInput.blockNumber.sub(UInt64.from(1))
-    );
 
     // Verify commitment hash matches
     this.commitmentHash.requireEquals(proof.publicInput.commitment.hash());

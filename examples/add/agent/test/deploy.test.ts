@@ -110,6 +110,8 @@ describe("Deploy App for Coordinator", async () => {
 
     console.log("💾 Configuration saved to .env.app");
     console.log("App instance ID:", appInstanceID);
+    console.log("Mina contract address:", contractAddress);
+    console.log("Mina admin address:", adminAddress);
     console.log("\n📋 Next steps:");
     console.log(
       "Copy SILVANA_REGISTRY_PACKAGE and SILVANA_REGISTRY to your coordinator's .env"

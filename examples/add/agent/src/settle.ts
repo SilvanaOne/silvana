@@ -117,7 +117,10 @@ export async function settle(params: SettleParams): Promise<void> {
 
   // Check that the contract is deployed
   console.log("🔍 Checking contract deployment...");
-  const isDeployed = await checkAddContractDeployment(contractAddress);
+  const isDeployed = await checkAddContractDeployment({
+    contractAddress,
+    adminAddress: settlementAdminAddress,
+  });
   if (!isDeployed) {
     throw new Error(
       `Contract at ${contractAddress} is not deployed or not accessible`
@@ -153,7 +156,9 @@ export async function settle(params: SettleParams): Promise<void> {
 
   // Compile the contract as well
   console.log("📦 Compiling contract...");
+  console.time("compiled contract");
   await AddContract.compile({ cache });
+  console.timeEnd("compiled contract");
 
   // Start iterating from the next block
   let currentBlockNumber = lastSettledBlock + 1n;
@@ -203,17 +208,37 @@ export async function settle(params: SettleParams): Promise<void> {
     // Extract proof details
     console.log("📊 Block proof details:");
     console.log(
-      `  - Block Number: ${blockProof.publicOutput.blockNumber.toBigInt()}`
+      `  - Block Number (publicInput): ${blockProof.publicInput.blockNumber.toBigInt()}`
     );
+    console.log(
+      `  - Sequence (publicInput): ${blockProof.publicInput.sequence.toBigInt()}`
+    );
+    console.log(
+      `  - Sum (publicInput): ${blockProof.publicInput.sum.toBigInt()}`
+    );
+    console.log(
+      `  - Block Number (publicOutput): ${blockProof.publicOutput.blockNumber.toBigInt()}`
+    );
+    console.log(
+      `  - Sequence (publicOutput): ${blockProof.publicOutput.sequence.toBigInt()}`
+    );
+    console.log(
+      `  - Sum (publicOutput): ${blockProof.publicOutput.sum.toBigInt()}`
+    );
+
     if (blockProof.publicOutput.blockNumber.toBigInt() !== currentBlockNumber) {
       throw new Error(
         `Block number mismatch: ${blockProof.publicOutput.blockNumber.toBigInt()} !== ${currentBlockNumber}`
       );
     }
-    console.log(
-      `  - Final Sequence: ${blockProof.publicOutput.sequence.toBigInt()}`
-    );
-    console.log(`  - Final Sum: ${blockProof.publicOutput.sum.toBigInt()}`);
+    if (
+      blockProof.publicInput.blockNumber.toBigInt() !==
+      blockProof.publicOutput.blockNumber.toBigInt()
+    ) {
+      throw new Error(
+        `Block number mismatch input-output: ${blockProof.publicInput.blockNumber.toBigInt()} !== ${blockProof.publicOutput.blockNumber.toBigInt()}`
+      );
+    }
 
     // Initialize nonce on first proof (after verification)
     if (nonce === null) {

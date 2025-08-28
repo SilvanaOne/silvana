@@ -281,11 +281,28 @@ impl DockerManager {
         if self.use_tee {
             self.wait_for_container_polling(container_id).await
         } else {
-            self.wait_for_container_stream(container_id).await
+            // Try stream-based waiting first, fallback to polling if it fails
+            match self.wait_for_container_stream(container_id).await {
+                Ok(result) => Ok(result),
+                Err(e) => {
+                    warn!("Stream-based wait failed, falling back to polling: {}", e);
+                    self.wait_for_container_polling(container_id).await
+                }
+            }
         }
     }
 
     async fn wait_for_container_stream(&self, container_id: &str) -> Result<(i64, String)> {
+        // First, try to get container logs immediately to see if there was an immediate failure
+        let initial_logs = self.get_container_logs(container_id).await.unwrap_or_else(|e| {
+            debug!("Could not get initial logs: {}", e);
+            String::new()
+        });
+        
+        if !initial_logs.is_empty() {
+            debug!("Initial container logs:\n{}", initial_logs);
+        }
+        
         let wait_options = Some(WaitContainerOptions {
             // Use default options for wait
             ..Default::default()
@@ -293,10 +310,42 @@ impl DockerManager {
 
         let mut status_stream = self.docker.wait_container(container_id, wait_options);
 
-        let exit_code = if let Some(status) = status_stream.try_next().await? {
-            status.status_code
-        } else {
-            0
+        let exit_code = match status_stream.try_next().await {
+            Ok(Some(status)) => {
+                debug!("Container exited with status code: {}", status.status_code);
+                status.status_code
+            }
+            Ok(None) => {
+                debug!("Container wait stream ended without status");
+                // Try to inspect the container to get the exit code
+                match self.docker.inspect_container(container_id, None::<InspectContainerOptions>).await {
+                    Ok(details) => {
+                        if let Some(state) = details.state {
+                            state.exit_code.unwrap_or(0)
+                        } else {
+                            0
+                        }
+                    }
+                    Err(e) => {
+                        debug!("Could not inspect container: {}", e);
+                        0
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error waiting for container: {}", e);
+                // Try to get more information about the container state
+                if let Ok(details) = self.docker.inspect_container(container_id, None::<InspectContainerOptions>).await {
+                    if let Some(state) = details.state {
+                        error!("Container state: running={:?}, exit_code={:?}, error={:?}", 
+                               state.running, state.exit_code, state.error);
+                        if let Some(exit_code) = state.exit_code {
+                            return Ok((exit_code, self.get_container_logs(container_id).await?));
+                        }
+                    }
+                }
+                return Err(DockerError::ContainerError(format!("Failed to wait for container: {}", e)));
+            }
         };
 
         let logs = self.get_container_logs(container_id).await?;
@@ -304,33 +353,60 @@ impl DockerManager {
     }
 
     async fn wait_for_container_polling(&self, container_id: &str) -> Result<(i64, String)> {
-        debug!("Polling container status (TEE mode)...");
+        debug!("Polling container status...");
+        
+        let mut poll_count = 0;
+        let max_polls = 600; // Maximum 10 minutes with 1 second intervals
         
         loop {
-            let details = self
+            poll_count += 1;
+            
+            match self
                 .docker
                 .inspect_container(container_id, None::<InspectContainerOptions>)
-                .await?;
-
-            if let Some(state) = details.state {
-                if state.running == Some(false) {
-                    let exit_code = state.exit_code.unwrap_or(0);
-                    debug!("Container exited with code: {}", exit_code);
-                    
-                    let logs = self.get_container_logs(container_id).await?;
-                    
-                    if exit_code != 0 {
-                        return Err(DockerError::ContainerError(format!(
-                            "Container exited with non-zero status: {}",
-                            exit_code
-                        )));
+                .await
+            {
+                Ok(details) => {
+                    if let Some(state) = details.state {
+                        // Check if container has stopped
+                        if state.running == Some(false) || state.running.is_none() {
+                            let exit_code = state.exit_code.unwrap_or(0);
+                            debug!("Container exited with code: {}", exit_code);
+                            
+                            // Log any error message from the container
+                            if let Some(error) = state.error {
+                                if !error.is_empty() {
+                                    error!("Container error message: {}", error);
+                                }
+                            }
+                            
+                            let logs = self.get_container_logs(container_id).await?;
+                            
+                            // Don't treat non-zero exit as error here, let caller decide
+                            return Ok((exit_code, logs));
+                        }
+                        
+                        // Container is still running
+                        if poll_count > max_polls {
+                            return Err(DockerError::Timeout(max_polls as u64));
+                        }
+                    } else {
+                        // No state information available
+                        warn!("Container has no state information");
+                        let logs = self.get_container_logs(container_id).await?;
+                        return Ok((0, logs));
                     }
-                    
-                    return Ok((exit_code, logs));
+                }
+                Err(e) => {
+                    // Container might have been removed or doesn't exist
+                    warn!("Failed to inspect container: {}", e);
+                    // Try to get logs one more time
+                    let logs = self.get_container_logs(container_id).await.unwrap_or_else(|_| String::new());
+                    return Ok((1, logs));
                 }
             }
 
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
 

@@ -20,7 +20,7 @@ pub enum DockerError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
     
-    #[error("Bollard error: {0}")]
+    #[error("Docker API error: {0:?}")]
     BollardError(#[from] bollard::errors::Error),
     
     #[error("Other error: {0}")]

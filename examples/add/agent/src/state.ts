@@ -7,7 +7,15 @@ import {
 } from "./circuit.js";
 import { AddProgramCommitment } from "./commitment.js";
 import { readDataAvailability } from "./grpc.js";
-import { UInt32, Field, VerificationKey, Cache, verify, JsonProof } from "o1js";
+import {
+  UInt32,
+  Field,
+  VerificationKey,
+  Cache,
+  verify,
+  JsonProof,
+  UInt64,
+} from "o1js";
 import { processCommitments } from "./transition.js";
 
 export interface SequenceState {
@@ -99,6 +107,7 @@ export async function merge(
 export async function getStateAndProof(params: {
   sequenceStates: SequenceState[];
   sequence: bigint;
+  blockNumber: bigint;
 }): Promise<
   | {
       state: AddProgramState;
@@ -107,7 +116,7 @@ export async function getStateAndProof(params: {
     }
   | undefined
 > {
-  const { sequenceStates, sequence } = params;
+  const { sequenceStates, sequence, blockNumber } = params;
 
   if (sequenceStates.length === 0) {
     return undefined;
@@ -196,6 +205,11 @@ export async function getStateAndProof(params: {
 
     // Process commitments for this transition
     const commitments = processCommitments(transitionData);
+    if (shouldProve) {
+      console.log(`Setting block number to ${blockNumber}`);
+      state.blockNumber = UInt64.from(blockNumber);
+      console.log(`State block number: ${state.blockNumber.toBigInt()}`);
+    }
 
     // Apply the operation based on method type
     if (transitionData.method === "add") {

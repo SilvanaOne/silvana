@@ -1624,12 +1624,28 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Build the secret reference from the job information
         use rpc_client::SecretReference;
-        let secret_reference = SecretReference {
-            developer: agent_job.developer.clone(),
-            agent: agent_job.agent.clone(),
-            app: Some(agent_job.pending_job.app.clone()),
-            app_instance: Some(agent_job.app_instance.clone()),
-            name: Some(req.name.clone()),
+        
+        // Special handling for private key secrets (prefixed with sk_)
+        // These are typically global secrets at the developer/agent level
+        // rather than app-instance specific
+        let secret_reference = if req.name.starts_with("sk_") {
+            debug!("Retrieving private key secret '{}' at developer/agent level", req.name);
+            SecretReference {
+                developer: agent_job.developer.clone(),
+                agent: agent_job.agent.clone(),
+                app: None,  // No app context for private keys
+                app_instance: None,  // No app instance context for private keys
+                name: Some(req.name.clone()),
+            }
+        } else {
+            // Regular secret with full context
+            SecretReference {
+                developer: agent_job.developer.clone(),
+                agent: agent_job.agent.clone(),
+                app: Some(agent_job.pending_job.app.clone()),
+                app_instance: Some(agent_job.app_instance.clone()),
+                name: Some(req.name.clone()),
+            }
         };
 
         // Create the retrieve secret request for the Silvana RPC service
