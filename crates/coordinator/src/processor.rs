@@ -5,7 +5,7 @@ use crate::state::SharedState;
 use std::collections::HashMap;
 use std::time::Duration;
 use sui_rpc::proto::sui::rpc::v2beta2::{
-    GetTransactionRequest, SubscribeCheckpointsRequest, SubscribeCheckpointsResponse,
+    GetTransactionRequest, SubscribeCheckpointsResponse,
 };
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
@@ -68,26 +68,9 @@ impl EventProcessor {
     async fn stream_checkpoints(&mut self) -> Result<()> {
         info!("Starting checkpoint stream...");
 
-        let mut client = self.state.get_sui_client();
-        let mut subscription_client = client.subscription_client();
-
-        let request = SubscribeCheckpointsRequest {
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    //"summary.timestamp".to_string(),
-                    //"transactions.events.events.package_id".to_string(),
-                    //"transactions.events.events.module".to_string(),
-                    //"transactions.events.events.sender".to_string(),
-                    "transactions.events.events.event_type".to_string(),
-                ],
-            }),
-        };
-
-        let mut stream = subscription_client
-            .subscribe_checkpoints(request)
+        let mut stream = sui::events::create_checkpoint_stream()
             .await
-            .map_err(|e| CoordinatorError::TonicError(e))?
-            .into_inner();
+            .map_err(|e| CoordinatorError::Other(e))?;
 
         let mut checkpoint_count = 0;
 

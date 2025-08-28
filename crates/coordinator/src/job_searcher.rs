@@ -263,9 +263,8 @@ impl JobSearcher {
 
         // Fetch agent method configuration
         let agent_fetch_start = Instant::now();
-        let mut client = self.state.get_sui_client();
         let agent_method =
-            match fetch_agent_method(&mut client, &job.developer, &job.agent, &job.agent_method)
+            match fetch_agent_method(&job.developer, &job.agent, &job.agent_method)
                 .await
             {
                 Ok(method) => {

@@ -1,4 +1,5 @@
 use crate::error::{SilvanaSuiInterfaceError, Result};
+use crate::state::SharedSuiState;
 use serde::Deserialize;
 use std::env;
 use sui_rpc::Client;
@@ -14,11 +15,11 @@ pub struct AgentMethod {
 }
 
 pub async fn fetch_agent_method(
-    client: &mut Client,
     developer_name: &str,
     agent_name: &str,
     method_name: &str,
 ) -> Result<AgentMethod> {
+    let mut client = SharedSuiState::get_instance().get_sui_client();
 
     // Get the registry package ID from environment variable
     let _registry_package = env::var("SILVANA_REGISTRY_PACKAGE")
@@ -64,7 +65,7 @@ pub async fn fetch_agent_method(
                                 
                                 // Now fetch the developer from the developers table
                                 return fetch_developer_and_agent(
-                                    client,
+                                    &mut client,
                                     developers_table_id,
                                     developer_name,
                                     agent_name,

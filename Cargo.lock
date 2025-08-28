@@ -4583,6 +4583,7 @@ dependencies = [
  "sui-transaction-builder",
  "thiserror 2.0.12",
  "tokio",
+ "tonic",
  "tracing",
  "tracing-subscriber",
 ]

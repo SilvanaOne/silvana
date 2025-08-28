@@ -46,16 +46,30 @@ pub async fn analyze_proof_completion(
       debug!("🔍 Checking for settlement opportunities from block {} to {}", 
           start_block, last_proved_block_number);
       
-      // Fetch all blocks and proof calculations in the range with a single iteration
-      let fetch_blocks_start = std::time::Instant::now();
-      let blocks_map = match fetch_blocks_range(
-          app_instance,
-          start_block,
-          last_proved_block_number
-      ).await {
+      // Fetch all blocks and proof calculations in parallel
+      let fetch_start = std::time::Instant::now();
+      
+      // Run both fetches concurrently
+      let (blocks_result, proofs_result) = tokio::join!(
+          fetch_blocks_range(
+              app_instance,
+              start_block,
+              last_proved_block_number
+          ),
+          fetch_proof_calculations_range(
+              app_instance,
+              start_block,
+              last_proved_block_number
+          )
+      );
+      
+      let fetch_duration = fetch_start.elapsed();
+      
+      // Process blocks result
+      let blocks_map = match blocks_result {
           Ok(blocks) => {
               blocks_fetched = blocks.len();
-              debug!("Fetched {} blocks in {:.2}s", blocks.len(), fetch_blocks_start.elapsed().as_secs_f64());
+              debug!("Fetched {} blocks", blocks.len());
               blocks
           },
           Err(e) => {
@@ -64,15 +78,11 @@ pub async fn analyze_proof_completion(
           }
       };
       
-      let fetch_proofs_start = std::time::Instant::now();
-      let proofs_map = match fetch_proof_calculations_range(
-          app_instance,
-          start_block,
-          last_proved_block_number
-      ).await {
+      // Process proofs result
+      let proofs_map = match proofs_result {
           Ok(proofs) => {
               proofs_fetched = proofs.len();
-              debug!("Fetched {} proof calculations in {:.2}s", proofs.len(), fetch_proofs_start.elapsed().as_secs_f64());
+              debug!("Fetched {} proof calculations", proofs.len());
               proofs
           },
           Err(e) => {
@@ -80,6 +90,9 @@ pub async fn analyze_proof_completion(
               Default::default()
           }
       };
+      
+      debug!("Fetched {} blocks and {} proofs in parallel in {:.2}s", 
+          blocks_fetched, proofs_fetched, fetch_duration.as_secs_f64());
       
       // Check each block for settlement opportunities
       for block_number in start_block..=last_proved_block_number {

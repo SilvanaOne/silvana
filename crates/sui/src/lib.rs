@@ -2,6 +2,7 @@
 pub mod chain;
 pub mod coin;
 pub mod error;
+pub mod events;
 pub mod fetch;
 pub mod interface;
 pub mod keypair;
