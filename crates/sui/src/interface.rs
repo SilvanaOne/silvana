@@ -601,4 +601,74 @@ impl SilvanaSuiInterface {
             }
         }
     }
+
+    /// Update block state data availability on the Sui blockchain
+    pub async fn update_block_state_data_availability(
+        &mut self,
+        app_instance: &str,
+        block_number: u64,
+        state_data_availability: String,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to update block state DA for block {} on Sui blockchain",
+            block_number
+        );
+
+        match crate::transactions::update_block_state_data_availability_tx(
+            app_instance,
+            block_number,
+            state_data_availability.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated block state DA for block {} on blockchain, tx: {}",
+                    block_number, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to update block state DA for block {} on blockchain: {}",
+                    block_number, e
+                );
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Purge sequences below a threshold on the Sui blockchain
+    pub async fn purge_sequences_below(
+        &mut self,
+        app_instance: &str,
+        threshold_sequence: u64,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        info!(
+            "Attempting to purge sequences below {} on Sui blockchain",
+            threshold_sequence
+        );
+
+        match crate::transactions::purge_sequences_below_tx(
+            app_instance,
+            threshold_sequence,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully purged sequences below {} on blockchain, tx: {}",
+                    threshold_sequence, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to purge sequences below {} on blockchain: {}",
+                    threshold_sequence, e
+                );
+                Err(e.into())
+            }
+        }
+    }
 }

@@ -89,31 +89,27 @@ async function agent() {
                 `Successfully fetched block proof (${blockProofResponse.blockProof.length} chars)`
               );
 
-              // Verify the block proof
-              console.log("\n🔐 Starting block proof verification...");
+              // Settle the block proof on-chain
+              console.log("\n🔐 Starting settlement process...");
               const settlementStartTime = Date.now();
 
-              // const isValid = await settle(
-              //   blockProofResponse.blockProof,
-              //   blockNumber
-              // );
-              const isValid = true;
+              try {
+                // Call the settle function which will handle everything:
+                // - Fetch metadata and get admin/contract info
+                // - Get admin private key from secrets
+                // - Submit proof to Mina blockchain
+                // - Update settlement tx hash on Sui blockchain
+                await settle({
+                  // privateKey and contractAddress are optional
+                  // They will be fetched from metadata if not provided
+                });
 
-              const settlementTimeMs = Date.now() - settlementStartTime;
-              console.log(
-                `\n✅ Settlement verification completed in ${settlementTimeMs}ms`
-              );
-
-              if (isValid) {
+                const settlementTimeMs = Date.now() - settlementStartTime;
                 console.log(
-                  "Block proof is valid and ready for on-chain settlement!"
+                  `\n✅ Settlement completed successfully in ${settlementTimeMs}ms`
                 );
 
-                // TODO: In production, submit the proof to the smart contract
-                console.log(
-                  "\n📝 TODO: Submit proof to smart contract for on-chain settlement"
-                );
-                console.log("For now, marking job as complete...");
+                console.log("Block proofs have been settled on-chain!");
 
                 // Complete the job successfully
                 console.log(`\nCompleting settle job ${response.job.jobId}...`);
@@ -127,8 +123,8 @@ async function agent() {
                     `Failed to complete settle job: ${completeResponse.message}`
                   );
                 }
-              } else {
-                throw new Error("Block proof verification failed");
+              } catch (settleError) {
+                throw settleError; // Re-throw to be caught by outer catch
               }
             } catch (error) {
               console.error(`\n❌ Failed to settle block: ${error}`);

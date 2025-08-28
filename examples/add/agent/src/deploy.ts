@@ -35,6 +35,7 @@ const expectedTxStatus = "pending";
 
 export async function deployAddContract(): Promise<{
   contractAddress: string;
+  adminAddress: string;
   txHash: string;
   verificationKey: VerificationKey;
   nonce: number;
@@ -98,7 +99,7 @@ export async function deployAddContract(): Promise<{
     {
       sender: deployerPublicKey,
       fee: 100_000_000,
-      memo: "Deploy AddContract",
+      memo: "Deploy Silvana AddContract",
     },
     async () => {
       // Fund the new account
@@ -107,7 +108,7 @@ export async function deployAddContract(): Promise<{
       // Deploy the contract
       await contract.deploy({
         admin: adminPublicKey,
-        uri: "AddContract for Silvana",
+        uri: "Silvana AddContract",
         verificationKey,
       });
     }
@@ -115,19 +116,20 @@ export async function deployAddContract(): Promise<{
 
   // Prove the transaction
   console.log("🔐 Proving transaction...");
-  console.time("Transaction proof");
+  console.time("proved tx");
   await tx.prove();
-  console.timeEnd("Transaction proof");
+  console.timeEnd("proved tx");
 
   // Sign and send the transaction
   console.log("📤 Sending transaction...");
+  console.time("sent tx");
   const sentTx = await sendTx({
     tx: tx.sign([deployerPrivateKey, contractPrivateKey]),
-    description: "Deploy AddContract",
+    description: "Deploy Silvana AddContract",
     wait: false,
     verbose: true,
   });
-
+  console.timeEnd("sent tx");
   if (sentTx?.status !== expectedTxStatus) {
     console.error("Transaction failed:", sentTx);
     throw new Error(`Deploy AddContract failed: ${sentTx?.status}`);
@@ -137,6 +139,7 @@ export async function deployAddContract(): Promise<{
   console.log(`✅ Transaction sent successfully!`);
   console.log(`  Transaction Hash: ${txHash}`);
   console.log(`  Contract Address: ${contractPublicKey.toBase58()}`);
+  console.log(`  Admin Address: ${adminPublicKey.toBase58()}`);
 
   console.timeEnd("AddContract deployment");
 
@@ -145,6 +148,7 @@ export async function deployAddContract(): Promise<{
 
   return {
     contractAddress: contractPublicKey.toBase58(),
+    adminAddress: adminPublicKey.toBase58(),
     txHash,
     verificationKey,
     nonce,

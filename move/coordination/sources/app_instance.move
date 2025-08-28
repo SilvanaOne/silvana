@@ -646,33 +646,34 @@ public fun add_metadata(
     app_instance: &mut AppInstance,
     key: String,
     value: String,
-    ctx: &TxContext,
+    _ctx: &TxContext,
 ) {
-    only_admin(app_instance, ctx);
+    //only_admin(app_instance, ctx);
     vec_map::insert(&mut app_instance.metadata, key, value);
 }
 
-public fun add_kv(
+public fun set_kv(
     app_instance: &mut AppInstance,
     key: String,
     value: String,
-    ctx: &TxContext,
+    _ctx: &TxContext,
 ) {
-    only_admin(app_instance, ctx);
-    vec_map::insert(&mut app_instance.kv, key, value);
-}
-
-public fun update_kv(
-    app_instance: &mut AppInstance,
-    key: String,
-    value: String,
-    ctx: &TxContext,
-) {
-    only_admin(app_instance, ctx);
+    //only_admin(app_instance, ctx);
     if (vec_map::contains(&app_instance.kv, &key)) {
         vec_map::remove(&mut app_instance.kv, &key);
     };
     vec_map::insert(&mut app_instance.kv, key, value);
+}
+
+public fun delete_kv(
+    app_instance: &mut AppInstance,
+    key: String,
+    _ctx: &TxContext,
+) {
+    //only_admin(app_instance, ctx);
+    if (vec_map::contains(&app_instance.kv, &key)) {
+        vec_map::remove(&mut app_instance.kv, &key);
+    };
 }
 
 // Getter functions for AppInstance
@@ -684,11 +685,11 @@ public fun description(app_instance: &AppInstance): &Option<String> {
     &app_instance.description
 }
 
-public fun metadata(app_instance: &AppInstance): &VecMap<String, String> {
+public fun get_metadata(app_instance: &AppInstance): &VecMap<String, String> {
     &app_instance.metadata
 }
 
-public fun kv(app_instance: &AppInstance): &VecMap<String, String> {
+public fun get_kv(app_instance: &AppInstance): &VecMap<String, String> {
     &app_instance.kv
 }
 

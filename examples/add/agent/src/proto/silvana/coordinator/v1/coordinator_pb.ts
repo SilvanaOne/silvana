@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file silvana/coordinator/v1/coordinator.proto.
  */
 export const file_silvana_coordinator_v1_coordinator: GenFile = /*@__PURE__*/
-  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIvwCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSGQoMYmxvY2tfbnVtYmVyGAkgASgESAGIAQESEQoJc2VxdWVuY2VzGAogAygEEhIKCnNlcXVlbmNlczEYCyADKAQSEgoKc2VxdWVuY2VzMhgMIAMoBBIMCgRkYXRhGA0gASgMEg4KBmpvYl9pZBgOIAEoCRIQCghhdHRlbXB0cxgPIAEoDRISCgpjcmVhdGVkX2F0GBAgASgEEhIKCnVwZGF0ZWRfYXQYESABKARCDgoMX2Rlc2NyaXB0aW9uQg8KDV9ibG9ja19udW1iZXIiWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiOQoTVGVybWluYXRlSm9iUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg4KBmpvYl9pZBgCIAEoCSI4ChRUZXJtaW5hdGVKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkirgEKElN1Ym1pdFN0YXRlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEg4KBmpvYl9pZBgDIAEoCRIbCg5uZXdfc3RhdGVfZGF0YRgEIAEoDEgAiAEBEh0KEHNlcmlhbGl6ZWRfc3RhdGUYBSABKAlIAYgBAUIRCg9fbmV3X3N0YXRlX2RhdGFCEwoRX3NlcmlhbGl6ZWRfc3RhdGUiSAoTU3VibWl0U3RhdGVSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEhQKB2RhX2hhc2gYAiABKAlIAIgBAUIKCghfZGFfaGFzaCKoAQoNU2VxdWVuY2VTdGF0ZRIQCghzZXF1ZW5jZRgBIAEoBBISCgVzdGF0ZRgCIAEoDEgAiAEBEh4KEWRhdGFfYXZhaWxhYmlsaXR5GAMgASgJSAGIAQESGAoQb3B0aW1pc3RpY19zdGF0ZRgEIAEoDBIXCg90cmFuc2l0aW9uX2RhdGEYBSABKAxCCAoGX3N0YXRlQhQKEl9kYXRhX2F2YWlsYWJpbGl0eSJQChhHZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZqb2JfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQiUgoZR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRI1CgZzdGF0ZXMYASADKAsyJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNlcXVlbmNlU3RhdGUiQgobUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg8KB2RhX2hhc2gYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJcChxSZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEhEKBGRhdGEYASABKAlIAIgBARIPCgdzdWNjZXNzGAIgASgIEg8KB21lc3NhZ2UYAyABKAlCBwoFX2RhdGEiXgoPR2V0UHJvb2ZSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSFAoMYmxvY2tfbnVtYmVyGAIgASgEEhEKCXNlcXVlbmNlcxgDIAMoBBIOCgZqb2JfaWQYBCABKAkiYwoQR2V0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhIKBXByb29mGAIgASgJSACIAQESFAoHbWVzc2FnZRgDIAEoCUgBiAEBQggKBl9wcm9vZkIKCghfbWVzc2FnZSJQChRHZXRCbG9ja1Byb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIOCgZqb2JfaWQYAyABKAkidAoVR2V0QmxvY2tQcm9vZlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSGAoLYmxvY2tfcHJvb2YYAiABKAlIAIgBARIUCgdtZXNzYWdlGAMgASgJSAGIAQFCDgoMX2Jsb2NrX3Byb29mQgoKCF9tZXNzYWdlIkkKFVJldHJpZXZlU2VjcmV0UmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJImYKFlJldHJpZXZlU2VjcmV0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhkKDHNlY3JldF92YWx1ZRgDIAEoCUgAiAEBQg8KDV9zZWNyZXRfdmFsdWUyqAkKEkNvb3JkaW5hdG9yU2VydmljZRJXCgZHZXRKb2ISJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlcXVlc3QaJi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlc3BvbnNlEmYKC0NvbXBsZXRlSm9iEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5Db21wbGV0ZUpvYlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkNvbXBsZXRlSm9iUmVzcG9uc2USWgoHRmFpbEpvYhImLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuRmFpbEpvYlJlcXVlc3QaJy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkZhaWxKb2JSZXNwb25zZRJpCgxUZXJtaW5hdGVKb2ISKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlRlcm1pbmF0ZUpvYlJlcXVlc3QaLC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlRlcm1pbmF0ZUpvYlJlc3BvbnNlEmYKC1N1Ym1pdFByb29mEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRQcm9vZlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFByb29mUmVzcG9uc2USZgoLU3VibWl0U3RhdGUSKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFN0YXRlUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0U3RhdGVSZXNwb25zZRJ4ChFHZXRTZXF1ZW5jZVN0YXRlcxIwLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0U2VxdWVuY2VTdGF0ZXNSZXF1ZXN0GjEuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRTZXF1ZW5jZVN0YXRlc1Jlc3BvbnNlEoEBChRSZWFkRGF0YUF2YWlsYWJpbGl0eRIzLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0GjQuc2lsdmFuYS5jb29yZGluYXRvci52MS5SZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEl0KCEdldFByb29mEicuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRQcm9vZlJlcXVlc3QaKC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFByb29mUmVzcG9uc2USbAoNR2V0QmxvY2tQcm9vZhIsLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0QmxvY2tQcm9vZlJlcXVlc3QaLS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEJsb2NrUHJvb2ZSZXNwb25zZRJvCg5SZXRyaWV2ZVNlY3JldBItLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmV0cmlldmVTZWNyZXRSZXF1ZXN0Gi4uc2lsdmFuYS5jb29yZGluYXRvci52MS5SZXRyaWV2ZVNlY3JldFJlc3BvbnNlQkNaQWdpdGh1Yi5jb20vU2lsdmFuYU9uZS96ay10ZXN0cy9wYWNrYWdlcy9hdnMvcnBjL3Byb3RvO2Nvb3JkaW5hdG9yYgZwcm90bzM", [file_google_protobuf_descriptor]);
+  fileDesc("CihzaWx2YW5hL2Nvb3JkaW5hdG9yL3YxL2Nvb3JkaW5hdG9yLnByb3RvEhZzaWx2YW5hLmNvb3JkaW5hdG9yLnYxIvwCCgNKb2ISFAoMam9iX3NlcXVlbmNlGAEgASgEEhgKC2Rlc2NyaXB0aW9uGAIgASgJSACIAQESEQoJZGV2ZWxvcGVyGAMgASgJEg0KBWFnZW50GAQgASgJEhQKDGFnZW50X21ldGhvZBgFIAEoCRILCgNhcHAYBiABKAkSFAoMYXBwX2luc3RhbmNlGAcgASgJEhsKE2FwcF9pbnN0YW5jZV9tZXRob2QYCCABKAkSGQoMYmxvY2tfbnVtYmVyGAkgASgESAGIAQESEQoJc2VxdWVuY2VzGAogAygEEhIKCnNlcXVlbmNlczEYCyADKAQSEgoKc2VxdWVuY2VzMhgMIAMoBBIMCgRkYXRhGA0gASgMEg4KBmpvYl9pZBgOIAEoCRIQCghhdHRlbXB0cxgPIAEoDRISCgpjcmVhdGVkX2F0GBAgASgEEhIKCnVwZGF0ZWRfYXQYESABKARCDgoMX2Rlc2NyaXB0aW9uQg8KDV9ibG9ja19udW1iZXIiWwoNR2V0Sm9iUmVxdWVzdBIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSFAoMYWdlbnRfbWV0aG9kGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiRwoOR2V0Sm9iUmVzcG9uc2USLQoDam9iGAEgASgLMhsuc2lsdmFuYS5jb29yZGluYXRvci52MS5Kb2JIAIgBAUIGCgRfam9iIjgKEkNvbXBsZXRlSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI3ChNDb21wbGV0ZUpvYlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLCg5GYWlsSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSFQoNZXJyb3JfbWVzc2FnZRgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJIjMKD0ZhaWxKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiOQoTVGVybWluYXRlSm9iUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEg4KBmpvYl9pZBgCIAEoCSI4ChRUZXJtaW5hdGVKb2JSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiugEKElN1Ym1pdFByb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIRCglzZXF1ZW5jZXMYAyADKAQSGgoSbWVyZ2VkX3NlcXVlbmNlc18xGAQgAygEEhoKEm1lcmdlZF9zZXF1ZW5jZXNfMhgFIAMoBBIOCgZqb2JfaWQYBiABKAkSDQoFcHJvb2YYByABKAkSEAoIY3B1X3RpbWUYCCABKAQiNwoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEg8KB2RhX2hhc2gYAiABKAkirgEKElN1Ym1pdFN0YXRlUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhAKCHNlcXVlbmNlGAIgASgEEg4KBmpvYl9pZBgDIAEoCRIbCg5uZXdfc3RhdGVfZGF0YRgEIAEoDEgAiAEBEh0KEHNlcmlhbGl6ZWRfc3RhdGUYBSABKAlIAYgBAUIRCg9fbmV3X3N0YXRlX2RhdGFCEwoRX3NlcmlhbGl6ZWRfc3RhdGUiSAoTU3VibWl0U3RhdGVSZXNwb25zZRIPCgd0eF9oYXNoGAEgASgJEhQKB2RhX2hhc2gYAiABKAlIAIgBAUIKCghfZGFfaGFzaCKoAQoNU2VxdWVuY2VTdGF0ZRIQCghzZXF1ZW5jZRgBIAEoBBISCgVzdGF0ZRgCIAEoDEgAiAEBEh4KEWRhdGFfYXZhaWxhYmlsaXR5GAMgASgJSAGIAQESGAoQb3B0aW1pc3RpY19zdGF0ZRgEIAEoDBIXCg90cmFuc2l0aW9uX2RhdGEYBSABKAxCCAoGX3N0YXRlQhQKEl9kYXRhX2F2YWlsYWJpbGl0eSJQChhHZXRTZXF1ZW5jZVN0YXRlc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZqb2JfaWQYAiABKAkSEAoIc2VxdWVuY2UYAyABKAQiUgoZR2V0U2VxdWVuY2VTdGF0ZXNSZXNwb25zZRI1CgZzdGF0ZXMYASADKAsyJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNlcXVlbmNlU3RhdGUiQgobUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg8KB2RhX2hhc2gYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJcChxSZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEhEKBGRhdGEYASABKAlIAIgBARIPCgdzdWNjZXNzGAIgASgIEg8KB21lc3NhZ2UYAyABKAlCBwoFX2RhdGEiXgoPR2V0UHJvb2ZSZXF1ZXN0EhIKCnNlc3Npb25faWQYASABKAkSFAoMYmxvY2tfbnVtYmVyGAIgASgEEhEKCXNlcXVlbmNlcxgDIAMoBBIOCgZqb2JfaWQYBCABKAkiYwoQR2V0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEhIKBXByb29mGAIgASgJSACIAQESFAoHbWVzc2FnZRgDIAEoCUgBiAEBQggKBl9wcm9vZkIKCghfbWVzc2FnZSJQChRHZXRCbG9ja1Byb29mUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGJsb2NrX251bWJlchgCIAEoBBIOCgZqb2JfaWQYAyABKAkidAoVR2V0QmxvY2tQcm9vZlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSGAoLYmxvY2tfcHJvb2YYAiABKAlIAIgBARIUCgdtZXNzYWdlGAMgASgJSAGIAQFCDgoMX2Jsb2NrX3Byb29mQgoKCF9tZXNzYWdlIkkKFVJldHJpZXZlU2VjcmV0UmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJImYKFlJldHJpZXZlU2VjcmV0UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhkKDHNlY3JldF92YWx1ZRgDIAEoCUgAiAEBQg8KDV9zZWNyZXRfdmFsdWUiTgoMU2V0S1ZSZXF1ZXN0Eg4KBmpvYl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgsKA2tleRgDIAEoCRINCgV2YWx1ZRgEIAEoCSJCCg1TZXRLVlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIPCgd0eF9oYXNoGAMgASgJIj8KDEdldEtWUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRILCgNrZXkYAyABKAkiTwoNR2V0S1ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSEgoFdmFsdWUYAyABKAlIAIgBAUIICgZfdmFsdWUiQgoPRGVsZXRlS1ZSZXF1ZXN0Eg4KBmpvYl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgsKA2tleRgDIAEoCSJFChBEZWxldGVLVlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIPCgd0eF9oYXNoGAMgASgJIlQKEkFkZE1ldGFkYXRhUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRILCgNrZXkYAyABKAkSDQoFdmFsdWUYBCABKAkiSAoTQWRkTWV0YWRhdGFSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSDwoHdHhfaGFzaBgDIAEoCSJSChJHZXRNZXRhZGF0YVJlcXVlc3QSDgoGam9iX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEAoDa2V5GAMgASgJSACIAQFCBgoEX2tleSKdBAoTR2V0TWV0YWRhdGFSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSEgoFdmFsdWUYAyABKAlIAIgBARIXCg9hcHBfaW5zdGFuY2VfaWQYBCABKAkSGAoQc2lsdmFuYV9hcHBfbmFtZRgFIAEoCRIYCgtkZXNjcmlwdGlvbhgGIAEoCUgBiAEBEhAKCHNlcXVlbmNlGAcgASgEEg0KBWFkbWluGAggASgJEhQKDGJsb2NrX251bWJlchgJIAEoBBIgChhwcmV2aW91c19ibG9ja190aW1lc3RhbXAYCiABKAQSJAoccHJldmlvdXNfYmxvY2tfbGFzdF9zZXF1ZW5jZRgLIAEoBBIgChhsYXN0X3Byb3ZlZF9ibG9ja19udW1iZXIYDCABKAQSIQoZbGFzdF9zZXR0bGVkX2Jsb2NrX251bWJlchgNIAEoBBIdChBzZXR0bGVtZW50X2NoYWluGA4gASgJSAKIAQESHwoSc2V0dGxlbWVudF9hZGRyZXNzGA8gASgJSAOIAQESEQoJaXNfcGF1c2VkGBAgASgIEhIKCmNyZWF0ZWRfYXQYESABKAQSEgoKdXBkYXRlZF9hdBgSIAEoBEIICgZfdmFsdWVCDgoMX2Rlc2NyaXB0aW9uQhMKEV9zZXR0bGVtZW50X2NoYWluQhUKE19zZXR0bGVtZW50X2FkZHJlc3MiOwoVVHJ5Q3JlYXRlQmxvY2tSZXF1ZXN0Eg4KBmpvYl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIncKFlRyeUNyZWF0ZUJsb2NrUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEg8KB3R4X2hhc2gYAyABKAkSGQoMYmxvY2tfbnVtYmVyGAQgASgESACIAQFCDwoNX2Jsb2NrX251bWJlciKEAQonVXBkYXRlQmxvY2tTdGF0ZURhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0Eg4KBmpvYl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhQKDGJsb2NrX251bWJlchgDIAEoBBIfChdzdGF0ZV9kYXRhX2F2YWlsYWJpbGl0eRgEIAEoCSJdCihVcGRhdGVCbG9ja1N0YXRlRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIPCgd0eF9oYXNoGAMgASgJIoQBCidVcGRhdGVCbG9ja1Byb29mRGF0YUF2YWlsYWJpbGl0eVJlcXVlc3QSDgoGam9iX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFAoMYmxvY2tfbnVtYmVyGAMgASgEEh8KF3Byb29mX2RhdGFfYXZhaWxhYmlsaXR5GAQgASgJIl0KKFVwZGF0ZUJsb2NrUHJvb2ZEYXRhQXZhaWxhYmlsaXR5UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEg8KB3R4X2hhc2gYAyABKAkiegoiVXBkYXRlQmxvY2tTZXR0bGVtZW50VHhIYXNoUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIUCgxibG9ja19udW1iZXIYAyABKAQSGgoSc2V0dGxlbWVudF90eF9oYXNoGAQgASgJIlgKI1VwZGF0ZUJsb2NrU2V0dGxlbWVudFR4SGFzaFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIPCgd0eF9oYXNoGAMgASgJIn0KLVVwZGF0ZUJsb2NrU2V0dGxlbWVudFR4SW5jbHVkZWRJbkJsb2NrUmVxdWVzdBIOCgZqb2JfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIUCgxibG9ja19udW1iZXIYAyABKAQSEgoKc2V0dGxlZF9hdBgEIAEoBCJjCi5VcGRhdGVCbG9ja1NldHRsZW1lbnRUeEluY2x1ZGVkSW5CbG9ja1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIPCgd0eF9oYXNoGAMgASgJIvACChNDcmVhdGVBcHBKb2JSZXF1ZXN0Eg4KBmpvYl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhMKC21ldGhvZF9uYW1lGAMgASgJEhwKD2pvYl9kZXNjcmlwdGlvbhgEIAEoCUgAiAEBEhkKDGJsb2NrX251bWJlchgFIAEoBEgBiAEBEhEKCXNlcXVlbmNlcxgGIAMoBBISCgpzZXF1ZW5jZXMxGAcgAygEEhIKCnNlcXVlbmNlczIYCCADKAQSDAoEZGF0YRgJIAEoDBIYCgtpbnRlcnZhbF9tcxgKIAEoBEgCiAEBEh4KEW5leHRfc2NoZWR1bGVkX2F0GAsgASgESAOIAQESGQoRaXNfc2V0dGxlbWVudF9qb2IYDCABKAhCEgoQX2pvYl9kZXNjcmlwdGlvbkIPCg1fYmxvY2tfbnVtYmVyQg4KDF9pbnRlcnZhbF9tc0IUChJfbmV4dF9zY2hlZHVsZWRfYXQiXwoUQ3JlYXRlQXBwSm9iUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEg8KB3R4X2hhc2gYAyABKAkSFAoMam9iX3NlcXVlbmNlGAQgASgEIlwKGlB1cmdlU2VxdWVuY2VzQmVsb3dSZXF1ZXN0Eg4KBmpvYl9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEnRocmVzaG9sZF9zZXF1ZW5jZRgDIAEoBCJQChtQdXJnZVNlcXVlbmNlc0JlbG93UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEg8KB3R4X2hhc2gYAyABKAkyghUKEkNvb3JkaW5hdG9yU2VydmljZRJXCgZHZXRKb2ISJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlcXVlc3QaJi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEpvYlJlc3BvbnNlEmYKC0NvbXBsZXRlSm9iEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5Db21wbGV0ZUpvYlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkNvbXBsZXRlSm9iUmVzcG9uc2USWgoHRmFpbEpvYhImLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuRmFpbEpvYlJlcXVlc3QaJy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkZhaWxKb2JSZXNwb25zZRJpCgxUZXJtaW5hdGVKb2ISKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlRlcm1pbmF0ZUpvYlJlcXVlc3QaLC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlRlcm1pbmF0ZUpvYlJlc3BvbnNlEmYKC1N1Ym1pdFByb29mEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5TdWJtaXRQcm9vZlJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFByb29mUmVzcG9uc2USZgoLU3VibWl0U3RhdGUSKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlN1Ym1pdFN0YXRlUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuU3VibWl0U3RhdGVSZXNwb25zZRJ4ChFHZXRTZXF1ZW5jZVN0YXRlcxIwLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0U2VxdWVuY2VTdGF0ZXNSZXF1ZXN0GjEuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRTZXF1ZW5jZVN0YXRlc1Jlc3BvbnNlEoEBChRSZWFkRGF0YUF2YWlsYWJpbGl0eRIzLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmVhZERhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0GjQuc2lsdmFuYS5jb29yZGluYXRvci52MS5SZWFkRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEl0KCEdldFByb29mEicuc2lsdmFuYS5jb29yZGluYXRvci52MS5HZXRQcm9vZlJlcXVlc3QaKC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldFByb29mUmVzcG9uc2USbAoNR2V0QmxvY2tQcm9vZhIsLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0QmxvY2tQcm9vZlJlcXVlc3QaLS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEJsb2NrUHJvb2ZSZXNwb25zZRJvCg5SZXRyaWV2ZVNlY3JldBItLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUmV0cmlldmVTZWNyZXRSZXF1ZXN0Gi4uc2lsdmFuYS5jb29yZGluYXRvci52MS5SZXRyaWV2ZVNlY3JldFJlc3BvbnNlElQKBVNldEtWEiQuc2lsdmFuYS5jb29yZGluYXRvci52MS5TZXRLVlJlcXVlc3QaJS5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlNldEtWUmVzcG9uc2USVAoFR2V0S1YSJC5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldEtWUmVxdWVzdBolLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0S1ZSZXNwb25zZRJdCghEZWxldGVLVhInLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuRGVsZXRlS1ZSZXF1ZXN0Giguc2lsdmFuYS5jb29yZGluYXRvci52MS5EZWxldGVLVlJlc3BvbnNlEmYKC0FkZE1ldGFkYXRhEiouc2lsdmFuYS5jb29yZGluYXRvci52MS5BZGRNZXRhZGF0YVJlcXVlc3QaKy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkFkZE1ldGFkYXRhUmVzcG9uc2USZgoLR2V0TWV0YWRhdGESKi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLkdldE1ldGFkYXRhUmVxdWVzdBorLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuR2V0TWV0YWRhdGFSZXNwb25zZRJvCg5UcnlDcmVhdGVCbG9jaxItLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuVHJ5Q3JlYXRlQmxvY2tSZXF1ZXN0Gi4uc2lsdmFuYS5jb29yZGluYXRvci52MS5UcnlDcmVhdGVCbG9ja1Jlc3BvbnNlEqUBCiBVcGRhdGVCbG9ja1N0YXRlRGF0YUF2YWlsYWJpbGl0eRI/LnNpbHZhbmEuY29vcmRpbmF0b3IudjEuVXBkYXRlQmxvY2tTdGF0ZURhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0GkAuc2lsdmFuYS5jb29yZGluYXRvci52MS5VcGRhdGVCbG9ja1N0YXRlRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEqUBCiBVcGRhdGVCbG9ja1Byb29mRGF0YUF2YWlsYWJpbGl0eRI/LnNpbHZhbmEuY29vcmRpbmF0b3IudjEuVXBkYXRlQmxvY2tQcm9vZkRhdGFBdmFpbGFiaWxpdHlSZXF1ZXN0GkAuc2lsdmFuYS5jb29yZGluYXRvci52MS5VcGRhdGVCbG9ja1Byb29mRGF0YUF2YWlsYWJpbGl0eVJlc3BvbnNlEpYBChtVcGRhdGVCbG9ja1NldHRsZW1lbnRUeEhhc2gSOi5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlVwZGF0ZUJsb2NrU2V0dGxlbWVudFR4SGFzaFJlcXVlc3QaOy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlVwZGF0ZUJsb2NrU2V0dGxlbWVudFR4SGFzaFJlc3BvbnNlErcBCiZVcGRhdGVCbG9ja1NldHRsZW1lbnRUeEluY2x1ZGVkSW5CbG9jaxJFLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuVXBkYXRlQmxvY2tTZXR0bGVtZW50VHhJbmNsdWRlZEluQmxvY2tSZXF1ZXN0GkYuc2lsdmFuYS5jb29yZGluYXRvci52MS5VcGRhdGVCbG9ja1NldHRsZW1lbnRUeEluY2x1ZGVkSW5CbG9ja1Jlc3BvbnNlEmkKDENyZWF0ZUFwcEpvYhIrLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuQ3JlYXRlQXBwSm9iUmVxdWVzdBosLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuQ3JlYXRlQXBwSm9iUmVzcG9uc2USfgoTUHVyZ2VTZXF1ZW5jZXNCZWxvdxIyLnNpbHZhbmEuY29vcmRpbmF0b3IudjEuUHVyZ2VTZXF1ZW5jZXNCZWxvd1JlcXVlc3QaMy5zaWx2YW5hLmNvb3JkaW5hdG9yLnYxLlB1cmdlU2VxdWVuY2VzQmVsb3dSZXNwb25zZUJDWkFnaXRodWIuY29tL1NpbHZhbmFPbmUvemstdGVzdHMvcGFja2FnZXMvYXZzL3JwYy9wcm90bztjb29yZGluYXRvcmIGcHJvdG8z", [file_google_protobuf_descriptor]);
 
 /**
  * Job message matching the partial Move struct
@@ -811,6 +811,867 @@ export const RetrieveSecretResponseSchema: GenMessage<RetrieveSecretResponse> = 
   messageDesc(file_silvana_coordinator_v1_coordinator, 23);
 
 /**
+ * Request message for setting a key-value pair
+ *
+ * @generated from message silvana.coordinator.v1.SetKVRequest
+ */
+export type SetKVRequest = Message<"silvana.coordinator.v1.SetKVRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string key = 3;
+   */
+  key: string;
+
+  /**
+   * @generated from field: string value = 4;
+   */
+  value: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.SetKVRequest.
+ * Use `create(SetKVRequestSchema)` to create a new message.
+ */
+export const SetKVRequestSchema: GenMessage<SetKVRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 24);
+
+/**
+ * Response message for setting a key-value pair
+ *
+ * @generated from message silvana.coordinator.v1.SetKVResponse
+ */
+export type SetKVResponse = Message<"silvana.coordinator.v1.SetKVResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.SetKVResponse.
+ * Use `create(SetKVResponseSchema)` to create a new message.
+ */
+export const SetKVResponseSchema: GenMessage<SetKVResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 25);
+
+/**
+ * Request message for getting a key-value pair
+ *
+ * @generated from message silvana.coordinator.v1.GetKVRequest
+ */
+export type GetKVRequest = Message<"silvana.coordinator.v1.GetKVRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string key = 3;
+   */
+  key: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.GetKVRequest.
+ * Use `create(GetKVRequestSchema)` to create a new message.
+ */
+export const GetKVRequestSchema: GenMessage<GetKVRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 26);
+
+/**
+ * Response message for getting a key-value pair
+ *
+ * @generated from message silvana.coordinator.v1.GetKVResponse
+ */
+export type GetKVResponse = Message<"silvana.coordinator.v1.GetKVResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * Only returned if success is true and key exists
+   *
+   * @generated from field: optional string value = 3;
+   */
+  value?: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.GetKVResponse.
+ * Use `create(GetKVResponseSchema)` to create a new message.
+ */
+export const GetKVResponseSchema: GenMessage<GetKVResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 27);
+
+/**
+ * Request message for deleting a key-value pair
+ *
+ * @generated from message silvana.coordinator.v1.DeleteKVRequest
+ */
+export type DeleteKVRequest = Message<"silvana.coordinator.v1.DeleteKVRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string key = 3;
+   */
+  key: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.DeleteKVRequest.
+ * Use `create(DeleteKVRequestSchema)` to create a new message.
+ */
+export const DeleteKVRequestSchema: GenMessage<DeleteKVRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 28);
+
+/**
+ * Response message for deleting a key-value pair
+ *
+ * @generated from message silvana.coordinator.v1.DeleteKVResponse
+ */
+export type DeleteKVResponse = Message<"silvana.coordinator.v1.DeleteKVResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.DeleteKVResponse.
+ * Use `create(DeleteKVResponseSchema)` to create a new message.
+ */
+export const DeleteKVResponseSchema: GenMessage<DeleteKVResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 29);
+
+/**
+ * Request message for adding metadata (write-once)
+ *
+ * @generated from message silvana.coordinator.v1.AddMetadataRequest
+ */
+export type AddMetadataRequest = Message<"silvana.coordinator.v1.AddMetadataRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string key = 3;
+   */
+  key: string;
+
+  /**
+   * @generated from field: string value = 4;
+   */
+  value: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.AddMetadataRequest.
+ * Use `create(AddMetadataRequestSchema)` to create a new message.
+ */
+export const AddMetadataRequestSchema: GenMessage<AddMetadataRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 30);
+
+/**
+ * Response message for adding metadata
+ *
+ * @generated from message silvana.coordinator.v1.AddMetadataResponse
+ */
+export type AddMetadataResponse = Message<"silvana.coordinator.v1.AddMetadataResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.AddMetadataResponse.
+ * Use `create(AddMetadataResponseSchema)` to create a new message.
+ */
+export const AddMetadataResponseSchema: GenMessage<AddMetadataResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 31);
+
+/**
+ * Request message for getting metadata
+ *
+ * @generated from message silvana.coordinator.v1.GetMetadataRequest
+ */
+export type GetMetadataRequest = Message<"silvana.coordinator.v1.GetMetadataRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: optional string key = 3;
+   */
+  key?: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.GetMetadataRequest.
+ * Use `create(GetMetadataRequestSchema)` to create a new message.
+ */
+export const GetMetadataRequestSchema: GenMessage<GetMetadataRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 32);
+
+/**
+ * Response message for getting metadata
+ *
+ * @generated from message silvana.coordinator.v1.GetMetadataResponse
+ */
+export type GetMetadataResponse = Message<"silvana.coordinator.v1.GetMetadataResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * Only returned if success is true and key exists
+   *
+   * @generated from field: optional string value = 3;
+   */
+  value?: string;
+
+  /**
+   * AppInstance fields
+   *
+   * @generated from field: string app_instance_id = 4;
+   */
+  appInstanceId: string;
+
+  /**
+   * @generated from field: string silvana_app_name = 5;
+   */
+  silvanaAppName: string;
+
+  /**
+   * @generated from field: optional string description = 6;
+   */
+  description?: string;
+
+  /**
+   * @generated from field: uint64 sequence = 7;
+   */
+  sequence: bigint;
+
+  /**
+   * @generated from field: string admin = 8;
+   */
+  admin: string;
+
+  /**
+   * @generated from field: uint64 block_number = 9;
+   */
+  blockNumber: bigint;
+
+  /**
+   * @generated from field: uint64 previous_block_timestamp = 10;
+   */
+  previousBlockTimestamp: bigint;
+
+  /**
+   * @generated from field: uint64 previous_block_last_sequence = 11;
+   */
+  previousBlockLastSequence: bigint;
+
+  /**
+   * @generated from field: uint64 last_proved_block_number = 12;
+   */
+  lastProvedBlockNumber: bigint;
+
+  /**
+   * @generated from field: uint64 last_settled_block_number = 13;
+   */
+  lastSettledBlockNumber: bigint;
+
+  /**
+   * @generated from field: optional string settlement_chain = 14;
+   */
+  settlementChain?: string;
+
+  /**
+   * @generated from field: optional string settlement_address = 15;
+   */
+  settlementAddress?: string;
+
+  /**
+   * @generated from field: bool is_paused = 16;
+   */
+  isPaused: boolean;
+
+  /**
+   * @generated from field: uint64 created_at = 17;
+   */
+  createdAt: bigint;
+
+  /**
+   * @generated from field: uint64 updated_at = 18;
+   */
+  updatedAt: bigint;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.GetMetadataResponse.
+ * Use `create(GetMetadataResponseSchema)` to create a new message.
+ */
+export const GetMetadataResponseSchema: GenMessage<GetMetadataResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 33);
+
+/**
+ * Request message for trying to create a block
+ *
+ * @generated from message silvana.coordinator.v1.TryCreateBlockRequest
+ */
+export type TryCreateBlockRequest = Message<"silvana.coordinator.v1.TryCreateBlockRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.TryCreateBlockRequest.
+ * Use `create(TryCreateBlockRequestSchema)` to create a new message.
+ */
+export const TryCreateBlockRequestSchema: GenMessage<TryCreateBlockRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 34);
+
+/**
+ * Response message for try create block
+ *
+ * @generated from message silvana.coordinator.v1.TryCreateBlockResponse
+ */
+export type TryCreateBlockResponse = Message<"silvana.coordinator.v1.TryCreateBlockResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+
+  /**
+   * The block number if a block was created
+   *
+   * @generated from field: optional uint64 block_number = 4;
+   */
+  blockNumber?: bigint;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.TryCreateBlockResponse.
+ * Use `create(TryCreateBlockResponseSchema)` to create a new message.
+ */
+export const TryCreateBlockResponseSchema: GenMessage<TryCreateBlockResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 35);
+
+/**
+ * Request message for updating block state data availability
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockStateDataAvailabilityRequest
+ */
+export type UpdateBlockStateDataAvailabilityRequest = Message<"silvana.coordinator.v1.UpdateBlockStateDataAvailabilityRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: uint64 block_number = 3;
+   */
+  blockNumber: bigint;
+
+  /**
+   * @generated from field: string state_data_availability = 4;
+   */
+  stateDataAvailability: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockStateDataAvailabilityRequest.
+ * Use `create(UpdateBlockStateDataAvailabilityRequestSchema)` to create a new message.
+ */
+export const UpdateBlockStateDataAvailabilityRequestSchema: GenMessage<UpdateBlockStateDataAvailabilityRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 36);
+
+/**
+ * Response message for updating block state data availability
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockStateDataAvailabilityResponse
+ */
+export type UpdateBlockStateDataAvailabilityResponse = Message<"silvana.coordinator.v1.UpdateBlockStateDataAvailabilityResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockStateDataAvailabilityResponse.
+ * Use `create(UpdateBlockStateDataAvailabilityResponseSchema)` to create a new message.
+ */
+export const UpdateBlockStateDataAvailabilityResponseSchema: GenMessage<UpdateBlockStateDataAvailabilityResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 37);
+
+/**
+ * Request message for updating block proof data availability
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockProofDataAvailabilityRequest
+ */
+export type UpdateBlockProofDataAvailabilityRequest = Message<"silvana.coordinator.v1.UpdateBlockProofDataAvailabilityRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: uint64 block_number = 3;
+   */
+  blockNumber: bigint;
+
+  /**
+   * @generated from field: string proof_data_availability = 4;
+   */
+  proofDataAvailability: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockProofDataAvailabilityRequest.
+ * Use `create(UpdateBlockProofDataAvailabilityRequestSchema)` to create a new message.
+ */
+export const UpdateBlockProofDataAvailabilityRequestSchema: GenMessage<UpdateBlockProofDataAvailabilityRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 38);
+
+/**
+ * Response message for updating block proof data availability
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockProofDataAvailabilityResponse
+ */
+export type UpdateBlockProofDataAvailabilityResponse = Message<"silvana.coordinator.v1.UpdateBlockProofDataAvailabilityResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockProofDataAvailabilityResponse.
+ * Use `create(UpdateBlockProofDataAvailabilityResponseSchema)` to create a new message.
+ */
+export const UpdateBlockProofDataAvailabilityResponseSchema: GenMessage<UpdateBlockProofDataAvailabilityResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 39);
+
+/**
+ * Request message for updating block settlement tx hash
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockSettlementTxHashRequest
+ */
+export type UpdateBlockSettlementTxHashRequest = Message<"silvana.coordinator.v1.UpdateBlockSettlementTxHashRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: uint64 block_number = 3;
+   */
+  blockNumber: bigint;
+
+  /**
+   * @generated from field: string settlement_tx_hash = 4;
+   */
+  settlementTxHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockSettlementTxHashRequest.
+ * Use `create(UpdateBlockSettlementTxHashRequestSchema)` to create a new message.
+ */
+export const UpdateBlockSettlementTxHashRequestSchema: GenMessage<UpdateBlockSettlementTxHashRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 40);
+
+/**
+ * Response message for updating block settlement tx hash
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockSettlementTxHashResponse
+ */
+export type UpdateBlockSettlementTxHashResponse = Message<"silvana.coordinator.v1.UpdateBlockSettlementTxHashResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockSettlementTxHashResponse.
+ * Use `create(UpdateBlockSettlementTxHashResponseSchema)` to create a new message.
+ */
+export const UpdateBlockSettlementTxHashResponseSchema: GenMessage<UpdateBlockSettlementTxHashResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 41);
+
+/**
+ * Request message for updating block settlement tx included in block
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockSettlementTxIncludedInBlockRequest
+ */
+export type UpdateBlockSettlementTxIncludedInBlockRequest = Message<"silvana.coordinator.v1.UpdateBlockSettlementTxIncludedInBlockRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: uint64 block_number = 3;
+   */
+  blockNumber: bigint;
+
+  /**
+   * @generated from field: uint64 settled_at = 4;
+   */
+  settledAt: bigint;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockSettlementTxIncludedInBlockRequest.
+ * Use `create(UpdateBlockSettlementTxIncludedInBlockRequestSchema)` to create a new message.
+ */
+export const UpdateBlockSettlementTxIncludedInBlockRequestSchema: GenMessage<UpdateBlockSettlementTxIncludedInBlockRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 42);
+
+/**
+ * Response message for updating block settlement tx included in block
+ *
+ * @generated from message silvana.coordinator.v1.UpdateBlockSettlementTxIncludedInBlockResponse
+ */
+export type UpdateBlockSettlementTxIncludedInBlockResponse = Message<"silvana.coordinator.v1.UpdateBlockSettlementTxIncludedInBlockResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.UpdateBlockSettlementTxIncludedInBlockResponse.
+ * Use `create(UpdateBlockSettlementTxIncludedInBlockResponseSchema)` to create a new message.
+ */
+export const UpdateBlockSettlementTxIncludedInBlockResponseSchema: GenMessage<UpdateBlockSettlementTxIncludedInBlockResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 43);
+
+/**
+ * Request message for creating an app job
+ *
+ * @generated from message silvana.coordinator.v1.CreateAppJobRequest
+ */
+export type CreateAppJobRequest = Message<"silvana.coordinator.v1.CreateAppJobRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string method_name = 3;
+   */
+  methodName: string;
+
+  /**
+   * @generated from field: optional string job_description = 4;
+   */
+  jobDescription?: string;
+
+  /**
+   * @generated from field: optional uint64 block_number = 5;
+   */
+  blockNumber?: bigint;
+
+  /**
+   * @generated from field: repeated uint64 sequences = 6;
+   */
+  sequences: bigint[];
+
+  /**
+   * @generated from field: repeated uint64 sequences1 = 7;
+   */
+  sequences1: bigint[];
+
+  /**
+   * @generated from field: repeated uint64 sequences2 = 8;
+   */
+  sequences2: bigint[];
+
+  /**
+   * @generated from field: bytes data = 9;
+   */
+  data: Uint8Array;
+
+  /**
+   * @generated from field: optional uint64 interval_ms = 10;
+   */
+  intervalMs?: bigint;
+
+  /**
+   * @generated from field: optional uint64 next_scheduled_at = 11;
+   */
+  nextScheduledAt?: bigint;
+
+  /**
+   * @generated from field: bool is_settlement_job = 12;
+   */
+  isSettlementJob: boolean;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.CreateAppJobRequest.
+ * Use `create(CreateAppJobRequestSchema)` to create a new message.
+ */
+export const CreateAppJobRequestSchema: GenMessage<CreateAppJobRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 44);
+
+/**
+ * Response message for creating an app job
+ *
+ * @generated from message silvana.coordinator.v1.CreateAppJobResponse
+ */
+export type CreateAppJobResponse = Message<"silvana.coordinator.v1.CreateAppJobResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+
+  /**
+   * The sequence number of the created job
+   *
+   * @generated from field: uint64 job_sequence = 4;
+   */
+  jobSequence: bigint;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.CreateAppJobResponse.
+ * Use `create(CreateAppJobResponseSchema)` to create a new message.
+ */
+export const CreateAppJobResponseSchema: GenMessage<CreateAppJobResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 45);
+
+/**
+ * Request message for purging sequences below threshold
+ *
+ * @generated from message silvana.coordinator.v1.PurgeSequencesBelowRequest
+ */
+export type PurgeSequencesBelowRequest = Message<"silvana.coordinator.v1.PurgeSequencesBelowRequest"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: uint64 threshold_sequence = 3;
+   */
+  thresholdSequence: bigint;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.PurgeSequencesBelowRequest.
+ * Use `create(PurgeSequencesBelowRequestSchema)` to create a new message.
+ */
+export const PurgeSequencesBelowRequestSchema: GenMessage<PurgeSequencesBelowRequest> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 46);
+
+/**
+ * Response message for purging sequences
+ *
+ * @generated from message silvana.coordinator.v1.PurgeSequencesBelowResponse
+ */
+export type PurgeSequencesBelowResponse = Message<"silvana.coordinator.v1.PurgeSequencesBelowResponse"> & {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success: boolean;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message: string;
+
+  /**
+   * @generated from field: string tx_hash = 3;
+   */
+  txHash: string;
+};
+
+/**
+ * Describes the message silvana.coordinator.v1.PurgeSequencesBelowResponse.
+ * Use `create(PurgeSequencesBelowResponseSchema)` to create a new message.
+ */
+export const PurgeSequencesBelowResponseSchema: GenMessage<PurgeSequencesBelowResponse> = /*@__PURE__*/
+  messageDesc(file_silvana_coordinator_v1_coordinator, 47);
+
+/**
  * gRPC service definition
  *
  * @generated from service silvana.coordinator.v1.CoordinatorService
@@ -903,6 +1764,102 @@ export const CoordinatorService: GenService<{
     methodKind: "unary";
     input: typeof RetrieveSecretRequestSchema;
     output: typeof RetrieveSecretResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.SetKV
+   */
+  setKV: {
+    methodKind: "unary";
+    input: typeof SetKVRequestSchema;
+    output: typeof SetKVResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.GetKV
+   */
+  getKV: {
+    methodKind: "unary";
+    input: typeof GetKVRequestSchema;
+    output: typeof GetKVResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.DeleteKV
+   */
+  deleteKV: {
+    methodKind: "unary";
+    input: typeof DeleteKVRequestSchema;
+    output: typeof DeleteKVResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.AddMetadata
+   */
+  addMetadata: {
+    methodKind: "unary";
+    input: typeof AddMetadataRequestSchema;
+    output: typeof AddMetadataResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.GetMetadata
+   */
+  getMetadata: {
+    methodKind: "unary";
+    input: typeof GetMetadataRequestSchema;
+    output: typeof GetMetadataResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.TryCreateBlock
+   */
+  tryCreateBlock: {
+    methodKind: "unary";
+    input: typeof TryCreateBlockRequestSchema;
+    output: typeof TryCreateBlockResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.UpdateBlockStateDataAvailability
+   */
+  updateBlockStateDataAvailability: {
+    methodKind: "unary";
+    input: typeof UpdateBlockStateDataAvailabilityRequestSchema;
+    output: typeof UpdateBlockStateDataAvailabilityResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.UpdateBlockProofDataAvailability
+   */
+  updateBlockProofDataAvailability: {
+    methodKind: "unary";
+    input: typeof UpdateBlockProofDataAvailabilityRequestSchema;
+    output: typeof UpdateBlockProofDataAvailabilityResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.UpdateBlockSettlementTxHash
+   */
+  updateBlockSettlementTxHash: {
+    methodKind: "unary";
+    input: typeof UpdateBlockSettlementTxHashRequestSchema;
+    output: typeof UpdateBlockSettlementTxHashResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.UpdateBlockSettlementTxIncludedInBlock
+   */
+  updateBlockSettlementTxIncludedInBlock: {
+    methodKind: "unary";
+    input: typeof UpdateBlockSettlementTxIncludedInBlockRequestSchema;
+    output: typeof UpdateBlockSettlementTxIncludedInBlockResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.CreateAppJob
+   */
+  createAppJob: {
+    methodKind: "unary";
+    input: typeof CreateAppJobRequestSchema;
+    output: typeof CreateAppJobResponseSchema;
+  },
+  /**
+   * @generated from rpc silvana.coordinator.v1.CoordinatorService.PurgeSequencesBelow
+   */
+  purgeSequencesBelow: {
+    methodKind: "unary";
+    input: typeof PurgeSequencesBelowRequestSchema;
+    output: typeof PurgeSequencesBelowResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_silvana_coordinator_v1_coordinator, 0);

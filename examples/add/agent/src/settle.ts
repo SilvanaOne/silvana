@@ -9,31 +9,108 @@ import {
   accountBalanceMina,
   sendTx,
 } from "@silvana-one/mina-utils";
+import {
+  getBlockProof,
+  setKv,
+  getKv,
+  getMetadata,
+  getSecret,
+  updateBlockSettlementTxHash,
+} from "./grpc.js";
 
 interface SettleParams {
-  privateKey: string;
-  contractAddress: string;
-  getBlockProof: (blockNumber: bigint) => Promise<string | null>;
-  saveKey: (key: string, value: string) => Promise<void>;
-  readKey: (key: string) => Promise<string | null>;
-  saveSettlementTxHash: (txHash: string, blockNumber: bigint) => Promise<void>;
+  privateKey?: string; // Optional - will use secret if not provided
+  contractAddress?: string; // Optional - will use settlement address from metadata if not provided
 }
 
 export async function settle(params: SettleParams): Promise<void> {
-  const {
-    contractAddress,
-    getBlockProof,
-    saveKey,
-    readKey,
-    saveSettlementTxHash,
-  } = params;
-
   console.log("🚀 Starting settlement process...");
-  console.log(`Contract Address: ${contractAddress}`);
-  const senderPrivateKey = PrivateKey.fromBase58(params.privateKey);
+
+  // Fetch settlement_admin metadata to get admin address and contract info
+  console.log("🔍 Fetching settlement admin metadata...");
+  const metadataResponse = await getMetadata("settlementAdmin");
+
+  if (!metadataResponse.success) {
+    throw new Error(
+      `Failed to fetch settlement admin metadata: ${metadataResponse.message}`
+    );
+  }
+
+  // Get the admin address from metadata value (if present) or use the AppInstance admin field
+  let settlementAdminAddress = metadataResponse.value;
+  const contractAddress =
+    metadataResponse.settlementAddress || params.contractAddress;
+
+  // Print AppInstance info
+  console.log("📊 AppInstance Information:");
+  console.log(`  - Instance ID: ${metadataResponse.appInstanceId}`);
+  console.log(`  - App Name: ${metadataResponse.silvanaAppName}`);
+  console.log(`  - Admin Address: ${metadataResponse.admin}`);
+  console.log(`  - Settlement Admin: ${settlementAdminAddress ?? "none"}`);
+  console.log(
+    `  - Settlement Chain: ${metadataResponse.settlementChain ?? "none"}`
+  );
+  console.log(`  - Contract Address: ${contractAddress ?? "none"}`);
+  console.log(`  - Current Sequence: ${metadataResponse.sequence}`);
+  console.log(`  - Current Block: ${metadataResponse.blockNumber}`);
+  console.log(
+    `  - Last Proved Block: ${metadataResponse.lastProvedBlockNumber}`
+  );
+  console.log(
+    `  - Last Settled Block: ${metadataResponse.lastSettledBlockNumber}`
+  );
+
+  if (!contractAddress) {
+    throw new Error(
+      "No contract address found in settlement address or params"
+    );
+  }
+
+  if (!settlementAdminAddress) {
+    if (params.privateKey) {
+      console.log(
+        `🔑 Using provided private key to derive settlement admin address...`
+      );
+      settlementAdminAddress = PrivateKey.fromBase58(params.privateKey)
+        .toPublicKey()
+        .toBase58();
+      console.log(`  - Derived Settlement Admin: ${settlementAdminAddress}`);
+    } else {
+      throw new Error("No settlement admin address found in metadata");
+    }
+  }
+
+  // Get the admin's private key - either from params or from secrets
+  let senderPrivateKey: PrivateKey;
+
+  if (params.privateKey) {
+    console.log(`🔑 Using provided private key...`);
+    senderPrivateKey = PrivateKey.fromBase58(params.privateKey);
+  } else {
+    console.log(
+      `🔑 Retrieving admin private key for ${settlementAdminAddress}...`
+    );
+    const adminPrivateKeySecret = await getSecret(
+      `sk_${settlementAdminAddress}`
+    );
+
+    if (!adminPrivateKeySecret) {
+      throw new Error(
+        `Failed to retrieve private key for admin ${settlementAdminAddress}`
+      );
+    }
+
+    senderPrivateKey = PrivateKey.fromBase58(adminPrivateKeySecret);
+  }
+
   const senderPublicKey = senderPrivateKey.toPublicKey();
-  const adminAddress = senderPublicKey;
-  console.log(`Admin Address: ${adminAddress}`);
+  if (senderPublicKey.toBase58() !== settlementAdminAddress) {
+    throw new Error(
+      `Public key ${senderPublicKey.toBase58()} does not match settlement admin address ${settlementAdminAddress}`
+    );
+  }
+
+  console.log(`✅ Admin public key verified: ${senderPublicKey.toBase58()}`);
 
   // Initialize blockchain for devnet
   await initBlockchain("devnet");
@@ -54,6 +131,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
   // Fetch the contract state
   await fetchMinaAccount({ publicKey: contractPublicKey, force: true });
+  await fetchMinaAccount({ publicKey: senderPublicKey, force: true });
 
   // Get the last settled block number from contract
   const lastSettledBlock = contract.blockNumber.get().toBigInt();
@@ -88,7 +166,10 @@ export async function settle(params: SettleParams): Promise<void> {
     console.log(`\n📦 Processing block ${currentBlockNumber}...`);
 
     // Fetch block proof
-    const blockProofSerialized = await getBlockProof(currentBlockNumber);
+    const blockProofResponse = await getBlockProof(currentBlockNumber);
+    const blockProofSerialized = blockProofResponse.success
+      ? blockProofResponse.blockProof
+      : null;
 
     if (!blockProofSerialized) {
       console.log(`❌ No proof available for block ${currentBlockNumber}`);
@@ -124,6 +205,11 @@ export async function settle(params: SettleParams): Promise<void> {
     console.log(
       `  - Block Number: ${blockProof.publicOutput.blockNumber.toBigInt()}`
     );
+    if (blockProof.publicOutput.blockNumber.toBigInt() !== currentBlockNumber) {
+      throw new Error(
+        `Block number mismatch: ${blockProof.publicOutput.blockNumber.toBigInt()} !== ${currentBlockNumber}`
+      );
+    }
     console.log(
       `  - Final Sequence: ${blockProof.publicOutput.sequence.toBigInt()}`
     );
@@ -133,15 +219,18 @@ export async function settle(params: SettleParams): Promise<void> {
     if (nonce === null) {
       console.log("🔢 Initializing nonce...");
 
+      // Read saved nonce
+      const savedNonceResponse = await getKv(NONCE_KEY);
+      const savedNonceStr = savedNonceResponse.success
+        ? savedNonceResponse.value
+        : null;
+      const savedNonce = savedNonceStr ? parseInt(savedNonceStr, 10) : 0;
+
       // Fetch fresh account state
       await fetchMinaAccount({ publicKey: senderPublicKey, force: true });
       const onChainNonce = Number(
         Mina.getAccount(senderPublicKey).nonce.toBigint()
       );
-
-      // Read saved nonce
-      const savedNonceStr = await readKey(NONCE_KEY);
-      const savedNonce = savedNonceStr ? parseInt(savedNonceStr, 10) : 0;
 
       // Use the highest nonce
       nonce = Math.max(onChainNonce, savedNonce);
@@ -153,6 +242,10 @@ export async function settle(params: SettleParams): Promise<void> {
     // Create and send settlement transaction
     console.log("📝 Creating settlement transaction...");
     const memo = `Settle block ${currentBlockNumber}`;
+    console.time("prepared tx");
+
+    // Fetch the contract state
+    await fetchMinaAccount({ publicKey: contractPublicKey, force: true });
 
     try {
       const tx = await Mina.transaction(
@@ -160,26 +253,29 @@ export async function settle(params: SettleParams): Promise<void> {
           sender: senderPublicKey,
           fee: 200_000_000, // 0.2 MINA
           memo: memo.substring(0, 30),
-          nonce: nonce,
+          nonce,
         },
         async () => {
           await contract.settle(blockProof);
         }
       );
-
+      console.timeEnd("prepared tx");
       // Prove the transaction
       console.log("🔐 Proving transaction...");
+      console.time("proved tx");
       await tx.prove();
+      console.timeEnd("proved tx");
 
       // Sign and send the transaction
       console.log("📤 Sending transaction...");
+      console.time("sent tx");
       const sentTx = await sendTx({
         tx: tx.sign([senderPrivateKey]),
-        description: `settle block ${currentBlockNumber}`,
+        description: `Silvana AddContract: settle block ${currentBlockNumber}`,
         wait: false,
         verbose: true,
       });
-
+      console.timeEnd("sent tx");
       if (
         !sentTx ||
         !sentTx.status ||
@@ -190,10 +286,14 @@ export async function settle(params: SettleParams): Promise<void> {
 
         // Reset nonce on failure
         console.log("🔄 Resetting nonce to 0 due to failure");
-        await saveKey(NONCE_KEY, "0");
+        await setKv(NONCE_KEY, "0");
 
         throw new Error(
-          `Settlement transaction failed for block ${currentBlockNumber}: ${sentTx?.status}`
+          `Settlement transaction failed for block ${currentBlockNumber}: ${
+            sentTx?.status ?? "status unknown"
+          } ${sentTx?.hash ?? "hash unknown"} ${
+            sentTx && "errors" in sentTx ? sentTx.errors : "no errors"
+          }`
         );
       }
 
@@ -202,12 +302,24 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log(`✅ Transaction sent successfully!`);
       console.log(`  Transaction Hash: ${txHash}`);
 
-      // Save transaction hash
-      await saveSettlementTxHash(txHash, currentBlockNumber);
+      // Save transaction hash to blockchain
+      const updateResult = await updateBlockSettlementTxHash(
+        currentBlockNumber,
+        txHash
+      );
+      if (!updateResult.success) {
+        console.warn(
+          `⚠️ Failed to update settlement tx hash on chain: ${updateResult.message}`
+        );
+      } else {
+        console.log(
+          `  Settlement tx hash saved on chain: ${updateResult.txHash}`
+        );
+      }
 
       // Increment and save nonce
       nonce++;
-      await saveKey(NONCE_KEY, nonce.toString());
+      await setKv(NONCE_KEY, nonce.toString());
       console.log(`  Updated nonce to: ${nonce}`);
 
       // Move to next block
@@ -220,7 +332,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
       // Reset nonce on error
       console.log("🔄 Resetting nonce to 0 due to error");
-      await saveKey(NONCE_KEY, "0");
+      await setKv(NONCE_KEY, "0");
 
       // Re-throw the error to fail the job
       throw error;

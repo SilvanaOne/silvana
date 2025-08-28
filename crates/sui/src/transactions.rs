@@ -441,6 +441,44 @@ pub async fn update_block_proof_data_availability_tx(
     ).await
 }
 
+/// Update block state data availability
+pub async fn update_block_state_data_availability_tx(
+    app_instance_str: &str,
+    block_number: u64,
+    state_data_availability: String,
+) -> Result<String> {
+    debug!("Creating update_block_state_data_availability transaction for block_number: {}", block_number);
+    
+    execute_app_instance_function(
+        app_instance_str,
+        "update_block_state_data_availability",
+        move |tb, app_instance_arg, clock_arg| {
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            let state_da_arg = tb.input(sui_transaction_builder::Serialized(&state_data_availability));
+            
+            vec![app_instance_arg, block_number_arg, state_da_arg, clock_arg]
+        },
+    ).await
+}
+
+/// Purge sequences below a threshold
+pub async fn purge_sequences_below_tx(
+    app_instance_str: &str,
+    threshold_sequence: u64,
+) -> Result<String> {
+    debug!("Creating purge_sequences_below transaction for threshold: {}", threshold_sequence);
+    
+    execute_app_instance_function(
+        app_instance_str,
+        "purge_sequences_below",
+        move |tb, app_instance_arg, clock_arg| {
+            let threshold_arg = tb.input(sui_transaction_builder::Serialized(&threshold_sequence));
+            
+            vec![app_instance_arg, threshold_arg, clock_arg]
+        },
+    ).await
+}
+
 /// Convenience function to create a settle job
 pub async fn create_settle_job_tx(
     app_instance_str: &str,
@@ -783,6 +821,61 @@ pub async fn try_create_block_tx(
         "try_create_block",
         |_tb, app_instance_arg, clock_arg| {
             vec![app_instance_arg, clock_arg]
+        },
+    ).await
+}
+
+/// Set a key-value pair in the app instance KV store
+pub async fn set_kv_tx(
+    app_instance_str: &str,
+    key: String,
+    value: String,
+) -> Result<String> {
+    debug!("Creating set_kv transaction for key: {}", key);
+    
+    execute_app_instance_function(
+        app_instance_str,
+        "set_kv",
+        move |tb, app_instance_arg, _clock_arg| {
+            let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
+            let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
+            vec![app_instance_arg, key_arg, value_arg]
+        },
+    ).await
+}
+
+/// Delete a key-value pair from the app instance KV store
+pub async fn delete_kv_tx(
+    app_instance_str: &str,
+    key: String,
+) -> Result<String> {
+    debug!("Creating delete_kv transaction for key: {}", key);
+    
+    execute_app_instance_function(
+        app_instance_str,
+        "delete_kv",
+        move |tb, app_instance_arg, _clock_arg| {
+            let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
+            vec![app_instance_arg, key_arg]
+        },
+    ).await
+}
+
+/// Add metadata to the app instance (write-once)
+pub async fn add_metadata_tx(
+    app_instance_str: &str,
+    key: String,
+    value: String,
+) -> Result<String> {
+    debug!("Creating add_metadata transaction for key: {}", key);
+    
+    execute_app_instance_function(
+        app_instance_str,
+        "add_metadata",
+        move |tb, app_instance_arg, _clock_arg| {
+            let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
+            let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
+            vec![app_instance_arg, key_arg, value_arg]
         },
     ).await
 }

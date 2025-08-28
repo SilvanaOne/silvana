@@ -8,13 +8,14 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getSuiAddress } from "./key.js";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
-const developerName = "AddExampleDev";
+const developerName = "AddDeveloper";
 const agentName = "AddAgent";
 const appName = "add_app";
-const appDescription = "Example Add Application";
+const appDescription = "Silvana Add App";
 
 export async function createApp(params: {
   contractAddress: string;
+  adminAddress: string;
   chain: string;
   nonce: number;
 }): Promise<string> {
@@ -27,6 +28,14 @@ export async function createApp(params: {
   const packageID = process.env.APP_PACKAGE_ID;
   if (!packageID) {
     throw new Error("PACKAGE_ID is not set");
+  }
+
+  if (!params.adminAddress) {
+    throw new Error("Missing admin address");
+  }
+
+  if (!params.contractAddress) {
+    throw new Error("Missing contract address");
   }
 
   // Get registry from env or create a test one
@@ -52,12 +61,17 @@ export async function createApp(params: {
     process.env.SUI_KEY = suiSecretKey;
 
     const testRegistry = await createTestRegistry({
-      registryName: "Test Registry for Add Example",
+      registryName: "Test Registry for Silvana Add App",
       developerName,
       appName,
       appDescription,
       testAgentName: agentName,
-      testAgentChains: ["sui-testnet", "sui-devnet"],
+      testAgentChains: [
+        "sui:testnet",
+        "sui:devnet",
+        "mina:devnet",
+        "zeko:testnet",
+      ],
     });
 
     registryAddress = testRegistry.registryAddress;
@@ -194,7 +208,7 @@ export async function createApp(params: {
         registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
       }::app_method::new`,
       arguments: [
-        methodTx.pure.option("string", "Settle proofs"),
+        methodTx.pure.option("string", "Settle to Mina or Zeko"),
         methodTx.pure.string(developerName),
         methodTx.pure.string(agentName),
         methodTx.pure.string("prove"),
@@ -324,34 +338,34 @@ export async function createApp(params: {
     }::app_instance::add_metadata`,
     arguments: [
       metadataTx.object(appInstanceID),
-      metadataTx.pure.string("contractAddress"),
-      metadataTx.pure.string(params.contractAddress),
+      metadataTx.pure.string("settlementAdmin"),
+      metadataTx.pure.string(params.adminAddress),
     ],
   });
 
   // Add chain to metadata
-  metadataTx.moveCall({
-    target: `${
-      registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-    }::app_instance::add_metadata`,
-    arguments: [
-      metadataTx.object(appInstanceID),
-      metadataTx.pure.string("chain"),
-      metadataTx.pure.string(params.chain),
-    ],
-  });
+  // metadataTx.moveCall({
+  //   target: `${
+  //     registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+  //   }::app_instance::add_metadata`,
+  //   arguments: [
+  //     metadataTx.object(appInstanceID),
+  //     metadataTx.pure.string("chain"),
+  //     metadataTx.pure.string(params.chain),
+  //   ],
+  // });
 
   // Add nonce to kv (convert number to string)
-  metadataTx.moveCall({
-    target: `${
-      registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-    }::app_instance::add_kv`,
-    arguments: [
-      metadataTx.object(appInstanceID),
-      metadataTx.pure.string("nonce"),
-      metadataTx.pure.string(params.nonce.toString()),
-    ],
-  });
+  // metadataTx.moveCall({
+  //   target: `${
+  //     registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
+  //   }::app_instance::add_kv`,
+  //   arguments: [
+  //     metadataTx.object(appInstanceID),
+  //     metadataTx.pure.string("nonce"),
+  //     metadataTx.pure.string(params.nonce.toString()),
+  //   ],
+  // });
 
   metadataTx.setSender(address);
   metadataTx.setGasBudget(100_000_000);

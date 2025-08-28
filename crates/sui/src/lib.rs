@@ -22,7 +22,8 @@ pub use keypair::{
 };
 pub use state::SharedSuiState;
 pub use transactions::{
-    complete_job_tx, fail_job_tx, start_job_tx, submit_proof_tx, update_state_for_sequence_tx,
+    add_metadata_tx, complete_job_tx, delete_kv_tx, fail_job_tx, set_kv_tx, start_job_tx,
+    submit_proof_tx, update_state_for_sequence_tx,
 };
 // Re-export selected fetch utilities for convenient access at crate root
 pub use fetch::fetch_agent_method;

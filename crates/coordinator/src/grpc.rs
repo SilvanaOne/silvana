@@ -14,12 +14,20 @@ pub mod coordinator {
 }
 
 use coordinator::{
-    CompleteJobRequest, CompleteJobResponse, FailJobRequest, FailJobResponse, GetBlockProofRequest,
-    GetBlockProofResponse, GetJobRequest, GetJobResponse, GetProofRequest, GetProofResponse,
-    GetSequenceStatesRequest, GetSequenceStatesResponse, Job, ReadDataAvailabilityRequest,
-    ReadDataAvailabilityResponse, RetrieveSecretRequest, RetrieveSecretResponse, SequenceState,
-    SubmitProofRequest, SubmitProofResponse, SubmitStateRequest, SubmitStateResponse,
-    TerminateJobRequest, TerminateJobResponse,
+    AddMetadataRequest, AddMetadataResponse, CompleteJobRequest, CompleteJobResponse,
+    CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest, DeleteKvResponse,
+    FailJobRequest, FailJobResponse, GetBlockProofRequest, GetBlockProofResponse,
+    GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
+    GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
+    GetSequenceStatesResponse, Job, PurgeSequencesBelowRequest, PurgeSequencesBelowResponse,
+    ReadDataAvailabilityRequest, ReadDataAvailabilityResponse, RetrieveSecretRequest,
+    RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
+    SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
+    TerminateJobResponse, TryCreateBlockRequest, TryCreateBlockResponse,
+    UpdateBlockProofDataAvailabilityRequest, UpdateBlockProofDataAvailabilityResponse,
+    UpdateBlockSettlementTxHashRequest, UpdateBlockSettlementTxHashResponse,
+    UpdateBlockSettlementTxIncludedInBlockRequest, UpdateBlockSettlementTxIncludedInBlockResponse,
+    UpdateBlockStateDataAvailabilityRequest, UpdateBlockStateDataAvailabilityResponse,
     coordinator_service_server::{CoordinatorService, CoordinatorServiceServer},
 };
 
@@ -1663,6 +1671,981 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     success: false,
                     message: format!("Error retrieving secret: {}", e),
                     secret_value: None,
+                }))
+            }
+        }
+    }
+
+    async fn set_kv(
+        &self,
+        request: Request<SetKvRequest>,
+    ) -> Result<Response<SetKvResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            key = %req.key,
+            "Received SetKV request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("SetKV request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(SetKvResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "SetKV request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    current.developer,
+                    current.agent,
+                    current.agent_method
+                );
+                return Ok(Response::new(SetKvResponse {
+                    success: false,
+                    message: "Job does not belong to requesting session".to_string(),
+                    tx_hash: String::new(),
+                }));
+            }
+        } else {
+            warn!("SetKV request from unknown session: {}", req.session_id);
+            return Ok(Response::new(SetKvResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+                tx_hash: String::new(),
+            }));
+        }
+
+        // Execute the set_kv transaction
+        match sui::set_kv_tx(
+            &agent_job.app_instance,
+            req.key,
+            req.value,
+        )
+        .await
+        {
+            Ok(tx_hash) => {
+                info!(
+                    "✅ SetKV successful for job {}: tx_hash={}",
+                    req.job_id, tx_hash
+                );
+                Ok(Response::new(SetKvResponse {
+                    success: true,
+                    message: "Key-value pair set successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to set key-value pair for job {}: {}", req.job_id, e);
+                Ok(Response::new(SetKvResponse {
+                    success: false,
+                    message: format!("Failed to set key-value pair: {}", e),
+                    tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn get_kv(
+        &self,
+        request: Request<GetKvRequest>,
+    ) -> Result<Response<GetKvResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            key = %req.key,
+            "Received GetKV request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("GetKV request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(GetKvResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    value: None,
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "GetKV request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    current.developer,
+                    current.agent,
+                    current.agent_method
+                );
+                return Ok(Response::new(GetKvResponse {
+                    success: false,
+                    message: "Job does not belong to requesting session".to_string(),
+                    value: None,
+                }));
+            }
+        } else {
+            warn!("GetKV request from unknown session: {}", req.session_id);
+            return Ok(Response::new(GetKvResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+                value: None,
+            }));
+        }
+
+        // Fetch the app instance and get the key-value
+        match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+            Ok(app_instance) => {
+                if let Some(value) = app_instance.kv.get(&req.key) {
+                    info!(
+                        "✅ GetKV successful for job {}: key={}, value={}",
+                        req.job_id, req.key, value
+                    );
+                    Ok(Response::new(GetKvResponse {
+                        success: true,
+                        message: "Key-value pair retrieved successfully".to_string(),
+                        value: Some(value.clone()),
+                    }))
+                } else {
+                    info!(
+                        "GetKV for job {}: key '{}' not found",
+                        req.job_id, req.key
+                    );
+                    Ok(Response::new(GetKvResponse {
+                        success: true,
+                        message: format!("Key '{}' not found", req.key),
+                        value: None,
+                    }))
+                }
+            }
+            Err(e) => {
+                error!("Failed to fetch app instance for job {}: {}", req.job_id, e);
+                Ok(Response::new(GetKvResponse {
+                    success: false,
+                    message: format!("Failed to fetch app instance: {}", e),
+                    value: None,
+                }))
+            }
+        }
+    }
+
+    async fn delete_kv(
+        &self,
+        request: Request<DeleteKvRequest>,
+    ) -> Result<Response<DeleteKvResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            key = %req.key,
+            "Received DeleteKV request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("DeleteKV request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(DeleteKvResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "DeleteKV request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    current.developer,
+                    current.agent,
+                    current.agent_method
+                );
+                return Ok(Response::new(DeleteKvResponse {
+                    success: false,
+                    message: "Job does not belong to requesting session".to_string(),
+                    tx_hash: String::new(),
+                }));
+            }
+        } else {
+            warn!("DeleteKV request from unknown session: {}", req.session_id);
+            return Ok(Response::new(DeleteKvResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+                tx_hash: String::new(),
+            }));
+        }
+
+        // Execute the delete_kv transaction
+        match sui::delete_kv_tx(
+            &agent_job.app_instance,
+            req.key,
+        )
+        .await
+        {
+            Ok(tx_hash) => {
+                info!(
+                    "✅ DeleteKV successful for job {}: tx_hash={}",
+                    req.job_id, tx_hash
+                );
+                Ok(Response::new(DeleteKvResponse {
+                    success: true,
+                    message: "Key-value pair deleted successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to delete key-value pair for job {}: {}", req.job_id, e);
+                Ok(Response::new(DeleteKvResponse {
+                    success: false,
+                    message: format!("Failed to delete key-value pair: {}", e),
+                    tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn add_metadata(
+        &self,
+        request: Request<AddMetadataRequest>,
+    ) -> Result<Response<AddMetadataResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            key = %req.key,
+            "Received AddMetadata request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("AddMetadata request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(AddMetadataResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "AddMetadata request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    current.developer,
+                    current.agent,
+                    current.agent_method
+                );
+                return Ok(Response::new(AddMetadataResponse {
+                    success: false,
+                    message: "Job does not belong to requesting session".to_string(),
+                    tx_hash: String::new(),
+                }));
+            }
+        } else {
+            warn!("AddMetadata request from unknown session: {}", req.session_id);
+            return Ok(Response::new(AddMetadataResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+                tx_hash: String::new(),
+            }));
+        }
+
+        // Execute the add_metadata transaction
+        match sui::add_metadata_tx(
+            &agent_job.app_instance,
+            req.key,
+            req.value,
+        )
+        .await
+        {
+            Ok(tx_hash) => {
+                info!(
+                    "✅ AddMetadata successful for job {}: tx_hash={}",
+                    req.job_id, tx_hash
+                );
+                Ok(Response::new(AddMetadataResponse {
+                    success: true,
+                    message: "Metadata added successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to add metadata for job {}: {}", req.job_id, e);
+                Ok(Response::new(AddMetadataResponse {
+                    success: false,
+                    message: format!("Failed to add metadata: {}", e),
+                    tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn get_metadata(
+        &self,
+        request: Request<GetMetadataRequest>,
+    ) -> Result<Response<GetMetadataResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            key = ?req.key,
+            "Received GetMetadata request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("GetMetadata request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(GetMetadataResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    value: None,
+                    app_instance_id: String::new(),
+                    silvana_app_name: String::new(),
+                    description: None,
+                    sequence: 0,
+                    admin: String::new(),
+                    block_number: 0,
+                    previous_block_timestamp: 0,
+                    previous_block_last_sequence: 0,
+                    last_proved_block_number: 0,
+                    last_settled_block_number: 0,
+                    settlement_chain: None,
+                    settlement_address: None,
+                    is_paused: false,
+                    created_at: 0,
+                    updated_at: 0,
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "GetMetadata request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    current.developer,
+                    current.agent,
+                    current.agent_method
+                );
+                return Ok(Response::new(GetMetadataResponse {
+                    success: false,
+                    message: "Job does not belong to requesting session".to_string(),
+                    value: None,
+                    app_instance_id: String::new(),
+                    silvana_app_name: String::new(),
+                    description: None,
+                    sequence: 0,
+                    admin: String::new(),
+                    block_number: 0,
+                    previous_block_timestamp: 0,
+                    previous_block_last_sequence: 0,
+                    last_proved_block_number: 0,
+                    last_settled_block_number: 0,
+                    settlement_chain: None,
+                    settlement_address: None,
+                    is_paused: false,
+                    created_at: 0,
+                    updated_at: 0,
+                }));
+            }
+        } else {
+            warn!("GetMetadata request from unknown session: {}", req.session_id);
+            return Ok(Response::new(GetMetadataResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+                value: None,
+                app_instance_id: String::new(),
+                silvana_app_name: String::new(),
+                description: None,
+                sequence: 0,
+                admin: String::new(),
+                block_number: 0,
+                previous_block_timestamp: 0,
+                previous_block_last_sequence: 0,
+                last_proved_block_number: 0,
+                last_settled_block_number: 0,
+                settlement_chain: None,
+                settlement_address: None,
+                is_paused: false,
+                created_at: 0,
+                updated_at: 0,
+            }));
+        }
+
+        // Fetch the app instance and get the metadata
+        match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+            Ok(app_instance) => {
+                // Handle the optional key - if provided, look up the metadata value
+                let metadata_value = if let Some(ref key) = req.key {
+                    if let Some(value) = app_instance.metadata.get(key) {
+                        info!(
+                            "✅ GetMetadata successful for job {}: key={}, value={}",
+                            req.job_id, key, value
+                        );
+                        Some(value.clone())
+                    } else {
+                        info!(
+                            "GetMetadata for job {}: key '{}' not found",
+                            req.job_id, key
+                        );
+                        None
+                    }
+                } else {
+                    // No key provided, just return app instance info without metadata value
+                    info!(
+                        "✅ GetMetadata successful for job {}: returning app instance info",
+                        req.job_id
+                    );
+                    None
+                };
+                
+                Ok(Response::new(GetMetadataResponse {
+                    success: true,
+                    message: if req.key.is_some() {
+                        if metadata_value.is_some() {
+                            "Metadata retrieved successfully".to_string()
+                        } else {
+                            format!("Key '{}' not found", req.key.as_ref().unwrap())
+                        }
+                    } else {
+                        "App instance info retrieved successfully".to_string()
+                    },
+                    value: metadata_value,
+                    app_instance_id: app_instance.id.clone(),
+                    silvana_app_name: app_instance.silvana_app_name.clone(),
+                    description: app_instance.description.clone(),
+                    sequence: app_instance.sequence,
+                    admin: app_instance.admin.clone(),
+                    block_number: app_instance.block_number,
+                    previous_block_timestamp: app_instance.previous_block_timestamp,
+                    previous_block_last_sequence: app_instance.previous_block_last_sequence,
+                    last_proved_block_number: app_instance.last_proved_block_number,
+                    last_settled_block_number: app_instance.last_settled_block_number,
+                    settlement_chain: app_instance.settlement_chain.clone(),
+                    settlement_address: app_instance.settlement_address.clone(),
+                    is_paused: app_instance.is_paused,
+                    created_at: app_instance.created_at,
+                    updated_at: app_instance.updated_at,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to fetch app instance for job {}: {}", req.job_id, e);
+                Ok(Response::new(GetMetadataResponse {
+                    success: false,
+                    message: format!("Failed to fetch app instance: {}", e),
+                    value: None,
+                    app_instance_id: String::new(),
+                    silvana_app_name: String::new(),
+                    description: None,
+                    sequence: 0,
+                    admin: String::new(),
+                    block_number: 0,
+                    previous_block_timestamp: 0,
+                    previous_block_last_sequence: 0,
+                    last_proved_block_number: 0,
+                    last_settled_block_number: 0,
+                    settlement_chain: None,
+                    settlement_address: None,
+                    is_paused: false,
+                    created_at: 0,
+                    updated_at: 0,
+                }))
+            }
+        }
+    }
+
+    async fn try_create_block(
+        &self,
+        request: Request<TryCreateBlockRequest>,
+    ) -> Result<Response<TryCreateBlockResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            "Received TryCreateBlock request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("TryCreateBlock request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(TryCreateBlockResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                    block_number: None,
+                }));
+            }
+        };
+
+        // Try to create block
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface.try_create_block(&agent_job.app_instance).await {
+            Ok(tx_hash) => {
+                info!("✅ TryCreateBlock successful, tx: {}", tx_hash);
+                // TODO: Parse event to get block number if created
+                Ok(Response::new(TryCreateBlockResponse {
+                    success: true,
+                    message: "Block creation attempted successfully".to_string(),
+                    tx_hash,
+                    block_number: None,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to try create block: {}", e);
+                Ok(Response::new(TryCreateBlockResponse {
+                    success: false,
+                    message: format!("Failed to create block: {}", e),
+                    tx_hash: String::new(),
+                    block_number: None,
+                }))
+            }
+        }
+    }
+
+    async fn update_block_state_data_availability(
+        &self,
+        request: Request<UpdateBlockStateDataAvailabilityRequest>,
+    ) -> Result<Response<UpdateBlockStateDataAvailabilityResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            "Received UpdateBlockStateDataAvailability request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("UpdateBlockStateDataAvailability request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Update block state data availability
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface
+            .update_block_state_data_availability(
+                &agent_job.app_instance,
+                req.block_number,
+                req.state_data_availability,
+            )
+            .await
+        {
+            Ok(tx_hash) => {
+                info!("✅ UpdateBlockStateDataAvailability successful, tx: {}", tx_hash);
+                Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
+                    success: true,
+                    message: "Block state DA updated successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to update block state DA: {}", e);
+                Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Failed to update block state DA: {}", e),
+                    tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn update_block_proof_data_availability(
+        &self,
+        request: Request<UpdateBlockProofDataAvailabilityRequest>,
+    ) -> Result<Response<UpdateBlockProofDataAvailabilityResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            "Received UpdateBlockProofDataAvailability request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("UpdateBlockProofDataAvailability request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Update block proof data availability
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface
+            .update_block_proof_data_availability(
+                &agent_job.app_instance,
+                req.block_number,
+                req.proof_data_availability,
+            )
+            .await
+        {
+            Ok(tx_hash) => {
+                info!("✅ UpdateBlockProofDataAvailability successful, tx: {}", tx_hash);
+                Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                    success: true,
+                    message: "Block proof DA updated successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to update block proof DA: {}", e);
+                Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Failed to update block proof DA: {}", e),
+                    tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn update_block_settlement_tx_hash(
+        &self,
+        request: Request<UpdateBlockSettlementTxHashRequest>,
+    ) -> Result<Response<UpdateBlockSettlementTxHashResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            "Received UpdateBlockSettlementTxHash request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("UpdateBlockSettlementTxHash request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(UpdateBlockSettlementTxHashResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Update block settlement tx hash
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface
+            .update_block_settlement_tx_hash(
+                &agent_job.app_instance,
+                req.block_number,
+                req.settlement_tx_hash,
+            )
+            .await
+        {
+            Ok(tx_hash) => {
+                info!("✅ UpdateBlockSettlementTxHash successful, tx: {}", tx_hash);
+                Ok(Response::new(UpdateBlockSettlementTxHashResponse {
+                    success: true,
+                    message: "Block settlement tx hash updated successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to update block settlement tx hash: {}", e);
+                Ok(Response::new(UpdateBlockSettlementTxHashResponse {
+                    success: false,
+                    message: format!("Failed to update block settlement tx hash: {}", e),
+                    tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn update_block_settlement_tx_included_in_block(
+        &self,
+        request: Request<UpdateBlockSettlementTxIncludedInBlockRequest>,
+    ) -> Result<Response<UpdateBlockSettlementTxIncludedInBlockResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            settled_at = %req.settled_at,
+            "Received UpdateBlockSettlementTxIncludedInBlock request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("UpdateBlockSettlementTxIncludedInBlock request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Update block settlement included in block
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface
+            .update_block_settlement_tx_included_in_block(
+                &agent_job.app_instance,
+                req.block_number,
+                req.settled_at,
+            )
+            .await
+        {
+            Ok(tx_hash) => {
+                info!("✅ UpdateBlockSettlementTxIncludedInBlock successful, tx: {}", tx_hash);
+                Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
+                    success: true,
+                    message: "Block settlement included in block updated successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to update block settlement included in block: {}", e);
+                Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
+                    success: false,
+                    message: format!("Failed to update block settlement included: {}", e),
+                    tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn create_app_job(
+        &self,
+        request: Request<CreateAppJobRequest>,
+    ) -> Result<Response<CreateAppJobResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            method_name = %req.method_name,
+            "Received CreateAppJob request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("CreateAppJob request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(CreateAppJobResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                    job_sequence: 0,
+                }));
+            }
+        };
+
+        // Create app job
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface
+            .create_app_job(
+                &agent_job.app_instance,
+                req.method_name.clone(),
+                req.job_description,
+                req.block_number,
+                Some(req.sequences),
+                Some(req.sequences1),
+                Some(req.sequences2),
+                req.data,
+                req.interval_ms,
+                req.next_scheduled_at,
+                req.is_settlement_job,
+            )
+            .await
+        {
+            Ok(tx_hash) => {
+                info!("✅ CreateAppJob successful, tx: {}", tx_hash);
+                // TODO: Parse event to get job sequence
+                Ok(Response::new(CreateAppJobResponse {
+                    success: true,
+                    message: format!("App job '{}' created successfully", req.method_name),
+                    tx_hash,
+                    job_sequence: 0, // TODO: Get from event
+                }))
+            }
+            Err(e) => {
+                error!("Failed to create app job: {}", e);
+                Ok(Response::new(CreateAppJobResponse {
+                    success: false,
+                    message: format!("Failed to create app job: {}", e),
+                    tx_hash: String::new(),
+                    job_sequence: 0,
+                }))
+            }
+        }
+    }
+
+    async fn purge_sequences_below(
+        &self,
+        request: Request<PurgeSequencesBelowRequest>,
+    ) -> Result<Response<PurgeSequencesBelowResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            threshold_sequence = %req.threshold_sequence,
+            "Received PurgeSequencesBelow request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance info
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("PurgeSequencesBelow request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(PurgeSequencesBelowResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Purge sequences below threshold
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface
+            .purge_sequences_below(&agent_job.app_instance, req.threshold_sequence)
+            .await
+        {
+            Ok(tx_hash) => {
+                info!("✅ PurgeSequencesBelow successful, tx: {}", tx_hash);
+                Ok(Response::new(PurgeSequencesBelowResponse {
+                    success: true,
+                    message: format!("Sequences below {} purged successfully", req.threshold_sequence),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to purge sequences: {}", e);
+                Ok(Response::new(PurgeSequencesBelowResponse {
+                    success: false,
+                    message: format!("Failed to purge sequences: {}", e),
+                    tx_hash: String::new(),
                 }))
             }
         }

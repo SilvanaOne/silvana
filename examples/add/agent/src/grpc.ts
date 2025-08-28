@@ -12,6 +12,18 @@ import {
   GetProofRequestSchema,
   GetBlockProofRequestSchema,
   ReadDataAvailabilityRequestSchema,
+  SetKVRequestSchema,
+  GetKVRequestSchema,
+  DeleteKVRequestSchema,
+  AddMetadataRequestSchema,
+  GetMetadataRequestSchema,
+  TryCreateBlockRequestSchema,
+  UpdateBlockStateDataAvailabilityRequestSchema,
+  UpdateBlockProofDataAvailabilityRequestSchema,
+  UpdateBlockSettlementTxHashRequestSchema,
+  UpdateBlockSettlementTxIncludedInBlockRequestSchema,
+  CreateAppJobRequestSchema,
+  PurgeSequencesBelowRequestSchema,
   type GetJobResponse,
   type CompleteJobResponse,
   type FailJobResponse,
@@ -21,6 +33,18 @@ import {
   type GetProofResponse,
   type GetBlockProofResponse,
   type ReadDataAvailabilityResponse,
+  type SetKVResponse,
+  type GetKVResponse,
+  type DeleteKVResponse,
+  type AddMetadataResponse,
+  type GetMetadataResponse,
+  type TryCreateBlockResponse,
+  type UpdateBlockStateDataAvailabilityResponse,
+  type UpdateBlockProofDataAvailabilityResponse,
+  type UpdateBlockSettlementTxHashResponse,
+  type UpdateBlockSettlementTxIncludedInBlockResponse,
+  type CreateAppJobResponse,
+  type PurgeSequencesBelowResponse,
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
 
@@ -340,4 +364,276 @@ export async function readDataAvailability(
   });
 
   return await client.readDataAvailability(request);
+}
+
+/**
+ * Sets a key-value pair in the app instance KV store
+ */
+export async function setKv(
+  key: string,
+  value: string
+): Promise<SetKVResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(SetKVRequestSchema, {
+    sessionId,
+    jobId,
+    key,
+    value,
+  });
+
+  return await client.setKV(request);
+}
+
+/**
+ * Gets a value from the app instance KV store
+ */
+export async function getKv(key: string): Promise<GetKVResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(GetKVRequestSchema, {
+    sessionId,
+    jobId,
+    key,
+  });
+
+  return await client.getKV(request);
+}
+
+/**
+ * Deletes a key-value pair from the app instance KV store
+ */
+export async function deleteKv(key: string): Promise<DeleteKVResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(DeleteKVRequestSchema, {
+    sessionId,
+    jobId,
+    key,
+  });
+
+  return await client.deleteKV(request);
+}
+
+/**
+ * Adds metadata to the app instance (write-once)
+ */
+export async function addMetadata(
+  key: string,
+  value: string
+): Promise<AddMetadataResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(AddMetadataRequestSchema, {
+    sessionId,
+    jobId,
+    key,
+    value,
+  });
+
+  return await client.addMetadata(request);
+}
+
+/**
+ * Gets metadata from the app instance
+ * @param key Optional metadata key. If not provided, returns app instance info only
+ */
+export async function getMetadata(key?: string): Promise<GetMetadataResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(GetMetadataRequestSchema, {
+    sessionId,
+    jobId,
+    ...(key && { key }),
+  });
+
+  return await client.getMetadata(request);
+}
+
+/**
+ * Gets app instance information without a specific metadata key
+ * Returns all AppInstance fields like sequence, block number, admin, etc.
+ */
+export async function getAppInstanceInfo(): Promise<GetMetadataResponse> {
+  return getMetadata(); // Call without key to get app instance info
+}
+
+/**
+ * Tries to create a new block
+ */
+export async function tryCreateBlock(): Promise<TryCreateBlockResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(TryCreateBlockRequestSchema, {
+    sessionId,
+    jobId,
+  });
+
+  return await client.tryCreateBlock(request);
+}
+
+/**
+ * Updates block state data availability
+ */
+export async function updateBlockStateDataAvailability(
+  blockNumber: bigint,
+  stateDataAvailability: string
+): Promise<UpdateBlockStateDataAvailabilityResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(UpdateBlockStateDataAvailabilityRequestSchema, {
+    sessionId,
+    jobId,
+    blockNumber,
+    stateDataAvailability,
+  });
+
+  return await client.updateBlockStateDataAvailability(request);
+}
+
+/**
+ * Updates block proof data availability
+ */
+export async function updateBlockProofDataAvailability(
+  blockNumber: bigint,
+  proofDataAvailability: string
+): Promise<UpdateBlockProofDataAvailabilityResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(UpdateBlockProofDataAvailabilityRequestSchema, {
+    sessionId,
+    jobId,
+    blockNumber,
+    proofDataAvailability,
+  });
+
+  return await client.updateBlockProofDataAvailability(request);
+}
+
+/**
+ * Updates block settlement transaction hash
+ */
+export async function updateBlockSettlementTxHash(
+  blockNumber: bigint,
+  settlementTxHash: string
+): Promise<UpdateBlockSettlementTxHashResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(UpdateBlockSettlementTxHashRequestSchema, {
+    sessionId,
+    jobId,
+    blockNumber,
+    settlementTxHash,
+  });
+
+  return await client.updateBlockSettlementTxHash(request);
+}
+
+/**
+ * Updates block settlement transaction included in block
+ */
+export async function updateBlockSettlementTxIncludedInBlock(
+  blockNumber: bigint,
+  settledAt: bigint
+): Promise<UpdateBlockSettlementTxIncludedInBlockResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(UpdateBlockSettlementTxIncludedInBlockRequestSchema, {
+    sessionId,
+    jobId,
+    blockNumber,
+    settledAt,
+  });
+
+  return await client.updateBlockSettlementTxIncludedInBlock(request);
+}
+
+/**
+ * Creates a new app job
+ */
+export async function createAppJob(
+  methodName: string,
+  data: Uint8Array,
+  options?: {
+    jobDescription?: string;
+    blockNumber?: bigint;
+    sequences?: bigint[];
+    sequences1?: bigint[];
+    sequences2?: bigint[];
+    intervalMs?: bigint;
+    nextScheduledAt?: bigint;
+    isSettlementJob?: boolean;
+  }
+): Promise<CreateAppJobResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(CreateAppJobRequestSchema, {
+    sessionId,
+    jobId,
+    methodName,
+    jobDescription: options?.jobDescription,
+    blockNumber: options?.blockNumber,
+    sequences: options?.sequences || [],
+    sequences1: options?.sequences1 || [],
+    sequences2: options?.sequences2 || [],
+    data,
+    intervalMs: options?.intervalMs,
+    nextScheduledAt: options?.nextScheduledAt,
+    isSettlementJob: options?.isSettlementJob || false,
+  });
+
+  return await client.createAppJob(request);
+}
+
+/**
+ * Purges sequences below a threshold
+ */
+export async function purgeSequencesBelow(
+  thresholdSequence: bigint
+): Promise<PurgeSequencesBelowResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(PurgeSequencesBelowRequestSchema, {
+    sessionId,
+    jobId,
+    thresholdSequence,
+  });
+
+  return await client.purgeSequencesBelow(request);
 }
