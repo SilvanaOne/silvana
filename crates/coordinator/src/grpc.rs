@@ -2334,21 +2334,61 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Update block state data availability
+        // Save state to Walrus DA
+        debug!("Saving block state to Walrus DA for block {}", req.block_number);
+        let walrus_client = walrus::WalrusClient::new();
+
+        let save_params = walrus::SaveToWalrusParams {
+            data: req.state_data_availability.clone(),
+            address: None,
+            num_epochs: Some(53), // Maximum epochs for longer retention
+        };
+
+        let walrus_save_start = std::time::Instant::now();
+        let da_hash = match walrus_client.save_to_walrus(save_params).await {
+            Ok(Some(blob_id)) => {
+                let walrus_save_duration = walrus_save_start.elapsed();
+                info!(
+                    "Successfully saved block state to Walrus with blob_id: {} (took {}ms)",
+                    blob_id,
+                    walrus_save_duration.as_millis()
+                );
+                blob_id
+            }
+            Ok(None) => {
+                error!("Failed to save block state to Walrus: no blob_id returned");
+                return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
+                    success: false,
+                    message: "Failed to save state to data availability layer".to_string(),
+                    tx_hash: String::new(),
+                }));
+            }
+            Err(e) => {
+                error!("Error saving block state to Walrus: {}", e);
+                return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Failed to save state to data availability layer: {}", e),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Update block state data availability with the Walrus blob ID
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         match sui_interface
             .update_block_state_data_availability(
                 &agent_job.app_instance,
                 req.block_number,
-                req.state_data_availability,
+                da_hash.clone(),
             )
             .await
         {
             Ok(tx_hash) => {
-                info!("✅ UpdateBlockStateDataAvailability successful, tx: {}", tx_hash);
+                info!("✅ UpdateBlockStateDataAvailability successful, block: {}, da_hash: {}, tx: {}", 
+                    req.block_number, da_hash, tx_hash);
                 Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
                     success: true,
-                    message: "Block state DA updated successfully".to_string(),
+                    message: format!("Block state DA updated successfully with blob_id: {}", da_hash),
                     tx_hash,
                 }))
             }
@@ -2393,21 +2433,61 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Update block proof data availability
+        // Save proof to Walrus DA
+        debug!("Saving block proof to Walrus DA for block {}", req.block_number);
+        let walrus_client = walrus::WalrusClient::new();
+
+        let save_params = walrus::SaveToWalrusParams {
+            data: req.proof_data_availability.clone(),
+            address: None,
+            num_epochs: Some(53), // Maximum epochs for longer retention
+        };
+
+        let walrus_save_start = std::time::Instant::now();
+        let da_hash = match walrus_client.save_to_walrus(save_params).await {
+            Ok(Some(blob_id)) => {
+                let walrus_save_duration = walrus_save_start.elapsed();
+                info!(
+                    "Successfully saved block proof to Walrus with blob_id: {} (took {}ms)",
+                    blob_id,
+                    walrus_save_duration.as_millis()
+                );
+                blob_id
+            }
+            Ok(None) => {
+                error!("Failed to save block proof to Walrus: no blob_id returned");
+                return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                    success: false,
+                    message: "Failed to save proof to data availability layer".to_string(),
+                    tx_hash: String::new(),
+                }));
+            }
+            Err(e) => {
+                error!("Error saving block proof to Walrus: {}", e);
+                return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Failed to save proof to data availability layer: {}", e),
+                    tx_hash: String::new(),
+                }));
+            }
+        };
+
+        // Update block proof data availability with the Walrus blob ID
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         match sui_interface
             .update_block_proof_data_availability(
                 &agent_job.app_instance,
                 req.block_number,
-                req.proof_data_availability,
+                da_hash.clone(),
             )
             .await
         {
             Ok(tx_hash) => {
-                info!("✅ UpdateBlockProofDataAvailability successful, tx: {}", tx_hash);
+                info!("✅ UpdateBlockProofDataAvailability successful, block: {}, da_hash: {}, tx: {}", 
+                    req.block_number, da_hash, tx_hash);
                 Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: true,
-                    message: "Block proof DA updated successfully".to_string(),
+                    message: format!("Block proof DA updated successfully with blob_id: {}", da_hash),
                     tx_hash,
                 }))
             }

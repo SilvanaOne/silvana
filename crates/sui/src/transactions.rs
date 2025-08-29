@@ -575,42 +575,28 @@ async fn query_job_status(
     app_instance_id: sui::Address,
     job_sequence: u64,
 ) -> Result<String> {
-    let mut client = SharedSuiState::get_instance().get_sui_client();
-    let mut ledger = client.ledger_client();
+    use crate::fetch::app_instance::fetch_app_instance;
     
-    // Query the app_instance object to get the jobs field
-    let response = ledger
-        .get_object(proto::GetObjectRequest {
-            object_id: Some(app_instance_id.to_string()),
-            version: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["data".to_string()],
-            }),
-        })
-        .await;
-    
-    match response {
-        Ok(resp) => {
-            let inner = resp.into_inner();
-            if let Some(object) = inner.object {
-                // Successfully found the object
-                // Note: We can't easily parse the BCS data here to check if it's a settlement job,
-                // but finding the object is enough to confirm it exists
-                debug!("Found app_instance object with version: {:?}", object.version);
-                return Ok(format!("Found job {} in app_instance (object version: {:?})", job_sequence, object.version));
-            } else {
-                return Err(anyhow!("App instance object not found"));
+    // Use the existing fetch_app_instance function which handles formatting correctly
+    match fetch_app_instance(&app_instance_id.to_string()).await {
+        Ok(app_instance) => {
+            // Check if this is a settlement job
+            if let Some(jobs) = &app_instance.jobs {
+                if let Some(settlement_job) = jobs.settlement_job {
+                    if settlement_job == job_sequence {
+                        debug!("Job {} is the settlement job", job_sequence);
+                        return Ok(format!("Job {} is settlement job", job_sequence));
+                    }
+                }
             }
+            
+            debug!("Found app_instance for job {} check", job_sequence);
+            return Ok(format!("Job {} status check completed", job_sequence));
         }
         Err(e) => {
-            // Check if it's a formatting error with the app_instance_id
-            // This is likely if the ID isn't properly formatted
-            if e.to_string().contains("Invalid object ID") || e.to_string().contains("not found") {
-                debug!("Could not query job {} status - app_instance object lookup failed (possibly settlement job): {}", job_sequence, e);
-                // Return Ok to suppress the warning, since settlement jobs are stored differently
-                return Ok(format!("Job {} status check skipped (may be settlement job)", job_sequence));
-            }
-            return Err(anyhow!("Failed to get app_instance object: {}", e));
+            // Don't warn for fetch errors as they're expected for some job types
+            debug!("Could not fetch app_instance for job {} status check: {}", job_sequence, e);
+            return Ok(format!("Job {} status check skipped", job_sequence));
         }
     }
 }

@@ -305,13 +305,18 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     );
 
                     // Check if we should continue trying
-                    if e.to_string().contains("already reserved") {
+                    let error_str = e.to_string();
+                    if error_str.contains("already reserved") {
                         debug!("   → Looking for other merge opportunities...");
                         // Add a small delay before retrying to allow other coordinators to complete
                         if attempt < MAX_MERGE_ATTEMPTS {
                             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         }
                         // Continue to next iteration to try another merge opportunity
+                    } else if error_str.contains("already Started and not timed out") 
+                        || error_str.contains("Cannot merge") {
+                        // These are expected conditions, not errors
+                        debug!("   → Expected condition, will try other opportunities: {}", e);
                     } else {
                         warn!("   → Unexpected error, will try other opportunities: {}", e);
                     }
@@ -327,8 +332,8 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     }
 
     if !merge_created && !attempted_merges.is_empty() {
-        warn!(
-            "❌ Failed to create any merge job for block {} after {} attempts",
+        debug!(
+            "ℹ️ No merge job created for block {} after {} attempts (proofs may be in progress)",
             proof_calc.block_number,
             attempted_merges.len()
         );

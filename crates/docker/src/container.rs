@@ -204,11 +204,29 @@ impl DockerManager {
             }
             Err(_) => {
                 warn!(
-                    "Container timeout after {} seconds, stopping...",
+                    "Container timeout after {} seconds, fetching logs and stopping...",
                     config.timeout_seconds
                 );
+                
+                // Try to get logs before stopping the container
+                let timeout_logs = self.get_container_logs(&container.id).await
+                    .unwrap_or_else(|e| {
+                        error!("Failed to get logs from timed-out container: {}", e);
+                        String::from("[Could not retrieve logs from timed-out container]")
+                    });
+                
+                // Log the container output before stopping
+                if !timeout_logs.is_empty() {
+                    info!("Container logs before timeout:\n{}", timeout_logs);
+                }
+                
                 self.stop_and_remove_container(&container.id).await?;
-                return Err(DockerError::Timeout(config.timeout_seconds));
+                
+                // Include logs in the timeout error
+                return Err(DockerError::ContainerError(
+                    format!("Container timeout after {} seconds. Logs:\n{}", 
+                        config.timeout_seconds, timeout_logs)
+                ));
             }
         };
 

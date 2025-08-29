@@ -81,7 +81,7 @@ export LOG_LEVEL=info  # Logging level
 cargo run --release --bin coordinator
 
 # With custom settings
-CONTAINER_TIMEOUT_SECS=600 \
+CONTAINER_TIMEOUT_SECS=900 \
 SUI_RPC_URL="https://mainnet.sui.io:443" \
 cargo run --release --bin coordinator
 ```

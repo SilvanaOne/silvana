@@ -15,6 +15,8 @@ import {
   getKv,
   getMetadata,
   getSecret,
+  updateBlockStateDataAvailability,
+  updateBlockProofDataAvailability,
   updateBlockSettlementTxHash,
 } from "./grpc.js";
 
@@ -153,12 +155,14 @@ export async function settle(params: SettleParams): Promise<void> {
   console.log("📦 Compiling circuit...");
   const cache = Cache.FileSystem("./cache");
   const vk = await compile();
+  console.log("vk AddProgram", vk.hash.toJSON());
 
   // Compile the contract as well
   console.log("📦 Compiling contract...");
   console.time("compiled contract");
-  await AddContract.compile({ cache });
+  const vkContract = (await AddContract.compile({ cache })).verificationKey;
   console.timeEnd("compiled contract");
+  console.log("vk AddContract", vkContract.hash.toJSON());
 
   // Start iterating from the next block
   let currentBlockNumber = lastSettledBlock + 1n;
@@ -177,7 +181,7 @@ export async function settle(params: SettleParams): Promise<void> {
       : null;
 
     if (!blockProofSerialized) {
-      console.log(`❌ No proof available for block ${currentBlockNumber}`);
+      console.log(`No proof available for block ${currentBlockNumber}`);
       console.log("✅ Settlement complete - reached latest proven block");
       break;
     }
@@ -204,6 +208,65 @@ export async function settle(params: SettleParams): Promise<void> {
       );
     }
     console.log("✅ Block proof verified successfully");
+
+    // Update block state data availability on Sui (using the same serialized data that contains both proof and state)
+    console.log("📝 Updating block state data availability on Sui...");
+    try {
+      const updateStateDAResponse = await updateBlockStateDataAvailability(
+        currentBlockNumber,
+        blockProofSerialized // The serialized proof contains both proof and state data
+      );
+
+      if (!updateStateDAResponse.success) {
+        throw new Error(
+          `Failed to update block state DA: ${
+            updateStateDAResponse.message || "Unknown error"
+          }`
+        );
+      }
+
+      console.log(
+        `✅ Block state DA updated on Sui for block ${currentBlockNumber}`
+      );
+      console.log(
+        `  Response: success=${updateStateDAResponse.success}, message=${updateStateDAResponse.message}, txHash=${updateStateDAResponse.txHash}`
+      );
+    } catch (error: any) {
+      console.error(
+        `❌ Failed to update block state DA on Sui: ${error.message}`
+      );
+      throw error; // Re-throw to stop settlement if state DA update fails
+    }
+
+    // Update block proof data availability on Sui
+    console.log("📝 Updating block proof data availability on Sui...");
+    try {
+      // Use the serialized proof string we already have
+      const updateDAResponse = await updateBlockProofDataAvailability(
+        currentBlockNumber,
+        blockProofSerialized
+      );
+
+      if (!updateDAResponse.success) {
+        throw new Error(
+          `Failed to update block proof DA: ${
+            updateDAResponse.message || "Unknown error"
+          }`
+        );
+      }
+
+      console.log(
+        `✅ Block proof DA updated on Sui for block ${currentBlockNumber}`
+      );
+      console.log(
+        `  Response: success=${updateDAResponse.success}, message=${updateDAResponse.message}, txHash=${updateDAResponse.txHash}`
+      );
+    } catch (error: any) {
+      console.error(
+        `❌ Failed to update block proof DA on Sui: ${error.message}`
+      );
+      throw error; // Re-throw to stop settlement if DA update fails
+    }
 
     // Extract proof details
     console.log("📊 Block proof details:");
@@ -299,6 +362,7 @@ export async function settle(params: SettleParams): Promise<void> {
         description: `Silvana AddContract: settle block ${currentBlockNumber}`,
         wait: false,
         verbose: true,
+        retry: 3,
       });
       console.timeEnd("sent tx");
       if (

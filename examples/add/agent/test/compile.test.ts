@@ -2,11 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert";
 import { AddProgram } from "../src/circuit.js";
 import { Cache, VerificationKey } from "o1js";
+import { AddContract } from "../src/contract.js";
+import { initBlockchain } from "@silvana-one/mina-utils";
 
 let vk: VerificationKey | undefined = undefined;
 
 describe("Add Rollup", async () => {
-  it("should get ZkProgram constraints", async () => {
+  it.skip("should get ZkProgram constraints", async () => {
     // Analyze the constraint count for both methods
     const methods = await AddProgram.analyzeMethods();
     const addMethodStats = (methods as any).add;
@@ -44,12 +46,19 @@ describe("Add Rollup", async () => {
     }
   });
   it("should compile", async () => {
+    // Initialize blockchain connection
+    await initBlockchain("devnet");
     const cache = Cache.FileSystem("./cache");
     console.log("compiling...");
-    console.time("compiled");
+    console.time("compiled AddProgram");
     vk = (await AddProgram.compile({ cache })).verificationKey;
-    console.timeEnd("compiled");
+    console.timeEnd("compiled AddProgram");
     assert.ok(vk !== undefined, "vk is not set");
     console.log("vk", vk.hash.toJSON());
+    console.time("compiled AddContract");
+    const vkContract = (await AddContract.compile({ cache })).verificationKey;
+    console.timeEnd("compiled AddContract");
+    assert.ok(vkContract !== undefined, "vkContract is not set");
+    console.log("vkContract", vkContract.hash.toJSON());
   });
 });

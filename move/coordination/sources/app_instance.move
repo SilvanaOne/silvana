@@ -78,6 +78,23 @@ public struct InsufficientTimeForBlockEvent has copy, drop {
     min_time_required: u64,
 }
 
+public struct KVSetEvent has copy, drop {
+    app_instance_address: address,
+    key: String,
+    value: String,
+}
+
+public struct KVDeletedEvent has copy, drop {
+    app_instance_address: address,
+    key: String,
+}
+
+public struct MetadataAddedEvent has copy, drop {
+    app_instance_address: address,
+    key: String,
+    value: String,
+}
+
 public struct APP_INSTANCE has drop {}
 
 fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
@@ -486,9 +503,9 @@ public fun update_block_state_data_availability(
     block_number: u64,
     state_data_availability: String,
     clock: &Clock,
-    ctx: &mut TxContext,
+    _ctx: &mut TxContext,
 ) {
-    only_admin(app_instance, ctx);
+    // only_admin(app_instance, ctx);
     let timestamp = clock.timestamp_ms();
     let block = borrow_mut(
         &mut app_instance.blocks,
@@ -508,9 +525,9 @@ public fun update_block_proof_data_availability(
     block_number: u64,
     proof_data_availability: String,
     clock: &Clock,
-    ctx: &mut TxContext,
+    _ctx: &mut TxContext,
 ) {
-    only_admin(app_instance, ctx);
+    // only_admin(app_instance, ctx);
     let timestamp = clock.timestamp_ms();
     let block = borrow_mut(
         &mut app_instance.blocks,
@@ -535,9 +552,9 @@ public fun update_block_settlement_tx_hash(
     block_number: u64,
     settlement_tx_hash: String,
     clock: &Clock,
-    ctx: &mut TxContext,
+    _ctx: &mut TxContext,
 ) {
-    only_admin(app_instance, ctx);
+    // only_admin(app_instance, ctx);
     let timestamp = clock.timestamp_ms();
     let block = borrow_mut(
         &mut app_instance.blocks,
@@ -564,9 +581,9 @@ public fun update_block_settlement_tx_included_in_block(
     block_number: u64,
     settled_at: u64,
     clock: &Clock,
-    ctx: &mut TxContext,
+    _ctx: &mut TxContext,
 ) {
-    only_admin(app_instance, ctx);
+    // only_admin(app_instance, ctx);
     let block = borrow_mut(
         &mut app_instance.blocks,
         block_number,
@@ -650,6 +667,12 @@ public fun add_metadata(
 ) {
     //only_admin(app_instance, ctx);
     vec_map::insert(&mut app_instance.metadata, key, value);
+    
+    event::emit(MetadataAddedEvent {
+        app_instance_address: app_instance.id.to_address(),
+        key,
+        value,
+    });
 }
 
 public fun set_kv(
@@ -663,6 +686,12 @@ public fun set_kv(
         vec_map::remove(&mut app_instance.kv, &key);
     };
     vec_map::insert(&mut app_instance.kv, key, value);
+    
+    event::emit(KVSetEvent {
+        app_instance_address: app_instance.id.to_address(),
+        key,
+        value,
+    });
 }
 
 public fun delete_kv(
@@ -673,6 +702,11 @@ public fun delete_kv(
     //only_admin(app_instance, ctx);
     if (vec_map::contains(&app_instance.kv, &key)) {
         vec_map::remove(&mut app_instance.kv, &key);
+        
+        event::emit(KVDeletedEvent {
+            app_instance_address: app_instance.id.to_address(),
+            key,
+        });
     };
 }
 

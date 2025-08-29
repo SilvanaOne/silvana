@@ -4,6 +4,7 @@ import {
   Mina,
   AccountUpdate,
   PublicKey,
+  Cache,
 } from "o1js";
 import { AddContract } from "./contract.js";
 import { AddProgram } from "./circuit.js";
@@ -45,11 +46,13 @@ export async function deployAddContract(): Promise<{
 
   // Initialize blockchain connection
   await initBlockchain(chain);
+  const cache = Cache.FileSystem("./cache");
 
   // Compile the AddProgram circuit to get verification key
   console.log("📦 Compiling AddProgram circuit...");
   console.time("Circuit compilation");
-  await AddProgram.compile();
+  const vk = (await AddProgram.compile()).verificationKey;
+  console.log("vk AddProgram", vk.hash.toJSON());
   console.timeEnd("Circuit compilation");
 
   // Compile the AddContract
@@ -57,6 +60,7 @@ export async function deployAddContract(): Promise<{
   console.time("Contract compilation");
   const { verificationKey } = await AddContract.compile();
   console.timeEnd("Contract compilation");
+  console.log("vk AddContract", verificationKey.hash.toJSON());
 
   // Parse keys
   const deployerPrivateKey = PrivateKey.fromBase58(MINA_PRIVATE_KEY!);
@@ -97,7 +101,7 @@ export async function deployAddContract(): Promise<{
   const tx = await Mina.transaction(
     {
       sender: deployerPublicKey,
-      fee: 100_000_000,
+      fee: 200_000_000,
       memo: "Deploy Silvana AddContract",
     },
     async () => {
@@ -108,7 +112,6 @@ export async function deployAddContract(): Promise<{
       await contract.deploy({
         admin: adminPublicKey,
         uri: "Silvana AddContract",
-        verificationKey,
       });
     }
   );

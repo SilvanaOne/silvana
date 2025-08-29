@@ -24,9 +24,11 @@ pub async fn analyze_proof_completion(
   
   // Check if we're at the start of a new block with no sequences processed yet
   if last_proved_block_number + 1 == current_block_number && 
-     previous_block_last_sequence + 1 == current_sequence {
+     previous_block_last_sequence + 1 == current_sequence &&
+     last_settled_block_number == last_proved_block_number {
+      // Only skip analysis if we're at a fresh block AND all proved blocks are settled
       let analysis_duration = analysis_start.elapsed();
-      info!("✅ We're at the start of block {} with no sequences processed yet (waiting for sequences) - took {:.2}s", 
+      info!("✅ We're at the start of block {} with no sequences processed yet and all blocks settled - took {:.2}s", 
           current_block_number, analysis_duration.as_secs_f64());
       return Ok(());
   }
