@@ -4,16 +4,15 @@ import {
   Mina,
   AccountUpdate,
   PublicKey,
-  Cache,
 } from "o1js";
 import { AddContract } from "./contract.js";
-import { AddProgram } from "./circuit.js";
 import {
   fetchMinaAccount,
   initBlockchain,
   accountBalanceMina,
   sendTx,
 } from "@silvana-one/mina-utils";
+import { compile } from "./compile.js";
 
 const expectedTxStatus = "pending";
 
@@ -46,21 +45,10 @@ export async function deployAddContract(): Promise<{
 
   // Initialize blockchain connection
   await initBlockchain(chain);
-  const cache = Cache.FileSystem("./cache");
-
-  // Compile the AddProgram circuit to get verification key
-  console.log("📦 Compiling AddProgram circuit...");
-  console.time("Circuit compilation");
-  const vk = (await AddProgram.compile()).verificationKey;
-  console.log("vk AddProgram", vk.hash.toJSON());
-  console.timeEnd("Circuit compilation");
-
-  // Compile the AddContract
-  console.log("📦 Compiling AddContract...");
-  console.time("Contract compilation");
-  const { verificationKey } = await AddContract.compile();
-  console.timeEnd("Contract compilation");
-  console.log("vk AddContract", verificationKey.hash.toJSON());
+  const { vkProgram, vkContract } = await compile({ compileContract: true });
+  if (!vkProgram || !vkContract) {
+    throw new Error("Failed to compile circuit for merging");
+  }
 
   // Parse keys
   const deployerPrivateKey = PrivateKey.fromBase58(MINA_PRIVATE_KEY!);
@@ -101,7 +89,7 @@ export async function deployAddContract(): Promise<{
   const tx = await Mina.transaction(
     {
       sender: deployerPublicKey,
-      fee: 200_000_000,
+      fee: 300_000_000,
       memo: "Deploy Silvana AddContract",
     },
     async () => {
@@ -152,7 +140,7 @@ export async function deployAddContract(): Promise<{
     contractAddress: contractPublicKey.toBase58(),
     adminAddress: adminPublicKey.toBase58(),
     txHash,
-    verificationKey,
+    verificationKey: vkContract,
     nonce,
   };
 }

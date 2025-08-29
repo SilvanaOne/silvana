@@ -43,40 +43,74 @@ pub async fn fetch_sequence_state_by_id(
     debug!("🔍 Fetching sequence {} from sequence_states table {}", sequence, sequence_states_table_id);
     
     let mut client = SharedSuiState::get_instance().get_sui_client();
+    let mut page_token: Option<tonic::codegen::Bytes> = None;
+    let mut total_fields_checked = 0;
     
-    // List dynamic fields to find the specific sequence state
-    let list_request = ListDynamicFieldsRequest {
-        parent: Some(sequence_states_table_id.to_string()),
-        page_size: Some(100),
-        page_token: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "field_id".to_string(),
-                "name_type".to_string(),
-                "name_value".to_string(),
-            ],
-        }),
-    };
-    
-    let list_response = client
-        .live_data_client()
-        .list_dynamic_fields(list_request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to list sequence states in table: {}", e)
-        ))?;
-    
-    let response = list_response.into_inner();
-    debug!("📋 Found {} dynamic fields in sequence_states table", response.dynamic_fields.len());
-    
-    // Find the specific sequence state entry
-    for field in &response.dynamic_fields {
-        if let Some(name_value) = &field.name_value {
-            // The name_value is BCS-encoded u64 (sequence)
-            if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
-                if field_sequence == sequence {
-                    debug!("🎯 Found matching sequence {} in dynamic fields", sequence);
-                    if let Some(field_id) = &field.field_id {
+    // Loop through pages to find the sequence
+    loop {
+        // List dynamic fields to find the specific sequence state
+        let list_request = ListDynamicFieldsRequest {
+            parent: Some(sequence_states_table_id.to_string()),
+            page_size: Some(500), // Process 500 at a time
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                ],
+            }),
+        };
+        
+        let list_response = client
+            .live_data_client()
+            .list_dynamic_fields(list_request)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+                format!("Failed to list sequence states in table: {}", e)
+            ))?;
+        
+            let response = list_response.into_inner();
+        let current_page_size = response.dynamic_fields.len();
+        total_fields_checked += current_page_size;
+        
+        debug!("📋 Page: found {} dynamic fields (total checked: {})", current_page_size, total_fields_checked);
+        
+        // Log sequences found in this page for debugging (only on first page or if sequence might be here)
+        if page_token.is_none() || current_page_size > 0 {
+            let mut found_sequences: Vec<u64> = Vec::new();
+            for field in &response.dynamic_fields {
+                if let Some(name_value) = &field.name_value {
+                    if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
+                        found_sequences.push(field_sequence);
+                    }
+                }
+            }
+            
+            if !found_sequences.is_empty() {
+                found_sequences.sort();
+                debug!("📊 Page sequences: min={}, max={}, count={}", 
+                    found_sequences.first().unwrap(), 
+                    found_sequences.last().unwrap(),
+                    found_sequences.len());
+                
+                // Check if our target sequence is in range
+                let min_seq = *found_sequences.first().unwrap();
+                let max_seq = *found_sequences.last().unwrap();
+                if sequence >= min_seq && sequence <= max_seq {
+                    debug!("  Target sequence {} is within page range [{}, {}]", sequence, min_seq, max_seq);
+                }
+            }
+        }
+        
+        // Find the specific sequence state entry
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                // The name_value is BCS-encoded u64 (sequence)
+                if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
+                    if field_sequence == sequence {
+                        debug!("🎯 Found matching sequence {} in dynamic fields", sequence);
+                        if let Some(field_id) = &field.field_id {
                         debug!("📄 Fetching sequence state field object: {}", field_id);
                         // Fetch the sequence state field wrapper
                         let sequence_state_field_request = GetObjectRequest {
@@ -146,12 +180,26 @@ pub async fn fetch_sequence_state_by_id(
                             }
                         }
                     }
+                    }
                 }
             }
         }
+        
+        // Check if there are more pages
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() {
+                debug!("📄 Moving to next page with token length: {}", next_token.len());
+                page_token = Some(next_token);
+                continue;
+            }
+        }
+        
+        // No more pages and sequence not found
+        break;
     }
     
-    debug!("❌ Sequence state {} not found in table {}", sequence, sequence_states_table_id);
+    debug!("❌ Sequence state {} not found in table {} after checking {} fields", 
+        sequence, sequence_states_table_id, total_fields_checked);
     Ok(None)
 }
 
@@ -231,9 +279,88 @@ pub async fn get_sequence_state_manager_info_from_app_instance(
     Ok(None)
 }
 
+/// Validates that the sequence states meet required conditions:
+/// 1. All sequences are sequential (no gaps)
+/// 2. First sequence has data availability OR is sequence 0 (if first_must_have_da is false)
+/// 3. Last sequence matches the requested sequence
+fn validate_sequence_states(
+    states: &[SequenceState], 
+    requested_sequence: u64,
+    first_must_have_da: bool
+) -> Result<()> {
+    if states.is_empty() {
+        error!("❌ Validation failed: No sequence states returned");
+        return Err(SilvanaSuiInterfaceError::ParseError(
+            "No sequence states returned".to_string()
+        ));
+    }
+    
+    // Check 1: All sequences are sequential
+    for i in 1..states.len() {
+        let expected = states[i - 1].sequence + 1;
+        let actual = states[i].sequence;
+        if actual != expected {
+            let gap = actual - states[i - 1].sequence;
+            error!(
+                "❌ Validation failed: Non-sequential sequences detected! Gap of {} between sequence {} and {}",
+                gap, states[i - 1].sequence, actual
+            );
+            error!(
+                "  Expected sequence {}, but got {}. Total sequences: {}, Range: {} to {}",
+                expected, actual, states.len(), states[0].sequence, states[states.len() - 1].sequence
+            );
+            return Err(SilvanaSuiInterfaceError::ParseError(
+                format!("Non-sequential sequences: missing sequences between {} and {}", 
+                    states[i - 1].sequence, actual)
+            ));
+        }
+    }
+    debug!("✅ Sequences are sequential: {} sequences from {} to {}", 
+        states.len(), states[0].sequence, states[states.len() - 1].sequence);
+    
+    // Check 2: First sequence has data availability or is sequence 0
+    let first = &states[0];
+    if first_must_have_da && first.data_availability.is_none() && first.sequence != 0 {
+        error!(
+            "❌ Validation failed: First sequence {} does not have data availability and is not sequence 0",
+            first.sequence
+        );
+        return Err(SilvanaSuiInterfaceError::ParseError(
+            format!("First sequence {} must have data availability or be sequence 0", first.sequence)
+        ));
+    }
+    
+    if first.data_availability.is_some() {
+        debug!("✅ First sequence {} has data availability", first.sequence);
+    } else if first.sequence == 0 {
+        debug!("✅ First sequence is 0 (genesis sequence)");
+    } else {
+        debug!("⚠️ First sequence {} has no data availability (allowed in this context)", first.sequence);
+    }
+    
+    // Check 3: Last sequence matches requested sequence
+    let last = &states[states.len() - 1];
+    if last.sequence != requested_sequence {
+        error!(
+            "❌ Validation failed: Last sequence {} does not match requested sequence {}",
+            last.sequence, requested_sequence
+        );
+        error!(
+            "  Received sequences: {} to {} ({} total)",
+            states[0].sequence, last.sequence, states.len()
+        );
+        return Err(SilvanaSuiInterfaceError::ParseError(
+            format!("Last sequence mismatch: got {}, expected {}", last.sequence, requested_sequence)
+        ));
+    }
+    debug!("✅ Last sequence {} matches requested sequence", last.sequence);
+    
+    Ok(())
+}
+
 /// Query sequence states from the SequenceStateManager
-/// If the requested sequence has state and data_availability (both Some), return just that sequence.
-/// Otherwise, find the highest sequence with both state and data_availability set,
+/// If the requested sequence has data_availability (Some), return just that sequence.
+/// Otherwise, find the highest sequence with data_availability set,
 /// and return all sequences from that one (inclusive) to the requested one.
 pub async fn query_sequence_states(
     app_instance: &AppInstance,
@@ -310,20 +437,27 @@ pub async fn query_sequence_states(
     
     match start_sequence {
         Some(seq) => {
-            // Found a sequence with data availability, return only that sequence and the requested sequence
+            // Found a sequence with data availability, return ALL sequences from that one to requested
             let mut result_states = Vec::new();
             
-            // Add the start sequence (highest with DA)
-            if let Ok(Some(start_state)) = fetch_sequence_state_by_id(&table_id, seq).await {
-                result_states.push(start_state);
+            debug!("Found start sequence {} with data availability, fetching all sequences from {} to {}", 
+                seq, seq, requested_sequence);
+            
+            // Fetch ALL sequences from start to requested (inclusive)
+            for sequence_num in seq..=requested_sequence {
+                if let Ok(Some(state)) = fetch_sequence_state_by_id(&table_id, sequence_num).await {
+                    result_states.push(state);
+                } else {
+                    debug!("Warning: Could not fetch sequence state for {}", sequence_num);
+                }
             }
             
-            // Add the requested sequence if it's different from start sequence
-            if seq != requested_sequence {
-                result_states.push(requested_state);
-            }
+            debug!("Fetched {} sequence states, validating before return", result_states.len());
             
-            debug!("Returning {} sequence states: start sequence {} (with DA) and requested sequence {}", 
+            // Validate the results before returning
+            validate_sequence_states(&result_states, requested_sequence, true)?;
+            
+            debug!("✅ Validation passed, returning {} sequence states from {} to {}", 
                 result_states.len(), seq, requested_sequence);
             return Ok(result_states);
         }
@@ -335,8 +469,20 @@ pub async fn query_sequence_states(
             for seq in lowest_sequence..=requested_sequence {
                 if let Ok(Some(state)) = fetch_sequence_state_by_id(&table_id, seq).await {
                     result_states.push(state);
+                } else {
+                    debug!("Warning: Could not fetch sequence state for {}", seq);
                 }
             }
+            
+            debug!("Fetched {} sequence states, validating before return", result_states.len());
+            
+            // Validate the results before returning
+            // When no DA found and starting from lowest, first sequence being 0 is acceptable
+            let first_can_be_zero = lowest_sequence == 0;
+            validate_sequence_states(&result_states, requested_sequence, !first_can_be_zero)?;
+            
+            debug!("✅ Validation passed, returning {} sequence states from {} to {}", 
+                result_states.len(), lowest_sequence, requested_sequence);
             return Ok(result_states);
         }
     }

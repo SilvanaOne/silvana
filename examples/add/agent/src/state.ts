@@ -111,6 +111,50 @@ export async function getStateAndProof(params: {
   // Sort sequence states by sequence number (lowest first)
   const sortedStates = sequenceStates.sort((a, b) => a.sequence - b.sequence);
 
+  // Validate that sequences are sequential (no gaps)
+  for (let i = 1; i < sortedStates.length; i++) {
+    const expectedSequence = sortedStates[i - 1].sequence + 1;
+    if (sortedStates[i].sequence !== expectedSequence) {
+      const gap = sortedStates[i].sequence - sortedStates[i - 1].sequence;
+      console.error(
+        `❌ ERROR: Non-sequential sequences detected! Gap of ${gap} between sequence ${sortedStates[i - 1].sequence} and ${sortedStates[i].sequence}`
+      );
+      console.error(
+        `  Expected sequence ${expectedSequence}, but got ${sortedStates[i].sequence}`
+      );
+      console.error(
+        `  Total sequences received: ${sortedStates.length}, Range: ${sortedStates[0].sequence} to ${sortedStates[sortedStates.length - 1].sequence}`
+      );
+      throw new Error(
+        `Non-sequential sequences: missing sequences between ${sortedStates[i - 1].sequence} and ${sortedStates[i].sequence}`
+      );
+    }
+  }
+  
+  console.log(
+    `✅ Sequences validated: ${sortedStates.length} sequential sequences from ${sortedStates[0].sequence} to ${sortedStates[sortedStates.length - 1].sequence}`
+  );
+  
+  // Validate that the last sequence matches the requested sequence
+  const lastSequence = BigInt(sortedStates[sortedStates.length - 1].sequence);
+  if (lastSequence !== sequence) {
+    console.error(
+      `❌ ERROR: Last sequence ${lastSequence} does not match requested sequence ${sequence}`
+    );
+    console.error(
+      `  Received sequences: ${sortedStates[0].sequence} to ${lastSequence} (${sortedStates.length} total)`
+    );
+    console.error(
+      `  Expected last sequence to be: ${sequence}`
+    );
+    throw new Error(
+      `Last sequence mismatch: got ${lastSequence}, expected ${sequence}`
+    );
+  }
+  console.log(
+    `✅ Last sequence ${lastSequence} matches requested sequence ${sequence}`
+  );
+
   // Initialize state and map - either from data availability or create new
   let state: AddProgramState;
   let map: AddMap;
@@ -172,6 +216,14 @@ export async function getStateAndProof(params: {
     );
   }
 
+  // Log sequences that will be processed
+  const sequencesToProcess = sortedStates.slice(startProcessingFromIndex).map(s => s.sequence);
+  console.log(
+    `📋 Will process ${sequencesToProcess.length} sequences: [${sequencesToProcess.slice(0, 5).join(', ')}${
+      sequencesToProcess.length > 5 ? `, ... , ${sequencesToProcess.slice(-5).join(', ')}` : ''
+    }]`
+  );
+
   for (let i = startProcessingFromIndex; i < sortedStates.length; i++) {
     const sequenceState = sortedStates[i];
     const transitionData = sequenceState.transition;
@@ -196,6 +248,11 @@ export async function getStateAndProof(params: {
       console.log(`Setting block number to ${blockNumber}`);
       state.blockNumber = UInt64.from(blockNumber);
       console.log(`State block number: ${state.blockNumber.toBigInt()}`);
+      const { vkProgram: vkAddProgram } = await compile();
+      if (!vkAddProgram) {
+        throw new Error("Failed to compile circuit for proof");
+      }
+      vkProgram = vkAddProgram;
     }
 
     // Apply the operation based on method type
@@ -269,7 +326,7 @@ export async function getStateAndProof(params: {
       const proof = finalProof;
       if (proof) {
         if (vkProgram === undefined) {
-          throw new Error("vk is not set");
+          throw new Error("vkProgram is not set");
         }
         console.time(`verifying proof for sequence ${currentSequence}`);
         const ok = await verify(proof, vkProgram);

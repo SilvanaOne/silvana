@@ -13,6 +13,7 @@
     "create": "npm run test test/create.test.ts",
     "sum": "npm run test test/sum.test.ts",
     "add": "npm run test test/add.test.ts",
+    "batch": "npm run test test/batch.test.ts",
     "multiply": "npm run test test/multiply.test.ts",
     "purge": "npm run test test/purge.test.ts",
     "rollup": "npm run test test/rollup.test.ts",

@@ -113,11 +113,17 @@ export async function settle(params: SettleParams): Promise<void> {
   const lastSettledBlock = contract.blockNumber.get().toBigInt();
   console.log(`📊 Last settled block: ${lastSettledBlock}`);
 
+  console.log("🔄 Started recording tx inclusion for blocks...");
+
   for (
     let i = metadataResponse.metadata.lastSettledBlockNumber;
     i <= lastSettledBlock;
     i++
   ) {
+    if (i === 0n) {
+      console.log("Skipping block 0");
+      continue;
+    }
     const block = await getBlock(i);
     if (!block) {
       console.log(`No block found for block ${i}`);
@@ -207,18 +213,30 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log(
         `Block ${currentBlockNumber} has already been settled, txHash: ${block.block.settlementTxHash}`
       );
-      if (block.block.settledAt) {
+      if (block.block.sentToSettlementAt) {
         const now = BigInt(Date.now());
-        if (block.block.settledAt + 60n * 60n * 1000n > now) {
+        console.log("now", now);
+        console.log("sentToSettlementAt", block.block.sentToSettlementAt);
+        if (block.block.sentToSettlementAt + 60n * 60n * 1000n > now) {
           console.log(
             `Block ${currentBlockNumber} was settled less than 1 hour ago, skipping...`
           );
           shouldSettle = false;
+        } else {
+          console.log(
+            `Block ${currentBlockNumber} was settled more than 1 hour ago, setting...`
+          );
         }
+      } else {
+        console.log(
+          `Block ${currentBlockNumber} was settled but no sentToSettlementAt timestamp, skipping...`
+        );
+        shouldSettle = false;
       }
     }
 
     if (!shouldSettle) {
+      console.log("Skipping block", currentBlockNumber);
       currentBlockNumber++;
       continue;
     }

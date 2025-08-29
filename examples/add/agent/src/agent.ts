@@ -70,25 +70,6 @@ async function agent() {
             console.log(`\nFetching block proof for block ${blockNumber}...`);
 
             try {
-              // Fetch the block proof using GetBlockProof
-              const blockProofResponse = await getBlockProof(blockNumber);
-
-              if (
-                !blockProofResponse.success ||
-                !blockProofResponse.blockProof
-              ) {
-                throw new Error(
-                  `Failed to fetch block proof: ${
-                    blockProofResponse.message ||
-                    "Block proof not available yet"
-                  }`
-                );
-              }
-
-              console.log(
-                `Successfully fetched block proof (${blockProofResponse.blockProof.length} chars)`
-              );
-
               // Settle the block proof on-chain
               console.log("\n🔐 Starting settlement process...");
               const settlementStartTime = Date.now();
