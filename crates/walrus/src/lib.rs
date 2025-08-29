@@ -1,7 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
+use std::env;
 use std::time::Instant;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing::{debug, error, warn};
 
 #[derive(Debug, Clone)]
@@ -34,17 +35,20 @@ impl Default for WalrusConfig {
 }
 
 impl WalrusConfig {
-    pub fn base_publisher_url(&self) -> &'static str {
+    pub fn base_publisher_url(&self) -> String {
         match self.daemon {
-            Daemon::Local => "http://127.0.0.1:31415",
-            Daemon::Testnet => "https://wal-publisher-testnet.staketab.org",
+            Daemon::Local => "http://127.0.0.1:31415".to_string(),
+            Daemon::Testnet => env::var("WALRUS_PUBLISHER")
+                .unwrap_or_else(|_| "https://wal-publisher-testnet.staketab.org".to_string()),
         }
     }
 
-    pub fn reader_url(&self) -> &'static str {
+    pub fn reader_url(&self) -> String {
         match self.daemon {
-            Daemon::Local => "http://127.0.0.1:31415/v1/blobs/",
-            Daemon::Testnet => "https://wal-aggregator-testnet.staketab.org/v1/blobs/",
+            Daemon::Local => "http://127.0.0.1:31415/v1/blobs/".to_string(),
+            Daemon::Testnet => env::var("WALRUS_AGGREGATOR").unwrap_or_else(|_| {
+                "https://wal-aggregator-testnet.staketab.org/v1/blobs/".to_string()
+            }),
         }
     }
 }
@@ -89,21 +93,15 @@ impl WalrusClient {
 
         const MAX_RETRIES: u32 = 5;
         const RETRY_DELAY_SECS: u64 = 5;
-        
+
         for attempt in 1..=MAX_RETRIES {
             debug!("Writing to Walrus (attempt {}/{})", attempt, MAX_RETRIES);
             let start = Instant::now();
 
             // Clone the data for each attempt since body() consumes it
             let data_clone = params.data.clone();
-            
-            let response = match self
-                .client
-                .put(&url)
-                .body(data_clone)
-                .send()
-                .await
-            {
+
+            let response = match self.client.put(&url).body(data_clone).send().await {
                 Ok(resp) => resp,
                 Err(e) => {
                     if attempt < MAX_RETRIES {
@@ -114,8 +112,15 @@ impl WalrusClient {
                         sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
                         continue;
                     } else {
-                        error!("Failed to send request to Walrus after {} attempts: {}", MAX_RETRIES, e);
-                        return Err(anyhow!("Failed to send request after {} attempts: {}", MAX_RETRIES, e));
+                        error!(
+                            "Failed to send request to Walrus after {} attempts: {}",
+                            MAX_RETRIES, e
+                        );
+                        return Err(anyhow!(
+                            "Failed to send request after {} attempts: {}",
+                            MAX_RETRIES,
+                            e
+                        ));
                     }
                 }
             };
@@ -135,8 +140,15 @@ impl WalrusClient {
                             sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
                             continue;
                         } else {
-                            error!("Failed to parse response after {} attempts: {}", MAX_RETRIES, e);
-                            return Err(anyhow!("Failed to parse response after {} attempts: {}", MAX_RETRIES, e));
+                            error!(
+                                "Failed to parse response after {} attempts: {}",
+                                MAX_RETRIES, e
+                            );
+                            return Err(anyhow!(
+                                "Failed to parse response after {} attempts: {}",
+                                MAX_RETRIES,
+                                e
+                            ));
                         }
                     }
                 };
@@ -165,8 +177,11 @@ impl WalrusClient {
                 }
             } else {
                 let status = response.status();
-                let status_text = response.status().canonical_reason().unwrap_or("Unknown error");
-                
+                let status_text = response
+                    .status()
+                    .canonical_reason()
+                    .unwrap_or("Unknown error");
+
                 // For 500 errors and other server errors, retry
                 if status.is_server_error() && attempt < MAX_RETRIES {
                     warn!(
@@ -191,7 +206,7 @@ impl WalrusClient {
                 }
             }
         }
-        
+
         // This should not be reached, but just in case
         error!("Walrus saveToDA failed after all retry attempts");
         Ok(None)
@@ -203,20 +218,18 @@ impl WalrusClient {
         }
 
         let url = format!("{}{}", self.config.reader_url(), params.blob_id);
-        
+
         const MAX_RETRIES: u32 = 5;
         const RETRY_DELAY_SECS: u64 = 5;
-        
+
         for attempt in 1..=MAX_RETRIES {
-            debug!("Reading walrus blob: {} (attempt {}/{})", params.blob_id, attempt, MAX_RETRIES);
+            debug!(
+                "Reading walrus blob: {} (attempt {}/{})",
+                params.blob_id, attempt, MAX_RETRIES
+            );
             let start = Instant::now();
 
-            let response = match self
-                .client
-                .get(&url)
-                .send()
-                .await
-            {
+            let response = match self.client.get(&url).send().await {
                 Ok(resp) => resp,
                 Err(e) => {
                     if attempt < MAX_RETRIES {
@@ -227,8 +240,15 @@ impl WalrusClient {
                         sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
                         continue;
                     } else {
-                        error!("Failed to read from Walrus after {} attempts: {}", MAX_RETRIES, e);
-                        return Err(anyhow!("Failed to read from Walrus after {} attempts: {}", MAX_RETRIES, e));
+                        error!(
+                            "Failed to read from Walrus after {} attempts: {}",
+                            MAX_RETRIES, e
+                        );
+                        return Err(anyhow!(
+                            "Failed to read from Walrus after {} attempts: {}",
+                            MAX_RETRIES,
+                            e
+                        ));
                     }
                 }
             };
@@ -248,8 +268,15 @@ impl WalrusClient {
                             sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
                             continue;
                         } else {
-                            error!("Failed to read response body after {} attempts: {}", MAX_RETRIES, e);
-                            return Err(anyhow!("Failed to read response after {} attempts: {}", MAX_RETRIES, e));
+                            error!(
+                                "Failed to read response body after {} attempts: {}",
+                                MAX_RETRIES, e
+                            );
+                            return Err(anyhow!(
+                                "Failed to read response after {} attempts: {}",
+                                MAX_RETRIES,
+                                e
+                            ));
                         }
                     }
                 };
@@ -257,8 +284,11 @@ impl WalrusClient {
                 return Ok(Some(blob));
             } else {
                 let status = response.status();
-                let status_text = response.status().canonical_reason().unwrap_or("Unknown error");
-                
+                let status_text = response
+                    .status()
+                    .canonical_reason()
+                    .unwrap_or("Unknown error");
+
                 // For 500 errors and other server errors, retry
                 if status.is_server_error() && attempt < MAX_RETRIES {
                     warn!(
@@ -283,7 +313,7 @@ impl WalrusClient {
                 }
             }
         }
-        
+
         // This should not be reached, but just in case
         error!("Walrus readFromDA failed after all retry attempts");
         Ok(None)
@@ -321,4 +351,3 @@ pub struct ReadFromWalrusParams {
 pub struct GetWalrusUrlParams {
     pub blob_id: String,
 }
-

@@ -31,6 +31,7 @@ pub struct ContainerConfig {
     pub cpu_cores: Option<f64>,
     pub network_mode: Option<String>,
     pub requires_tee: bool,
+    pub extra_hosts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +275,7 @@ impl DockerManager {
             } else {
                 Some(config.volume_binds.clone())
             },
+            extra_hosts: config.extra_hosts.clone(),
             ..Default::default()
         };
 

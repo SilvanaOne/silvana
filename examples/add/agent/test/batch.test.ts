@@ -6,7 +6,7 @@ describe("Batch", async () => {
   it("should batch add", async () => {
     while (true) {
       for (let i = 0; i < 10; i++) {
-        const maxDelay = Math.floor(Math.random() * 120 * 1000) + 5000;
+        const maxDelay = Math.floor(Math.random() * 240 * 1000) + 5000;
         console.log(`Max delay for batch: ${maxDelay / 1000}s`);
 
         await action({

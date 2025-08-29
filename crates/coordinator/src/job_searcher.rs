@@ -551,6 +551,7 @@ impl JobSearcher {
                 None
             },
             requires_tee: agent_method.requires_tee,
+            extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
         };
 
         // Run the container

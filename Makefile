@@ -149,6 +149,25 @@ build: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
 	@echo "✅ RPC deployment archive built successfully for ARM64"
 	@echo "📦 Archive: rpc.tar.gz (contains rpc folder + ARM64 RPC executable)"
 
+build-ubuntu: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
+	@echo "🐳 Building coordinator for Ubuntu Linux ARM64..."
+	@mkdir -p docker/coordinator/release
+	@echo "🔨 Building Docker image for ARM64, compiling coordinator..."
+	@DOCKER_BUILDKIT=1 docker build \
+		--platform linux/arm64 \
+		-f docker/coordinator/Dockerfile \
+		-t coordinator-builder:arm64 \
+		--progress=plain \
+		.
+	@echo "📦 Extracting binary from Docker image..."
+	@docker create --name coordinator-extract coordinator-builder:arm64
+	@docker cp coordinator-extract:/output/coordinator docker/coordinator/release/coordinator
+	@docker rm coordinator-extract
+	@echo "🧹 Cleaning up Docker image..."
+	@docker rmi coordinator-builder:arm64 2>/dev/null || true
+	@echo "✅ Coordinator built successfully for ARM64"
+	@echo "📦 Binary location: docker/coordinator/release/coordinator"
+
 
 regen: check-database-url check-tools setup proto2entities apply-ddl ## Complete regeneration: proto → DDL+entities → DB
 	@echo "🎉 Regeneration complete!"
