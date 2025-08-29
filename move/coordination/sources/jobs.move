@@ -139,9 +139,6 @@ const EJobNotPending: vector<u8> = b"Job is not in pending state";
 const EJobNotRunning: vector<u8> = b"Job is not in running state";
 
 #[error]
-const EJobNotInIndex: vector<u8> = b"Job not found in pending jobs index";
-
-#[error]
 const EIntervalTooShort: vector<u8> = b"Interval must be >= 60000 ms";
 
 #[error]
@@ -252,13 +249,7 @@ public fun create_job(
 
     // Add to storage
     object_table::add(&mut jobs.jobs, job_sequence, job);
-    vec_set::insert(&mut jobs.pending_jobs, job_sequence);
-
-    // Update pending jobs count
-    jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
-
-    // Add to index
-    add_to_index(jobs, job_sequence, &developer, &agent, &agent_method);
+    add_pending_job(jobs, job_sequence);
 
     jobs.next_job_sequence = job_sequence + 1;
 
@@ -277,35 +268,29 @@ public fun start_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
         assert!(job.status == JobStatus::Pending, EJobNotPending);
 
         // If periodic, enforce that it's due
-        if (option::is_some(&job.interval_ms)) {
+        if (is_periodic_job(job)) {
             // next_scheduled_at must be Some for periodic
             let due_at = *option::borrow(&job.next_scheduled_at);
             assert!(now >= due_at, ENotDueYet);
         };
 
         // Copy values we need
-        let dev = job.developer;
-        let ag = job.agent;
-        let meth = job.agent_method;
-        let app_inst = job.app_instance;
-        let att = job.attempts + 1;
+        let developer = job.developer;
+        let agent = job.agent;
+        let agent_method = job.agent_method;
+        let app_instance = job.app_instance;
+        let attempts = job.attempts + 1;
 
         // Update job
         job.status = JobStatus::Running;
-        job.attempts = att;
+        job.attempts = attempts;
         job.updated_at = now;
 
-        (dev, ag, meth, app_inst, att)
+        (developer, agent, agent_method, app_instance, attempts)
     }; // Mutable borrow of job ends here
 
-    // Remove from pending set
-    vec_set::remove(&mut jobs.pending_jobs, &job_sequence);
-
-    // Update pending jobs count
-    jobs.pending_jobs_count = jobs.pending_jobs_count - 1;
-
-    // Remove from index
-    remove_from_index(jobs, job_sequence, &developer, &agent, &agent_method);
+    // Remove from pending set and index
+    remove_pending_job(jobs, job_sequence);
 
     event::emit(JobUpdatedEvent {
         job_sequence,
@@ -334,29 +319,36 @@ public fun complete_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
     let now = clock::timestamp_ms(clock);
 
     // Check if job is periodic and reschedule if needed
-    let (is_periodic, app_instance, developer, agent, agent_method, next_at) = {
+    let (
+        is_periodic,
+        app_instance,
+        developer,
+        agent,
+        agent_method,
+        next_run,
+    ) = {
         let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
         assert!(job.status == JobStatus::Running, EJobNotRunning);
 
-        let app_inst = job.app_instance;
-        let dev = job.developer;
-        let ag = job.agent;
-        let meth = job.agent_method;
+        let app_instance = job.app_instance;
+        let developer = job.developer;
+        let agent = job.agent;
+        let agent_method = job.agent_method;
 
-        if (option::is_some(&job.interval_ms)) {
+        if (is_periodic_job(job)) {
             // Periodic: reschedule instead of delete
             let interval = *option::borrow(&job.interval_ms);
-            let next = now + interval;
+            let next_run = now + interval;
 
             job.status = JobStatus::Pending;
             job.attempts = 0;
             job.updated_at = now;
-            job.next_scheduled_at = option::some(next);
+            job.next_scheduled_at = option::some(next_run);
 
-            (true, app_inst, dev, ag, meth, next)
+            (true, app_instance, developer, agent, agent_method, next_run)
         } else {
             // One-time job
-            (false, app_inst, dev, ag, meth, 0)
+            (false, app_instance, developer, agent, agent_method, 0)
         }
     };
 
@@ -368,10 +360,8 @@ public fun complete_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
     });
 
     if (is_periodic) {
-        // Re-add to pending + index
-        vec_set::insert(&mut jobs.pending_jobs, job_sequence);
-        jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
-        add_to_index(jobs, job_sequence, &developer, &agent, &agent_method);
+        // Re-add to pending and index
+        add_pending_job(jobs, job_sequence);
 
         event::emit(JobUpdatedEvent {
             job_sequence,
@@ -387,7 +377,7 @@ public fun complete_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
         event::emit(JobRescheduledEvent {
             job_sequence,
             app_instance,
-            next_scheduled_at: next_at,
+            next_scheduled_at: next_run,
             rescheduled_at: now,
         });
     } else {
@@ -426,7 +416,7 @@ public fun fail_job(
         attempts,
         should_retry,
         is_periodic,
-        next_at_after_max,
+        next_run,
     ) = {
         let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
 
@@ -434,32 +424,41 @@ public fun fail_job(
         assert!(job.status == JobStatus::Running, EJobNotRunning);
 
         // Copy values we need
-        let dev = job.developer;
-        let ag = job.agent;
-        let meth = job.agent_method;
-        let app_inst = job.app_instance;
-        let att = job.attempts; // attempts already incremented in start_job
-        let retry = att < jobs.max_attempts;
-        let periodic = option::is_some(&job.interval_ms);
+        let developer = job.developer;
+        let agent = job.agent;
+        let agent_method = job.agent_method;
+        let app_instance = job.app_instance;
+        let attempts = job.attempts; // attempts already incremented in start_job
+        let should_retry = attempts < jobs.max_attempts;
+        let periodic = is_periodic_job(job);
 
         // Mark failed (this run)
         job.status = JobStatus::Failed(error);
         job.updated_at = now;
 
-        let mut next_after_max: u64 = 0;
-        if (!retry && periodic) {
+        let mut next_run: u64 = 0;
+        if (!should_retry && periodic) {
             // Reached max attempts for this run -> schedule next interval
             let interval = *option::borrow(&job.interval_ms);
-            next_after_max = now + interval;
+            next_run = now + interval;
             job.status = JobStatus::Pending;
             job.attempts = 0;
-            job.next_scheduled_at = option::some(next_after_max);
-        } else if (retry) {
+            job.next_scheduled_at = option::some(next_run);
+        } else if (should_retry) {
             // Will retry within current interval window
             job.status = JobStatus::Pending;
         };
 
-        (dev, ag, meth, app_inst, att, retry, periodic, next_after_max)
+        (
+            developer,
+            agent,
+            agent_method,
+            app_instance,
+            attempts,
+            should_retry,
+            periodic,
+            next_run,
+        )
     }; // Mutable borrow ends here
 
     event::emit(JobFailedEvent {
@@ -472,10 +471,8 @@ public fun fail_job(
 
     // Check if we should retry or reschedule
     if (should_retry || is_periodic) {
-        // Put back to pending
-        vec_set::insert(&mut jobs.pending_jobs, job_sequence);
-        jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
-        add_to_index(jobs, job_sequence, &developer, &agent, &agent_method);
+        // Put back to pending and index
+        add_pending_job(jobs, job_sequence);
 
         event::emit(JobUpdatedEvent {
             job_sequence,
@@ -493,7 +490,7 @@ public fun fail_job(
             event::emit(JobRescheduledEvent {
                 job_sequence,
                 app_instance,
-                next_scheduled_at: next_at_after_max,
+                next_scheduled_at: next_run,
                 rescheduled_at: now,
             });
         }
@@ -501,18 +498,7 @@ public fun fail_job(
         // One-time job & no retries left -> delete
         let job = object_table::remove(&mut jobs.jobs, job_sequence);
 
-        // If job was pending (shouldn't be, but just in case), update count and index
-        if (vec_set::contains(&jobs.pending_jobs, &job_sequence)) {
-            vec_set::remove(&mut jobs.pending_jobs, &job_sequence);
-            jobs.pending_jobs_count = jobs.pending_jobs_count - 1;
-            remove_from_index(
-                jobs,
-                job_sequence,
-                &job.developer,
-                &job.agent,
-                &job.agent_method,
-            );
-        };
+        remove_pending_job(jobs, job_sequence);
 
         event::emit(JobDeletedEvent {
             job_sequence,
@@ -538,44 +524,20 @@ public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
 
     let now = clock::timestamp_ms(clock);
 
-    // Get job info before removal
-    let (was_pending, developer, agent, agent_method, app_instance) = {
-        let job = object_table::borrow(&jobs.jobs, job_sequence);
-
-        let was_pend = vec_set::contains(&jobs.pending_jobs, &job_sequence);
-        let dev = job.developer;
-        let ag = job.agent;
-        let meth = job.agent_method;
-        let app_inst = job.app_instance;
-
-        (was_pend, dev, ag, meth, app_inst)
-    };
-
-    // Remove from pending set and index if it was pending
-    if (was_pending) {
-        vec_set::remove(&mut jobs.pending_jobs, &job_sequence);
-        jobs.pending_jobs_count = jobs.pending_jobs_count - 1;
-        remove_from_index(
-            jobs,
-            job_sequence,
-            &developer,
-            &agent,
-            &agent_method,
-        );
-    };
+    remove_pending_job(jobs, job_sequence);
 
     // Remove and delete the job
     let job = object_table::remove(&mut jobs.jobs, job_sequence);
 
     event::emit(JobTerminatedEvent {
         job_sequence,
-        app_instance,
+        app_instance: job.app_instance,
         terminated_at: now,
     });
 
     event::emit(JobDeletedEvent {
         job_sequence,
-        app_instance,
+        app_instance: job.app_instance,
         deleted_at: now,
     });
 
@@ -583,77 +545,92 @@ public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
     object::delete(id);
 }
 
-// Internal helper function to add a job to the index
-fun add_to_index(
-    jobs: &mut Jobs,
-    job_sequence: u64,
-    developer: &String,
-    agent: &String,
-    agent_method: &String,
-) {
-    // Get or create developer level
-    if (!vec_map::contains(&jobs.pending_jobs_indexes, developer)) {
-        vec_map::insert(
+// Internal helper function to add a job to pending jobs set, update count and index
+// Tolerant to duplicate calls - ensures job is in pending set and index after call
+fun add_pending_job(jobs: &mut Jobs, job_sequence: u64) {
+    // Only add if not already present
+    if (!vec_set::contains(&jobs.pending_jobs, &job_sequence)) {
+        vec_set::insert(&mut jobs.pending_jobs, job_sequence);
+        jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
+
+        // Get job details from storage and add to index
+        let job = object_table::borrow(&jobs.jobs, job_sequence);
+        let developer = job.developer;
+        let agent = job.agent;
+        let agent_method = job.agent_method;
+
+        // Get or create developer level
+        if (!vec_map::contains(&jobs.pending_jobs_indexes, &developer)) {
+            vec_map::insert(
+                &mut jobs.pending_jobs_indexes,
+                developer,
+                vec_map::empty(),
+            );
+        };
+        let developer_map = vec_map::get_mut(
             &mut jobs.pending_jobs_indexes,
-            *developer,
-            vec_map::empty(),
+            &developer,
         );
-    };
-    let developer_map = vec_map::get_mut(
-        &mut jobs.pending_jobs_indexes,
-        developer,
-    );
 
-    // Get or create agent level
-    if (!vec_map::contains(developer_map, agent)) {
-        vec_map::insert(developer_map, *agent, vec_map::empty());
-    };
-    let agent_map = vec_map::get_mut(developer_map, agent);
+        // Get or create agent level
+        if (!vec_map::contains(developer_map, &agent)) {
+            vec_map::insert(developer_map, agent, vec_map::empty());
+        };
+        let agent_map = vec_map::get_mut(developer_map, &agent);
 
-    // Get or create agent_method level
-    if (!vec_map::contains(agent_map, agent_method)) {
-        vec_map::insert(agent_map, *agent_method, vec_set::empty());
-    };
-    let method_set = vec_map::get_mut(agent_map, agent_method);
+        // Get or create agent_method level
+        if (!vec_map::contains(agent_map, &agent_method)) {
+            vec_map::insert(agent_map, agent_method, vec_set::empty());
+        };
+        let method_set = vec_map::get_mut(agent_map, &agent_method);
 
-    // Add job_sequence to the set
-    vec_set::insert(method_set, job_sequence);
+        // Add job_sequence to the set
+        vec_set::insert(method_set, job_sequence);
+    }
 }
 
-// Internal helper function to remove a job from the index
-// Asserts that the job exists in the index
-fun remove_from_index(
-    jobs: &mut Jobs,
-    job_sequence: u64,
-    developer: &String,
-    agent: &String,
-    agent_method: &String,
-) {
-    // Developer must exist in index
-    assert!(
-        vec_map::contains(&jobs.pending_jobs_indexes, developer),
-        EJobNotInIndex,
-    );
-    let developer_map = vec_map::get_mut(
-        &mut jobs.pending_jobs_indexes,
-        developer,
-    );
+// Internal helper function to remove a job from pending jobs set, update count and index
+// Tolerant to calls when job is not present - ensures job is not in pending set and index after call
+fun remove_pending_job(jobs: &mut Jobs, job_sequence: u64) {
+    // Only remove if present
+    if (vec_set::contains(&jobs.pending_jobs, &job_sequence)) {
+        vec_set::remove(&mut jobs.pending_jobs, &job_sequence);
+        jobs.pending_jobs_count = jobs.pending_jobs_count - 1;
 
-    // Agent must exist
-    assert!(vec_map::contains(developer_map, agent), EJobNotInIndex);
-    let agent_map = vec_map::get_mut(developer_map, agent);
+        // Get job details from storage and remove from index
+        let job = object_table::borrow(&jobs.jobs, job_sequence);
+        let developer = job.developer;
+        let agent = job.agent;
+        let agent_method = job.agent_method;
 
-    // Agent_method must exist
-    assert!(vec_map::contains(agent_map, agent_method), EJobNotInIndex);
-    let method_set = vec_map::get_mut(agent_map, agent_method);
+        // Remove from index - tolerant to missing entries
+        if (vec_map::contains(&jobs.pending_jobs_indexes, &developer)) {
+            let developer_map = vec_map::get_mut(
+                &mut jobs.pending_jobs_indexes,
+                &developer,
+            );
+            
+            if (vec_map::contains(developer_map, &agent)) {
+                let agent_map = vec_map::get_mut(developer_map, &agent);
+                
+                if (vec_map::contains(agent_map, &agent_method)) {
+                    let method_set = vec_map::get_mut(agent_map, &agent_method);
+                    
+                    // Remove job_sequence from the set if it exists
+                    if (vec_set::contains(method_set, &job_sequence)) {
+                        vec_set::remove(method_set, &job_sequence);
+                    };
+                };
+            };
+        };
 
-    // Job must exist in the set
-    assert!(vec_set::contains(method_set, &job_sequence), EJobNotInIndex);
+        // Keep empty structures for reuse - they will likely be needed again soon
+    }
+}
 
-    // Remove job_sequence from the set
-    vec_set::remove(method_set, &job_sequence);
-
-    // Keep empty structures for reuse - they will likely be needed again soon
+// Internal helper function to check if a job is periodic
+fun is_periodic_job(job: &Job): bool {
+    option::is_some(&job.interval_ms)
 }
 
 // Update max attempts for the Jobs storage
@@ -835,5 +812,5 @@ public fun job_next_scheduled_at(job: &Job): &Option<u64> {
 }
 
 public fun is_job_periodic(job: &Job): bool {
-    option::is_some(&job.interval_ms)
+    is_periodic_job(job)
 }

@@ -25,7 +25,7 @@ export async function compile(params?: { compileContract: boolean }): Promise<{
   if (params?.compileContract === true && vkContract === undefined) {
     console.log("📦 Compiling contract...");
     console.time("compiled AddContract");
-    const vkContract = (await AddContract.compile({ cache })).verificationKey;
+    vkContract = (await AddContract.compile({ cache })).verificationKey;
     console.timeEnd("compiled AddContract");
     console.log("vk AddContract", vkContract.hash.toJSON());
   }

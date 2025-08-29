@@ -4,6 +4,7 @@ use crate::parse::{get_bool, get_option_string, get_option_u64, get_string, get_
 use crate::state::SharedSuiState;
 use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
+use std::fmt;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{
     BatchGetObjectsRequest, GetObjectRequest, ListDynamicFieldsRequest,
@@ -33,6 +34,28 @@ pub struct Block {
     pub proved_at: Option<u64>,
     pub sent_to_settlement_at: Option<u64>,
     pub settled_at: Option<u64>,
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Block {{ name: \"{}\", block_number: {}, start_sequence: {}, end_sequence: {}, time_since_last_block: {}, number_of_transactions: {}, state_data_availability: {:?}, proof_data_availability: {:?}, settlement_tx_hash: {:?}, settlement_tx_included_in_block: {}, created_at: {}, state_calculated_at: {:?}, proved_at: {:?}, sent_to_settlement_at: {:?}, settled_at: {:?} }}",
+            self.name,
+            self.block_number,
+            self.start_sequence,
+            self.end_sequence,
+            self.time_since_last_block,
+            self.number_of_transactions,
+            self.state_data_availability,
+            self.proof_data_availability,
+            self.settlement_tx_hash,
+            self.settlement_tx_included_in_block,
+            self.created_at,
+            self.state_calculated_at,
+            self.proved_at,
+            self.sent_to_settlement_at,
+            self.settled_at
+        )
+    }
 }
 
 /// Fetch Block information from AppInstance by block number (legacy single-block function)
@@ -593,7 +616,7 @@ fn extract_block_info_from_json(
             settled_at,
         };
         info!(
-            "✅ Successfully extracted block info for block {}: {:?}",
+            "✅ Successfully extracted block info for block {}: {}",
             block_number, block
         );
         return Ok(Some(block));

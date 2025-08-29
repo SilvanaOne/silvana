@@ -342,13 +342,15 @@ pub async fn fetch_pending_job_from_instances(
         .map_err(|e| anyhow::anyhow!("Failed to fetch job: {}", e))
 }
 
-/// Fetch the pending job with the smallest job_sequence from multiple app_instances
-/// Prioritizes: settlement jobs > merge jobs > other jobs
+/// Fetch all pending jobs from multiple app_instances, sorted by priority
+/// Priority order: settlement jobs > merge jobs > other jobs
+/// Within each category, jobs are sorted by job_sequence
 /// Also checks next_scheduled_at to ensure jobs are ready to run
+/// Returns a vector of jobs to allow the caller to skip failed ones
 pub async fn fetch_all_pending_jobs(
     app_instance_ids: &[String],
     only_check: bool,
-) -> Result<Option<Job>> {
+) -> Result<Vec<Job>> {
     // Get current time for checking next_scheduled_at
     let current_time_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -372,12 +374,27 @@ pub async fn fetch_all_pending_jobs(
             if let Ok(Some(settle_job_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await {
                 // Fetch the settlement job to check if it's pending and ready
                 if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(&app_instance).await {
-                    if let Ok(Some(settle_job)) = fetch_job_by_id(&jobs_table_id, settle_job_id).await {
-                        // Check if it's pending and ready to run
-                        if matches!(settle_job.status, sui::fetch::JobStatus::Pending) &&
-                           (settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() <= current_time_ms) {
-                            debug!("Found pending settlement job {} in app_instance {}", settle_job.job_sequence, app_instance_id);
-                            all_pending_jobs.push((settle_job, true)); // true = is_settlement
+                    match fetch_job_by_id(&jobs_table_id, settle_job_id).await {
+                        Ok(Some(settle_job)) => {
+                            // Check if it's pending and ready to run
+                            if matches!(settle_job.status, sui::fetch::JobStatus::Pending) {
+                                if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() <= current_time_ms {
+                                    debug!("Found pending settlement job {} in app_instance {}", settle_job.job_sequence, app_instance_id);
+                                    all_pending_jobs.push((settle_job, true)); // true = is_settlement
+                                } else {
+                                    debug!("Settlement job {} is pending but not ready yet (scheduled for {:?})", 
+                                           settle_job.job_sequence, settle_job.next_scheduled_at);
+                                }
+                            } else {
+                                debug!("Settlement job {} exists but status is {:?}, not Pending", 
+                                       settle_job.job_sequence, settle_job.status);
+                            }
+                        }
+                        Ok(None) => {
+                            debug!("Settlement job ID {} not found in jobs table", settle_job_id);
+                        }
+                        Err(e) => {
+                            debug!("Failed to fetch settlement job {}: {}", settle_job_id, e);
                         }
                     }
                 }
@@ -413,7 +430,7 @@ pub async fn fetch_all_pending_jobs(
         if !only_check {
             debug!("No pending jobs found across all app_instances");
         }
-        Ok(None)
+        Ok(Vec::new())
     } else {
         // Separate jobs by type
         let mut settlement_jobs: Vec<_> = all_pending_jobs.iter()
@@ -434,18 +451,17 @@ pub async fn fetch_all_pending_jobs(
         merge_jobs.sort_by_key(|job| job.job_sequence);
         other_jobs.sort_by_key(|job| job.job_sequence);
         
-        // Return the highest priority job
-        let selected_job = if !settlement_jobs.is_empty() {
-            debug!("Returning settlement job with job_sequence: {}", settlement_jobs[0].job_sequence);
-            settlement_jobs.into_iter().next().unwrap()
-        } else if !merge_jobs.is_empty() {
-            debug!("Returning merge job with job_sequence: {}", merge_jobs[0].job_sequence);
-            merge_jobs.into_iter().next().unwrap()
-        } else {
-            debug!("Returning other job with job_sequence: {}", other_jobs[0].job_sequence);
-            other_jobs.into_iter().next().unwrap()
-        };
+        // Combine all jobs in priority order
+        let mut result = Vec::new();
+        result.extend(settlement_jobs);
+        result.extend(merge_jobs);
+        result.extend(other_jobs);
         
-        Ok(Some(selected_job))
+        if !result.is_empty() {
+            debug!("Found {} pending jobs total, highest priority is job_sequence: {}", 
+                   result.len(), result[0].job_sequence);
+        }
+        
+        Ok(result)
     }
 }

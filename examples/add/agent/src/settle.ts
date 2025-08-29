@@ -201,12 +201,38 @@ export async function settle(params: SettleParams): Promise<void> {
     console.log(`\n📦 Processing block ${currentBlockNumber}...`);
 
     const block = await getBlock(currentBlockNumber);
-    console.log("block", block);
-    if (!block) {
+
+    if (!block || !block.success || !block.block) {
       console.log(`No block found for block ${currentBlockNumber}`);
       console.log("✅ Settlement complete - reached last block");
       break;
     }
+
+    // Format block data for logging (exclude commitments, convert times to UTC)
+    const formatTime = (timestamp: bigint | undefined) => {
+      if (!timestamp) return "N/A";
+      return new Date(Number(timestamp)).toUTCString();
+    };
+
+    console.log("📦 Block data:", {
+      name: block.block.name,
+      blockNumber: block.block.blockNumber?.toString(),
+      startSequence: block.block.startSequence?.toString(),
+      endSequence: block.block.endSequence?.toString(),
+      timeSinceLastBlock: block.block.timeSinceLastBlock
+        ? `${block.block.timeSinceLastBlock}ms`
+        : "N/A",
+      numberOfTransactions: block.block.numberOfTransactions?.toString(),
+      stateDataAvailability: block.block.stateDataAvailability || "none",
+      proofDataAvailability: block.block.proofDataAvailability || "none",
+      settlementTxHash: block.block.settlementTxHash || "none",
+      settlementTxIncludedInBlock: block.block.settlementTxIncludedInBlock,
+      createdAt: formatTime(block.block.createdAt),
+      stateCalculatedAt: formatTime(block.block.stateCalculatedAt),
+      provedAt: formatTime(block.block.provedAt),
+      sentToSettlementAt: formatTime(block.block.sentToSettlementAt),
+      settledAt: formatTime(block.block.settledAt),
+    });
 
     let shouldSettle = true;
     if (block.block?.settlementTxHash) {
@@ -397,9 +423,15 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log(`  Using nonce: ${nonce}`);
     }
 
+    const numberOfTransactions = block.block.numberOfTransactions;
+
     // Create and send settlement transaction
     console.log("📝 Creating settlement transaction...");
-    const memo = `Settle Silvana Add App block ${currentBlockNumber}`;
+    const memo = `Settle Silvana block ${currentBlockNumber} ${
+      numberOfTransactions
+        ? "(" + numberOfTransactions.toString() + " txs)"
+        : ""
+    })`;
     console.time("prepared tx");
 
     // Fetch the contract state

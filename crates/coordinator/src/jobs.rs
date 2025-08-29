@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 use tokio::sync::RwLock;
-use tracing::{debug, warn, info};
+use tracing::{debug, warn, info, error};
 use crate::error::Result;
 
 /// Key for agent method lookup: (developer, agent, agent_method)
@@ -140,6 +140,7 @@ impl JobsTracker {
 
 
     /// Reconcile with on-chain state by checking pending_jobs_count for each tracked app_instance
+    /// Also checks for stuck running jobs and fails them if they've been running too long
     /// Only removes app_instances that haven't been updated during the reconciliation
     /// Returns true if there are still pending jobs after reconciliation
     pub async fn reconcile_with_chain(&self) -> Result<bool> {
@@ -154,6 +155,9 @@ impl JobsTracker {
                 .map(|(id, info)| (id.clone(), info.updated_at))
                 .collect()
         };
+        
+        // First, check for stuck running jobs (running for more than 10 minutes)
+        self.fail_stuck_running_jobs(&instances_to_check).await;
         
         let mut removed_count = 0;
         let mut instances_with_jobs = 0;
@@ -250,6 +254,101 @@ impl JobsTracker {
     }
 
 
+
+    /// Check for stuck running jobs and fail them if they've been running too long
+    async fn fail_stuck_running_jobs(&self, instances_to_check: &[(String, Instant)]) {
+        let max_running_duration = Duration::from_secs(600); // 10 minutes
+        
+        if instances_to_check.is_empty() {
+            debug!("No app_instances to check for stuck jobs");
+            return;
+        }
+        
+        info!("Checking {} app_instances for stuck running jobs", instances_to_check.len());
+        
+        for (app_instance_id, _) in instances_to_check {
+            // First fetch the AppInstance object
+            let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+                Ok(app_inst) => app_inst,
+                Err(e) => {
+                    if !e.to_string().contains("not found") && !e.to_string().contains("NotFound") {
+                        debug!("Failed to fetch app_instance {}: {}", app_instance_id, e);
+                    }
+                    continue;
+                }
+            };
+            
+            // Fetch all jobs for this app_instance
+            match sui::fetch::fetch_all_jobs_from_app_instance(&app_instance).await {
+                Ok(jobs) => {
+                    // Get current time
+                    let current_time_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    
+                    // Check if this app_instance has a settlement job
+                    let settlement_job_id = if let Ok(Some(id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await {
+                        Some(id)
+                    } else {
+                        None
+                    };
+                    
+                    // Check each job for stuck running state
+                    for job in jobs {
+                        if matches!(job.status, sui::fetch::JobStatus::Running) {
+                            // Check if job has been running for more than 10 minutes
+                            let running_duration_ms = current_time_ms.saturating_sub(job.updated_at);
+                            let running_duration = Duration::from_millis(running_duration_ms);
+                            
+                            if running_duration > max_running_duration {
+                                // Check if this is the settlement job
+                                let is_settlement = settlement_job_id.map_or(false, |id| id == job.job_sequence);
+                                
+                                if is_settlement {
+                                    warn!(
+                                        "SETTLEMENT job {} in app_instance {} has been running for {:.1} minutes, failing it",
+                                        job.job_sequence, app_instance_id, running_duration.as_secs_f64() / 60.0
+                                    );
+                                } else {
+                                    warn!(
+                                        "Job {} in app_instance {} has been running for {:.1} minutes, failing it",
+                                        job.job_sequence, app_instance_id, running_duration.as_secs_f64() / 60.0
+                                    );
+                                }
+                                
+                                // Fail the job
+                                // Note: Settlement jobs are periodic, so they'll go back to Pending with a 1-minute delay after max attempts
+                                // Regular jobs will either retry (if attempts < max) or be deleted
+                                let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                                let error_msg = format!("Job timed out after running for {} minutes", running_duration.as_secs() / 60);
+                                
+                                if sui_interface.fail_job(app_instance_id, job.job_sequence, &error_msg).await {
+                                    if is_settlement {
+                                        info!("Successfully failed stuck SETTLEMENT job {} in app_instance {}", job.job_sequence, app_instance_id);
+                                    } else {
+                                        info!("Successfully failed stuck job {} in app_instance {}", job.job_sequence, app_instance_id);
+                                    }
+                                } else {
+                                    if is_settlement {
+                                        error!("Failed to mark stuck SETTLEMENT job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
+                                    } else {
+                                        error!("Failed to mark stuck job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Only log if it's not a "not found" error (app_instance might have been deleted)
+                    if !e.to_string().contains("not found") && !e.to_string().contains("NotFound") {
+                        debug!("Failed to fetch jobs for app_instance {}: {}", app_instance_id, e);
+                    }
+                }
+            }
+        }
+    }
 
     /// Get statistics about the tracker
     pub async fn get_stats(&self) -> TrackerStats {

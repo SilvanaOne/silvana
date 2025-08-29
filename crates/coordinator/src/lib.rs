@@ -3,6 +3,7 @@ pub mod block;
 pub mod config;
 pub mod error;
 pub mod events;
+pub mod failed_jobs_cache;
 pub mod grpc;
 pub mod hardware;
 pub mod job_id;

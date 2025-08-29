@@ -1,5 +1,6 @@
 use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
+use crate::failed_jobs_cache::FailedJobsCache;
 use crate::session_id::generate_docker_session;
 use crate::settlement::fetch_all_pending_jobs;
 use crate::state::SharedState;
@@ -31,6 +32,7 @@ pub struct JobSearcher {
     container_timeout_secs: u64,
     searcher_state: Arc<RwLock<SearcherState>>,
     secrets_client: Option<SecretsClient>,
+    failed_jobs_cache: FailedJobsCache,
 }
 
 impl JobSearcher {
@@ -44,6 +46,7 @@ impl JobSearcher {
             container_timeout_secs,
             searcher_state: Arc::new(RwLock::new(SearcherState::Searching)),
             secrets_client: None,
+            failed_jobs_cache: FailedJobsCache::new(),
         })
     }
 
@@ -102,7 +105,11 @@ impl JobSearcher {
                         continue;
                     }
 
+                    // Periodically clean up expired entries from the failed jobs cache
+                    self.failed_jobs_cache.cleanup_expired().await;
+                    
                     // Check for pending jobs and clean up app_instances without jobs
+                    // This already filters out jobs in the failed cache
                     match self.check_and_clean_pending_jobs().await? {
                         Some(job) => {
                             info!(
@@ -180,6 +187,7 @@ impl JobSearcher {
 
     /// Check for pending jobs and clean up app_instances without jobs
     /// This combines job searching with cleanup that reconciliation would do
+    /// Returns the first job that is not in the failed cache
     async fn check_and_clean_pending_jobs(&self) -> Result<Option<Job>> {
         let app_instances = self.state.get_app_instances().await;
 
@@ -216,12 +224,28 @@ impl JobSearcher {
         );
 
         match fetch_all_pending_jobs(&remaining_instances, false).await {
-            Ok(pending_job) => {
-                if pending_job.is_none() {
-                    // No pending jobs found, but we had app_instances - they might have been cleaned up
+            Ok(pending_jobs) => {
+                if pending_jobs.is_empty() {
+                    // No pending jobs found
                     debug!("No pending jobs found after detailed fetch");
+                    return Ok(None);
                 }
-                Ok(pending_job)
+                
+                let total_jobs = pending_jobs.len();
+                
+                // Try to find a job that is not in the failed cache
+                for job in pending_jobs {
+                    if !self.failed_jobs_cache.is_recently_failed(&job.app_instance, job.job_sequence).await {
+                        debug!("Found viable job {} from app_instance {}", job.job_sequence, job.app_instance);
+                        return Ok(Some(job));
+                    } else {
+                        debug!("Skipping job {} from app_instance {} (in failed cache)", job.job_sequence, job.app_instance);
+                    }
+                }
+                
+                // All jobs are in the failed cache
+                debug!("All {} pending jobs are in the failed cache", total_jobs);
+                Ok(None)
             }
             Err(e) => {
                 error!("Failed to fetch pending jobs: {}", e);
@@ -297,23 +321,127 @@ impl JobSearcher {
 
         // Start the job on Sui blockchain before processing
         debug!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
-        let mut sui_interface = SilvanaSuiInterface::new();
 
-        // Try to start the job on blockchain with retries to prevent race conditions
+        // Try to start the job on blockchain with custom retry logic
         let start_time = Instant::now();
-        if !sui_interface
-            .try_start_job_with_retry(&job.app_instance, job.job_sequence, 3)
-            .await
-        {
-            error!(
-                "Failed to start job {} on Sui blockchain, aborting",
-                job.job_sequence
-            );
-            self.state
-                .clear_current_agent(&docker_session.session_id)
-                .await;
+        let mut job_started = false;
+        
+        for attempt in 1..=3 {
+            debug!("Attempting to start job {} (attempt {}/3)", job.job_sequence, attempt);
+            
+            // Fetch current job status before attempting to start
+            if attempt == 1 {
+                if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
+                    if let Ok(Some((_app_instance_id, jobs_table_id))) = sui::fetch::get_jobs_info_from_app_instance(&app_inst).await {
+                        if let Ok(Some(current_job)) = sui::fetch::fetch_job_by_id(&jobs_table_id, job.job_sequence).await {
+                            debug!("Job {} status BEFORE start attempt: {:?}", job.job_sequence, current_job.status);
+                        }
+                    }
+                }
+            }
+            
+            match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await {
+                Ok(tx_digest) => {
+                    debug!("Successfully started job {} on blockchain, tx: {}", job.job_sequence, tx_digest);
+                    job_started = true;
+                    break;
+                }
+                Err(e) => {
+                    let error_str = e.to_string();
+                    
+                    // Check if the error is because the job is not in pending state
+                    // This can happen if another coordinator already started it or it was completed/failed
+                    if error_str.contains("Job is not in pending state") || 
+                       error_str.contains("EJobNotPending") ||
+                       error_str.contains("13906835364049584133") {
+                        warn!("Job {} is not in pending state - likely already started/completed by another coordinator", job.job_sequence);
+                        
+                        // Add to failed jobs cache so we don't try again for 5 minutes
+                        self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+                        
+                        // Try to fetch comprehensive debugging information
+                        if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
+                            if let Ok(Some((_app_instance_id, jobs_table_id))) = sui::fetch::get_jobs_info_from_app_instance(&app_inst).await {
+                                // Fetch and print the full failing job as Debug struct
+                                if let Ok(Some(current_job)) = sui::fetch::fetch_job_by_id(&jobs_table_id, job.job_sequence).await {
+                                    error!("FAILED JOB {} DEBUG:\n{:#?}", job.job_sequence, current_job);
+                                    
+                                    // Check if it's in the pending_jobs set for this specific method
+                                    if let Ok(pending_jobs) = sui::fetch::fetch_pending_job_sequences_from_app_instance(
+                                        &app_inst, 
+                                        &job.developer, 
+                                        &job.agent, 
+                                        &job.agent_method
+                                    ).await {
+                                        let is_in_pending_set = pending_jobs.contains(&job.job_sequence);
+                                        error!("Job {} in pending_jobs index for {}/{}/{}: {}", 
+                                               job.job_sequence, job.developer, job.agent, job.agent_method, is_in_pending_set);
+                                        if !is_in_pending_set && matches!(current_job.status, sui::fetch::JobStatus::Pending) {
+                                            error!("⚠️ INCONSISTENCY: Job has Pending status but is NOT in pending_jobs index!");
+                                        }
+                                    }
+                                }
+                                
+                                // Print AppInstance debug info
+                                error!("APP_INSTANCE DEBUG:\n{:#?}", app_inst);
+                                
+                                // Print settlement job field
+                                if let Ok(Some(settlement_job_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_inst).await {
+                                    error!("Settlement job field: Some({})", settlement_job_id);
+                                } else {
+                                    error!("Settlement job field: None");
+                                }
+                                
+                                // Fetch and print ALL jobs summary
+                                if let Ok(all_jobs) = sui::fetch::fetch_all_jobs_from_app_instance(&app_inst).await {
+                                    let pending_jobs: Vec<_> = all_jobs.iter()
+                                        .filter(|j| matches!(j.status, sui::fetch::JobStatus::Pending))
+                                        .map(|j| (j.job_sequence, &j.agent_method, j.attempts, j.next_scheduled_at))
+                                        .collect();
+                                    
+                                    let running_jobs: Vec<_> = all_jobs.iter()
+                                        .filter(|j| matches!(j.status, sui::fetch::JobStatus::Running))
+                                        .map(|j| (j.job_sequence, &j.agent_method, j.attempts, j.updated_at))
+                                        .collect();
+                                    
+                                    error!("JOBS SUMMARY: Total={}, Pending={}, Running={}", 
+                                           all_jobs.len(), pending_jobs.len(), running_jobs.len());
+                                    
+                                    if !pending_jobs.is_empty() {
+                                        error!("PENDING JOBS: {:?}", pending_jobs);
+                                    }
+                                    
+                                    if !running_jobs.is_empty() {
+                                        error!("RUNNING JOBS: {:?}", running_jobs);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Clear the agent state and return
+                        self.state.clear_current_agent(&docker_session.session_id).await;
+                        return;
+                    }
+                    
+                    error!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
+                    
+                    if attempt < 3 {
+                        warn!("Failed to start job {} on attempt {}, retrying...", job.job_sequence, attempt);
+                        // Small delay between retries
+                        sleep(Duration::from_millis(100 * attempt as u64)).await;
+                    }
+                }
+            }
+        }
+        
+        if !job_started {
+            error!("Failed to start job {} after 3 attempts", job.job_sequence);
+            // Add to failed jobs cache
+            self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+            self.state.clear_current_agent(&docker_session.session_id).await;
             return;
         }
+        
         let start_elapsed = start_time.elapsed();
 
         // Add job to agent database as ready for gRPC retrieval

@@ -3,6 +3,7 @@ mod block;
 mod config;
 mod error;
 mod events;
+mod failed_jobs_cache;
 mod grpc;
 mod hardware;
 mod job_id;
@@ -134,6 +135,48 @@ async fn main() -> Result<()> {
                 stats.agent_methods_count
             );
             
+            // First, check all known app_instances for stuck jobs
+            let all_app_instances = reconciliation_state.get_app_instances().await;
+            if !all_app_instances.is_empty() {
+                info!("Checking {} known app_instances for stuck running jobs", all_app_instances.len());
+                for app_instance_id in &all_app_instances {
+                    // Check for stuck jobs in this app_instance
+                    if let Ok(app_inst) = sui::fetch::fetch_app_instance(app_instance_id).await {
+                        if let Ok(jobs) = sui::fetch::fetch_all_jobs_from_app_instance(&app_inst).await {
+                            let current_time_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis() as u64;
+                            
+                            for job in jobs {
+                                if matches!(job.status, sui::fetch::JobStatus::Running) {
+                                    let running_duration_ms = current_time_ms.saturating_sub(job.updated_at);
+                                    let running_duration = std::time::Duration::from_millis(running_duration_ms);
+                                    
+                                    // Check if job has been running for more than 10 minutes
+                                    if running_duration > std::time::Duration::from_secs(600) {
+                                        warn!(
+                                            "Found stuck job {} in app_instance {} running for {:.1} minutes",
+                                            job.job_sequence, app_instance_id, running_duration.as_secs_f64() / 60.0
+                                        );
+                                        
+                                        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                                        let error_msg = format!("Job timed out after running for {} minutes", running_duration.as_secs() / 60);
+                                        
+                                        if sui_interface.fail_job(app_instance_id, job.job_sequence, &error_msg).await {
+                                            info!("Successfully failed stuck job {} in app_instance {}", job.job_sequence, app_instance_id);
+                                        } else {
+                                            error!("Failed to mark stuck job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Then do the regular reconciliation
             match reconciliation_state.get_jobs_tracker().reconcile_with_chain().await {
                 Ok(has_jobs) => {
                     // Update the pending jobs flag based on reconciliation result
@@ -148,7 +191,80 @@ async fn main() -> Result<()> {
     });
     info!("🔄 Started reconciliation task (runs every 10 minutes)");
 
-    // 3. Start block creation task in a separate thread (runs every minute)
+    // 3. Start stuck job checker task (runs every 2 minutes)
+    let stuck_job_state = state.clone();
+    let stuck_job_handle = task::spawn(async move {
+        let mut check_interval = tokio::time::interval(Duration::from_secs(120)); // 2 minutes
+        check_interval.tick().await; // Skip the first immediate tick
+        
+        loop {
+            check_interval.tick().await;
+            
+            let all_app_instances = stuck_job_state.get_app_instances().await;
+            if !all_app_instances.is_empty() {
+                debug!("Checking {} app_instances for stuck running jobs", all_app_instances.len());
+                let mut stuck_count = 0;
+                
+                for app_instance_id in &all_app_instances {
+                    if let Ok(app_inst) = sui::fetch::fetch_app_instance(app_instance_id).await {
+                        if let Ok(jobs) = sui::fetch::fetch_all_jobs_from_app_instance(&app_inst).await {
+                            let current_time_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis() as u64;
+                            
+                            for job in jobs {
+                                if matches!(job.status, sui::fetch::JobStatus::Running) {
+                                    let running_duration_ms = current_time_ms.saturating_sub(job.updated_at);
+                                    let running_duration = std::time::Duration::from_millis(running_duration_ms);
+                                    
+                                    // Check if job has been running for more than 10 minutes
+                                    if running_duration > std::time::Duration::from_secs(600) {
+                                        stuck_count += 1;
+                                        
+                                        // Check if this is a settlement job
+                                        let is_settlement = if let Ok(Some(settle_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_inst).await {
+                                            settle_id == job.job_sequence
+                                        } else {
+                                            false
+                                        };
+                                        
+                                        if is_settlement {
+                                            warn!(
+                                                "Found stuck SETTLEMENT job {} in app_instance {} running for {:.1} minutes",
+                                                job.job_sequence, app_instance_id, running_duration.as_secs_f64() / 60.0
+                                            );
+                                        } else {
+                                            warn!(
+                                                "Found stuck job {} in app_instance {} running for {:.1} minutes",
+                                                job.job_sequence, app_instance_id, running_duration.as_secs_f64() / 60.0
+                                            );
+                                        }
+                                        
+                                        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                                        let error_msg = format!("Job timed out after running for {} minutes", running_duration.as_secs() / 60);
+                                        
+                                        if sui_interface.fail_job(app_instance_id, job.job_sequence, &error_msg).await {
+                                            info!("Successfully failed stuck job {} in app_instance {}", job.job_sequence, app_instance_id);
+                                        } else {
+                                            error!("Failed to mark stuck job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if stuck_count > 0 {
+                    info!("Found and failed {} stuck jobs", stuck_count);
+                }
+            }
+        }
+    });
+    info!("🔍 Started stuck job checker task (runs every 2 minutes)");
+
+    // 4. Start block creation task in a separate thread (runs every minute)
     let block_creation_state = state.clone();
     let block_creation_handle = task::spawn(async move {
         use std::sync::Arc;
@@ -388,6 +504,7 @@ async fn main() -> Result<()> {
     // If processor exits, cancel all background tasks
     grpc_handle.abort();
     reconciliation_handle.abort();
+    stuck_job_handle.abort();
     block_creation_handle.abort();
     proof_analysis_handle.abort();
     job_searcher_handle.abort();
