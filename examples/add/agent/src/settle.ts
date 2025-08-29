@@ -329,7 +329,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
     // Create and send settlement transaction
     console.log("📝 Creating settlement transaction...");
-    const memo = `Settle block ${currentBlockNumber}`;
+    const memo = `Settle Silvana Add App block ${currentBlockNumber}`;
     console.time("prepared tx");
 
     // Fetch the contract state
