@@ -11,6 +11,8 @@ import {
   SubmitStateRequestSchema,
   GetProofRequestSchema,
   GetBlockProofRequestSchema,
+  GetBlockRequestSchema,
+  TerminateJobRequestSchema,
   ReadDataAvailabilityRequestSchema,
   SetKVRequestSchema,
   GetKVRequestSchema,
@@ -27,12 +29,17 @@ import {
   type GetJobResponse,
   type CompleteJobResponse,
   type FailJobResponse,
+  type TerminateJobResponse,
   type GetSequenceStatesResponse,
   type SubmitProofResponse,
   type SubmitStateResponse,
   type GetProofResponse,
   type GetBlockProofResponse,
+  type GetBlockResponse,
+  type Block,
+  type Metadata,
   type ReadDataAvailabilityResponse,
+  type RetrieveSecretResponse,
   type SetKVResponse,
   type GetKVResponse,
   type DeleteKVResponse,
@@ -229,6 +236,25 @@ export async function failJob(errorMessage: string): Promise<FailJobResponse> {
   jobId = null;
 
   return await client.failJob(request);
+}
+
+/**
+ * Terminates a job
+ */
+export async function terminateJob(): Promise<TerminateJobResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(TerminateJobRequestSchema, {
+    sessionId,
+    jobId,
+  });
+  
+  jobId = null;
+
+  return await client.terminateJob(request);
 }
 
 /**
@@ -637,3 +663,32 @@ export async function purgeSequencesBelow(
 
   return await client.purgeSequencesBelow(request);
 }
+
+/**
+ * Gets a block by block number
+ */
+export async function getBlock(
+  blockNumber: bigint
+): Promise<GetBlockResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(GetBlockRequestSchema, {
+    sessionId,
+    jobId,
+    blockNumber,
+  });
+
+  return await client.getBlock(request);
+}
+
+// Re-export types for users to access
+export type { 
+  Block, 
+  Metadata,
+  RetrieveSecretResponse,
+  TerminateJobResponse,
+  GetBlockResponse 
+};

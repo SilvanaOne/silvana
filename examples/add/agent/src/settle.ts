@@ -1,6 +1,6 @@
 import { JsonProof, verify, PrivateKey, PublicKey, Mina, Cache } from "o1js";
 import { AddProgramProof } from "./circuit.js";
-import { compile } from "./state.js";
+import { compile } from "./compile.js";
 import { AddContract } from "./contract.js";
 import { checkAddContractDeployment } from "./deploy.js";
 import {
@@ -10,6 +10,7 @@ import {
   sendTx,
 } from "@silvana-one/mina-utils";
 import {
+  getBlock,
   getBlockProof,
   setKv,
   getKv,
@@ -18,6 +19,7 @@ import {
   updateBlockStateDataAvailability,
   updateBlockProofDataAvailability,
   updateBlockSettlementTxHash,
+  updateBlockSettlementTxIncludedInBlock,
 } from "./grpc.js";
 
 interface SettleParams {
@@ -32,34 +34,36 @@ export async function settle(params: SettleParams): Promise<void> {
   console.log("🔍 Fetching settlement admin metadata...");
   const metadataResponse = await getMetadata("settlementAdmin");
 
-  if (!metadataResponse.success) {
+  if (!metadataResponse.success || !metadataResponse.metadata) {
     throw new Error(
       `Failed to fetch settlement admin metadata: ${metadataResponse.message}`
     );
   }
 
   // Get the admin address from metadata value (if present) or use the AppInstance admin field
-  let settlementAdminAddress = metadataResponse.value;
+  let settlementAdminAddress = metadataResponse.metadata.value;
   const contractAddress =
-    metadataResponse.settlementAddress || params.contractAddress;
+    metadataResponse.metadata.settlementAddress || params.contractAddress;
 
   // Print AppInstance info
   console.log("📊 AppInstance Information:");
-  console.log(`  - Instance ID: ${metadataResponse.appInstanceId}`);
-  console.log(`  - App Name: ${metadataResponse.silvanaAppName}`);
-  console.log(`  - Admin Address: ${metadataResponse.admin}`);
+  console.log(`  - Instance ID: ${metadataResponse.metadata.appInstanceId}`);
+  console.log(`  - App Name: ${metadataResponse.metadata.silvanaAppName}`);
+  console.log(`  - Admin Address: ${metadataResponse.metadata.admin}`);
   console.log(`  - Settlement Admin: ${settlementAdminAddress ?? "none"}`);
   console.log(
-    `  - Settlement Chain: ${metadataResponse.settlementChain ?? "none"}`
+    `  - Settlement Chain: ${
+      metadataResponse.metadata.settlementChain ?? "none"
+    }`
   );
   console.log(`  - Contract Address: ${contractAddress ?? "none"}`);
-  console.log(`  - Current Sequence: ${metadataResponse.sequence}`);
-  console.log(`  - Current Block: ${metadataResponse.blockNumber}`);
+  console.log(`  - Current Sequence: ${metadataResponse.metadata.sequence}`);
+  console.log(`  - Current Block: ${metadataResponse.metadata.blockNumber}`);
   console.log(
-    `  - Last Proved Block: ${metadataResponse.lastProvedBlockNumber}`
+    `  - Last Proved Block: ${metadataResponse.metadata.lastProvedBlockNumber}`
   );
   console.log(
-    `  - Last Settled Block: ${metadataResponse.lastSettledBlockNumber}`
+    `  - Last Settled Block: ${metadataResponse.metadata.lastSettledBlockNumber}`
   );
 
   if (!contractAddress) {
@@ -79,6 +83,62 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log(`  - Derived Settlement Admin: ${settlementAdminAddress}`);
     } else {
       throw new Error("No settlement admin address found in metadata");
+    }
+  }
+
+  // Initialize blockchain for devnet
+  await initBlockchain("devnet");
+
+  // Check that the contract is deployed
+  console.log("🔍 Checking contract deployment...");
+  const isDeployed = await checkAddContractDeployment({
+    contractAddress,
+    adminAddress: settlementAdminAddress,
+  });
+  if (!isDeployed) {
+    throw new Error(
+      `Contract at ${contractAddress} is not deployed or not accessible`
+    );
+  }
+  console.log("✅ Contract is deployed and accessible");
+
+  // Create contract instance and fetch current state
+  const contractPublicKey = PublicKey.fromBase58(contractAddress);
+  const contract = new AddContract(contractPublicKey);
+
+  // Fetch the contract state
+  await fetchMinaAccount({ publicKey: contractPublicKey, force: true });
+
+  // Get the last settled block number from contract
+  const lastSettledBlock = contract.blockNumber.get().toBigInt();
+  console.log(`📊 Last settled block: ${lastSettledBlock}`);
+
+  for (
+    let i = metadataResponse.metadata.lastSettledBlockNumber;
+    i <= lastSettledBlock;
+    i++
+  ) {
+    const block = await getBlock(i);
+    if (!block) {
+      console.log(`No block found for block ${i}`);
+      continue;
+    }
+
+    if (block.block?.settlementTxIncludedInBlock === false) {
+      console.log(`Recording tx inclusion for block ${i}`);
+      const updateResult = await updateBlockSettlementTxIncludedInBlock(
+        i,
+        BigInt(Date.now())
+      );
+      if (!updateResult.success) {
+        console.error(
+          `Failed to update tx inclusion for block ${i}: ${updateResult.message}`
+        );
+        throw new Error(
+          `Failed to update tx inclusion for block ${i}: ${updateResult.message}`
+        );
+      }
+      console.log(`✅ Tx inclusion recorded for block ${i}`);
     }
   }
 
@@ -114,35 +174,8 @@ export async function settle(params: SettleParams): Promise<void> {
 
   console.log(`✅ Admin public key verified: ${senderPublicKey.toBase58()}`);
 
-  // Initialize blockchain for devnet
-  await initBlockchain("devnet");
-
-  // Check that the contract is deployed
-  console.log("🔍 Checking contract deployment...");
-  const isDeployed = await checkAddContractDeployment({
-    contractAddress,
-    adminAddress: settlementAdminAddress,
-  });
-  if (!isDeployed) {
-    throw new Error(
-      `Contract at ${contractAddress} is not deployed or not accessible`
-    );
-  }
-  console.log("✅ Contract is deployed and accessible");
-
-  // Create contract instance and fetch current state
-  const contractPublicKey = PublicKey.fromBase58(contractAddress);
-  const contract = new AddContract(contractPublicKey);
-
-  // Fetch the contract state
-  await fetchMinaAccount({ publicKey: contractPublicKey, force: true });
-  await fetchMinaAccount({ publicKey: senderPublicKey, force: true });
-
-  // Get the last settled block number from contract
-  const lastSettledBlock = contract.blockNumber.get().toBigInt();
-  console.log(`📊 Last settled block: ${lastSettledBlock}`);
-
   // Check sender balance
+  await fetchMinaAccount({ publicKey: senderPublicKey, force: true });
   const balance = await accountBalanceMina(senderPublicKey);
   console.log(`💰 Sender balance: ${balance} MINA`);
   if (balance < 0.2) {
@@ -150,19 +183,6 @@ export async function settle(params: SettleParams): Promise<void> {
       `Insufficient balance. Need at least 0.2 MINA, have ${balance} MINA`
     );
   }
-
-  // Ensure the circuit is compiled
-  console.log("📦 Compiling circuit...");
-  const cache = Cache.FileSystem("./cache");
-  const vk = await compile();
-  console.log("vk AddProgram", vk.hash.toJSON());
-
-  // Compile the contract as well
-  console.log("📦 Compiling contract...");
-  console.time("compiled contract");
-  const vkContract = (await AddContract.compile({ cache })).verificationKey;
-  console.timeEnd("compiled contract");
-  console.log("vk AddContract", vkContract.hash.toJSON());
 
   // Start iterating from the next block
   let currentBlockNumber = lastSettledBlock + 1n;
@@ -173,6 +193,35 @@ export async function settle(params: SettleParams): Promise<void> {
 
   while (true) {
     console.log(`\n📦 Processing block ${currentBlockNumber}...`);
+
+    const block = await getBlock(currentBlockNumber);
+    console.log("block", block);
+    if (!block) {
+      console.log(`No block found for block ${currentBlockNumber}`);
+      console.log("✅ Settlement complete - reached last block");
+      break;
+    }
+
+    let shouldSettle = true;
+    if (block.block?.settlementTxHash) {
+      console.log(
+        `Block ${currentBlockNumber} has already been settled, txHash: ${block.block.settlementTxHash}`
+      );
+      if (block.block.settledAt) {
+        const now = BigInt(Date.now());
+        if (block.block.settledAt + 60n * 60n * 1000n > now) {
+          console.log(
+            `Block ${currentBlockNumber} was settled less than 1 hour ago, skipping...`
+          );
+          shouldSettle = false;
+        }
+      }
+    }
+
+    if (!shouldSettle) {
+      currentBlockNumber++;
+      continue;
+    }
 
     // Fetch block proof
     const blockProofResponse = await getBlockProof(currentBlockNumber);
@@ -201,7 +250,8 @@ export async function settle(params: SettleParams): Promise<void> {
     );
 
     // Verify the proof
-    const isValid = await verify(blockProof, vk);
+    const { vkProgram } = await compile();
+    const isValid = await verify(blockProof, vkProgram);
     if (!isValid) {
       throw new Error(
         `Block proof verification failed for block ${currentBlockNumber}`
@@ -302,6 +352,8 @@ export async function settle(params: SettleParams): Promise<void> {
         `Block number mismatch input-output: ${blockProof.publicInput.blockNumber.toBigInt()} !== ${blockProof.publicOutput.blockNumber.toBigInt()}`
       );
     }
+
+    await compile({ compileContract: true });
 
     // Initialize nonce on first proof (after verification)
     if (nonce === null) {

@@ -14,12 +14,12 @@ pub mod coordinator {
 }
 
 use coordinator::{
-    AddMetadataRequest, AddMetadataResponse, CompleteJobRequest, CompleteJobResponse,
+    AddMetadataRequest, AddMetadataResponse, Block, CompleteJobRequest, CompleteJobResponse,
     CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest, DeleteKvResponse,
     FailJobRequest, FailJobResponse, GetBlockProofRequest, GetBlockProofResponse,
-    GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
+    GetBlockRequest, GetBlockResponse, GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
     GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
-    GetSequenceStatesResponse, Job, PurgeSequencesBelowRequest, PurgeSequencesBelowResponse,
+    GetSequenceStatesResponse, Job, Metadata, PurgeSequencesBelowRequest, PurgeSequencesBelowResponse,
     ReadDataAvailabilityRequest, ReadDataAvailabilityResponse, RetrieveSecretRequest,
     RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
     SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
@@ -99,7 +99,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 updated_at: agent_job.pending_job.updated_at,
             };
 
-            return Ok(Response::new(GetJobResponse { job: Some(job) }));
+            return Ok(Response::new(GetJobResponse {
+                success: true,
+                message: format!("Job {} retrieved from database", agent_job.job_sequence),
+                job: Some(job),
+            }));
         }
 
         // If no ready job found, check if the requested job matches the current running agent for this session
@@ -206,7 +210,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                         updated_at: agent_job.pending_job.updated_at,
                                     };
 
-                                    return Ok(Response::new(GetJobResponse { job: Some(job) }));
+                                    return Ok(Response::new(GetJobResponse {
+                success: true,
+                message: format!("Job {} retrieved from database", agent_job.job_sequence),
+                job: Some(job),
+            }));
                                 }
                                 Err(e) => {
                                     warn!(
@@ -251,7 +259,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
             "⭕ GetJob: dev={}, agent={}/{}, no_job_found, time={:?}",
             req.developer, req.agent, req.agent_method, elapsed
         );
-        Ok(Response::new(GetJobResponse { job: None }))
+        Ok(Response::new(GetJobResponse {
+            success: true,
+            message: "No pending jobs found".to_string(),
+            job: None,
+        }))
     }
 
     async fn complete_job(
@@ -725,7 +737,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 });
 
                 // Return immediately without waiting for merge analysis
-                Ok(Response::new(SubmitProofResponse { tx_hash, da_hash }))
+                Ok(Response::new(SubmitProofResponse { 
+                    success: true,
+                    message: "Proof submitted successfully".to_string(),
+                    tx_hash, 
+                    da_hash 
+                }))
             }
             Err(e) => {
                 error!(
@@ -905,7 +922,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     elapsed
                 );
 
-                Ok(Response::new(SubmitStateResponse { tx_hash, da_hash }))
+                Ok(Response::new(SubmitStateResponse { 
+                    success: true,
+                    message: "State submitted successfully".to_string(),
+                    tx_hash, 
+                    da_hash 
+                }))
             }
             Err(e) => {
                 let elapsed = start_time.elapsed();
@@ -1053,6 +1075,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 );
 
                 Ok(Response::new(GetSequenceStatesResponse {
+                    success: true,
+                    message: format!("Retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence),
                     states: proto_states,
                 }))
             }
@@ -1177,7 +1201,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
-                    message: Some(format!("Job not found: {}", req.job_id)),
+                    message: format!("Job not found: {}", req.job_id),
                 }));
             }
         };
@@ -1201,7 +1225,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
-                    message: Some("Session does not match job assignment".to_string()),
+                    message: "Session does not match job assignment".to_string(),
                 }));
             }
         } else {
@@ -1209,7 +1233,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Ok(Response::new(GetProofResponse {
                 success: false,
                 proof: None,
-                message: Some("Invalid session ID".to_string()),
+                message: "Invalid session ID".to_string(),
             }));
         }
 
@@ -1219,7 +1243,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Ok(Response::new(GetProofResponse {
                 success: false,
                 proof: None,
-                message: Some("Sequences are required".to_string()),
+                message: "Sequences are required".to_string(),
             }));
         }
 
@@ -1234,7 +1258,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
-                    message: Some(format!("Failed to fetch AppInstance: {}", e)),
+                    message: format!("Failed to fetch AppInstance: {}", e),
                 }));
             }
         };
@@ -1248,10 +1272,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     return Ok(Response::new(GetProofResponse {
                         success: false,
                         proof: None,
-                        message: Some(format!(
+                        message: format!(
                             "No ProofCalculation found for block {}",
                             req.block_number
-                        )),
+                        ),
                     }));
                 }
                 Err(e) => {
@@ -1259,7 +1283,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     return Ok(Response::new(GetProofResponse {
                         success: false,
                         proof: None,
-                        message: Some(format!("Failed to fetch ProofCalculation: {}", e)),
+                        message: format!("Failed to fetch ProofCalculation: {}", e),
                     }));
                 }
             };
@@ -1299,10 +1323,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
-                    message: Some(format!(
+                    message: format!(
                         "No proof found for sequences {:?} in block {}",
                         req.sequences, req.block_number
-                    )),
+                    ),
                 }));
             }
         };
@@ -1330,7 +1354,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(GetProofResponse {
                     success: true,
                     proof: Some(data),
-                    message: None,
+                    message: "Proof retrieved successfully".to_string(),
                 }))
             }
             Ok(None) => {
@@ -1342,7 +1366,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
-                    message: Some(format!("No data found for hash: {}", da_hash)),
+                    message: format!("No data found for hash: {}", da_hash),
                 }))
             }
             Err(e) => {
@@ -1354,7 +1378,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(GetProofResponse {
                     success: false,
                     proof: None,
-                    message: Some(format!("Failed to read proof: {}", e)),
+                    message: format!("Failed to read proof: {}", e),
                 }))
             }
         }
@@ -1387,7 +1411,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some(format!("Job not found: {}", req.job_id)),
+                    message: format!("Job not found: {}", req.job_id),
                 }));
             }
         };
@@ -1411,7 +1435,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some("Session does not match job assignment".to_string()),
+                    message: "Session does not match job assignment".to_string(),
                 }));
             }
         } else {
@@ -1422,7 +1446,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Ok(Response::new(GetBlockProofResponse {
                 success: false,
                 block_proof: None,
-                message: Some("Invalid session ID".to_string()),
+                message: "Invalid session ID".to_string(),
             }));
         }
 
@@ -1437,7 +1461,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some(format!("Failed to fetch AppInstance: {}", e)),
+                    message: format!("Failed to fetch AppInstance: {}", e),
                 }));
             }
         };
@@ -1450,10 +1474,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some(format!(
+                    message: format!(
                         "No ProofCalculation found for block {}",
                         req.block_number
-                    )),
+                    ),
                 }));
             }
             Err(e) => {
@@ -1461,7 +1485,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some(format!("Failed to fetch ProofCalculation: {}", e)),
+                    message: format!("Failed to fetch ProofCalculation: {}", e),
                 }));
             }
         };
@@ -1483,10 +1507,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some(format!(
+                    message: format!(
                         "Block proof not available yet for block {}",
                         req.block_number
-                    )),
+                    ),
                 }));
             }
         };
@@ -1512,7 +1536,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(GetBlockProofResponse {
                     success: true,
                     block_proof: Some(data),
-                    message: None,
+                    message: "Block proof retrieved successfully".to_string(),
                 }))
             }
             Ok(None) => {
@@ -1527,7 +1551,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some(format!("No data found for hash: {}", da_hash)),
+                    message: format!("No data found for hash: {}", da_hash),
                 }))
             }
             Err(e) => {
@@ -1538,7 +1562,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
-                    message: Some(format!("Failed to read proof: {}", e)),
+                    message: format!("Failed to read proof: {}", e),
                 }))
             }
         }
@@ -2086,22 +2110,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetMetadataResponse {
                     success: false,
                     message: format!("Job not found: {}", req.job_id),
-                    value: None,
-                    app_instance_id: String::new(),
-                    silvana_app_name: String::new(),
-                    description: None,
-                    sequence: 0,
-                    admin: String::new(),
-                    block_number: 0,
-                    previous_block_timestamp: 0,
-                    previous_block_last_sequence: 0,
-                    last_proved_block_number: 0,
-                    last_settled_block_number: 0,
-                    settlement_chain: None,
-                    settlement_address: None,
-                    is_paused: false,
-                    created_at: 0,
-                    updated_at: 0,
+                    metadata: None,
                 }));
             }
         };
@@ -2125,22 +2134,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 return Ok(Response::new(GetMetadataResponse {
                     success: false,
                     message: "Job does not belong to requesting session".to_string(),
-                    value: None,
-                    app_instance_id: String::new(),
-                    silvana_app_name: String::new(),
-                    description: None,
-                    sequence: 0,
-                    admin: String::new(),
-                    block_number: 0,
-                    previous_block_timestamp: 0,
-                    previous_block_last_sequence: 0,
-                    last_proved_block_number: 0,
-                    last_settled_block_number: 0,
-                    settlement_chain: None,
-                    settlement_address: None,
-                    is_paused: false,
-                    created_at: 0,
-                    updated_at: 0,
+                    metadata: None,
                 }));
             }
         } else {
@@ -2148,22 +2142,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Ok(Response::new(GetMetadataResponse {
                 success: false,
                 message: "Invalid session ID".to_string(),
-                value: None,
-                app_instance_id: String::new(),
-                silvana_app_name: String::new(),
-                description: None,
-                sequence: 0,
-                admin: String::new(),
-                block_number: 0,
-                previous_block_timestamp: 0,
-                previous_block_last_sequence: 0,
-                last_proved_block_number: 0,
-                last_settled_block_number: 0,
-                settlement_chain: None,
-                settlement_address: None,
-                is_paused: false,
-                created_at: 0,
-                updated_at: 0,
+                metadata: None,
             }));
         }
 
@@ -2205,22 +2184,24 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     } else {
                         "App instance info retrieved successfully".to_string()
                     },
-                    value: metadata_value,
-                    app_instance_id: app_instance.id.clone(),
-                    silvana_app_name: app_instance.silvana_app_name.clone(),
-                    description: app_instance.description.clone(),
-                    sequence: app_instance.sequence,
-                    admin: app_instance.admin.clone(),
-                    block_number: app_instance.block_number,
-                    previous_block_timestamp: app_instance.previous_block_timestamp,
-                    previous_block_last_sequence: app_instance.previous_block_last_sequence,
-                    last_proved_block_number: app_instance.last_proved_block_number,
-                    last_settled_block_number: app_instance.last_settled_block_number,
-                    settlement_chain: app_instance.settlement_chain.clone(),
-                    settlement_address: app_instance.settlement_address.clone(),
-                    is_paused: app_instance.is_paused,
-                    created_at: app_instance.created_at,
-                    updated_at: app_instance.updated_at,
+                    metadata: Some(Metadata {
+                        value: metadata_value,
+                        app_instance_id: app_instance.id.clone(),
+                        silvana_app_name: app_instance.silvana_app_name.clone(),
+                        description: app_instance.description.clone(),
+                        sequence: app_instance.sequence,
+                        admin: app_instance.admin.clone(),
+                        block_number: app_instance.block_number,
+                        previous_block_timestamp: app_instance.previous_block_timestamp,
+                        previous_block_last_sequence: app_instance.previous_block_last_sequence,
+                        last_proved_block_number: app_instance.last_proved_block_number,
+                        last_settled_block_number: app_instance.last_settled_block_number,
+                        settlement_chain: app_instance.settlement_chain.clone(),
+                        settlement_address: app_instance.settlement_address.clone(),
+                        is_paused: app_instance.is_paused,
+                        created_at: app_instance.created_at,
+                        updated_at: app_instance.updated_at,
+                    }),
                 }))
             }
             Err(e) => {
@@ -2228,22 +2209,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(GetMetadataResponse {
                     success: false,
                     message: format!("Failed to fetch app instance: {}", e),
-                    value: None,
-                    app_instance_id: String::new(),
-                    silvana_app_name: String::new(),
-                    description: None,
-                    sequence: 0,
-                    admin: String::new(),
-                    block_number: 0,
-                    previous_block_timestamp: 0,
-                    previous_block_last_sequence: 0,
-                    last_proved_block_number: 0,
-                    last_settled_block_number: 0,
-                    settlement_chain: None,
-                    settlement_address: None,
-                    is_paused: false,
-                    created_at: 0,
-                    updated_at: 0,
+                    metadata: None,
                 }))
             }
         }
@@ -2742,6 +2708,101 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     success: false,
                     message: format!("Failed to purge sequences: {}", e),
                     tx_hash: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn get_block(
+        &self,
+        request: Request<GetBlockRequest>,
+    ) -> Result<Response<GetBlockResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            "Received GetBlock request"
+        );
+
+        // Get agent job to find app_instance
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                return Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    block: None,
+                }));
+            }
+        };
+
+        // Fetch app instance
+        let app_instance = match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+            Ok(ai) => ai,
+            Err(e) => {
+                return Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Failed to fetch app instance: {}", e),
+                    block: None,
+                }));
+            }
+        };
+
+        // Fetch block info
+        match sui::fetch::block::fetch_block_info(&app_instance, req.block_number).await {
+            Ok(Some(block_info)) => {
+                info!("✅ GetBlock successful for block {}", req.block_number);
+                
+                // Commitments are already Vec<u8> from the fetch function
+                let block = Block {
+                    id: format!("block_{}", req.block_number), // Generate ID from block number
+                    name: block_info.name,
+                    block_number: block_info.block_number,
+                    start_sequence: block_info.start_sequence,
+                    end_sequence: block_info.end_sequence,
+                    actions_commitment: block_info.actions_commitment,
+                    state_commitment: block_info.state_commitment,
+                    time_since_last_block: block_info.time_since_last_block,
+                    number_of_transactions: block_info.number_of_transactions,
+                    start_actions_commitment: block_info.start_actions_commitment,
+                    end_actions_commitment: block_info.end_actions_commitment,
+                    state_data_availability: block_info.state_data_availability,
+                    proof_data_availability: block_info.proof_data_availability,
+                    settlement_tx_hash: block_info.settlement_tx_hash,
+                    settlement_tx_included_in_block: block_info.settlement_tx_included_in_block,
+                    created_at: block_info.created_at,
+                    state_calculated_at: block_info.state_calculated_at,
+                    proved_at: block_info.proved_at,
+                    sent_to_settlement_at: block_info.sent_to_settlement_at,
+                    settled_at: block_info.settled_at,
+                };
+                
+                Ok(Response::new(GetBlockResponse {
+                    success: true,
+                    message: format!("Block {} retrieved successfully", req.block_number),
+                    block: Some(block),
+                }))
+            }
+            Ok(None) => {
+                info!("Block {} not found", req.block_number);
+                Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Block {} not found", req.block_number),
+                    block: None,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to fetch block {}: {}", req.block_number, e);
+                Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Failed to fetch block: {}", e),
+                    block: None,
                 }))
             }
         }

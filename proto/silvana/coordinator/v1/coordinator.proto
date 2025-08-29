@@ -43,7 +43,9 @@ message GetJobRequest {
 
 // Response message containing a job
 message GetJobResponse {
-  optional Job job = 1;
+  bool success = 1;
+  string message = 2;
+  optional Job job = 3;
 }
 
 // Request message for completing a job
@@ -97,8 +99,10 @@ message SubmitProofRequest {
 
 // Response message for proof submission
 message SubmitProofResponse {
-  string tx_hash = 1;
-  string da_hash = 2;
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+  string da_hash = 4;
 }
 
 // Request message for submitting state
@@ -112,8 +116,10 @@ message SubmitStateRequest {
 
 // Response message for state submission
 message SubmitStateResponse {
-  string tx_hash = 1;
-  optional string da_hash = 2; // only present if serialized_state was provided
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+  optional string da_hash = 4; // only present if serialized_state was provided
 }
 
 // Sequence state message matching the Move SequenceState struct
@@ -134,7 +140,9 @@ message GetSequenceStatesRequest {
 
 // Response message for sequence states query
 message GetSequenceStatesResponse {
-  repeated SequenceState states = 1;
+  bool success = 1;
+  string message = 2;
+  repeated SequenceState states = 3;
 }
 
 // Request message for reading data availability by hash
@@ -162,7 +170,7 @@ message GetProofRequest {
 message GetProofResponse {
   bool success = 1;
   optional string proof = 2; // available when success is true
-  optional string message = 3; // available when success is false
+  string message = 3; // available when success is false
 }
 
 // Request message for getting a block proof
@@ -176,7 +184,7 @@ message GetBlockProofRequest {
 message GetBlockProofResponse {
   bool success = 1;
   optional string block_proof = 2; // available when success is true
-  optional string message = 3; // available when success is false
+  string message = 3; // error message or status details
 }
 
 // Request message for retrieving a secret
@@ -258,27 +266,32 @@ message GetMetadataRequest {
   optional string key = 3;
 }
 
+// Metadata message containing AppInstance information
+message Metadata {
+  optional string value = 1; // The metadata value if a key was requested
+  // AppInstance fields
+  string app_instance_id = 2;
+  string silvana_app_name = 3;
+  optional string description = 4;
+  uint64 sequence = 5;
+  string admin = 6;
+  uint64 block_number = 7;
+  uint64 previous_block_timestamp = 8;
+  uint64 previous_block_last_sequence = 9;
+  uint64 last_proved_block_number = 10;
+  uint64 last_settled_block_number = 11;
+  optional string settlement_chain = 12;
+  optional string settlement_address = 13;
+  bool is_paused = 14;
+  uint64 created_at = 15;
+  uint64 updated_at = 16;
+}
+
 // Response message for getting metadata
 message GetMetadataResponse {
   bool success = 1;
   string message = 2;
-  optional string value = 3; // Only returned if success is true and key exists
-  // AppInstance fields
-  string app_instance_id = 4;
-  string silvana_app_name = 5;
-  optional string description = 6;
-  uint64 sequence = 7;
-  string admin = 8;
-  uint64 block_number = 9;
-  uint64 previous_block_timestamp = 10;
-  uint64 previous_block_last_sequence = 11;
-  uint64 last_proved_block_number = 12;
-  uint64 last_settled_block_number = 13;
-  optional string settlement_chain = 14;
-  optional string settlement_address = 15;
-  bool is_paused = 16;
-  uint64 created_at = 17;
-  uint64 updated_at = 18;
+  optional Metadata metadata = 3;
 }
 
 // Request message for trying to create a block
@@ -393,6 +406,44 @@ message PurgeSequencesBelowResponse {
   string tx_hash = 3;
 }
 
+// Block message mirroring the Move Block struct
+message Block {
+  string id = 1;                                  // UID from Move
+  string name = 2;
+  uint64 block_number = 3;
+  uint64 start_sequence = 4;
+  uint64 end_sequence = 5;
+  bytes actions_commitment = 6;                   // Element<Scalar> as bytes
+  bytes state_commitment = 7;                     // Element<Scalar> as bytes
+  uint64 time_since_last_block = 8;
+  uint64 number_of_transactions = 9;
+  bytes start_actions_commitment = 10;            // Element<Scalar> as bytes
+  bytes end_actions_commitment = 11;              // Element<Scalar> as bytes
+  optional string state_data_availability = 12;
+  optional string proof_data_availability = 13;
+  optional string settlement_tx_hash = 14;
+  bool settlement_tx_included_in_block = 15;
+  uint64 created_at = 16;
+  optional uint64 state_calculated_at = 17;
+  optional uint64 proved_at = 18;
+  optional uint64 sent_to_settlement_at = 19;
+  optional uint64 settled_at = 20;
+}
+
+// Request message for getting a block
+message GetBlockRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+}
+
+// Response message for getting a block
+message GetBlockResponse {
+  bool success = 1;
+  string message = 2;
+  optional Block block = 3;
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -418,4 +469,5 @@ service CoordinatorService {
   rpc UpdateBlockSettlementTxIncludedInBlock(UpdateBlockSettlementTxIncludedInBlockRequest) returns (UpdateBlockSettlementTxIncludedInBlockResponse);
   rpc CreateAppJob(CreateAppJobRequest) returns (CreateAppJobResponse);
   rpc PurgeSequencesBelow(PurgeSequencesBelowRequest) returns (PurgeSequencesBelowResponse);
+  rpc GetBlock(GetBlockRequest) returns (GetBlockResponse);
 }

@@ -10,32 +10,18 @@ import { readDataAvailability } from "./grpc.js";
 import {
   UInt32,
   Field,
-  VerificationKey,
-  Cache,
   verify,
   JsonProof,
   UInt64,
+  VerificationKey,
 } from "o1js";
 import { processCommitments } from "./transition.js";
+import { compile } from "./compile.js";
 
 export interface SequenceState {
   sequence: number;
   transition: TransitionData;
   dataAvailability?: string;
-}
-
-let vk: VerificationKey | undefined = undefined;
-
-export async function compile(): Promise<VerificationKey> {
-  if (vk === undefined) {
-    const cache = Cache.FileSystem("./cache");
-    console.log("compiling...");
-    console.time("compiled");
-    vk = (await AddProgram.compile({ cache })).verificationKey;
-    console.timeEnd("compiled");
-    console.log("vk", vk.hash.toJSON());
-  }
-  return vk;
 }
 
 export async function merge(
@@ -47,8 +33,8 @@ export async function merge(
   console.log(`Proof 2 size: ${proof2Serialized.length} chars`);
 
   // Ensure the circuit is compiled
-  const vk = await compile();
-  if (!vk) {
+  const { vkProgram } = await compile();
+  if (!vkProgram) {
     throw new Error("Failed to compile circuit for merging");
   }
 
@@ -65,14 +51,14 @@ export async function merge(
 
   // Verify both proofs before merging
   console.log("Verifying proof 1...");
-  const ok1 = await verify(proof1, vk);
+  const ok1 = await verify(proof1, vkProgram);
   if (!ok1) {
     throw new Error("Proof 1 verification failed");
   }
   console.log("Proof 1 verified");
 
   console.log("Verifying proof 2...");
-  const ok2 = await verify(proof2, vk);
+  const ok2 = await verify(proof2, vkProgram);
   if (!ok2) {
     throw new Error("Proof 2 verification failed");
   }
@@ -89,7 +75,7 @@ export async function merge(
 
   // Verify the merged proof
   console.log("Verifying merged proof...");
-  const okMerged = await verify(mergedProof.proof, vk);
+  const okMerged = await verify(mergedProof.proof, vkProgram);
   if (!okMerged) {
     throw new Error("Merged proof verification failed");
   }
@@ -175,6 +161,7 @@ export async function getStateAndProof(params: {
   // Process all sequence states sequentially
   let finalProof: AddProgramProof | undefined = undefined;
   let startProcessingFromIndex = 0;
+  let vkProgram: VerificationKey | undefined = undefined;
 
   // If we loaded state from data availability, skip the first sequence state
   // as it's already applied to the loaded state
@@ -193,9 +180,9 @@ export async function getStateAndProof(params: {
     // Determine if this is the sequence we need to prove
     const shouldProve = currentSequence === sequence;
     if (shouldProve) {
-      const vk = await compile();
-      if (vk === undefined) {
-        throw new Error("vk is not set");
+      const { vkProgram } = await compile();
+      if (vkProgram === undefined) {
+        throw new Error("vkProgram is not set");
       }
     }
 
@@ -281,11 +268,11 @@ export async function getStateAndProof(params: {
     if (shouldProve) {
       const proof = finalProof;
       if (proof) {
-        if (vk === undefined) {
+        if (vkProgram === undefined) {
           throw new Error("vk is not set");
         }
         console.time(`verifying proof for sequence ${currentSequence}`);
-        const ok = await verify(proof, vk);
+        const ok = await verify(proof, vkProgram);
         console.timeEnd(`verifying proof for sequence ${currentSequence}`);
         if (!ok) {
           throw new Error(
