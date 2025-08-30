@@ -32,7 +32,7 @@ import type { CanonicalElement } from "@silvana-one/mina-utils";
 
 // Element<Scalar> is a struct with bytes field (from group_ops.move line 22-24)
 const ElementScalar = bcs.struct("Element", {
-  bytes: bcs.vector(bcs.u8())
+  bytes: bcs.vector(bcs.u8()),
 });
 
 export const CommitmentDataBcs = bcs.struct("CommitmentData", {
@@ -134,7 +134,9 @@ export function bigIntToCommitmentArray(value: bigint): number[] {
  * @param data - The BCS serialized data as byte array or Uint8Array
  * @returns Raw TransitionData object (with number[] commitments)
  */
-export function deserializeRawTransitionData(data: number[] | Uint8Array): RawTransitionData {
+export function deserializeRawTransitionData(
+  data: number[] | Uint8Array
+): RawTransitionData {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   return TransitionDataBcs.parse(bytes);
 }
@@ -144,7 +146,9 @@ export function deserializeRawTransitionData(data: number[] | Uint8Array): RawTr
  * @param data - The BCS serialized data as byte array or Uint8Array
  * @returns Processed TransitionData object with Fr.Canonical.provable commitments
  */
-export function deserializeTransitionData(data: number[] | Uint8Array): TransitionData {
+export function deserializeTransitionData(
+  data: number[] | Uint8Array
+): TransitionData {
   const rawTransitionData = deserializeRawTransitionData(data);
 
   return {
@@ -156,20 +160,32 @@ export function deserializeTransitionData(data: number[] | Uint8Array): Transiti
     old_value: BigInt(rawTransitionData.old_value),
     old_commitment: {
       actions_commitment: scalar(
-        commitmentArrayToBigInt(rawTransitionData.old_commitment.actions_commitment.bytes)
+        commitmentArrayToBigInt(
+          rawTransitionData.old_commitment.actions_commitment.bytes
+        )
       ),
-      actions_sequence: BigInt(rawTransitionData.old_commitment.actions_sequence),
+      actions_sequence: BigInt(
+        rawTransitionData.old_commitment.actions_sequence
+      ),
       state_commitment: scalar(
-        commitmentArrayToBigInt(rawTransitionData.old_commitment.state_commitment.bytes)
+        commitmentArrayToBigInt(
+          rawTransitionData.old_commitment.state_commitment.bytes
+        )
       ),
     },
     new_commitment: {
       actions_commitment: scalar(
-        commitmentArrayToBigInt(rawTransitionData.new_commitment.actions_commitment.bytes)
+        commitmentArrayToBigInt(
+          rawTransitionData.new_commitment.actions_commitment.bytes
+        )
       ),
-      actions_sequence: BigInt(rawTransitionData.new_commitment.actions_sequence),
+      actions_sequence: BigInt(
+        rawTransitionData.new_commitment.actions_sequence
+      ),
       state_commitment: scalar(
-        commitmentArrayToBigInt(rawTransitionData.new_commitment.state_commitment.bytes)
+        commitmentArrayToBigInt(
+          rawTransitionData.new_commitment.state_commitment.bytes
+        )
       ),
     },
   };
@@ -189,7 +205,9 @@ function provableToBigInt(provable: CanonicalElement): bigint {
  * @param transitionData - The TransitionData object to serialize
  * @returns BCS serialized bytes
  */
-export function serializeTransitionData(transitionData: TransitionData): Uint8Array {
+export function serializeTransitionData(
+  transitionData: TransitionData
+): Uint8Array {
   // Convert back to raw format for serialization
   const rawTransitionData: RawTransitionData = {
     block_number: transitionData.block_number.toString(),
@@ -199,22 +217,32 @@ export function serializeTransitionData(transitionData: TransitionData): Uint8Ar
     value: transitionData.value.toString(),
     old_value: transitionData.old_value.toString(),
     old_commitment: {
-      actions_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(transitionData.old_commitment.actions_commitment)
-      ) },
-      actions_sequence: transitionData.old_commitment.actions_sequence.toString(),
-      state_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(transitionData.old_commitment.state_commitment)
-      ) },
+      actions_commitment: {
+        bytes: bigIntToCommitmentArray(
+          provableToBigInt(transitionData.old_commitment.actions_commitment)
+        ),
+      },
+      actions_sequence:
+        transitionData.old_commitment.actions_sequence.toString(),
+      state_commitment: {
+        bytes: bigIntToCommitmentArray(
+          provableToBigInt(transitionData.old_commitment.state_commitment)
+        ),
+      },
     },
     new_commitment: {
-      actions_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(transitionData.new_commitment.actions_commitment)
-      ) },
-      actions_sequence: transitionData.new_commitment.actions_sequence.toString(),
-      state_commitment: { bytes: bigIntToCommitmentArray(
-        provableToBigInt(transitionData.new_commitment.state_commitment)
-      ) },
+      actions_commitment: {
+        bytes: bigIntToCommitmentArray(
+          provableToBigInt(transitionData.new_commitment.actions_commitment)
+        ),
+      },
+      actions_sequence:
+        transitionData.new_commitment.actions_sequence.toString(),
+      state_commitment: {
+        bytes: bigIntToCommitmentArray(
+          provableToBigInt(transitionData.new_commitment.state_commitment)
+        ),
+      },
     },
   };
 
@@ -244,18 +272,24 @@ export interface ProcessedCommitments {
  * @param transitionData - Deserialized TransitionData with provable commitments
  * @returns Processed commitment objects
  */
-export function processCommitments(transitionData: TransitionData): ProcessedCommitments {
+export function processCommitments(
+  transitionData: TransitionData
+): ProcessedCommitments {
   return {
     oldCommitment: {
       actionsCommitment: transitionData.old_commitment.actions_commitment,
       stateCommitment: transitionData.old_commitment.state_commitment,
-      actionsSequence: UInt64.from(transitionData.old_commitment.actions_sequence),
+      actionsSequence: UInt64.from(
+        transitionData.old_commitment.actions_sequence
+      ),
       actionsRPower: rScalarPow(transitionData.old_commitment.actions_sequence),
     },
     newCommitment: {
       actionsCommitment: transitionData.new_commitment.actions_commitment,
       stateCommitment: transitionData.new_commitment.state_commitment,
-      actionsSequence: UInt64.from(transitionData.new_commitment.actions_sequence),
+      actionsSequence: UInt64.from(
+        transitionData.new_commitment.actions_sequence
+      ),
       actionsRPower: rScalarPow(transitionData.new_commitment.actions_sequence),
     },
   };
@@ -288,35 +322,4 @@ export function hexToElement(hex: string): bigint {
   }
 
   return BigInt("0x" + cleanHex);
-}
-
-/**
- * Legacy helper function to convert Element<Scalar> bytes to hex string
- * @param elementBytes - 32 bytes representing an Element<Scalar> (as number[] from BCS)
- * @returns Hex string representation
- * @deprecated Use elementToHex with bigint instead
- */
-export function elementBytesToHex(elementBytes: number[]): string {
-  return (
-    "0x" + elementBytes.map((b) => b.toString(16).padStart(2, "0")).join("")
-  );
-}
-
-/**
- * Legacy helper function to convert hex string to Element<Scalar> bytes
- * @param hex - Hex string (with or without 0x prefix)
- * @returns 32-byte number array (for BCS compatibility)
- * @deprecated Use hexToElement with bigint instead
- */
-export function hexToElementBytes(hex: string): number[] {
-  const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (cleanHex.length !== 64) {
-    throw new Error("Element<Scalar> hex must be 64 characters (32 bytes)");
-  }
-
-  const bytes: number[] = [];
-  for (let i = 0; i < 32; i++) {
-    bytes.push(parseInt(cleanHex.substring(i * 2, i * 2 + 2), 16));
-  }
-  return bytes;
 }

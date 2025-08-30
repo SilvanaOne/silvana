@@ -19,6 +19,7 @@ mod state;
 use anyhow::Result;
 use clap::Parser;
 use dotenvy::dotenv;
+use tokio::signal;
 use tokio::task;
 use tokio::time::Duration;
 use tracing::{debug, info, warn, error};
@@ -88,6 +89,44 @@ async fn main() -> Result<()> {
 
     // Create shared state
     let state = SharedState::new();
+    
+    // Setup signal handlers for graceful shutdown (Ctrl-C and SIGTERM for system reboot)
+    let shutdown_state = state.clone();
+    let force_shutdown_state = state.clone();
+    tokio::spawn(async move {
+        let mut sigint = signal::unix::signal(signal::unix::SignalKind::interrupt())
+            .expect("Failed to create SIGINT handler");
+        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to create SIGTERM handler");
+        
+        tokio::select! {
+            _ = sigint.recv() => {
+                if shutdown_state.is_shutting_down() {
+                    // Second Ctrl-C - force shutdown
+                    error!("\n🛑 Second SIGINT received - forcing immediate shutdown!");
+                    shutdown_state.set_force_shutdown();
+                } else {
+                    // First Ctrl-C - graceful shutdown
+                    warn!("\n⚠️  Received SIGINT (Ctrl-C), initiating graceful shutdown...");
+                    warn!("    Press Ctrl-C again to force immediate shutdown");
+                    shutdown_state.set_shutdown();
+                    
+                    // Spawn a task to listen for second Ctrl-C
+                    tokio::spawn(async move {
+                        let mut sigint2 = signal::unix::signal(signal::unix::SignalKind::interrupt())
+                            .expect("Failed to create second SIGINT handler");
+                        sigint2.recv().await;
+                        error!("\n🛑 Second SIGINT received - forcing immediate shutdown!");
+                        force_shutdown_state.set_force_shutdown();
+                    });
+                }
+            }
+            _ = sigterm.recv() => {
+                warn!("\n⚠️  Received SIGTERM (system shutdown/reboot), initiating graceful shutdown...");
+                shutdown_state.set_shutdown();
+            }
+        }
+    });
 
     info!("✅ Coordinator initialized, starting services...");
 
@@ -498,21 +537,130 @@ async fn main() -> Result<()> {
     let mut processor = EventProcessor::new(config, state.clone()).await?;
     info!("👁️ Starting event monitoring...");
     
-    // Run processor (this blocks)
-    let processor_result = processor.run().await;
-
-    // If processor exits, cancel all background tasks
+    // Run processor in a task so we can monitor shutdown
+    let processor_handle = task::spawn(async move {
+        processor.run().await
+    });
+    
+    // Monitor for shutdown or processor exit
+    loop {
+        if state.is_shutting_down() {
+            info!("🛑 Shutdown requested, starting graceful shutdown sequence...");
+            break;
+        }
+        
+        // Check if processor exited
+        if processor_handle.is_finished() {
+            let processor_result = processor_handle.await?;
+            if let Err(e) = processor_result {
+                error!("Fatal error in event processor: {}", e);
+                return Err(e.into());
+            }
+            break;
+        }
+        
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    info!("🔄 Starting graceful shutdown sequence...");
+    
+    // Phase 1: Stop accepting new jobs (already done by setting shutdown flag)
+    info!("  1️⃣ Stopping new job acceptance...");
+    
+    // Phase 2: Wait for current jobs to complete (with timeout)
+    info!("  2️⃣ Waiting for current jobs to complete (max 5 minutes)...");
+    let mut wait_time = 0;
+    let max_wait = 300; // 5 minutes in seconds
+    
+    while wait_time < max_wait {
+        // Check for force shutdown
+        if state.is_force_shutdown() {
+            error!("  🛑 Force shutdown requested!");
+            break;
+        }
+        
+        let current_agents = state.get_current_agent_count().await;
+        if current_agents == 0 {
+            info!("  ✅ All jobs completed");
+            break;
+        }
+        
+        // Show more detailed progress
+        if wait_time < 60 {
+            info!("  ⏳ {} agents still running, waiting... ({}/{}s)", current_agents, wait_time, max_wait);
+        } else {
+            let minutes = wait_time / 60;
+            let seconds = wait_time % 60;
+            info!("  ⏳ {} agents still running, waiting... ({}m {}s / 5m)", current_agents, minutes, seconds);
+        }
+        
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        wait_time += 1;
+    }
+    
+    // Phase 3: If jobs are still running, try to get their status and logs
+    let remaining_agents = state.get_current_agent_count().await;
+    if remaining_agents > 0 {
+        if state.is_force_shutdown() {
+            error!("  🛑 Force shutdown - terminating {} running agents...", remaining_agents);
+        } else {
+            warn!("  ⚠️ {} agents still running after timeout, collecting logs...", remaining_agents);
+        }
+        
+        // Get information about running agents
+        let running_agents = state.get_all_current_agents().await;
+        
+        // Try to get Docker container logs and terminate if force shutdown
+        let docker_manager = match docker::DockerManager::new(false) {
+            Ok(dm) => Some(dm),
+            Err(e) => {
+                error!("Failed to create Docker manager for shutdown: {}", e);
+                None
+            }
+        };
+        
+        for (session_id, agent_info) in running_agents {
+            warn!("    - Session {}: {}/{}/{}", 
+                session_id, agent_info.developer, agent_info.agent, agent_info.agent_method);
+        }
+        
+        // Try to get container logs and optionally stop them
+        if let Some(ref dm) = docker_manager {
+            info!("  📋 Fetching logs from running Docker containers...");
+            let container_results = dm.fetch_and_stop_silvana_containers(state.is_force_shutdown()).await;
+            
+            for (container_id, container_name, logs) in container_results {
+                info!("\n  📦 Container: {} ({})", &container_id[..12.min(container_id.len())], container_name);
+                if !logs.is_empty() {
+                    // Print first 2000 chars of logs to avoid flooding the terminal
+                    let log_preview = if logs.len() > 2000 {
+                        format!("{}
+... [truncated {} more bytes]", &logs[..2000], logs.len() - 2000)
+                    } else {
+                        logs
+                    };
+                    info!("  📄 Container logs:\n{}", log_preview);
+                } else {
+                    info!("  ⚠️ No logs available from container");
+                }
+            }
+        }
+    }
+    
+    // Phase 4: Cancel all background tasks
+    info!("  3️⃣ Stopping background tasks...");
     grpc_handle.abort();
     reconciliation_handle.abort();
     stuck_job_handle.abort();
     block_creation_handle.abort();
     proof_analysis_handle.abort();
-    job_searcher_handle.abort();
-
-    if let Err(e) = processor_result {
-        error!("Fatal error in event processor: {}", e);
-        return Err(e.into());
+    
+    // Give job_searcher a chance to cleanup
+    if !job_searcher_handle.is_finished() {
+        // Wait a bit for job_searcher to finish gracefully
+        let _ = tokio::time::timeout(Duration::from_secs(5), job_searcher_handle).await;
     }
-
+    
+    info!("✅ Graceful shutdown complete");
     Ok(())
 }

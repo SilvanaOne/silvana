@@ -120,6 +120,32 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         block_proofs.proofs.len(),
         proof_calc.is_finished
     );
+    
+    // Debug: Print detailed proof list with sequences and statuses
+    if !block_proofs.proofs.is_empty() {
+        debug!("📝 Detailed proof list for block {}:", proof_calc.block_number);
+        for (idx, proof) in block_proofs.proofs.iter().enumerate() {
+            let sequences_str = if proof.sequences.len() <= 10 {
+                format!("{:?}", proof.sequences)
+            } else {
+                format!("[{} sequences: {}..{}]", 
+                    proof.sequences.len(),
+                    proof.sequences.first().unwrap_or(&0),
+                    proof.sequences.last().unwrap_or(&0))
+            };
+            
+            debug!(
+                "   Proof #{}: sequences={}, status={:?}, da_hash={}, timestamp={}",
+                idx + 1,
+                sequences_str,
+                proof.status,
+                proof.da_hash.as_ref().unwrap_or(&"none".to_string()),
+                proof.timestamp
+            );
+        }
+    } else {
+        debug!("📝 No proofs found for block {}", proof_calc.block_number);
+    }
 
     // Check if the current proof covers the entire block
     if let Some(end_seq) = block_proofs.end_sequence {
@@ -227,7 +253,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                         )
                     };
 
-                ProofCalculation {
+                let updated_block_proofs = ProofCalculation {
                     id: updated_proof_calculation
                         .as_ref()
                         .map(|p| p.id.clone())
@@ -238,7 +264,31 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     proofs: updated_proof_infos,
                     block_proof: latest_block_proof,
                     is_finished: latest_is_finished,
+                };
+                
+                // Debug: Print updated proof list after refetch
+                if !updated_block_proofs.proofs.is_empty() {
+                    debug!("📝 Updated proof list after refetch (attempt {}):", attempt);
+                    for (idx, proof) in updated_block_proofs.proofs.iter().enumerate() {
+                        let sequences_str = if proof.sequences.len() <= 10 {
+                            format!("{:?}", proof.sequences)
+                        } else {
+                            format!("[{} sequences: {}..{}]", 
+                                proof.sequences.len(),
+                                proof.sequences.first().unwrap_or(&0),
+                                proof.sequences.last().unwrap_or(&0))
+                        };
+                        
+                        debug!(
+                            "   Proof #{}: sequences={}, status={:?}",
+                            idx + 1,
+                            sequences_str,
+                            proof.status
+                        );
+                    }
                 }
+                
+                updated_block_proofs
             } else {
                 block_proofs.clone()
             };
@@ -247,9 +297,27 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         if let Some(merge_request) =
             find_proofs_to_merge_excluding(&current_block_proofs, &attempted_merges)
         {
+            // Find the actual proof objects for more details
+            let proof1_details = current_block_proofs
+                .proofs
+                .iter()
+                .find(|p| p.sequences == merge_request.sequences1)
+                .map(|p| format!("status={:?}", p.status))
+                .unwrap_or_else(|| "not found".to_string());
+                
+            let proof2_details = current_block_proofs
+                .proofs
+                .iter()
+                .find(|p| p.sequences == merge_request.sequences2)
+                .map(|p| format!("status={:?}", p.status))
+                .unwrap_or_else(|| "not found".to_string());
+            
             debug!(
-                "✨ Attempt {}/{}: Found merge opportunity - Sequences1: {:?}, Sequences2: {:?}, Is block proof: {}",
-                attempt, MAX_MERGE_ATTEMPTS, merge_request.sequences1, merge_request.sequences2, merge_request.block_proof
+                "✨ Attempt {}/{}: Found merge opportunity - Sequences1: {:?} ({}), Sequences2: {:?} ({}), Is block proof: {}",
+                attempt, MAX_MERGE_ATTEMPTS, 
+                merge_request.sequences1, proof1_details,
+                merge_request.sequences2, proof2_details,
+                merge_request.block_proof
             );
 
             // Remember this attempt
@@ -679,12 +747,21 @@ async fn create_merge_job(
             }
         }
         Err(e) => {
-            warn!(
-                "⚠️ Failed to reserve proofs for block {} - another coordinator may have already reserved them: {}",
-                block_number, e
-            );
+            // This is expected when multiple coordinators are running
+            let error_str = e.to_string();
+            if error_str.contains("already reserved") || error_str.contains("MoveAbort") || error_str.contains("version conflict") {
+                debug!(
+                    "Proofs for block {} already reserved by another coordinator (expected race condition)",
+                    block_number
+                );
+            } else {
+                warn!(
+                    "⚠️ Failed to reserve proofs for block {}: {}",
+                    block_number, e
+                );
+            }
             // Don't create merge job if we couldn't reserve the proofs
-            Err(anyhow::anyhow!("Failed to reserve proofs for merge: {}", e))
+            Err(anyhow::anyhow!("Cannot reserve proofs - likely taken by another coordinator"))
         }
     }
 }

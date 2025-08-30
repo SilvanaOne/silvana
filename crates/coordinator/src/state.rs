@@ -26,6 +26,8 @@ pub struct SharedState {
     agent_job_db: AgentJobDatabase, // Memory database for agent job tracking
     has_pending_jobs: Arc<AtomicBool>, // Fast check for pending jobs availability
     rpc_client: Arc<RwLock<Option<RpcClient>>>, // Silvana RPC service client
+    shutdown_flag: Arc<AtomicBool>, // Global shutdown flag for graceful shutdown
+    force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
 }
 
 impl SharedState {
@@ -53,6 +55,8 @@ impl SharedState {
             agent_job_db: AgentJobDatabase::new(),
             has_pending_jobs: Arc::new(AtomicBool::new(false)),
             rpc_client,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            force_shutdown_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -117,6 +121,40 @@ impl SharedState {
         current_agents
             .values()
             .any(|a| a.developer == developer && a.agent == agent && a.agent_method == agent_method)
+    }
+    
+    /// Get all currently running agents (for shutdown reporting)
+    pub async fn get_all_current_agents(&self) -> HashMap<String, CurrentAgent> {
+        let current_agents = self.current_agents.read().await;
+        current_agents.clone()
+    }
+    
+    /// Get the shutdown flag (for sharing with tasks)
+    #[allow(dead_code)]
+    pub fn get_shutdown_flag(&self) -> Arc<AtomicBool> {
+        self.shutdown_flag.clone()
+    }
+    
+    /// Set the shutdown flag to initiate graceful shutdown
+    pub fn set_shutdown(&self) {
+        self.shutdown_flag.store(true, Ordering::SeqCst);
+    }
+    
+    /// Check if shutdown has been requested
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutdown_flag.load(Ordering::SeqCst)
+    }
+    
+    /// Set the force shutdown flag for immediate termination
+    pub fn set_force_shutdown(&self) {
+        self.force_shutdown_flag.store(true, Ordering::SeqCst);
+        // Also set the normal shutdown flag
+        self.shutdown_flag.store(true, Ordering::SeqCst);
+    }
+    
+    /// Check if force shutdown has been requested
+    pub fn is_force_shutdown(&self) -> bool {
+        self.force_shutdown_flag.load(Ordering::SeqCst)
     }
 
     /// Add a new job to tracking from JobCreatedEvent

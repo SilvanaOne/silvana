@@ -33,6 +33,7 @@ pub struct JobSearcher {
     searcher_state: Arc<RwLock<SearcherState>>,
     secrets_client: Option<SecretsClient>,
     failed_jobs_cache: FailedJobsCache,
+    current_job_info: Arc<RwLock<Option<(String, Job)>>>, // (container_id, job)
 }
 
 impl JobSearcher {
@@ -47,6 +48,7 @@ impl JobSearcher {
             searcher_state: Arc::new(RwLock::new(SearcherState::Searching)),
             secrets_client: None,
             failed_jobs_cache: FailedJobsCache::new(),
+            current_job_info: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -70,6 +72,11 @@ impl JobSearcher {
         tokio::spawn(async move {
             let mut last_has_jobs = monitor_state.has_pending_jobs_available();
             loop {
+                // Check for shutdown
+                if monitor_state.is_shutting_down() {
+                    break;
+                }
+                
                 sleep(Duration::from_millis(100)).await;
                 let current_has_jobs = monitor_state.has_pending_jobs_available();
                 if current_has_jobs != last_has_jobs {
@@ -87,10 +94,70 @@ impl JobSearcher {
         });
 
         loop {
+            // Check for shutdown request
+            if self.state.is_shutting_down() {
+                info!("🛑 Job searcher received shutdown signal");
+                
+                // If we have a running container, handle it based on shutdown type
+                let job_info = self.current_job_info.read().await.clone();
+                if let Some((container_id, job)) = job_info {
+                    if self.state.is_force_shutdown() {
+                        error!("Force shutdown - terminating Docker container {} for job {}", container_id, job.job_sequence);
+                        
+                        // Try to get logs before terminating
+                        if let Some(logs) = self.docker_manager.get_container_logs_safe(&container_id).await {
+                            info!("Container logs before force termination:\n{}", logs);
+                        }
+                        
+                        // Force stop the container with a short timeout
+                        if let Err(e) = self.docker_manager.stop_container_with_timeout(&container_id, 5).await {
+                            error!("Failed to stop container {}: {}", container_id, e);
+                        }
+                    } else {
+                        warn!("Waiting for Docker container {} (job {}) to complete before shutdown...", container_id, job.job_sequence);
+                        warn!("Press Ctrl-C again to force terminate the container");
+                        
+                        // Wait for container to finish or force shutdown
+                        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
+                        loop {
+                            check_interval.tick().await;
+                            
+                            if self.state.is_force_shutdown() {
+                                error!("Force shutdown requested - terminating container {}", container_id);
+                                
+                                // Get logs and terminate
+                                if let Some(logs) = self.docker_manager.get_container_logs_safe(&container_id).await {
+                                    info!("Container logs before force termination:\n{}", logs);
+                                }
+                                
+                                if let Err(e) = self.docker_manager.stop_container_with_timeout(&container_id, 5).await {
+                                    error!("Failed to stop container {}: {}", container_id, e);
+                                }
+                                break;
+                            }
+                            
+                            // Check if container is still running
+                            let current_job = self.current_job_info.read().await.clone();
+                            if current_job.is_none() {
+                                info!("Container completed during shutdown wait");
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                return Ok(());
+            }
             let current_state = self.searcher_state.read().await.clone();
 
             match current_state {
                 SearcherState::Searching => {
+                    // Check for shutdown during searching phase
+                    if self.state.is_shutting_down() {
+                        debug!("Shutdown requested during searching phase");
+                        return Ok(());
+                    }
+                    
                     // Fast check if there are any pending jobs
                     if !self.state.has_pending_jobs_available() {
                         // No pending jobs, wait for state change
@@ -322,124 +389,64 @@ impl JobSearcher {
         // Start the job on Sui blockchain before processing
         debug!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
 
-        // Try to start the job on blockchain with custom retry logic
-        let start_time = Instant::now();
-        let mut job_started = false;
-        
-        for attempt in 1..=3 {
-            debug!("Attempting to start job {} (attempt {}/3)", job.job_sequence, attempt);
-            
-            // Fetch current job status before attempting to start
-            if attempt == 1 {
-                if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
-                    if let Ok(Some((_app_instance_id, jobs_table_id))) = sui::fetch::get_jobs_info_from_app_instance(&app_inst).await {
-                        if let Ok(Some(current_job)) = sui::fetch::fetch_job_by_id(&jobs_table_id, job.job_sequence).await {
-                            debug!("Job {} status BEFORE start attempt: {:?}", job.job_sequence, current_job.status);
-                        }
-                    }
-                }
+        // First check if job is still in pending_jobs list before attempting to start
+        let job_still_pending = if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
+            // Check if job is in the pending_jobs VecSet
+            if let Some(jobs) = &app_inst.jobs {
+                jobs.pending_jobs.contains(&job.job_sequence)
+            } else {
+                false
             }
-            
-            match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await {
-                Ok(tx_digest) => {
-                    debug!("Successfully started job {} on blockchain, tx: {}", job.job_sequence, tx_digest);
-                    job_started = true;
-                    break;
-                }
-                Err(e) => {
-                    let error_str = e.to_string();
-                    
-                    // Check if the error is because the job is not in pending state
-                    // This can happen if another coordinator already started it or it was completed/failed
-                    if error_str.contains("Job is not in pending state") || 
-                       error_str.contains("EJobNotPending") ||
-                       error_str.contains("13906835364049584133") {
-                        warn!("Job {} is not in pending state - likely already started/completed by another coordinator", job.job_sequence);
-                        
-                        // Add to failed jobs cache so we don't try again for 5 minutes
-                        self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
-                        
-                        // Try to fetch comprehensive debugging information
-                        if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
-                            if let Ok(Some((_app_instance_id, jobs_table_id))) = sui::fetch::get_jobs_info_from_app_instance(&app_inst).await {
-                                // Fetch and print the full failing job as Debug struct
-                                if let Ok(Some(current_job)) = sui::fetch::fetch_job_by_id(&jobs_table_id, job.job_sequence).await {
-                                    error!("FAILED JOB {} DEBUG:\n{:#?}", job.job_sequence, current_job);
-                                    
-                                    // Check if it's in the pending_jobs set for this specific method
-                                    if let Ok(pending_jobs) = sui::fetch::fetch_pending_job_sequences_from_app_instance(
-                                        &app_inst, 
-                                        &job.developer, 
-                                        &job.agent, 
-                                        &job.agent_method
-                                    ).await {
-                                        let is_in_pending_set = pending_jobs.contains(&job.job_sequence);
-                                        error!("Job {} in pending_jobs index for {}/{}/{}: {}", 
-                                               job.job_sequence, job.developer, job.agent, job.agent_method, is_in_pending_set);
-                                        if !is_in_pending_set && matches!(current_job.status, sui::fetch::JobStatus::Pending) {
-                                            error!("⚠️ INCONSISTENCY: Job has Pending status but is NOT in pending_jobs index!");
-                                        }
-                                    }
-                                }
-                                
-                                // Print AppInstance debug info
-                                error!("APP_INSTANCE DEBUG:\n{:#?}", app_inst);
-                                
-                                // Print settlement job field
-                                if let Ok(Some(settlement_job_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_inst).await {
-                                    error!("Settlement job field: Some({})", settlement_job_id);
-                                } else {
-                                    error!("Settlement job field: None");
-                                }
-                                
-                                // Fetch and print ALL jobs summary
-                                if let Ok(all_jobs) = sui::fetch::fetch_all_jobs_from_app_instance(&app_inst).await {
-                                    let pending_jobs: Vec<_> = all_jobs.iter()
-                                        .filter(|j| matches!(j.status, sui::fetch::JobStatus::Pending))
-                                        .map(|j| (j.job_sequence, &j.agent_method, j.attempts, j.next_scheduled_at))
-                                        .collect();
-                                    
-                                    let running_jobs: Vec<_> = all_jobs.iter()
-                                        .filter(|j| matches!(j.status, sui::fetch::JobStatus::Running))
-                                        .map(|j| (j.job_sequence, &j.agent_method, j.attempts, j.updated_at))
-                                        .collect();
-                                    
-                                    error!("JOBS SUMMARY: Total={}, Pending={}, Running={}", 
-                                           all_jobs.len(), pending_jobs.len(), running_jobs.len());
-                                    
-                                    if !pending_jobs.is_empty() {
-                                        error!("PENDING JOBS: {:?}", pending_jobs);
-                                    }
-                                    
-                                    if !running_jobs.is_empty() {
-                                        error!("RUNNING JOBS: {:?}", running_jobs);
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Clear the agent state and return
-                        self.state.clear_current_agent(&docker_session.session_id).await;
-                        return;
-                    }
-                    
-                    error!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
-                    
-                    if attempt < 3 {
-                        warn!("Failed to start job {} on attempt {}, retrying...", job.job_sequence, attempt);
-                        // Small delay between retries
-                        sleep(Duration::from_millis(100 * attempt as u64)).await;
-                    }
-                }
-            }
-        }
-        
-        if !job_started {
-            error!("Failed to start job {} after 3 attempts", job.job_sequence);
-            // Add to failed jobs cache
+        } else {
+            // If we can't fetch app instance, assume job might still be pending
+            true
+        };
+
+        if !job_still_pending {
+            warn!("Job {} is no longer in pending_jobs list - likely already started by another coordinator", job.job_sequence);
+            // Add to failed jobs cache to prevent immediate retries
             self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
             self.state.clear_current_agent(&docker_session.session_id).await;
             return;
+        }
+
+        // Try to start the job on blockchain - NO RETRIES since other coordinators might be handling it
+        let start_time = Instant::now();
+        
+        debug!("Attempting to start job {} (single attempt, no retries)", job.job_sequence);
+        
+        match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await {
+            Ok(tx_digest) => {
+                debug!("Successfully started job {} on blockchain, tx: {}", job.job_sequence, tx_digest);
+            }
+            Err(e) => {
+                let error_str = e.to_string();
+                
+                // Check if the error is because the job is not in pending state or not found
+                // This can happen if another coordinator already started it
+                if error_str.contains("Job is not in pending state") || 
+                   error_str.contains("EJobNotPending") ||
+                   error_str.contains("13906835325394878469") || // EJobNotPending abort code
+                   error_str.contains("Job not found") ||
+                   error_str.contains("EJobNotFound") ||
+                   error_str.contains("13906835322940243973") { // EJobNotFound abort code
+                    warn!("Job {} cannot be started - likely already handled by another coordinator: {}", job.job_sequence, error_str);
+                    
+                    // Add to failed jobs cache so we don't try again for 5 minutes
+                    self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+                    
+                    // Clear the agent state and return
+                    self.state.clear_current_agent(&docker_session.session_id).await;
+                    return;
+                }
+                
+                error!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
+                
+                // No retries - add to failed cache and move on
+                self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+                self.state.clear_current_agent(&docker_session.session_id).await;
+                return;
+            }
         }
         
         let start_elapsed = start_time.elapsed();
@@ -556,7 +563,20 @@ impl JobSearcher {
 
         // Run the container
         let container_start = Instant::now();
+        
+        // Store job info before running container
+        let job_clone = job.clone();
+        
+        // Run the container and get the result (which includes container_id)
         let container_result = self.docker_manager.run_container(&container_config).await;
+        
+        // If successful, track the container ID
+        if let Ok(ref result) = container_result {
+            *self.current_job_info.write().await = Some((result.container_id.clone(), job_clone));
+        }
+        
+        // Clear the tracking after completion
+        *self.current_job_info.write().await = None;
 
         match container_result {
             Ok(result) => {
@@ -697,5 +717,32 @@ impl JobSearcher {
         }
 
         Ok(secrets)
+    }
+    
+    /// Get the current container ID and job info for shutdown logging
+    #[allow(dead_code)]
+    pub async fn get_current_container_info(&self) -> Option<(String, Job)> {
+        self.current_job_info.read().await.clone()
+    }
+    
+    /// Fetch logs from current container if any
+    #[allow(dead_code)]
+    pub async fn fetch_current_container_logs(&self) -> Option<String> {
+        if let Some((container_id, job)) = self.get_current_container_info().await {
+            info!("Fetching logs for container {} (job {})", &container_id[..12.min(container_id.len())], job.job_sequence);
+            
+            // Use the safe method that returns Option
+            let logs = self.docker_manager.get_container_logs_safe(&container_id).await;
+            
+            if let Some(ref log_content) = logs {
+                info!("Retrieved {} bytes of logs from container", log_content.len());
+            } else {
+                warn!("Failed to retrieve logs from container {}", &container_id[..12.min(container_id.len())]);
+            }
+            
+            logs
+        } else {
+            None
+        }
     }
 }

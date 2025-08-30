@@ -4,7 +4,7 @@ use bollard::container::LogOutput;
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
 use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, ImportImageOptions,
-    InspectContainerOptions, ListImagesOptions, LogsOptions, 
+    InspectContainerOptions, ListContainersOptions, ListImagesOptions, LogsOptions, 
     PruneContainersOptions, PruneImagesOptions, RemoveContainerOptions,
     StartContainerOptions, StopContainerOptions, WaitContainerOptions
 };
@@ -456,6 +456,48 @@ impl DockerManager {
         Ok(all_logs)
     }
 
+    /// Get container logs without stopping the container (public for shutdown purposes)
+    pub async fn get_container_logs_safe(&self, container_id: &str) -> Option<String> {
+        self.get_container_logs(container_id).await.ok()
+    }
+    
+    /// Stop container with timeout and return logs
+    pub async fn stop_container_with_timeout(&self, container_id: &str, timeout_secs: u64) -> Result<String> {
+        info!("Stopping container {} with {}s timeout", container_id, timeout_secs);
+        
+        // First try to get logs
+        let logs = self.get_container_logs(container_id).await
+            .unwrap_or_else(|e| {
+                warn!("Failed to get logs from container {}: {}", container_id, e);
+                String::from("[Could not retrieve logs]")
+            });
+        
+        // Send stop signal with timeout
+        let stop_options = Some(StopContainerOptions { 
+            t: Some(timeout_secs as i32),
+            ..Default::default()
+        });
+        
+        match self.docker.stop_container(container_id, stop_options).await {
+            Ok(_) => info!("Container {} stopped successfully", container_id),
+            Err(e) => warn!("Failed to stop container {}: {}", container_id, e),
+        }
+        
+        // Remove the container
+        let remove_options = Some(RemoveContainerOptions {
+            force: true,
+            v: true,
+            link: false,
+        });
+        
+        match self.docker.remove_container(container_id, remove_options).await {
+            Ok(_) => debug!("Container {} removed", container_id),
+            Err(e) => warn!("Failed to remove container {}: {}", container_id, e),
+        }
+        
+        Ok(logs)
+    }
+    
     async fn stop_and_remove_container(&self, container_id: &str) -> Result<()> {
         let stop_options = Some(StopContainerOptions { 
             t: Some(30),
@@ -518,5 +560,69 @@ impl DockerManager {
         let options: Option<PruneContainersOptions> = None;
         let _ = self.docker.prune_containers(options).await?;
         Ok(())
+    }
+    
+    /// List all running Silvana containers
+    pub async fn list_running_silvana_containers(&self) -> Result<Vec<(String, String)>> {
+        use bollard::models::ContainerSummary;
+        
+        let mut filters = HashMap::new();
+        filters.insert("status".to_string(), vec!["running".to_string()]);
+        
+        let options = ListContainersOptions {
+            all: false,
+            filters: Some(filters),
+            ..Default::default()
+        };
+        
+        let containers: Vec<ContainerSummary> = self.docker.list_containers(Some(options)).await?;
+        
+        let mut silvana_containers = Vec::new();
+        for container in containers {
+            if let Some(names) = container.names {
+                // Check if this is a Silvana container (name starts with "/silvana-")
+                if names.iter().any(|name| name.starts_with("/silvana-")) {
+                    if let Some(id) = container.id {
+                        let name = names.first().unwrap_or(&String::from("unknown")).clone();
+                        silvana_containers.push((id, name));
+                    }
+                }
+            }
+        }
+        
+        Ok(silvana_containers)
+    }
+    
+    /// Fetch logs from all running Silvana containers and optionally stop them
+    pub async fn fetch_and_stop_silvana_containers(&self, force_stop: bool) -> Vec<(String, String, String)> {
+        let mut results = Vec::new();
+        
+        match self.list_running_silvana_containers().await {
+            Ok(containers) => {
+                for (container_id, container_name) in containers {
+                    info!("Found running Silvana container: {} ({})", &container_id[..12.min(container_id.len())], container_name);
+                    
+                    // Try to get logs
+                    let logs = self.get_container_logs_safe(&container_id).await
+                        .unwrap_or_else(|| String::from("[Failed to retrieve logs]"));
+                    
+                    results.push((container_id.clone(), container_name.clone(), logs));
+                    
+                    // If force stop is requested, stop the container
+                    if force_stop {
+                        info!("Force stopping container: {}", &container_id[..12.min(container_id.len())]);
+                        match self.stop_container_with_timeout(&container_id, 10).await {
+                            Ok(_) => info!("Successfully stopped container {}", &container_id[..12.min(container_id.len())]),
+                            Err(e) => error!("Failed to stop container {}: {}", &container_id[..12.min(container_id.len())], e),
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to list running containers: {}", e);
+            }
+        }
+        
+        results
     }
 }

@@ -21,8 +21,44 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                 if status.error.is_some() {
                     let error_msg = status.error.as_ref().unwrap();
                     let error_str = format!("{:?}", error_msg);
-                    error!("{} transaction failed with error: {}", operation, error_str);
-                    return Err(anyhow!("{} transaction failed: {}", operation, error_str));
+                    
+                    // Clean up common error messages for better readability
+                    let clean_error = if error_str.contains("MoveAbort") {
+                        // Extract abort code and location for Move aborts
+                        let mut parts = vec![];
+                        if error_str.contains("abort_code: Some(") {
+                            if let Some(start) = error_str.find("abort_code: Some(") {
+                                let code_start = start + "abort_code: Some(".len();
+                                if let Some(end) = error_str[code_start..].find(')') {
+                                    parts.push(format!("abort_code: {}", &error_str[code_start..code_start+end]));
+                                }
+                            }
+                        }
+                        if error_str.contains("function_name: Some(") {
+                            if let Some(start) = error_str.find("function_name: Some(\"") {
+                                let name_start = start + "function_name: Some(\"".len();
+                                if let Some(end) = error_str[name_start..].find("\"") {
+                                    parts.push(format!("function: {}", &error_str[name_start..name_start+end]));
+                                }
+                            }
+                        }
+                        if !parts.is_empty() {
+                            format!("MoveAbort: {}", parts.join(", "))
+                        } else {
+                            "Move execution aborted".to_string()
+                        }
+                    } else {
+                        error_str
+                    };
+                    
+                    // Log as warning for expected race conditions
+                    if clean_error.contains("reserve_proof") || clean_error.contains("start_job") {
+                        warn!("{} transaction failed (likely race condition): {}", operation, clean_error);
+                    } else {
+                        error!("{} transaction failed: {}", operation, clean_error);
+                    }
+                    
+                    return Err(anyhow!("{} transaction failed: {}", operation, clean_error));
                 }
             }
         }
@@ -781,8 +817,40 @@ where
     let resp = match exec_result {
         Ok(r) => r,
         Err(e) => {
-            error!("Transaction execution network error: {}", e);
-            return Err(anyhow!("Failed to execute {} transaction: {}", function_name, e));
+            let error_str = e.to_string();
+            
+            // Clean up error message - remove binary details
+            let clean_error = if error_str.contains("Object ID") && error_str.contains("is not available for consumption") {
+                // Extract just the relevant object version conflict info
+                if let Some(obj_start) = error_str.find("Object ID") {
+                    if let Some(version_info) = error_str.find("current version:") {
+                        let end_idx = error_str[version_info..].find('.').unwrap_or(50) + version_info;
+                        format!("Object version conflict - {}", &error_str[obj_start..end_idx])
+                    } else {
+                        "Object version conflict - transaction inputs are outdated".to_string()
+                    }
+                } else {
+                    "Transaction failed due to outdated object versions".to_string()
+                }
+            } else if error_str.contains("details: [") {
+                // Remove binary details array
+                if let Some(idx) = error_str.find(", details: [") {
+                    error_str[..idx].to_string()
+                } else {
+                    error_str
+                }
+            } else {
+                error_str
+            };
+            
+            // Log as warning for expected race conditions, error for unexpected issues
+            if clean_error.contains("version conflict") || clean_error.contains("not available for consumption") {
+                warn!("Transaction {} failed (expected race condition): {}", function_name, clean_error);
+            } else {
+                error!("Transaction {} failed: {}", function_name, clean_error);
+            }
+            
+            return Err(anyhow!("Failed to execute {} transaction: {}", function_name, clean_error));
         }
     };
     let tx_resp = resp.into_inner();
