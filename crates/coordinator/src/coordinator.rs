@@ -380,14 +380,8 @@ pub async fn start_coordinator(
             for (container_id, container_name, logs) in container_results {
                 info!("  📦 Container: {} ({})", &container_id[..12.min(container_id.len())], container_name);
                 if !logs.is_empty() {
-                    // Print first 2000 chars of logs to avoid flooding the terminal
-                    let log_preview = if logs.len() > 2000 {
-                        format!("{}
-... [truncated {} more bytes]", &logs[..2000], logs.len() - 2000)
-                    } else {
-                        logs
-                    };
-                    info!("  📄 Container logs: {}", log_preview);
+                    // Print full container logs during shutdown
+                    info!("  📄 Container logs:\n{}", logs);
                 } else {
                     info!("  ⚠️ No logs available from container");
                 }
