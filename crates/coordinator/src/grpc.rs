@@ -20,7 +20,8 @@ use coordinator::{
     GetBlockRequest, GetBlockResponse, GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
     GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
     GetSequenceStatesResponse, Job, Metadata, PurgeSequencesBelowRequest, PurgeSequencesBelowResponse,
-    ReadDataAvailabilityRequest, ReadDataAvailabilityResponse, RetrieveSecretRequest,
+    ReadDataAvailabilityRequest, ReadDataAvailabilityResponse, RejectProofRequest,
+    RejectProofResponse, RetrieveSecretRequest,
     RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
     SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
     TerminateJobResponse, TryCreateBlockRequest, TryCreateBlockResponse,
@@ -442,29 +443,31 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Execute fail_job transaction on Sui
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
 
-        let success = sui_interface
+        match sui_interface
             .fail_job(
                 &agent_job.app_instance,
                 agent_job.job_sequence,
                 &req.error_message,
             )
-            .await;
+            .await
+        {
+            Some(tx_hash) => {
+                // Remove job from agent database
+                self.state.get_agent_job_db().fail_job(&req.job_id).await;
 
-        if success {
-            // Remove job from agent database
-            self.state.get_agent_job_db().fail_job(&req.job_id).await;
-
-            info!("Successfully failed job {}", req.job_id);
-            Ok(Response::new(FailJobResponse {
-                success: true,
-                message: format!("Job {} failed successfully", req.job_id),
-            }))
-        } else {
-            error!("Failed to fail job {} on blockchain", req.job_id);
-            Ok(Response::new(FailJobResponse {
-                success: false,
-                message: format!("Failed to fail job {} on blockchain", req.job_id),
-            }))
+                info!("Successfully failed job {}, tx: {}", req.job_id, tx_hash);
+                Ok(Response::new(FailJobResponse {
+                    success: true,
+                    message: format!("Job {} failed successfully, tx: {}", req.job_id, tx_hash),
+                }))
+            }
+            None => {
+                error!("Failed to fail job {} on blockchain", req.job_id);
+                Ok(Response::new(FailJobResponse {
+                    success: false,
+                    message: format!("Failed to fail job {} on blockchain", req.job_id),
+                }))
+            }
         }
     }
 
@@ -792,6 +795,126 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 );
                 Err(Status::internal(format!(
                     "Failed to submit proof transaction: {}",
+                    e
+                )))
+            }
+        }
+    }
+
+    async fn reject_proof(
+        &self,
+        request: Request<RejectProofRequest>,
+    ) -> Result<Response<RejectProofResponse>, Status> {
+        let start_time = std::time::Instant::now();
+        let req = request.into_inner();
+
+        // Get job early to log app_instance
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("RejectProof request for unknown job_id: {}", req.job_id);
+                return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
+            }
+        };
+
+        debug!(
+            app_instance = %agent_job.app_instance,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            sequences = ?req.sequences,
+            job_id = %req.job_id,
+            "Received RejectProof request"
+        );
+
+        // Validate sequences are sorted
+        let sequences = req.sequences;
+        if !sequences.windows(2).all(|w| w[0] <= w[1]) {
+            return Err(Status::invalid_argument("Sequences must be sorted"));
+        }
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "RejectProof request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    current.developer,
+                    current.agent,
+                    current.agent_method
+                );
+                return Err(Status::permission_denied(
+                    "Job does not belong to requesting session",
+                ));
+            }
+        } else {
+            warn!(
+                "RejectProof request from unknown session: {}",
+                req.session_id
+            );
+            return Err(Status::unauthenticated("Invalid session ID"));
+        }
+
+        // Reject proof transaction on Sui
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+
+        let tx_result = sui_interface
+            .reject_proof(
+                &agent_job.app_instance,
+                req.block_number,
+                sequences.clone(),
+            )
+            .await;
+
+        match tx_result {
+            Ok(tx_hash) => {
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ RejectProof: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, block={}, seqs={:?}, tx={}, time={:?}",
+                    agent_job.app_instance,
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    agent_job.job_sequence,
+                    agent_job.pending_job.app_instance_method,
+                    req.block_number,
+                    sequences,
+                    tx_hash,
+                    elapsed
+                );
+                debug!(
+                    "Successfully rejected proof for job {} with tx: {}",
+                    req.job_id, tx_hash
+                );
+
+                Ok(Response::new(RejectProofResponse { 
+                    success: true,
+                    message: "Proof rejected successfully".to_string(),
+                    tx_hash,
+                }))
+            }
+            Err(e) => {
+                let elapsed = start_time.elapsed();
+                error!(
+                    "Failed to reject proof for job {} on blockchain: {}",
+                    req.job_id, e
+                );
+                warn!(
+                    "❌ RejectProof: job_id={}, error={}, time={:?}",
+                    req.job_id, e, elapsed
+                );
+                Err(Status::internal(format!(
+                    "Failed to reject proof transaction: {}",
                     e
                 )))
             }

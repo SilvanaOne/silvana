@@ -105,6 +105,21 @@ message SubmitProofResponse {
   string da_hash = 4;
 }
 
+// Request message for rejecting a proof
+message RejectProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  repeated uint64 sequences = 3; // should be sorted
+  string job_id = 4;
+}
+
+// Response message for proof rejection
+message RejectProofResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
 // Request message for submitting state
 message SubmitStateRequest {
   string session_id = 1;
@@ -451,6 +466,7 @@ service CoordinatorService {
   rpc FailJob(FailJobRequest) returns (FailJobResponse);
   rpc TerminateJob(TerminateJobRequest) returns (TerminateJobResponse);
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc RejectProof(RejectProofRequest) returns (RejectProofResponse);
   rpc SubmitState(SubmitStateRequest) returns (SubmitStateResponse);
   rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
   rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);

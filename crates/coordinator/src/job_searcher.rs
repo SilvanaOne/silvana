@@ -634,7 +634,7 @@ impl JobSearcher {
                 let error_message = "Job not completed before Docker container termination";
                 info!("Auto-failing uncompleted job {}", uncompleted_job.job_id);
 
-                if !sui_interface
+                match sui_interface
                     .fail_job(
                         &uncompleted_job.app_instance,
                         uncompleted_job.job_sequence,
@@ -642,15 +642,18 @@ impl JobSearcher {
                     )
                     .await
                 {
-                    error!(
-                        "Failed to auto-fail uncompleted job {} on blockchain",
-                        uncompleted_job.job_id
-                    );
-                } else {
-                    info!(
-                        "Successfully auto-failed uncompleted job {} on blockchain",
-                        uncompleted_job.job_id
-                    );
+                    Some(tx_hash) => {
+                        info!(
+                            "Successfully auto-failed uncompleted job {} on blockchain, tx: {}",
+                            uncompleted_job.job_id, tx_hash
+                        );
+                    }
+                    None => {
+                        error!(
+                            "Failed to auto-fail uncompleted job {} on blockchain",
+                            uncompleted_job.job_id
+                        );
+                    }
                 }
             }
         }

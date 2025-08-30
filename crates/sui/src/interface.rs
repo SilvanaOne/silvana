@@ -47,18 +47,18 @@ impl SilvanaSuiInterface {
 
     /// Fail a job on the Sui blockchain by calling the fail_job Move function
     /// This should be called when job processing fails
-    /// Returns true if the transaction was successful, false if it failed
-    pub async fn fail_job(&mut self, app_instance: &str, job_sequence: u64, error_message: &str) -> bool {
+    /// Returns the transaction hash if successful, or None if it failed
+    pub async fn fail_job(&mut self, app_instance: &str, job_sequence: u64, error_message: &str) -> Option<String> {
         debug!("Attempting to fail job {} on Sui blockchain with error: {}", job_sequence, error_message);
         
         match fail_job_tx(app_instance, job_sequence, error_message).await {
             Ok(tx_digest) => {
                 debug!("Successfully failed job {} on blockchain, tx: {}", job_sequence, tx_digest);
-                true
+                Some(tx_digest)
             }
             Err(e) => {
                 error!("Failed to fail job {} on blockchain: {}", job_sequence, e);
-                false
+                None
             }
         }
     }

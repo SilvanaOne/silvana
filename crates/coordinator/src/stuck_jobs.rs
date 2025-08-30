@@ -139,16 +139,19 @@ impl StuckJobMonitor {
             running_duration.as_secs() / 60
         );
         
-        if sui_interface.fail_job(app_instance_id, job_sequence, &error_msg).await {
-            info!(
-                "Successfully failed stuck job {} in app_instance {}",
-                job_sequence, app_instance_id
-            );
-        } else {
-            error!(
-                "Failed to mark stuck job {} as failed in app_instance {}",
-                job_sequence, app_instance_id
-            );
+        match sui_interface.fail_job(app_instance_id, job_sequence, &error_msg).await {
+            Some(tx_hash) => {
+                info!(
+                    "Successfully failed stuck job {} in app_instance {}, tx: {}",
+                    job_sequence, app_instance_id, tx_hash
+                );
+            }
+            None => {
+                error!(
+                    "Failed to mark stuck job {} as failed in app_instance {}",
+                    job_sequence, app_instance_id
+                );
+            }
         }
     }
 }

@@ -323,17 +323,20 @@ impl JobsTracker {
                                 let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
                                 let error_msg = format!("Job timed out after running for {} minutes", running_duration.as_secs() / 60);
                                 
-                                if sui_interface.fail_job(app_instance_id, job.job_sequence, &error_msg).await {
-                                    if is_settlement {
-                                        info!("Successfully failed stuck SETTLEMENT job {} in app_instance {}", job.job_sequence, app_instance_id);
-                                    } else {
-                                        info!("Successfully failed stuck job {} in app_instance {}", job.job_sequence, app_instance_id);
+                                match sui_interface.fail_job(app_instance_id, job.job_sequence, &error_msg).await {
+                                    Some(tx_hash) => {
+                                        if is_settlement {
+                                            info!("Successfully failed stuck SETTLEMENT job {} in app_instance {}, tx: {}", job.job_sequence, app_instance_id, tx_hash);
+                                        } else {
+                                            info!("Successfully failed stuck job {} in app_instance {}, tx: {}", job.job_sequence, app_instance_id, tx_hash);
+                                        }
                                     }
-                                } else {
-                                    if is_settlement {
-                                        error!("Failed to mark stuck SETTLEMENT job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
-                                    } else {
-                                        error!("Failed to mark stuck job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
+                                    None => {
+                                        if is_settlement {
+                                            error!("Failed to mark stuck SETTLEMENT job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
+                                        } else {
+                                            error!("Failed to mark stuck job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
+                                        }
                                     }
                                 }
                             }
