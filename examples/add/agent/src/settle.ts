@@ -350,62 +350,57 @@ export async function settle(params: SettleParams): Promise<void> {
 
     // Update block state data availability on Sui (using the same serialized data that contains both proof and state)
     console.log("📝 Updating block state data availability on Sui...");
-    try {
-      const updateStateDAResponse = await updateBlockStateDataAvailability(
-        currentBlockNumber,
-        blockProofSerialized // The serialized proof contains both proof and state data
-      );
+    const updateStateDAResponse = await updateBlockStateDataAvailability(
+      currentBlockNumber,
+      blockProofSerialized // The serialized proof contains both proof and state data
+    );
 
-      if (!updateStateDAResponse.success) {
-        throw new Error(
-          `Failed to update block state DA: ${
-            updateStateDAResponse.message || "Unknown error"
-          }`
-        );
-      }
-
-      console.log(
-        `✅ Block state DA updated on Sui for block ${currentBlockNumber}`
-      );
-      console.log(
-        `  Response: success=${updateStateDAResponse.success}, message=${updateStateDAResponse.message}, txHash=${updateStateDAResponse.txHash}`
-      );
-    } catch (error: any) {
+    if (!updateStateDAResponse.success) {
       console.error(
-        `❌ Failed to update block state DA on Sui: ${error.message}`
+        `❌ Failed to update block state DA on Sui: ${
+          updateStateDAResponse.message || "Unknown error"
+        }`
       );
-      throw error; // Re-throw to stop settlement if state DA update fails
+      throw new Error(
+        `Failed to update block state DA: ${
+          updateStateDAResponse.message || "Unknown error"
+        }`
+      );
     }
+
+    console.log(
+      `✅ Block state DA updated on Sui for block ${currentBlockNumber}`
+    );
+    console.log(
+      `  Response: success=${updateStateDAResponse.success}, message=${updateStateDAResponse.message}, txHash=${updateStateDAResponse.txHash}`
+    );
 
     // Update block proof data availability on Sui
     console.log("📝 Updating block proof data availability on Sui...");
-    try {
-      // Use the serialized proof string we already have
-      const updateDAResponse = await updateBlockProofDataAvailability(
-        currentBlockNumber,
-        blockProofSerialized
-      );
+    const updateDAResponse = await updateBlockProofDataAvailability(
+      currentBlockNumber,
+      blockProofSerialized
+    );
 
-      if (!updateDAResponse.success) {
-        throw new Error(
-          `Failed to update block proof DA: ${
-            updateDAResponse.message || "Unknown error"
-          }`
-        );
-      }
-
-      console.log(
-        `✅ Block proof DA updated on Sui for block ${currentBlockNumber}`
-      );
-      console.log(
-        `  Response: success=${updateDAResponse.success}, message=${updateDAResponse.message}, txHash=${updateDAResponse.txHash}`
-      );
-    } catch (error: any) {
+    if (!updateDAResponse.success) {
       console.error(
-        `❌ Failed to update block proof DA on Sui: ${error.message}`
+        `❌ Failed to update block proof DA on Sui: ${
+          updateDAResponse.message || "Unknown error"
+        }`
       );
-      throw error; // Re-throw to stop settlement if DA update fails
+      throw new Error(
+        `Failed to update block proof DA: ${
+          updateDAResponse.message || "Unknown error"
+        }`
+      );
     }
+
+    console.log(
+      `✅ Block proof DA updated on Sui for block ${currentBlockNumber}`
+    );
+    console.log(
+      `  Response: success=${updateDAResponse.success}, message=${updateDAResponse.message}, txHash=${updateDAResponse.txHash}`
+    );
 
     // Extract proof details
     console.log("📊 Block proof details:");
