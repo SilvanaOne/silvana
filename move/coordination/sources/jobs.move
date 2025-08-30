@@ -46,7 +46,7 @@ public struct Jobs has key, store {
     jobs: ObjectTable<u64, Job>,
     pending_jobs: VecSet<u64>,
     pending_jobs_count: u64,
-    // index: developer -> agent -> app_method -> job_id for pending jobs
+    // index: developer -> agent -> agent_method -> job_id for pending jobs
     pending_jobs_indexes: VecMap<
         String,
         VecMap<String, VecMap<String, VecSet<u64>>>,
@@ -415,7 +415,7 @@ public fun fail_job(
         app_instance,
         attempts,
         should_retry,
-        is_periodic,
+        periodic,
         next_run,
     ) = {
         let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
@@ -470,7 +470,7 @@ public fun fail_job(
     });
 
     // Check if we should retry or reschedule
-    if (should_retry || is_periodic) {
+    if (should_retry || periodic) {
         // Put back to pending and index
         add_pending_job(jobs, job_sequence);
 
@@ -485,7 +485,7 @@ public fun fail_job(
             updated_at: now,
         });
 
-        if (!should_retry && is_periodic) {
+        if (!should_retry && periodic) {
             // We scheduled the next interval
             event::emit(JobRescheduledEvent {
                 job_sequence,
@@ -496,9 +496,10 @@ public fun fail_job(
         }
     } else {
         // One-time job & no retries left -> delete
-        let job = object_table::remove(&mut jobs.jobs, job_sequence);
-
+        // Remove from pending tracking first (needs job details from storage)
         remove_pending_job(jobs, job_sequence);
+
+        let job = object_table::remove(&mut jobs.jobs, job_sequence);
 
         event::emit(JobDeletedEvent {
             job_sequence,
@@ -548,43 +549,46 @@ public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
 // Internal helper function to add a job to pending jobs set, update count and index
 // Tolerant to duplicate calls - ensures job is in pending set and index after call
 fun add_pending_job(jobs: &mut Jobs, job_sequence: u64) {
-    // Only add if not already present
+    // Add to pending set if not already present
     if (!vec_set::contains(&jobs.pending_jobs, &job_sequence)) {
         vec_set::insert(&mut jobs.pending_jobs, job_sequence);
         jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
+    };
 
-        // Get job details from storage and add to index
-        let job = object_table::borrow(&jobs.jobs, job_sequence);
-        let developer = job.developer;
-        let agent = job.agent;
-        let agent_method = job.agent_method;
+    // Always ensure the job is in the index (even if already in pending_jobs)
+    // This handles cases where pending_jobs and indexes might be out of sync
+    let job = object_table::borrow(&jobs.jobs, job_sequence);
+    let developer = job.developer;
+    let agent = job.agent;
+    let agent_method = job.agent_method;
 
-        // Get or create developer level
-        if (!vec_map::contains(&jobs.pending_jobs_indexes, &developer)) {
-            vec_map::insert(
-                &mut jobs.pending_jobs_indexes,
-                developer,
-                vec_map::empty(),
-            );
-        };
-        let developer_map = vec_map::get_mut(
+    // Get or create developer level
+    if (!vec_map::contains(&jobs.pending_jobs_indexes, &developer)) {
+        vec_map::insert(
             &mut jobs.pending_jobs_indexes,
-            &developer,
+            developer,
+            vec_map::empty(),
         );
+    };
+    let developer_map = vec_map::get_mut(
+        &mut jobs.pending_jobs_indexes,
+        &developer,
+    );
 
-        // Get or create agent level
-        if (!vec_map::contains(developer_map, &agent)) {
-            vec_map::insert(developer_map, agent, vec_map::empty());
-        };
-        let agent_map = vec_map::get_mut(developer_map, &agent);
+    // Get or create agent level
+    if (!vec_map::contains(developer_map, &agent)) {
+        vec_map::insert(developer_map, agent, vec_map::empty());
+    };
+    let agent_map = vec_map::get_mut(developer_map, &agent);
 
-        // Get or create agent_method level
-        if (!vec_map::contains(agent_map, &agent_method)) {
-            vec_map::insert(agent_map, agent_method, vec_set::empty());
-        };
-        let method_set = vec_map::get_mut(agent_map, &agent_method);
+    // Get or create agent_method level
+    if (!vec_map::contains(agent_map, &agent_method)) {
+        vec_map::insert(agent_map, agent_method, vec_set::empty());
+    };
+    let method_set = vec_map::get_mut(agent_map, &agent_method);
 
-        // Add job_sequence to the set
+    // Add job_sequence to the set if not already there
+    if (!vec_set::contains(method_set, &job_sequence)) {
         vec_set::insert(method_set, job_sequence);
     }
 }
@@ -609,13 +613,13 @@ fun remove_pending_job(jobs: &mut Jobs, job_sequence: u64) {
                 &mut jobs.pending_jobs_indexes,
                 &developer,
             );
-            
+
             if (vec_map::contains(developer_map, &agent)) {
                 let agent_map = vec_map::get_mut(developer_map, &agent);
-                
+
                 if (vec_map::contains(agent_map, &agent_method)) {
                     let method_set = vec_map::get_mut(agent_map, &agent_method);
-                    
+
                     // Remove job_sequence from the set if it exists
                     if (vec_set::contains(method_set, &job_sequence)) {
                         vec_set::remove(method_set, &job_sequence);
@@ -644,10 +648,10 @@ public fun get_job(jobs: &Jobs, job_sequence: u64): &Job {
     object_table::borrow(&jobs.jobs, job_sequence)
 }
 
-public fun get_job_mut(jobs: &mut Jobs, job_sequence: u64): &mut Job {
-    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
-    object_table::borrow_mut(&mut jobs.jobs, job_sequence)
-}
+// public fun get_job_mut(jobs: &mut Jobs, job_sequence: u64): &mut Job {
+//     assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
+//     object_table::borrow_mut(&mut jobs.jobs, job_sequence)
+// }
 
 public fun job_exists(jobs: &Jobs, job_sequence: u64): bool {
     object_table::contains(&jobs.jobs, job_sequence)
