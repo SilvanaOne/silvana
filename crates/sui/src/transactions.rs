@@ -88,9 +88,11 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
 
 /// Wait for a transaction to be available in the ledger
 /// This polls GetTransaction until the transaction is found or timeout occurs
+/// Optionally takes a CoinLockGuard to ensure the coin stays locked until confirmation
 async fn wait_for_transaction(
     tx_digest: &str,
     max_wait_ms: Option<u64>,
+    _gas_guard: Option<crate::coin::CoinLockGuard>,
 ) -> Result<()> {
     let timeout = max_wait_ms.unwrap_or(5000); // Default to 5000ms if not specified
     let start = std::time::Instant::now();
@@ -728,6 +730,7 @@ async fn get_object_details(
 
 /// Common helper function to execute app instance transactions
 /// This reduces code duplication while maintaining all error detection and features
+/// Returns the transaction digest and keeps the coin lock guard alive
 async fn execute_app_instance_function<F>(
     app_instance_str: &str,
     function_name: &str,
@@ -771,7 +774,8 @@ where
     debug!("Gas price: {}", gas_price);
 
     // Select gas coin using parallel-safe coin management
-    let (gas_coin, _gas_guard) = match fetch_coin(&mut client, sender, 100_000_000).await? {
+    // IMPORTANT: Keep the guard alive until after transaction is confirmed
+    let (gas_coin, gas_guard) = match fetch_coin(&mut client, sender, 100_000_000).await? {
         Some((coin, guard)) => (coin, guard),
         None => {
             error!("No available coins with sufficient balance for gas");
@@ -903,7 +907,8 @@ where
     );
 
     // Wait for the transaction to be available in the ledger
-    if let Err(e) = wait_for_transaction(&tx_digest, None).await {
+    // Pass the gas_guard to keep the coin locked until transaction is confirmed
+    if let Err(e) = wait_for_transaction(&tx_digest, None, Some(gas_guard)).await {
         warn!("Failed to wait for {} transaction to be available: {}", function_name, e);
         // Continue anyway, the transaction was successful
     }

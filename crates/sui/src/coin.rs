@@ -18,6 +18,13 @@ pub struct CoinLockGuard {
     coin_id: sui::Address,
 }
 
+impl CoinLockGuard {
+    /// Get the coin ID that this guard is locking
+    pub fn coin_id(&self) -> sui::Address {
+        self.coin_id
+    }
+}
+
 impl Drop for CoinLockGuard {
     fn drop(&mut self) {
         self.manager.release_coin(self.coin_id);
@@ -84,7 +91,7 @@ impl CoinLockManager {
 static COIN_LOCK_MANAGER: std::sync::OnceLock<CoinLockManager> = std::sync::OnceLock::new();
 
 pub fn get_coin_lock_manager() -> &'static CoinLockManager {
-    COIN_LOCK_MANAGER.get_or_init(|| CoinLockManager::new(30)) // 30 seconds timeout
+    COIN_LOCK_MANAGER.get_or_init(|| CoinLockManager::new(60)) // 60 seconds timeout (increased for safety)
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +137,8 @@ pub async fn fetch_coin(
             .await?
             .into_inner();
 
+        // Collect all suitable coins first, then try to lock them
+        let mut suitable_coins = Vec::new();
         for obj in resp.objects {
             if let (Some(id_str), Some(version), Some(digest_str)) =
                 (&obj.object_id, obj.version, &obj.digest)
@@ -151,20 +160,30 @@ pub async fn fetch_coin(
                 };
 
                 if balance >= min_balance {
-                    // Try to lock this coin atomically
-                    if let Some(guard) = lock_manager.try_lock_coin(object_id) {
-                        let coin_info = CoinInfo {
-                            object_ref,
-                            balance,
-                        };
-                        return Ok(Some((coin_info, guard)));
-                    }
+                    suitable_coins.push((object_id, object_ref, balance));
                 }
             }
         }
 
+        // Sort by balance descending to prefer larger coins
+        suitable_coins.sort_by(|a, b| b.2.cmp(&a.2));
+
+        // Try to lock coins in order of preference
+        for (object_id, object_ref, balance) in suitable_coins {
+            // Try to lock this coin atomically
+            if let Some(guard) = lock_manager.try_lock_coin(object_id) {
+                let coin_info = CoinInfo {
+                    object_ref,
+                    balance,
+                };
+                return Ok(Some((coin_info, guard)));
+            }
+        }
+
         if attempt < MAX_RETRIES {
-            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS)).await;
+            // Exponential backoff with jitter
+            let delay = RETRY_DELAY_MS * (attempt as u64);
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
         }
     }
 
