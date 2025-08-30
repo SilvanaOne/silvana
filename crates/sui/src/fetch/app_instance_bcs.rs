@@ -219,6 +219,9 @@ pub struct VecSet<T> { pub contents: Vec<T> }
 pub struct Jobs {
     pub id: UID,
     pub jobs: ObjectTable<u64, Job>,
+    pub failed_jobs: ObjectTable<u64, Job>,
+    pub failed_jobs_count: u64,
+    pub failed_jobs_index: VecSet<u64>,
     pub pending_jobs: VecSet<u64>,
     pub pending_jobs_count: u64,
     pub pending_jobs_indexes: VecMap<MoveString, VecMap<MoveString, VecMap<MoveString, VecSet<u64>>>>,
@@ -440,6 +443,9 @@ pub async fn fetch_app_instance_bcs(
         jobs: Some(FetchJobs {
             id: to_hex(&raw.jobs.id.id),
             jobs_table_id: table_id_hex(&raw.jobs.jobs.id),
+            failed_jobs_table_id: table_id_hex(&raw.jobs.failed_jobs.id),
+            failed_jobs_count: raw.jobs.failed_jobs_count,
+            failed_jobs_index: raw.jobs.failed_jobs_index.contents,
             pending_jobs: raw.jobs.pending_jobs.contents,
             pending_jobs_count: raw.jobs.pending_jobs_count,
             pending_jobs_indexes: vecmap_nested_to_hashmap(raw.jobs.pending_jobs_indexes),

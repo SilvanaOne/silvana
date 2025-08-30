@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         
-        Commands::Job { rpc_url, instance, job } => {
+        Commands::Job { rpc_url, instance, job, failed } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("warn"))
@@ -183,7 +183,11 @@ async fn main() -> Result<()> {
             
             // Fetch and display the job
             let jobs_table_id = if let Some(ref jobs) = app_instance.jobs {
-                &jobs.jobs_table_id
+                if failed {
+                    &jobs.failed_jobs_table_id
+                } else {
+                    &jobs.jobs_table_id
+                }
             } else {
                 error!("App instance has no jobs object");
                 return Err(anyhow::anyhow!("App instance has no jobs").into());
@@ -194,7 +198,11 @@ async fn main() -> Result<()> {
                     println!("{:#?}", job);
                 }
                 Ok(None) => {
-                    println!("Job {} not found", job);
+                    if failed {
+                        println!("Failed job {} not found", job);
+                    } else {
+                        println!("Job {} not found", job);
+                    }
                 }
                 Err(e) => {
                     error!("Failed to fetch job {}: {}", job, e);
@@ -205,7 +213,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         
-        Commands::Jobs { rpc_url, instance } => {
+        Commands::Jobs { rpc_url, instance, failed } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("warn"))
@@ -230,9 +238,24 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
             
-            // Fetch all jobs from the app instance
-            match sui::fetch::fetch_all_jobs_from_app_instance(&app_instance).await {
+            // Fetch all jobs from the app instance (failed or active based on flag)
+            let fetch_result = if failed {
+                sui::fetch::fetch_failed_jobs_from_app_instance(&app_instance).await
+            } else {
+                sui::fetch::fetch_all_jobs_from_app_instance(&app_instance).await
+            };
+            
+            match fetch_result {
                 Ok(all_jobs) => {
+                    if all_jobs.is_empty() {
+                        if failed {
+                            println!("No failed jobs found in app instance");
+                        } else {
+                            println!("No active jobs found in app instance");
+                        }
+                        return Ok(());
+                    }
+                    
                     // Print all jobs with job_sequence as key and data as hex
                     for job in all_jobs {
                         println!("{}", job.job_sequence);
@@ -305,8 +328,9 @@ async fn main() -> Result<()> {
                     }
                 }
                 Err(e) => {
-                    error!("Failed to fetch jobs: {}", e);
-                    return Err(anyhow::anyhow!("Failed to fetch jobs: {}", e).into());
+                    let job_type = if failed { "failed jobs" } else { "jobs" };
+                    error!("Failed to fetch {}: {}", job_type, e);
+                    return Err(anyhow::anyhow!("Failed to fetch {}: {}", job_type, e).into());
                 }
             }
             

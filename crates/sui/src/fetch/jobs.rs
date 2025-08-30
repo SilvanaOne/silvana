@@ -117,6 +117,12 @@ pub struct Jobs {
     pub id: String,
     /// ObjectTable ID for jobs (u64 -> Job mapping)
     pub jobs_table_id: String,
+    /// ObjectTable ID for failed_jobs (u64 -> Job mapping)
+    pub failed_jobs_table_id: String,
+    /// Count of failed jobs
+    pub failed_jobs_count: u64,
+    /// Set of failed job IDs
+    pub failed_jobs_index: Vec<u64>,
     /// Set of pending job IDs
     pub pending_jobs: Vec<u64>,
     /// Count of pending jobs
@@ -151,6 +157,54 @@ impl Jobs {
                     None
                 }
             })?;
+        
+        // Extract failed_jobs table ID
+        let failed_jobs_table_id = struct_value.fields.get("failed_jobs")
+            .and_then(|f| {
+                if let Some(prost_types::value::Kind::StructValue(table_struct)) = &f.kind {
+                    table_struct.fields.get("id").and_then(|id_field| {
+                        if let Some(prost_types::value::Kind::StringValue(id)) = &id_field.kind {
+                            Some(id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                }
+            }).unwrap_or_default();
+        
+        // Extract failed_jobs_index VecSet
+        let failed_jobs_index = struct_value.fields.get("failed_jobs_index")
+            .and_then(|f| {
+                if let Some(prost_types::value::Kind::StructValue(vecset_struct)) = &f.kind {
+                    if let Some(contents) = vecset_struct.fields.get("contents") {
+                        if let Some(prost_types::value::Kind::ListValue(list)) = &contents.kind {
+                            let mut jobs = Vec::new();
+                            for value in &list.values {
+                                match &value.kind {
+                                    Some(prost_types::value::Kind::StringValue(s)) => {
+                                        if let Ok(num) = s.parse::<u64>() {
+                                            jobs.push(num);
+                                        }
+                                    }
+                                    Some(prost_types::value::Kind::NumberValue(n)) => {
+                                        jobs.push(n.round() as u64);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Some(jobs)
+                        } else {
+                            Some(Vec::new())
+                        }
+                    } else {
+                        Some(Vec::new())
+                    }
+                } else {
+                    Some(Vec::new())
+                }
+            }).unwrap_or_else(Vec::new);
         
         // Extract pending_jobs VecSet
         let pending_jobs = struct_value.fields.get("pending_jobs")
@@ -201,6 +255,9 @@ impl Jobs {
         Some(Jobs {
             id: get_string(struct_value, "id").unwrap_or_default(),
             jobs_table_id,
+            failed_jobs_table_id,
+            failed_jobs_count: get_u64(struct_value, "failed_jobs_count"),
+            failed_jobs_index,
             pending_jobs,
             pending_jobs_count: get_u64(struct_value, "pending_jobs_count"),
             pending_jobs_indexes,
@@ -428,7 +485,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
     Ok(None)
 }
 
-/// Batch fetch multiple jobs by their IDs from the jobs ObjectTable
+/// Batch fetch multiple jobs by their IDs from any jobs ObjectTable (jobs or failed_jobs)
 /// Returns a HashMap of job_sequence -> Job for all found jobs
 pub async fn fetch_jobs_batch(
     jobs_table_id: &str,
@@ -872,4 +929,48 @@ pub async fn fetch_all_jobs_from_app_instance(
     
     debug!("Found {} total jobs in app_instance {}", all_jobs.len(), app_instance.id);
     Ok(all_jobs)
+}
+
+/// Fetch failed jobs from an app instance
+pub async fn fetch_failed_jobs_from_app_instance(
+    app_instance: &AppInstance,
+) -> Result<Vec<Job>> {
+    debug!("Fetching failed jobs from app_instance {}", app_instance.id);
+    
+    // Use the Jobs struct that's already in the AppInstance
+    if let Some(jobs) = &app_instance.jobs {
+        if jobs.failed_jobs_count == 0 {
+            debug!("No failed jobs in app_instance {}", app_instance.id);
+            return Ok(Vec::new());
+        }
+        
+        // Fetch all failed jobs using batch fetch
+        let failed_jobs_map = fetch_jobs_batch(&jobs.failed_jobs_table_id, &jobs.failed_jobs_index).await?;
+        let mut failed_jobs: Vec<Job> = failed_jobs_map.into_iter().map(|(_, job)| job).collect();
+        
+        // Sort by job_sequence for consistent ordering
+        failed_jobs.sort_by_key(|job| job.job_sequence);
+        
+        debug!("Found {} failed jobs in app_instance {}", failed_jobs.len(), app_instance.id);
+        return Ok(failed_jobs);
+    }
+    
+    debug!("No Jobs found in AppInstance {}", app_instance.id);
+    Ok(Vec::new())
+}
+
+/// Check if an app instance has any failed jobs
+pub async fn has_failed_jobs(app_instance: &AppInstance) -> bool {
+    if let Some(jobs) = &app_instance.jobs {
+        return jobs.failed_jobs_count > 0;
+    }
+    false
+}
+
+/// Get the count of failed jobs in an app instance
+pub async fn get_failed_jobs_count(app_instance: &AppInstance) -> u64 {
+    if let Some(jobs) = &app_instance.jobs {
+        return jobs.failed_jobs_count;
+    }
+    0
 }

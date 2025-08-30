@@ -74,6 +74,10 @@ pub enum Commands {
         
         /// The job sequence number to fetch
         job: u64,
+        
+        /// Fetch from failed jobs table instead of active jobs
+        #[arg(long, default_value = "false")]
+        failed: bool,
     },
     
     /// Fetch and display all jobs from an app instance
@@ -83,5 +87,9 @@ pub enum Commands {
         
         /// The app instance ID to fetch jobs from
         instance: String,
+        
+        /// Fetch failed jobs instead of active jobs
+        #[arg(long, default_value = "false")]
+        failed: bool,
     },
 }
