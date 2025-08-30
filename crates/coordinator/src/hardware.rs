@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 
 /// Hardware information for the coordinator/prover
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ static HARDWARE_INFO: OnceLock<HardwareInfo> = OnceLock::new();
 /// Get hardware information, initializing it once on first call
 pub fn get_hardware_info() -> &'static HardwareInfo {
     HARDWARE_INFO.get_or_init(|| {
-        info!("Initializing hardware information");
+        debug!("Initializing hardware information");
         detect_hardware_info()
     })
 }
@@ -38,8 +38,10 @@ fn detect_hardware_info() -> HardwareInfo {
     };
 
     info!(
-        "Detected hardware: CPU cores: {}, Architecture: {}, Memory: {} KB",
-        hardware_info.cpu_cores, hardware_info.prover_architecture, hardware_info.prover_memory
+        "Detected hardware: CPU cores: {}, Architecture: {}, Memory: {:.1} GB",
+        hardware_info.cpu_cores, 
+        hardware_info.prover_architecture, 
+        hardware_info.prover_memory as f64 / (1024.0 * 1024.0)
     );
 
     hardware_info
@@ -66,8 +68,10 @@ fn get_total_memory() -> u64 {
     match sys_info::mem_info() {
         Ok(mem_info) => {
             info!(
-                "Memory info: total={} KB, available={} KB, free={} KB",
-                mem_info.total, mem_info.avail, mem_info.free
+                "Memory info: total={:.1} GB, available={:.1} GB, free={:.1} GB",
+                mem_info.total as f64 / (1024.0 * 1024.0),
+                mem_info.avail as f64 / (1024.0 * 1024.0),
+                mem_info.free as f64 / (1024.0 * 1024.0)
             );
             mem_info.total
         }

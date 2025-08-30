@@ -250,7 +250,7 @@ impl JobSearcher {
                     // This already filters out jobs in the failed cache
                     match self.check_and_clean_pending_jobs().await? {
                         Some(job) => {
-                            info!(
+                            debug!(
                                 "Found pending job: {} in app_instance {}",
                                 job.job_sequence, job.app_instance
                             );
@@ -309,8 +309,12 @@ impl JobSearcher {
                                 }
                             }
 
+                            // Log how many containers are already running
+                            let current_agent_count = self.state.get_current_agent_count().await;
                             info!(
-                                "🐳 Starting Docker: dev={}, agent={}/{}, job_seq={}, app={}",
+                                "🐳 Starting Docker (currently {} container{} running): dev={}, agent={}/{}, job_seq={}, app={}",
+                                current_agent_count,
+                                if current_agent_count == 1 { "" } else { "s" },
                                 job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
                             );
 
@@ -604,6 +608,14 @@ async fn run_docker_container_task(
             job.agent_method.clone(),
         )
         .await;
+    
+    // Log how many containers are now running
+    let running_count = state.get_current_agent_count().await;
+    info!(
+        "🐳 Docker container started: {} container{} now running",
+        running_count,
+        if running_count == 1 { "" } else { "s" }
+    );
 
     // Start the job on Sui blockchain before processing
     debug!("🔗 Preparing to start job {} on Sui blockchain", job.job_sequence);
@@ -782,6 +794,14 @@ async fn run_docker_container_task(
 
     // Clear the agent state after Docker completes
     state.clear_current_agent(&docker_session.session_id).await;
+    
+    // Log how many containers are still running
+    let remaining_count = state.get_current_agent_count().await;
+    info!(
+        "🐳 Docker container finished: {} container{} still running",
+        remaining_count,
+        if remaining_count == 1 { "" } else { "s" }
+    );
 
     // Job will be automatically cleaned up from the database when retrieved or replaced
 
