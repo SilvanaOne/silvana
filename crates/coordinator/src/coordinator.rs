@@ -226,6 +226,7 @@ pub async fn start_coordinator(
     info!("  2️⃣ Waiting for current jobs to complete (max 5 minutes)...");
     let mut wait_time = 0;
     let max_wait = 300; // 5 minutes in seconds
+    let msg_count = 0;
     
     while wait_time < max_wait {
         // Check for force shutdown
@@ -241,12 +242,14 @@ pub async fn start_coordinator(
         }
         
         // Show more detailed progress
-        if wait_time < 60 {
-            info!("  ⏳ {} agents still running, waiting... ({}/{}s)", current_agents, wait_time, max_wait);
-        } else {
-            let minutes = wait_time / 60;
-            let seconds = wait_time % 60;
-            info!("  ⏳ {} agents still running, waiting... ({}m {}s / 5m)", current_agents, minutes, seconds);
+        if msg_count % 10 == 0 {
+            if wait_time < 60 {
+                info!("  ⏳ {} agents still running, waiting... ({}/{}s)", current_agents, wait_time, max_wait);
+            } else {
+                let minutes = wait_time / 60;
+                let seconds = wait_time % 60;
+                info!("  ⏳ {} agents still running, waiting... ({}m {}s / 5m)", current_agents, minutes, seconds);
+            }
         }
         
         tokio::time::sleep(Duration::from_secs(1)).await;

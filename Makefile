@@ -60,14 +60,14 @@ check-database-url:
 
 # Default target
 help: ## Show this help message
-	@echo "Silvana RPC Database Schema Management"
-	@echo "====================================="
+	@echo "Silvana"
+	@echo "======="
 	@echo ""
 	@echo "📋 GENERAL COMMANDS:"
 	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🏗️  BUILD & DEPLOYMENT:"
-	@grep -E '^(build):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build|build-ubuntu):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
