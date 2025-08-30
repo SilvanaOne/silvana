@@ -38,6 +38,8 @@ rand.workspace = true
 tracing-subscriber.workspace = true
 # For parallel coin management
 parking_lot.workspace = true
+# For faucet requests
+reqwest.workspace = true
 
 [dev-dependencies]
 dotenvy.workspace = true

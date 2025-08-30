@@ -4576,6 +4576,7 @@ dependencies = [
  "prost",
  "prost-types",
  "rand 0.8.5",
+ "reqwest",
  "rustls 0.23.31",
  "serde",
  "serde_json",

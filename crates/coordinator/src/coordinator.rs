@@ -25,6 +25,13 @@ pub async fn start_coordinator(
     sui::SharedSuiState::initialize(&rpc_url).await?;
     info!("✅ Connected to Sui RPC");
     
+    // Check balance and request from faucet if needed
+    info!("🚰 Checking balance and faucet availability...");
+    match sui::faucet::initialize_faucet().await {
+        Ok(()) => info!("✅ Balance check complete"),
+        Err(e) => warn!("⚠️ Failed to check/request faucet tokens: {}. Continuing with existing balance.", e),
+    }
+    
     // Initialize gas coin pool for better parallel transaction performance
     info!("🪙 Initializing gas coin pool...");
     match sui::coin_management::initialize_gas_coin_pool().await {
@@ -167,7 +174,42 @@ pub async fn start_coordinator(
     });
     info!("🔬 Started proof completion analysis task (runs every 5 minutes)");
 
-    // 5. Start job searcher in a separate thread
+    // 5. Start periodic balance check task (runs every 30 minutes)
+    let balance_check_handle = task::spawn(async move {
+        info!("💰 Starting periodic balance check task (runs every 30 minutes)...");
+        let mut interval = tokio::time::interval(Duration::from_secs(1800)); // 30 minutes
+        
+        // Skip the immediate first tick since we already checked on startup
+        interval.tick().await;
+        
+        loop {
+            interval.tick().await;
+            
+            info!("💰 Running periodic balance check...");
+            
+            // Check balance and request from faucet if below 2 SUI
+            match sui::faucet::ensure_sufficient_balance(2.0).await {
+                Ok(requested) => {
+                    if requested {
+                        info!("✅ Balance was low, requested tokens from faucet");
+                    } else {
+                        debug!("✅ Balance check complete - sufficient balance available");
+                    }
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to check/request faucet tokens: {}", e);
+                }
+            }
+            
+            // Also check if we need to split coins for the pool
+            if let Err(e) = sui::coin_management::ensure_gas_coin_pool().await {
+                warn!("⚠️ Failed to maintain gas coin pool: {}", e);
+            }
+        }
+    });
+    info!("💰 Started periodic balance check task (runs every 30 minutes)");
+
+    // 6. Start job searcher in a separate thread
     let job_searcher_state = state.clone();
     let job_searcher_handle = task::spawn(async move {
         let mut job_searcher = match JobSearcher::new(
@@ -188,7 +230,7 @@ pub async fn start_coordinator(
     });
     info!("🔍 Started job searcher thread");
 
-    // 6. Start event processor in main thread (processes events and updates shared state)
+    // 7. Start event processor in main thread (processes events and updates shared state)
     let mut processor = EventProcessor::new(config, state.clone()).await?;
     info!("👁️ Starting event monitoring...");
     
@@ -319,6 +361,7 @@ pub async fn start_coordinator(
     stuck_job_handle.abort();
     block_creation_handle.abort();
     proof_analysis_handle.abort();
+    balance_check_handle.abort();
     
     // Give job_searcher a chance to cleanup
     if !job_searcher_handle.is_finished() {

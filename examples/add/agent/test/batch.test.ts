@@ -5,10 +5,9 @@ import { action } from "./helpers/action.js";
 describe("Batch", async () => {
   it("should batch add", async () => {
     while (true) {
+      const maxDelay = Math.floor(Math.random() * 60 * 1000) + 5000;
+      console.log(`Max delay for batch: ${maxDelay / 1000}s`);
       for (let i = 0; i < 10; i++) {
-        const maxDelay = Math.floor(Math.random() * 60 * 1000) + 5000;
-        console.log(`Max delay for batch: ${maxDelay / 1000}s`);
-
         await action({
           action: "add",
           value: 1,

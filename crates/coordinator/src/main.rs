@@ -25,7 +25,7 @@ use tracing::error;
 use tracing_subscriber::prelude::*;
 use chrono::{DateTime, Utc};
 
-use crate::cli::{Cli, Commands, TransactionType};
+use crate::cli::{Cli, Commands, TransactionType, BalanceCommands};
 use crate::error::Result;
 
 #[tokio::main]
@@ -559,6 +559,63 @@ async fn main() -> Result<()> {
                     } else {
                         println!("❌ Failed to restart failed jobs");
                         return Err(anyhow::anyhow!("Transaction failed").into());
+                    }
+                }
+            }
+            
+            Ok(())
+        }
+        
+        Commands::Balance { rpc_url, command } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+            
+            // Initialize Sui connection
+            sui::SharedSuiState::initialize(&rpc_url).await?;
+            
+            match command {
+                BalanceCommands::Check => {
+                    // Use the encapsulated balance function from sui crate
+                    sui::print_balance_info().await?;
+                }
+                
+                BalanceCommands::Faucet { min_balance } => {
+                    println!("Checking balance and requesting from faucet if needed (minimum: {} SUI)...", min_balance);
+                    
+                    match sui::faucet::ensure_sufficient_balance(min_balance).await {
+                        Ok(requested) => {
+                            if requested {
+                                println!("✅ Balance was below {} SUI, requested tokens from faucet", min_balance);
+                                println!("Tokens should arrive within 1 minute");
+                            } else {
+                                println!("✅ Balance is sufficient (above {} SUI), no faucet request needed", min_balance);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to check/request faucet tokens: {}", e);
+                            return Err(anyhow::anyhow!("Failed to check/request faucet tokens: {}", e).into());
+                        }
+                    }
+                }
+                
+                BalanceCommands::Split => {
+                    println!("Checking gas coin pool and splitting if needed...");
+                    
+                    match sui::coin_management::ensure_gas_coin_pool().await {
+                        Ok(()) => {
+                            println!("✅ Gas coin pool check complete");
+                            
+                            // Show updated balance info
+                            println!("\nUpdated balance:");
+                            sui::print_balance_info().await?;
+                        }
+                        Err(e) => {
+                            error!("Failed to manage gas coin pool: {}", e);
+                            return Err(anyhow::anyhow!("Failed to manage gas coin pool: {}", e).into());
+                        }
                     }
                 }
             }

@@ -104,6 +104,15 @@ pub enum Commands {
         #[command(subcommand)]
         tx_type: TransactionType,
     },
+    
+    /// Check balance and manage faucet
+    Balance {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: String,
+        
+        #[command(subcommand)]
+        command: BalanceCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -131,4 +140,20 @@ pub enum TransactionType {
         /// The app instance ID
         instance: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum BalanceCommands {
+    /// Check the current balance
+    Check,
+    
+    /// Request tokens from faucet if balance is low
+    Faucet {
+        /// Minimum balance in SUI to maintain (default: 5.0)
+        #[arg(long, default_value = "5.0")]
+        min_balance: f64,
+    },
+    
+    /// Split coins to maintain gas coin pool
+    Split,
 }

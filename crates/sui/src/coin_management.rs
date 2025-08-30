@@ -218,7 +218,22 @@ pub async fn ensure_gas_coin_pool() -> Result<()> {
                 "No coin with sufficient balance for splitting (need at least {} MIST)",
                 config.min_faucet_coin_balance
             );
-            return Ok(());
+            
+            // Try to get tokens from faucet if we don't have enough
+            info!("Attempting to request tokens from faucet...");
+            if let Err(e) = crate::faucet::ensure_sufficient_balance(5.0).await {
+                warn!("Failed to request faucet tokens: {}", e);
+            }
+            
+            // Try one more time to find a suitable coin after faucet
+            let gas_info_after = get_gas_coins_info(&config).await?;
+            match gas_info_after.faucet_coin {
+                Some(coin) => coin,
+                None => {
+                    warn!("Still no suitable coin for splitting after faucet attempt");
+                    return Ok(());
+                }
+            }
         }
     };
     
