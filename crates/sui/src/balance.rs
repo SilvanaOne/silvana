@@ -2,6 +2,7 @@ use anyhow::Result;
 use crate::state::SharedSuiState;
 use crate::coin::{list_coins, CoinInfo};
 use crate::coin_management::{CoinPoolConfig, get_gas_coins_info, GasCoinsInfo};
+use std::env;
 
 /// Information about the account balance
 #[derive(Debug)]
@@ -54,9 +55,40 @@ pub fn get_current_address() -> String {
     shared_state.get_sui_address().to_string()
 }
 
+/// Get the current network name from SUI_CHAIN env var
+pub fn get_network_name() -> String {
+    env::var("SUI_CHAIN").unwrap_or_else(|_| "unknown".to_string())
+}
+
 /// Print formatted balance information
 pub async fn print_balance_info() -> Result<()> {
     let balance_info = get_balance_info().await?;
+    let env_network = get_network_name();
+    
+    // Try to get actual network info from RPC
+    if let Ok(info) = crate::network_info::get_network_info().await {
+        // If RPC provides a chain name, use it; otherwise use env var
+        if let Some(ref chain_name) = info.chain_name {
+            // RPC provided a meaningful chain name
+            if chain_name != &env_network && env_network != "unknown" {
+                println!("Network: {} (⚠️ env says {})", chain_name, env_network);
+            } else {
+                println!("Network: {}", chain_name);
+            }
+        } else {
+            // RPC didn't provide chain name or returned "unknown", use env var
+            println!("Network: {} (from env)", env_network);
+        }
+        
+        // Show summary
+        let summary = format!(
+            "Epoch {} | Protocol v{} | {} validators | Gas: {} MIST",
+            info.epoch, info.protocol_version, info.validator_count, info.reference_gas_price
+        );
+        println!("Stats: {}", summary);
+    } else {
+        println!("Network: {} (from env)", env_network);
+    }
     
     println!("Address: {}", balance_info.address);
     println!("Total balance: {} SUI ({} MIST)", balance_info.total_balance_sui, balance_info.total_balance);

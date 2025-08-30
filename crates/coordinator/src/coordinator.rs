@@ -23,7 +23,49 @@ pub async fn start_coordinator(
 
     // Initialize the global SharedSuiState
     sui::SharedSuiState::initialize(&rpc_url).await?;
+    
+    // Get network and address info
+    let env_network = sui::get_network_name();
+    let address = sui::get_current_address();
+    
     info!("✅ Connected to Sui RPC");
+    
+    // Verify chain configuration and get actual chain name
+    match sui::network_info::get_service_info_full().await {
+        Ok(service_info) => {
+            // Use RPC chain name if provided and not "unknown", otherwise use env
+            let network = service_info.chain_name
+                .as_ref()
+                .unwrap_or(&env_network);
+            
+            info!("🌐 Network: {}", network);
+            
+            if let Some(id) = service_info.chain_id {
+                let short_id = if id.len() > 16 { format!("{}...", &id[..16]) } else { id };
+                debug!("Chain ID: {}", short_id);
+            }
+            
+            if let Some(version) = service_info.server_version {
+                debug!("Server: {}", version);
+            }
+            
+            if let Some(height) = service_info.checkpoint_height {
+                debug!("Checkpoint height: {}", height);
+            }
+        }
+        Err(e) => {
+            debug!("Could not get service info: {}", e);
+            info!("🌐 Network: {} (from env)", env_network);
+        }
+    }
+    
+    info!("👤 Address: {}", address);
+    
+    // Try to get and display network stats
+    match sui::get_network_summary().await {
+        Ok(summary) => info!("📊 Network Stats: {}", summary),
+        Err(e) => debug!("Could not fetch network stats: {}", e),
+    }
     
     // Check balance and request from faucet if needed
     info!("🚰 Checking balance and faucet availability...");

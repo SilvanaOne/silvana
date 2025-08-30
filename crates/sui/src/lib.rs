@@ -9,6 +9,7 @@ pub mod faucet;
 pub mod fetch;
 pub mod interface;
 pub mod keypair;
+pub mod network_info;
 pub mod object_lock;
 pub mod parse;
 pub mod state;
@@ -16,8 +17,8 @@ pub mod transactions;
 
 // Re-export commonly used types
 pub use balance::{
-    get_balance_info, get_total_balance_sui, get_current_address, print_balance_info,
-    BalanceInfo,
+    get_balance_info, get_total_balance_sui, get_current_address, get_network_name,
+    print_balance_info, BalanceInfo,
 };
 pub use chain::{get_reference_gas_price, load_sender_from_env, pick_gas_object};
 pub use coin::{
@@ -30,12 +31,18 @@ pub use coin_management::{
 pub use faucet::{
     request_tokens_from_faucet, request_tokens_for_default_address, 
     ensure_sufficient_balance, initialize_faucet,
+    request_tokens_from_faucet_network, request_tokens_for_default_address_network,
+    ensure_sufficient_balance_network, FaucetNetwork,
 };
 pub use object_lock::{ObjectLockGuard, ObjectLockManager, get_object_lock_manager};
 pub use interface::SilvanaSuiInterface;
 pub use keypair::{
     bcs_serialize, generate_ed25519, parse_address, parse_sui_private_key, sign_message,
     verify_with_address,
+};
+pub use network_info::{
+    get_network_info, print_network_info, get_network_summary, get_service_info,
+    get_service_info_full, verify_chain_config, NetworkInfo, ServiceInfo,
 };
 pub use state::SharedSuiState;
 pub use transactions::{

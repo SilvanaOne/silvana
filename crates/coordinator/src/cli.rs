@@ -113,6 +113,12 @@ pub enum Commands {
         #[command(subcommand)]
         command: BalanceCommands,
     },
+    
+    /// Display network information
+    Network {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -149,9 +155,17 @@ pub enum BalanceCommands {
     
     /// Request tokens from faucet if balance is low
     Faucet {
-        /// Minimum balance in SUI to maintain (default: 5.0)
-        #[arg(long, default_value = "5.0")]
-        min_balance: f64,
+        /// Minimum balance in SUI to maintain (default: 5.0 for devnet, 10.0 for testnet)
+        #[arg(long)]
+        min_balance: Option<f64>,
+        
+        /// Network to use (devnet or testnet)
+        #[arg(long, default_value = "devnet")]
+        network: String,
+        
+        /// Amount to request in SUI (only for testnet, max 10)
+        #[arg(long)]
+        amount: Option<f64>,
     },
     
     /// Split coins to maintain gas coin pool
