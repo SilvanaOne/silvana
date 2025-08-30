@@ -1102,6 +1102,9 @@ fun test_periodic_job_reschedule_after_max_failures() {
         fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock);
         assert!(is_job_pending(get_job(&jobs, job_sequence)), 1); // Should retry
         
+        // Wait for retry interval before second attempt
+        clock::increment_for_testing(&mut clock, 60_000); // RETRY_INTERVAL_MS
+        
         // Second attempt - fail again (max attempts reached)
         start_job(&mut jobs, job_sequence, &clock);
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 2);
@@ -1131,7 +1134,7 @@ fun test_periodic_job_reschedule_after_max_failures() {
 
 #[test]
 fun test_periodic_job_retry_within_interval() {
-    let (mut scenario, clock) = setup_test();
+    let (mut scenario, mut clock) = setup_test();
     
     ts::next_tx(&mut scenario, TEST_ADDR);
     {
@@ -1168,7 +1171,10 @@ fun test_periodic_job_retry_within_interval() {
         assert!(is_job_pending(get_job(&jobs, job_sequence)), 0);
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 1);
         
-        // Can immediately retry (still within same interval)
+        // Wait for retry interval before retry
+        clock::increment_for_testing(&mut clock, 60_000); // RETRY_INTERVAL_MS
+        
+        // Can retry after waiting for retry interval
         start_job(&mut jobs, job_sequence, &clock);
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 2);
         

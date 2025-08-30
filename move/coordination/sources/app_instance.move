@@ -667,7 +667,7 @@ public fun add_metadata(
 ) {
     //only_admin(app_instance, ctx);
     vec_map::insert(&mut app_instance.metadata, key, value);
-    
+
     event::emit(MetadataAddedEvent {
         app_instance_address: app_instance.id.to_address(),
         key,
@@ -686,7 +686,7 @@ public fun set_kv(
         vec_map::remove(&mut app_instance.kv, &key);
     };
     vec_map::insert(&mut app_instance.kv, key, value);
-    
+
     event::emit(KVSetEvent {
         app_instance_address: app_instance.id.to_address(),
         key,
@@ -702,7 +702,7 @@ public fun delete_kv(
     //only_admin(app_instance, ctx);
     if (vec_map::contains(&app_instance.kv, &key)) {
         vec_map::remove(&mut app_instance.kv, &key);
-        
+
         event::emit(KVDeletedEvent {
             app_instance_address: app_instance.id.to_address(),
             key,
@@ -925,6 +925,21 @@ public fun terminate_app_job(
     clock: &Clock,
 ) {
     jobs::terminate_job(&mut app_instance.jobs, job_id, clock)
+}
+
+public fun restart_failed_app_job(
+    app_instance: &mut AppInstance,
+    job_id: u64,
+    clock: &Clock,
+) {
+    jobs::restart_failed_job(&mut app_instance.jobs, job_id, clock)
+}
+
+public fun restart_failed_app_jobs(
+    app_instance: &mut AppInstance,
+    clock: &Clock,
+) {
+    jobs::restart_failed_jobs(&mut app_instance.jobs, clock)
 }
 
 public fun get_app_job(app_instance: &AppInstance, job_id: u64): &jobs::Job {
