@@ -705,6 +705,54 @@ async fn run_docker_container_task(
         job.job_sequence, job_id, tx_digest, start_elapsed
     );
 
+    // Pull the Docker image if needed
+    info!("Pulling Docker image: {}", agent_method.docker_image);
+    let pull_start = Instant::now();
+    let _digest = match docker_manager.load_image(&agent_method.docker_image, false).await {
+        Ok(digest) => {
+            let pull_duration = pull_start.elapsed();
+            info!(
+                "Docker image pulled successfully with digest: {} in {:.1} sec",
+                digest,
+                pull_duration.as_secs_f64()
+            );
+
+            // Verify SHA256 if provided
+            if let Some(expected_sha) = &agent_method.docker_sha256 {
+                if &digest != expected_sha {
+                    error!(
+                        "Docker image SHA256 mismatch for job {}: expected {}, got {}",
+                        job.job_sequence, expected_sha, digest
+                    );
+                    state.clear_current_agent(&docker_session.session_id).await;
+                    
+                    // Log container count after clearing
+                    let remaining_count = state.get_current_agent_count().await;
+                    info!(
+                        "🐳 Docker container finished: {} container{} still running",
+                        remaining_count,
+                        if remaining_count == 1 { "" } else { "s" }
+                    );
+                    return;
+                }
+            }
+            digest
+        }
+        Err(e) => {
+            error!("Failed to pull image for job {}: {}", job.job_sequence, e);
+            state.clear_current_agent(&docker_session.session_id).await;
+            
+            // Log container count after clearing
+            let remaining_count = state.get_current_agent_count().await;
+            info!(
+                "🐳 Docker container finished: {} container{} still running",
+                remaining_count,
+                if remaining_count == 1 { "" } else { "s" }
+            );
+            return;
+        }
+    };
+
     // Configure the Docker container with memory limits
     let mut env_vars = HashMap::new();
     env_vars.insert("CHAIN".to_string(), state.get_chain().clone());

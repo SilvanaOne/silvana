@@ -30,6 +30,11 @@ interface SettleParams {
 
 export async function settle(params: SettleParams): Promise<void> {
   console.log("🚀 Starting settlement process...");
+  
+  // Time tracking for graceful shutdown
+  const startTime = Date.now();
+  const maxRunTimeMs = 600 * 1000; // 10 minutes max runtime
+  const stopAcceptingJobsMs = 400 * 1000; // Stop accepting new blocks after 400 seconds
 
   // Fetch settlement_admin metadata to get admin address and contract info
   console.log("🔍 Fetching settlement admin metadata...");
@@ -199,6 +204,27 @@ export async function settle(params: SettleParams): Promise<void> {
   console.log(`🔄 Starting settlement from block ${currentBlockNumber}`);
 
   while (true) {
+    // Check if we should continue accepting new blocks
+    const elapsedMs = Date.now() - startTime;
+    const remainingMs = maxRunTimeMs - elapsedMs;
+    const remainingForNewJobsMs = stopAcceptingJobsMs - elapsedMs;
+
+    console.log(
+      `Elapsed: ${Math.round(
+        elapsedMs / 1000
+      )}s, Max runtime remaining: ${Math.round(
+        remainingMs / 1000
+      )}s, New blocks cutoff in: ${Math.round(
+        Math.max(0, remainingForNewJobsMs / 1000)
+      )}s`
+    );
+
+    // Stop accepting new blocks after 400 seconds
+    if (elapsedMs >= stopAcceptingJobsMs) {
+      console.log("Reached 400 second cutoff - not accepting new blocks");
+      break;
+    }
+    
     console.log(`\n📦 Processing block ${currentBlockNumber}...`);
 
     const block = await getBlock(currentBlockNumber);
