@@ -78,14 +78,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             let elapsed = start_time.elapsed();
+            let tx_info = agent_job.start_tx_hash.as_ref()
+                .map(|tx| format!(", tx={}", tx))
+                .unwrap_or_default();
             info!(
-                "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db, time={:?}",
+                "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db{}, time={:?}",
                 agent_job.app_instance,
                 req.developer,
                 req.agent,
                 req.agent_method,
                 agent_job.job_sequence,
                 agent_job.pending_job.app_instance_method,
+                tx_info,
                 elapsed
             );
 
@@ -160,7 +164,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     );
 
                                     // Create AgentJob and add it to agent database
-                                    let agent_job = AgentJob::new(pending_job, &self.state);
+                                    let mut agent_job = AgentJob::new(pending_job, &self.state);
+                                    agent_job.start_tx_hash = Some(tx_digest.clone());
+                                    agent_job.start_tx_sent = true;
 
                                     // Add to pending jobs (job has been started and is being returned to agent)
                                     self.state
@@ -175,13 +181,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                                     let elapsed = start_time.elapsed();
                                     info!(
-                                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=sui, time={:?}",
+                                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, tx={}, source=sui, time={:?}",
                                         agent_job.app_instance,
                                         req.developer,
                                         req.agent,
                                         req.agent_method,
                                         agent_job.job_sequence,
                                         agent_job.pending_job.app_instance_method,
+                                        tx_digest,
                                         elapsed
                                     );
 

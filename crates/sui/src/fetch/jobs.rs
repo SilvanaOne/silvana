@@ -382,28 +382,103 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
             })
             .unwrap_or_default();
         
-        // Parse status enum
+        // Parse status enum - Move enums are represented as structs with a single field
+        // where the field name is the variant name
         let status = struct_value.fields.get("status")
             .and_then(|field| {
+                // Debug: print the raw status field
+                debug!("Raw status field: {:?}", field);
+                
                 if let Some(prost_types::value::Kind::StructValue(status_struct)) = &field.kind {
-                    // Parse JobStatus enum
-                    if let Some(variant_field) = status_struct.fields.iter().next() {
-                        match variant_field.0.as_str() {
-                            "Pending" => Some(JobStatus::Pending),
-                            "Running" => Some(JobStatus::Running),
-                            "Failed" => {
-                                if let Some(prost_types::value::Kind::StringValue(msg)) = &variant_field.1.kind {
+                    // Debug: print all fields in the status struct
+                    debug!("Status struct fields: {:?}", status_struct.fields.keys().collect::<Vec<_>>());
+                    
+                    // Parse JobStatus enum - check the @variant field
+                    if let Some(variant_field) = status_struct.fields.get("@variant") {
+                        if let Some(prost_types::value::Kind::StringValue(variant_name)) = &variant_field.kind {
+                            match variant_name.as_str() {
+                                "Pending" => Some(JobStatus::Pending),
+                                "Running" => Some(JobStatus::Running),
+                                "Failed" => {
+                                    // For Failed variant, look for the error message in another field
+                                    // It might be in a "fields" array or another structure
+                                    if let Some(fields_field) = status_struct.fields.get("fields") {
+                                        if let Some(prost_types::value::Kind::ListValue(list)) = &fields_field.kind {
+                                            if let Some(first) = list.values.first() {
+                                                if let Some(prost_types::value::Kind::StringValue(msg)) = &first.kind {
+                                                    Some(JobStatus::Failed(msg.clone()))
+                                                } else {
+                                                    Some(JobStatus::Failed("Unknown error".to_string()))
+                                                }
+                                            } else {
+                                                Some(JobStatus::Failed("Unknown error".to_string()))
+                                            }
+                                        } else {
+                                            Some(JobStatus::Failed("Unknown error".to_string()))
+                                        }
+                                    } else {
+                                        Some(JobStatus::Failed("Unknown error".to_string()))
+                                    }
+                                }
+                                _ => {
+                                    warn!("Unknown status variant: {}", variant_name);
+                                    None
+                                }
+                            }
+                        } else {
+                            warn!("@variant field is not a string");
+                            None
+                        }
+                    } else if status_struct.fields.contains_key("Pending") {
+                        // Fallback: check if variant names are direct fields
+                        Some(JobStatus::Pending)
+                    } else if status_struct.fields.contains_key("Running") {
+                        Some(JobStatus::Running)
+                    } else if let Some(failed_field) = status_struct.fields.get("Failed") {
+                        // Failed variant has an associated string value
+                        if let Some(prost_types::value::Kind::StructValue(failed_struct)) = &failed_field.kind {
+                            // The error message might be in a nested structure
+                            if let Some(msg_field) = failed_struct.fields.values().next() {
+                                if let Some(prost_types::value::Kind::StringValue(msg)) = &msg_field.kind {
                                     Some(JobStatus::Failed(msg.clone()))
                                 } else {
                                     Some(JobStatus::Failed("Unknown error".to_string()))
                                 }
+                            } else {
+                                Some(JobStatus::Failed("Unknown error".to_string()))
                             }
-                            _ => None,
+                        } else if let Some(prost_types::value::Kind::StringValue(msg)) = &failed_field.kind {
+                            // Or directly as a string
+                            Some(JobStatus::Failed(msg.clone()))
+                        } else {
+                            Some(JobStatus::Failed("Unknown error".to_string()))
                         }
                     } else {
-                        None
+                        // Fallback: try the old parsing method
+                        if let Some(variant_field) = status_struct.fields.iter().next() {
+                            warn!("Using fallback status parsing for variant: {}", variant_field.0);
+                            match variant_field.0.as_str() {
+                                "Pending" => Some(JobStatus::Pending),
+                                "Running" => Some(JobStatus::Running),
+                                "Failed" => {
+                                    if let Some(prost_types::value::Kind::StringValue(msg)) = &variant_field.1.kind {
+                                        Some(JobStatus::Failed(msg.clone()))
+                                    } else {
+                                        Some(JobStatus::Failed("Unknown error".to_string()))
+                                    }
+                                }
+                                _ => {
+                                    warn!("Unknown status variant: {}", variant_field.0);
+                                    None
+                                }
+                            }
+                        } else {
+                            warn!("Status struct has no fields");
+                            None
+                        }
                     }
                 } else {
+                    warn!("Status field is not a struct: {:?}", field);
                     None
                 }
             })

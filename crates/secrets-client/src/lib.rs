@@ -12,6 +12,7 @@ pub enum SecretsClientError {
     InvalidArgument(String),
 }
 
+#[derive(Clone)]
 pub struct SecretsClient {
     client: SilvanaRpcClient,
 }

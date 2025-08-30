@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 /// Cache for tracking failed job start attempts with automatic expiry
+#[derive(Clone)]
 pub struct FailedJobsCache {
     cache: Arc<RwLock<HashMap<(String, u64), Instant>>>, // (app_instance, job_sequence) -> last_failure_time
     expiry_duration: Duration,

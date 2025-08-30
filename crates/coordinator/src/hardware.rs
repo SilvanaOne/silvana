@@ -78,6 +78,34 @@ fn get_total_memory() -> u64 {
     }
 }
 
+/// Get current available memory in GB
+pub fn get_available_memory_gb() -> u64 {
+    match sys_info::mem_info() {
+        Ok(mem_info) => {
+            // Convert from KB to GB
+            mem_info.avail / (1024 * 1024)
+        }
+        Err(e) => {
+            warn!("Failed to get memory info: {}, using default 4GB available", e);
+            4 // Default to 4GB available
+        }
+    }
+}
+
+/// Get total system memory in GB
+pub fn get_total_memory_gb() -> u64 {
+    match sys_info::mem_info() {
+        Ok(mem_info) => {
+            // Convert from KB to GB
+            mem_info.total / (1024 * 1024)
+        }
+        Err(e) => {
+            warn!("Failed to get memory info: {}, using default 8GB total", e);
+            8 // Default to 8GB total
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

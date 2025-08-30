@@ -256,6 +256,7 @@ impl JobsTracker {
 
 
     /// Check for stuck running jobs and fail them if they've been running too long
+    /// Also check for orphaned pending jobs (jobs with Pending status but not in pending_jobs array)
     async fn fail_stuck_running_jobs(&self, instances_to_check: &[(String, Instant)]) {
         let max_running_duration = Duration::from_secs(600); // 10 minutes
         
@@ -264,7 +265,7 @@ impl JobsTracker {
             return;
         }
         
-        info!("Checking {} app_instances for stuck running jobs", instances_to_check.len());
+        info!("Checking {} app_instances for stuck running jobs and orphaned pending jobs", instances_to_check.len());
         
         for (app_instance_id, _) in instances_to_check {
             // First fetch the AppInstance object
@@ -294,7 +295,14 @@ impl JobsTracker {
                         None
                     };
                     
-                    // Check each job for stuck running state
+                    // Get the list of pending_jobs from the Jobs object
+                    let pending_jobs_list = if let Some(ref jobs_obj) = app_instance.jobs {
+                        jobs_obj.pending_jobs.clone()
+                    } else {
+                        vec![]
+                    };
+                    
+                    // Check each job for stuck running state or orphaned pending state
                     for job in jobs {
                         if matches!(job.status, sui::fetch::JobStatus::Running) {
                             // Check if job has been running for more than 10 minutes
@@ -339,6 +347,40 @@ impl JobsTracker {
                                         }
                                     }
                                 }
+                            }
+                        }
+                        // Check for orphaned pending jobs (Pending status but not in pending_jobs array)
+                        else if matches!(job.status, sui::fetch::JobStatus::Pending) {
+                            let is_in_pending_jobs = pending_jobs_list.contains(&job.job_sequence);
+                            
+                            if !is_in_pending_jobs {
+                                // This job is orphaned - it has Pending status but is not in the pending_jobs array
+                                let is_settlement = settlement_job_id.map_or(false, |id| id == job.job_sequence);
+                                
+                                if is_settlement {
+                                    error!(
+                                        "ORPHANED SETTLEMENT job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
+                                        job.job_sequence, app_instance_id, job.attempts
+                                    );
+                                } else {
+                                    error!(
+                                        "ORPHANED job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
+                                        job.job_sequence, app_instance_id, job.attempts
+                                    );
+                                }
+                                
+                                // Log additional details to help debug
+                                info!(
+                                    "Orphaned job details: job_sequence={}, created_at={}, updated_at={}, next_scheduled_at={:?}",
+                                    job.job_sequence, job.created_at, job.updated_at, job.next_scheduled_at
+                                );
+                                
+                                // TODO: We could fix this by calling a new Move function that adds the job back to pending_jobs
+                                // For now, just log it so operators know to manually intervene
+                                // Options to fix:
+                                // 1. Create a new Move function `fix_orphaned_job` that adds it back to pending_jobs
+                                // 2. Delete the job and recreate it
+                                // 3. Manually call start_job then fail_job to reset it
                             }
                         }
                     }

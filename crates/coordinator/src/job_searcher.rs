@@ -1,6 +1,7 @@
 use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
 use crate::failed_jobs_cache::FailedJobsCache;
+use crate::hardware::{get_available_memory_gb, get_total_memory_gb, get_hardware_info};
 use crate::session_id::generate_docker_session;
 use crate::settlement::fetch_all_pending_jobs;
 use crate::state::SharedState;
@@ -9,9 +10,8 @@ use secrets_client::SecretsClient;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use sui::fetch::Job;
+use sui::fetch::{Job, AgentMethod};
 use sui::fetch_agent_method;
-use sui::interface::SilvanaSuiInterface;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
@@ -19,19 +19,87 @@ use tracing::{debug, error, info, warn};
 /// Maximum random delay in milliseconds before starting a job to avoid race conditions
 const MAX_JOB_START_DELAY_MS: u64 = 10000; // 10 seconds
 
+/// Minimum memory to keep reserved for the system (8GB)
+const MIN_SYSTEM_MEMORY_GB: u64 = 8;
+
+/// Check if system has sufficient resources to run an agent
+async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Result<bool> {
+    // Check TEE requirement
+    if agent_method.requires_tee {
+        debug!("Agent requires TEE but we don't run on TEE");
+        return Ok(false);
+    }
+
+    // Get hardware info
+    let hardware = get_hardware_info();
+    
+    // Check CPU cores
+    if (hardware.cpu_cores as u16) < agent_method.min_cpu_cores {
+        debug!(
+            "Insufficient CPU cores: have {}, need {}",
+            hardware.cpu_cores, agent_method.min_cpu_cores
+        );
+        return Ok(false);
+    }
+
+    // Check concurrent agent limit
+    let current_agents = state.get_current_agent_count().await;
+    if current_agents >= crate::state::MAX_CONCURRENT_AGENTS {
+        debug!(
+            "Maximum concurrent agents ({}) reached",
+            crate::state::MAX_CONCURRENT_AGENTS
+        );
+        return Ok(false);
+    }
+
+    // Calculate total memory required by currently running agents
+    let running_agents = state.get_all_current_agents().await;
+    let mut total_memory_used_gb = 0u64;
+    
+    for (_session_id, agent_info) in running_agents {
+        // Fetch agent method to get memory requirements
+        if let Ok(method) = fetch_agent_method(&agent_info.developer, &agent_info.agent, &agent_info.agent_method).await {
+            total_memory_used_gb += method.min_memory_gb as u64;
+        }
+    }
+
+    // Add memory requirement for this new agent
+    let total_memory_needed_gb = total_memory_used_gb + agent_method.min_memory_gb as u64;
+    
+    // Check against total system memory minus reserved
+    let total_memory_gb = get_total_memory_gb();
+    if total_memory_needed_gb > total_memory_gb.saturating_sub(MIN_SYSTEM_MEMORY_GB) {
+        debug!(
+            "Insufficient total memory: need {} GB (including {} GB for new agent), have {} GB (minus {} GB reserved)",
+            total_memory_needed_gb, agent_method.min_memory_gb, total_memory_gb, MIN_SYSTEM_MEMORY_GB
+        );
+        return Ok(false);
+    }
+
+    // Check against available memory
+    let available_memory_gb = get_available_memory_gb();
+    if (agent_method.min_memory_gb as u64) > available_memory_gb {
+        debug!(
+            "Insufficient available memory: need {} GB, have {} GB available",
+            agent_method.min_memory_gb, available_memory_gb
+        );
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
 /// State of the job searcher
 #[derive(Debug, Clone, PartialEq)]
 enum SearcherState {
     /// Looking for jobs
     Searching,
-    /// Running a Docker container
-    RunningDocker,
 }
 
 /// Job searcher that monitors shared state and runs Docker containers
 pub struct JobSearcher {
     state: SharedState,
-    docker_manager: DockerManager,
+    docker_manager: Arc<DockerManager>,
     container_timeout_secs: u64,
     searcher_state: Arc<RwLock<SearcherState>>,
     secrets_client: Option<SecretsClient>,
@@ -46,7 +114,7 @@ impl JobSearcher {
 
         Ok(Self {
             state,
-            docker_manager,
+            docker_manager: Arc::new(docker_manager),
             container_timeout_secs,
             searcher_state: Arc::new(RwLock::new(SearcherState::Searching)),
             secrets_client: None,
@@ -202,16 +270,43 @@ impl JobSearcher {
                                 continue;
                             }
 
-                            // Check if we can start another container (under the limit)
-                            if self.state.get_current_agent_count().await
-                                >= crate::state::MAX_CONCURRENT_AGENTS
-                            {
-                                debug!(
-                                    "Maximum concurrent agents ({}) reached, waiting",
-                                    crate::state::MAX_CONCURRENT_AGENTS
-                                );
-                                sleep(Duration::from_secs(1)).await;
-                                continue;
+                            // Fetch agent method configuration first to check resource requirements
+                            let agent_method = match fetch_agent_method(&job.developer, &job.agent, &job.agent_method).await {
+                                Ok(method) => {
+                                    debug!(
+                                        "Agent method for {}/{}/{}: memory={}GB, cpu={}, tee={}",
+                                        job.developer, job.agent, job.agent_method,
+                                        method.min_memory_gb, method.min_cpu_cores, method.requires_tee
+                                    );
+                                    method
+                                }
+                                Err(e) => {
+                                    error!("Failed to fetch agent method for job {}: {}", job.job_sequence, e);
+                                    // Add to failed cache to avoid retrying immediately
+                                    self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+                                    continue;
+                                }
+                            };
+
+                            // Check if we have sufficient resources to run this agent
+                            match can_run_agent(&self.state, &agent_method).await {
+                                Ok(true) => {
+                                    // Resources available, continue
+                                }
+                                Ok(false) => {
+                                    debug!(
+                                        "Insufficient resources to run agent {}/{}/{}",
+                                        job.developer, job.agent, job.agent_method
+                                    );
+                                    // Wait a bit before checking again
+                                    sleep(Duration::from_secs(2)).await;
+                                    continue;
+                                }
+                                Err(e) => {
+                                    error!("Error checking resources for agent: {}", e);
+                                    sleep(Duration::from_secs(1)).await;
+                                    continue;
+                                }
                             }
 
                             info!(
@@ -219,22 +314,28 @@ impl JobSearcher {
                                 job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
                             );
 
-                            // Set state to running Docker
-                            {
-                                let mut state = self.searcher_state.write().await;
-                                *state = SearcherState::RunningDocker;
-                            }
-
-                            // Run the Docker container
-                            self.run_docker_container(job).await;
-
-                            // Set state back to searching
-                            {
-                                let mut state = self.searcher_state.write().await;
-                                *state = SearcherState::Searching;
-                            }
+                            // Clone necessary data for the spawned task
+                            let state_clone = self.state.clone();
+                            let docker_manager_clone = self.docker_manager.clone();
+                            let failed_jobs_cache_clone = self.failed_jobs_cache.clone();
+                            let container_timeout_secs = self.container_timeout_secs;
+                            let secrets_client_clone = self.secrets_client.clone();
+                            
+                            // Spawn a task to run the Docker container in parallel
+                            tokio::spawn(async move {
+                                run_docker_container_task(
+                                    job,
+                                    agent_method,
+                                    state_clone,
+                                    docker_manager_clone,
+                                    failed_jobs_cache_clone,
+                                    container_timeout_secs,
+                                    secrets_client_clone,
+                                ).await;
+                            });
 
                             // Continue immediately to check for more jobs
+                            // This allows multiple containers to run in parallel
                             continue;
                         }
                         None => {
@@ -245,11 +346,6 @@ impl JobSearcher {
                             sleep(Duration::from_secs(1)).await;
                         }
                     }
-                }
-                SearcherState::RunningDocker => {
-                    // This shouldn't happen as we handle Docker synchronously
-                    warn!("Job searcher in RunningDocker state unexpectedly");
-                    sleep(Duration::from_millis(100)).await;
                 }
             }
         }
@@ -324,361 +420,9 @@ impl JobSearcher {
         }
     }
 
-    /// Run a Docker container for a pending job
-    async fn run_docker_container(&mut self, job: Job) {
-        let job_start = Instant::now();
-
-        debug!(
-            "🐳 Running Docker: dev={}, agent={}/{}, job_seq={}, app={}",
-            job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
-        );
-
-        // Generate Docker session keys
-        let docker_session = match generate_docker_session() {
-            Ok(session) => session,
-            Err(e) => {
-                error!(
-                    "Failed to generate Docker session for job {}: {}",
-                    job.job_sequence, e
-                );
-                return;
-            }
-        };
-
-        // Set current agent in shared state with session_id
-        self.state
-            .set_current_agent(
-                docker_session.session_id.clone(),
-                job.developer.clone(),
-                job.agent.clone(),
-                job.agent_method.clone(),
-            )
-            .await;
-
-        // Fetch agent method configuration
-        let agent_fetch_start = Instant::now();
-        let agent_method =
-            match fetch_agent_method(&job.developer, &job.agent, &job.agent_method)
-                .await
-            {
-                Ok(method) => {
-                    let agent_fetch_duration = agent_fetch_start.elapsed();
-                    info!(
-                        "⏱️ Agent method fetch time: {}ms",
-                        agent_fetch_duration.as_millis()
-                    );
-                    info!(
-                        "Agent Method: image={}, sha256={:?}, memory={}GB, cpu={}, tee={}",
-                        method.docker_image,
-                        method.docker_sha256,
-                        method.min_memory_gb,
-                        method.min_cpu_cores,
-                        method.requires_tee
-                    );
-                    method
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to fetch agent method for job {}: {}",
-                        job.job_sequence, e
-                    );
-                    self.state
-                        .clear_current_agent(&docker_session.session_id)
-                        .await;
-                    return;
-                }
-            };
-
-        // Start the job on Sui blockchain before processing
-        debug!("🔗 Preparing to start job {} on Sui blockchain", job.job_sequence);
-
-        // Add random delay to avoid race conditions with other coordinators
-        use rand::Rng;
-        let delay_ms = rand::thread_rng().gen_range(0..MAX_JOB_START_DELAY_MS);
-        debug!("Adding random delay of {}ms before starting job {} to avoid race conditions", delay_ms, job.job_sequence);
-        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-
-        // Check if job is still in pending_jobs list after the delay
-        let job_still_pending = if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
-            // Check if job is in the pending_jobs VecSet
-            if let Some(jobs) = &app_inst.jobs {
-                jobs.pending_jobs.contains(&job.job_sequence)
-            } else {
-                false
-            }
-        } else {
-            // If we can't fetch app instance, assume job might still be pending
-            true
-        };
-
-        if !job_still_pending {
-            warn!("Job {} is no longer in pending_jobs list after delay - already started by another coordinator", job.job_sequence);
-            // Add to failed jobs cache to prevent immediate retries
-            self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
-            self.state.clear_current_agent(&docker_session.session_id).await;
-            return;
-        }
-
-        debug!("Job {} is still pending after delay, attempting to start", job.job_sequence);
-
-        // Try to start the job on blockchain - NO RETRIES since other coordinators might be handling it
-        let start_time = Instant::now();
-        
-        debug!("Attempting to start job {} (single attempt, no retries)", job.job_sequence);
-        
-        match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await {
-            Ok(tx_digest) => {
-                debug!("Successfully started job {} on blockchain, tx: {}", job.job_sequence, tx_digest);
-            }
-            Err(e) => {
-                let error_str = e.to_string();
-                
-                // Check if the error is because the job is not in pending state or not found
-                // This can happen if another coordinator already started it
-                if error_str.contains("Job is not in pending state") || 
-                   error_str.contains("EJobNotPending") ||
-                   error_str.contains("13906835325394878469") || // EJobNotPending abort code
-                   error_str.contains("Job not found") ||
-                   error_str.contains("EJobNotFound") ||
-                   error_str.contains("13906835322940243973") { // EJobNotFound abort code
-                    warn!("Job {} cannot be started - likely already handled by another coordinator: {}", job.job_sequence, error_str);
-                    
-                    // Add to failed jobs cache so we don't try again for 5 minutes
-                    self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
-                    
-                    // Clear the agent state and return
-                    self.state.clear_current_agent(&docker_session.session_id).await;
-                    return;
-                }
-                
-                // This can happen due to race conditions even with our random delay
-                // Log as warning since it's expected in a multi-coordinator environment
-                warn!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
-                
-                // No retries - add to failed cache and move on
-                self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
-                self.state.clear_current_agent(&docker_session.session_id).await;
-                return;
-            }
-        }
-        
-        let start_elapsed = start_time.elapsed();
-
-        // Add job to agent database as ready for gRPC retrieval
-        let agent_job = AgentJob::new(job.clone(), &self.state);
-        let job_id = agent_job.job_id.clone();
-        self.state.get_agent_job_db().add_ready_job(agent_job).await;
-        
-        info!(
-            "✅ Started job: seq={}, dev={}, agent={}/{}, job_id={}, time={:?}",
-            job.job_sequence, job.developer, job.agent, job.agent_method, job_id, start_elapsed
-        );
-
-        // Pull the Docker image
-        info!("Pulling Docker image: {}", agent_method.docker_image);
-        let pull_start = Instant::now();
-        let _digest = match self
-            .docker_manager
-            .load_image(&agent_method.docker_image, false)
-            .await
-        {
-            Ok(digest) => {
-                let pull_duration = pull_start.elapsed();
-                info!(
-                    "Docker image pulled successfully with digest: {} in {:.1} sec",
-                    digest,
-                    pull_duration.as_secs_f64()
-                );
-
-                // Verify SHA256 if provided
-                if let Some(expected_sha) = &agent_method.docker_sha256 {
-                    if &digest != expected_sha {
-                        error!(
-                            "Image SHA mismatch for job {}: expected {}, got {}",
-                            job.job_sequence, expected_sha, digest
-                        );
-                        self.state
-                            .clear_current_agent(&docker_session.session_id)
-                            .await;
-                        return;
-                    }
-                }
-                digest
-            }
-            Err(e) => {
-                error!("Failed to pull image for job {}: {}", job.job_sequence, e);
-                self.state
-                    .clear_current_agent(&docker_session.session_id)
-                    .await;
-                return;
-            }
-        };
-
-        // Docker session was already generated earlier
-
-        // Prepare container configuration with new environment variables
-        let mut env_vars = HashMap::new();
-        env_vars.insert("CHAIN".to_string(), self.state.get_chain().clone());
-        env_vars.insert(
-            "COORDINATOR_ID".to_string(),
-            self.state.get_coordinator_id().clone(),
-        );
-        env_vars.insert("SESSION_ID".to_string(), docker_session.session_id.clone());
-        env_vars.insert(
-            "SESSION_PRIVATE_KEY".to_string(),
-            docker_session.session_private_key,
-        );
-        env_vars.insert("DEVELOPER".to_string(), job.developer.clone());
-        env_vars.insert("AGENT".to_string(), job.agent.clone());
-        env_vars.insert("AGENT_METHOD".to_string(), job.agent_method.clone());
-
-        // Retrieve secrets if secrets client is available
-        if let Some(ref mut secrets_client) = self.secrets_client {
-            match Self::retrieve_secrets_for_job(secrets_client, &job).await {
-                Ok(secrets) => {
-                    for (key, value) in secrets {
-                        env_vars.insert(format!("SECRET_{}", key.to_uppercase()), value);
-                    }
-                    info!(
-                        "Retrieved {} secrets for job {}",
-                        env_vars.len() - 7,
-                        job.job_sequence
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to retrieve secrets for job {}: {}",
-                        job.job_sequence, e
-                    );
-                    // Continue without secrets - let the agent decide if this is acceptable
-                }
-            }
-        }
-
-        let container_config = ContainerConfig {
-            image_name: agent_method.docker_image.clone(),
-            image_source: agent_method.docker_image.clone(),
-            command: vec![],
-            env_vars,
-            port_bindings: HashMap::new(),
-            volume_binds: vec![],
-            timeout_seconds: self.container_timeout_secs,
-            memory_limit_mb: Some((agent_method.min_memory_gb as u64) * 1024),
-            cpu_cores: Some(agent_method.min_cpu_cores as f64),
-            network_mode: if agent_method.requires_tee {
-                Some("host".to_string())
-            } else {
-                None
-            },
-            requires_tee: agent_method.requires_tee,
-            extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
-        };
-
-        // Run the container
-        let container_start = Instant::now();
-        
-        // Store job info before running container
-        let job_clone = job.clone();
-        
-        // Run the container and get the result (which includes container_id)
-        let container_result = self.docker_manager.run_container(&container_config).await;
-        
-        // If successful, track the container ID
-        if let Ok(ref result) = container_result {
-            *self.current_job_info.write().await = Some((result.container_id.clone(), job_clone));
-        }
-        
-        // Clear the tracking after completion
-        *self.current_job_info.write().await = None;
-
-        match container_result {
-            Ok(result) => {
-                let container_duration = container_start.elapsed();
-                debug!(
-                    "⏱️ Container execution time: {}ms",
-                    container_duration.as_millis()
-                );
-                debug!(
-                    "Container completed for job {}: exit_code={}, time={}ms",
-                    job.job_sequence, result.exit_code, result.duration_ms
-                );
-                if !result.logs.is_empty() {
-                    info!("Container logs:\n{}", result.logs);
-                }
-
-                let total_duration = job_start.elapsed();
-                info!(
-                    "✅ Docker completed: dev={}, agent={}/{}, job_seq={}, time={:?}",
-                    job.developer, job.agent, job.agent_method, job.job_sequence, total_duration
-                );
-            }
-            Err(e) => {
-                let total_duration = job_start.elapsed();
-                error!(
-                    "❌ Docker failed: dev={}, agent={}/{}, job_seq={}, error={}, time={:?}",
-                    job.developer, job.agent, job.agent_method, job.job_sequence, e, total_duration
-                );
-            }
-        }
-
-        // Small delay to allow any pending gRPC operations to complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // Clean up any jobs (ready or pending) that weren't completed/failed via gRPC
-        debug!(
-            "Starting cleanup of uncompleted jobs for agent {}/{}:{}",
-            job.developer, job.agent, job.agent_method
-        );
-        let jobs_to_fail = self
-            .state
-            .get_agent_job_db()
-            .cleanup_all_jobs_for_agent(&job.developer, &job.agent, &job.agent_method)
-            .await;
-
-        if !jobs_to_fail.is_empty() {
-            info!(
-                "Cleaning up {} uncompleted jobs after Docker termination",
-                jobs_to_fail.len()
-            );
-
-            let mut sui_interface = SilvanaSuiInterface::new();
-
-            for uncompleted_job in jobs_to_fail {
-                let error_message = "Job not completed before Docker container termination";
-                info!("Auto-failing uncompleted job {}", uncompleted_job.job_id);
-
-                match sui_interface
-                    .fail_job(
-                        &uncompleted_job.app_instance,
-                        uncompleted_job.job_sequence,
-                        error_message,
-                    )
-                    .await
-                {
-                    Some(tx_hash) => {
-                        info!(
-                            "Successfully auto-failed uncompleted job {} on blockchain, tx: {}",
-                            uncompleted_job.job_id, tx_hash
-                        );
-                    }
-                    None => {
-                        error!(
-                            "Failed to auto-fail uncompleted job {} on blockchain",
-                            uncompleted_job.job_id
-                        );
-                    }
-                }
-            }
-        }
-
-        // Clear current agent after container finishes
-        self.state
-            .clear_current_agent(&docker_session.session_id)
-            .await;
-    }
-
-    /// Retrieve secrets for a job from the secrets storage
-    async fn retrieve_secrets_for_job(
+    /// Retrieve secrets for a job from the secrets storage (old version, no longer used)
+    #[allow(dead_code)]
+    async fn retrieve_secrets_for_job_old(
         secrets_client: &mut SecretsClient,
         job: &Job,
     ) -> Result<HashMap<String, String>> {
@@ -761,4 +505,289 @@ impl JobSearcher {
             None
         }
     }
+}
+
+/// Standalone function to run a Docker container for a job (for parallel execution)
+/// Retrieve secrets for a job from the secrets storage
+async fn retrieve_secrets_for_job(
+    secrets_client: &mut SecretsClient,
+    job: &Job,
+) -> Result<HashMap<String, String>> {
+    let mut secrets = HashMap::new();
+
+    // TODO: Replace with actual signature - for now using empty signature as placeholder
+    let placeholder_signature = vec![];
+
+    // Try to retrieve secrets at different scopes, from most specific to least specific
+    let secret_attempts = vec![
+        // Most specific: developer + agent + app + app_instance + name
+        (Some("secret"), Some(job.app_instance.as_str())),
+        // Developer + agent + app + app_instance (general secret)
+        (None, Some(job.app_instance.as_str())),
+        // Developer + agent + app (app-level secret)
+        (None, None),
+    ];
+
+    for (name, app_instance) in secret_attempts {
+        match secrets_client
+            .retrieve_secret(
+                &job.developer,
+                &job.agent,
+                Some(&job.agent), // Using agent as app for now
+                app_instance,
+                name,
+                &placeholder_signature,
+            )
+            .await
+        {
+            Ok(secret_value) => {
+                let key = match (name, app_instance) {
+                    (Some(n), Some(_)) => format!("{}_{}", n, "instance"),
+                    (None, Some(_)) => "instance".to_string(),
+                    _ => "app".to_string(),
+                };
+                debug!("Retrieved secret '{}' for job {}", key, job.job_sequence);
+                secrets.insert(key, secret_value);
+            }
+            Err(secrets_client::SecretsClientError::SecretNotFound) => {
+                // Secret not found at this scope, try next one
+                continue;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to retrieve secret for job {}: {}",
+                    job.job_sequence, e
+                );
+                // Continue trying other secrets
+            }
+        }
+    }
+
+    Ok(secrets)
+}
+
+/// Standalone function to run a Docker container for a job (for parallel execution)
+async fn run_docker_container_task(
+    job: Job,
+    agent_method: AgentMethod,
+    state: SharedState,
+    docker_manager: Arc<DockerManager>,
+    failed_jobs_cache: FailedJobsCache,
+    container_timeout_secs: u64,
+    mut secrets_client: Option<SecretsClient>,
+) {
+    let job_start = Instant::now();
+
+    debug!(
+        "🐳 Running Docker task: dev={}, agent={}/{}, job_seq={}, app={}",
+        job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
+    );
+
+    // Generate Docker session keys
+    let docker_session = match generate_docker_session() {
+        Ok(session) => session,
+        Err(e) => {
+            error!(
+                "Failed to generate Docker session for job {}: {}",
+                job.job_sequence, e
+            );
+            return;
+        }
+    };
+
+    // Set current agent in shared state with session_id
+    state
+        .set_current_agent(
+            docker_session.session_id.clone(),
+            job.developer.clone(),
+            job.agent.clone(),
+            job.agent_method.clone(),
+        )
+        .await;
+
+    // Start the job on Sui blockchain before processing
+    debug!("🔗 Preparing to start job {} on Sui blockchain", job.job_sequence);
+
+    // Add random delay to avoid race conditions with other coordinators
+    use rand::Rng;
+    let delay_ms = rand::thread_rng().gen_range(0..MAX_JOB_START_DELAY_MS);
+    debug!("Adding random delay of {}ms before starting job {} to avoid race conditions", delay_ms, job.job_sequence);
+    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+
+    // Check if job is still in pending_jobs list after the delay
+    let job_still_pending = if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
+        // Check if job is in the pending_jobs VecSet
+        if let Some(jobs) = &app_inst.jobs {
+            jobs.pending_jobs.contains(&job.job_sequence)
+        } else {
+            false
+        }
+    } else {
+        // If we can't fetch app instance, assume job might still be pending
+        true
+    };
+
+    if !job_still_pending {
+        warn!("Job {} is no longer in pending_jobs list after delay - already started by another coordinator", job.job_sequence);
+        // Add to failed jobs cache to prevent immediate retries
+        failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+        state.clear_current_agent(&docker_session.session_id).await;
+        return;
+    }
+
+    debug!("Job {} is still pending after delay, attempting to start", job.job_sequence);
+
+    // Try to start the job on blockchain - NO RETRIES since other coordinators might be handling it
+    let start_time = Instant::now();
+    
+    debug!("Attempting to start job {} (single attempt, no retries)", job.job_sequence);
+    
+    let tx_digest = match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await {
+        Ok(tx_digest) => {
+            debug!("Successfully started job {} on blockchain, tx: {}", job.job_sequence, tx_digest);
+            tx_digest
+        }
+        Err(e) => {
+            let error_str = e.to_string();
+            
+            // Check if the error is because the job is not in pending state or not found
+            // This can happen if another coordinator already started it
+            if error_str.contains("Job is not in pending state") || 
+               error_str.contains("EJobNotPending") ||
+               error_str.contains("13906835325394878469") || // EJobNotPending abort code
+               error_str.contains("Job not found") ||
+               error_str.contains("EJobNotFound") ||
+               error_str.contains("13906835322940243973") { // EJobNotFound abort code
+                warn!("Job {} cannot be started - likely already handled by another coordinator: {}", job.job_sequence, error_str);
+                
+                // Add to failed jobs cache so we don't try again for 5 minutes
+                failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+                
+                // Clear the agent state and return
+                state.clear_current_agent(&docker_session.session_id).await;
+                return;
+            }
+            
+            // This can happen due to race conditions even with our random delay
+            // Log as warning since it's expected in a multi-coordinator environment
+            warn!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
+            
+            // No retries - add to failed cache and move on
+            failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+            state.clear_current_agent(&docker_session.session_id).await;
+            return;
+        }
+    };
+    
+    let start_elapsed = start_time.elapsed();
+
+    // Add job to agent database as ready for gRPC retrieval
+    let mut agent_job = AgentJob::new(job.clone(), &state);
+    agent_job.start_tx_hash = Some(tx_digest.clone());
+    agent_job.start_tx_sent = true;
+    let job_id = agent_job.job_id.clone();
+    state.get_agent_job_db().add_ready_job(agent_job).await;
+
+    info!(
+        "✅ Job {} started and ready for agent, job_id: {}, tx: {}, start_time: {:?}",
+        job.job_sequence, job_id, tx_digest, start_elapsed
+    );
+
+    // Configure the Docker container with memory limits
+    let mut env_vars = HashMap::new();
+    env_vars.insert("CHAIN".to_string(), state.get_chain().clone());
+    env_vars.insert("COORDINATOR_ID".to_string(), state.get_coordinator_id().clone());
+    env_vars.insert("SESSION_ID".to_string(), docker_session.session_id.clone());
+    env_vars.insert("SESSION_PRIVATE_KEY".to_string(), docker_session.session_private_key);
+    env_vars.insert("DEVELOPER".to_string(), job.developer.clone());
+    env_vars.insert("AGENT".to_string(), job.agent.clone());
+    env_vars.insert("AGENT_METHOD".to_string(), job.agent_method.clone());
+    
+    // Retrieve secrets if secrets client is available
+    if let Some(ref mut secrets_client) = secrets_client {
+        match retrieve_secrets_for_job(secrets_client, &job).await {
+            Ok(secrets) => {
+                for (key, value) in secrets {
+                    env_vars.insert(format!("SECRET_{}", key.to_uppercase()), value);
+                }
+                info!(
+                    "Retrieved {} secrets for job {}",
+                    env_vars.len() - 7,
+                    job.job_sequence
+                );
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to retrieve secrets for job {}: {}",
+                    job.job_sequence, e
+                );
+                // Continue without secrets - let the agent decide if this is acceptable
+            }
+        }
+    }
+    
+    let config = ContainerConfig {
+        image_name: agent_method.docker_image.clone(),
+        image_source: agent_method.docker_image.clone(),
+        command: vec![],
+        env_vars,
+        port_bindings: HashMap::new(),
+        volume_binds: vec![],
+        timeout_seconds: container_timeout_secs,
+        // Set memory limit based on agent method requirements (convert GB to MB)
+        memory_limit_mb: Some((agent_method.min_memory_gb as u64) * 1024),
+        // Set CPU cores limit
+        cpu_cores: Some(agent_method.min_cpu_cores as f64),
+        network_mode: if agent_method.requires_tee {
+            Some("host".to_string())
+        } else {
+            None
+        },
+        requires_tee: agent_method.requires_tee,
+        extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
+    };
+
+    // Run the Docker container
+    let docker_start = Instant::now();
+    match docker_manager.run_container(&config).await {
+        Ok(result) => {
+            let docker_elapsed = docker_start.elapsed();
+            let total_elapsed = job_start.elapsed();
+            
+            if result.exit_code == 0 {
+                info!(
+                    "✅ Docker container succeeded for job {} (docker: {:?}, total: {:?})",
+                    job.job_sequence, docker_elapsed, total_elapsed
+                );
+            } else {
+                error!(
+                    "❌ Docker container failed for job {} with exit code {} (docker: {:?}, total: {:?})",
+                    job.job_sequence, result.exit_code, docker_elapsed, total_elapsed
+                );
+            }
+
+            if !result.logs.is_empty() {
+                debug!("Docker logs: {}", result.logs);
+            }
+        }
+        Err(e) => {
+            let docker_elapsed = docker_start.elapsed();
+            let total_elapsed = job_start.elapsed();
+            error!(
+                "Failed to run Docker container for job {}: {} (docker: {:?}, total: {:?})",
+                job.job_sequence, e, docker_elapsed, total_elapsed
+            );
+        }
+    }
+
+    // Clear the agent state after Docker completes
+    state.clear_current_agent(&docker_session.session_id).await;
+
+    // Job will be automatically cleaned up from the database when retrieved or replaced
+
+    info!(
+        "🏁 Job {} completed, total time: {:?}",
+        job.job_sequence,
+        job_start.elapsed()
+    );
 }

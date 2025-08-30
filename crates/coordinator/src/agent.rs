@@ -20,6 +20,7 @@ pub struct AgentJob {
     #[allow(dead_code)]
     pub sent_at: u64, // Unix timestamp when job was sent to agent
     pub start_tx_sent: bool, // Whether start_job transaction was sent
+    pub start_tx_hash: Option<String>, // Transaction hash from start_job
 }
 
 impl AgentJob {
@@ -49,6 +50,7 @@ impl AgentJob {
             pending_job,
             sent_at: timestamp,
             start_tx_sent: false,
+            start_tx_hash: None,
         }
     }
 }
@@ -232,6 +234,7 @@ impl AgentJobDatabase {
 
     /// Clean up both ready and pending jobs for a specific agent method
     /// Returns jobs that need to be failed on the blockchain
+    #[allow(dead_code)]
     pub async fn cleanup_all_jobs_for_agent(
         &self,
         developer: &str,

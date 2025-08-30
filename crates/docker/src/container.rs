@@ -283,10 +283,11 @@ impl DockerManager {
             host_config.memory = Some((memory_mb * 1024 * 1024) as i64);
         }
 
-        if let Some(cpu_cores) = config.cpu_cores {
-            host_config.cpu_quota = Some((cpu_cores * 100000.0) as i64);
-            host_config.cpu_period = Some(100000);
-        }
+        // if let Some(cpu_cores) = config.cpu_cores {
+        //     host_config.cpu_quota = Some((cpu_cores * 100000.0) as i64);
+        //     host_config.cpu_period = Some(100000);
+        // }
+
 
         Ok(ContainerCreateBody {
             image: Some(config.image_name.clone()),

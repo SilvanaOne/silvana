@@ -98,6 +98,7 @@ pub async fn create_rpc_client_from_env() -> Result<RpcClient, RpcClientError> {
 }
 
 /// Wrapper for the RPC client with additional convenience methods
+#[derive(Clone)]
 pub struct SilvanaRpcClient {
     inner: RpcClient,
 }
