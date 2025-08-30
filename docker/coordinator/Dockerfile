@@ -41,7 +41,7 @@ RUN cargo build --release --target aarch64-unknown-linux-gnu -p coordinator
 
 # Create output directory and copy binary
 RUN mkdir -p /output
-RUN cp target/aarch64-unknown-linux-gnu/release/coordinator /output/
+RUN cp target/aarch64-unknown-linux-gnu/release/silvana /output/
 
 # List the output
 RUN ls -lh /output/ && echo "✅ Binary built successfully"

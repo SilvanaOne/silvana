@@ -161,7 +161,7 @@ build-ubuntu: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
 		.
 	@echo "📦 Extracting binary from Docker image..."
 	@docker create --name coordinator-extract coordinator-builder:arm64
-	@docker cp coordinator-extract:/output/coordinator docker/coordinator/release/coordinator
+	@docker cp coordinator-extract:/output/silvana docker/coordinator/release/silvana
 	@docker rm coordinator-extract
 	@echo "🧹 Cleaning up Docker image..."
 	@docker rmi coordinator-builder:arm64 2>/dev/null || true
