@@ -60,6 +60,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
             "Received GetJob request"
         );
 
+        // Check if system is shutting down - don't return new jobs during shutdown
+        if self.state.is_shutting_down() {
+            debug!("System is shutting down, returning empty GetJob response");
+            return Ok(Response::new(GetJobResponse {
+                success: true,
+                message: "System is shutting down".to_string(),
+                job: None,
+            }));
+        }
+
         // First check if there's a ready job in the agent database
         if let Some(agent_job) = self
             .state
