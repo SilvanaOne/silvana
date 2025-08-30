@@ -231,6 +231,38 @@ pub async fn terminate_job_tx(
     ).await
 }
 
+/// Create and submit a transaction to restart a failed job
+pub async fn restart_failed_job_tx(
+    app_instance_str: &str,
+    job_sequence: u64,
+) -> Result<String> {
+    debug!("Creating restart_failed_app_job transaction for job_sequence: {}", job_sequence);
+    
+    execute_app_instance_function(
+        app_instance_str,
+        "restart_failed_app_job",
+        move |tb, app_instance_arg, clock_arg| {
+            let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
+            vec![app_instance_arg, job_sequence_arg, clock_arg]
+        },
+    ).await
+}
+
+/// Create and submit a transaction to restart all failed jobs
+pub async fn restart_failed_jobs_tx(
+    app_instance_str: &str,
+) -> Result<String> {
+    debug!("Creating restart_failed_app_jobs transaction");
+    
+    execute_app_instance_function(
+        app_instance_str,
+        "restart_failed_app_jobs",
+        move |_tb, app_instance_arg, clock_arg| {
+            vec![app_instance_arg, clock_arg]
+        },
+    ).await
+}
+
 /// Create and submit a transaction to submit a proof
 pub async fn submit_proof_tx(
     app_instance_str: &str,

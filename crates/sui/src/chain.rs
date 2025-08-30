@@ -20,12 +20,25 @@ pub fn derive_address_from_secret_key(secret_key_bytes: &[u8; 32]) -> sui::Addre
     sui_public_key.derive_address()
 }
 
-/// Load sender address and private key from environment variables
+/// Load sender address and private key from environment variables or provided key
 pub fn load_sender_from_env() -> Result<(sui::Address, sui_crypto::ed25519::Ed25519PrivateKey)> {
+    load_sender_from_env_or_key(None)
+}
+
+/// Load sender address and private key from environment variables or provided key
+pub fn load_sender_from_env_or_key(private_key_opt: Option<String>) -> Result<(sui::Address, sui_crypto::ed25519::Ed25519PrivateKey)> {
     use base64ct::Encoding;
-    let addr = sui::Address::from_str(&env::var("SUI_ADDRESS")?)?;
-    let raw = env::var("SUI_SECRET_KEY")?;
-    let key_part = raw.split_once(':').map(|(_, b)| b.to_string()).unwrap_or(raw);
+    
+    // Track if we're using a provided key
+    let using_provided_key = private_key_opt.is_some();
+    
+    // Get the private key string from parameter or environment
+    let key_part = if let Some(key) = private_key_opt {
+        key
+    } else {
+        let raw = env::var("SUI_SECRET_KEY")?;
+        raw.split_once(':').map(|(_, b)| b.to_string()).unwrap_or(raw)
+    };
     
     // Try bech32 "suiprivkey" first
     if key_part.starts_with("suiprivkey") {
@@ -44,11 +57,20 @@ pub fn load_sender_from_env() -> Result<(sui::Address, sui_crypto::ed25519::Ed25
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes[1..]);
         
-        // Verify the derived address matches
+        // Derive address from the private key
         let derived_address = derive_address_from_secret_key(&arr);
-        if addr != derived_address {
-            return Err(anyhow::anyhow!("Address mismatch: environment address does not match derived address"));
-        }
+        
+        // If private key was provided, use derived address
+        // Otherwise get and verify against environment address
+        let addr = if using_provided_key {
+            derived_address
+        } else {
+            let env_addr = sui::Address::from_str(&env::var("SUI_ADDRESS")?)?;
+            if env_addr != derived_address {
+                return Err(anyhow::anyhow!("Address mismatch: environment address does not match derived address"));
+            }
+            env_addr
+        };
         
         let sk = sui_crypto::ed25519::Ed25519PrivateKey::new(arr);
         return Ok((addr, sk));
@@ -77,6 +99,22 @@ pub fn load_sender_from_env() -> Result<(sui::Address, sui_crypto::ed25519::Ed25
     
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&bytes[..32]);
+    
+    // Derive address from the private key
+    let derived_address = derive_address_from_secret_key(&arr);
+    
+    // If private key was provided, use derived address
+    // Otherwise get and verify against environment address
+    let addr = if using_provided_key {
+        derived_address
+    } else {
+        let env_addr = sui::Address::from_str(&env::var("SUI_ADDRESS")?)?;
+        if env_addr != derived_address {
+            return Err(anyhow::anyhow!("Address mismatch: environment address does not match derived address"));
+        }
+        env_addr
+    };
+    
     let sk = sui_crypto::ed25519::Ed25519PrivateKey::new(arr);
     Ok((addr, sk))
 }

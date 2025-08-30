@@ -25,7 +25,7 @@ use tracing::error;
 use tracing_subscriber::prelude::*;
 use chrono::{DateTime, Utc};
 
-use crate::cli::{Cli, Commands};
+use crate::cli::{Cli, Commands, TransactionType};
 use crate::error::Result;
 
 #[tokio::main]
@@ -331,6 +331,58 @@ async fn main() -> Result<()> {
                     let job_type = if failed { "failed jobs" } else { "jobs" };
                     error!("Failed to fetch {}: {}", job_type, e);
                     return Err(anyhow::anyhow!("Failed to fetch {}: {}", job_type, e).into());
+                }
+            }
+            
+            Ok(())
+        }
+        
+        Commands::Transaction { rpc_url, private_key, tx_type } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+            
+            // Initialize Sui connection with private key
+            sui::SharedSuiState::initialize_with_optional_key(&rpc_url, Some(&private_key)).await?;
+            
+            // Create interface
+            let mut interface = sui::interface::SilvanaSuiInterface::new();
+            
+            // Execute the requested transaction
+            match tx_type {
+                TransactionType::TerminateJob { instance, job } => {
+                    println!("Terminating job {} in instance {}", job, instance);
+                    
+                    if interface.terminate_job(&instance, job).await {
+                        println!("✅ Successfully terminated job {}", job);
+                    } else {
+                        println!("❌ Failed to terminate job {}", job);
+                        return Err(anyhow::anyhow!("Transaction failed").into());
+                    }
+                }
+                
+                TransactionType::RestartFailedJob { instance, job } => {
+                    println!("Restarting failed job {} in instance {}", job, instance);
+                    
+                    if interface.restart_failed_job(&instance, job).await {
+                        println!("✅ Successfully restarted failed job {}", job);
+                    } else {
+                        println!("❌ Failed to restart failed job {}", job);
+                        return Err(anyhow::anyhow!("Transaction failed").into());
+                    }
+                }
+                
+                TransactionType::RestartFailedJobs { instance } => {
+                    println!("Restarting all failed jobs in instance {}", instance);
+                    
+                    if interface.restart_failed_jobs(&instance).await {
+                        println!("✅ Successfully restarted all failed jobs");
+                    } else {
+                        println!("❌ Failed to restart failed jobs");
+                        return Err(anyhow::anyhow!("Transaction failed").into());
+                    }
                 }
             }
             

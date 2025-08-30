@@ -92,4 +92,43 @@ pub enum Commands {
         #[arg(long, default_value = "false")]
         failed: bool,
     },
+    
+    /// Execute blockchain transactions
+    Transaction {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: String,
+        
+        #[arg(long, env = "SUI_PRIVATE_KEY")]
+        private_key: String,
+        
+        #[command(subcommand)]
+        tx_type: TransactionType,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TransactionType {
+    /// Terminate a job on the blockchain
+    TerminateJob {
+        /// The app instance ID
+        instance: String,
+        
+        /// The job sequence number to terminate
+        job: u64,
+    },
+    
+    /// Restart a specific failed job on the blockchain
+    RestartFailedJob {
+        /// The app instance ID
+        instance: String,
+        
+        /// The job sequence number to restart
+        job: u64,
+    },
+    
+    /// Restart all failed jobs on the blockchain
+    RestartFailedJobs {
+        /// The app instance ID
+        instance: String,
+    },
 }

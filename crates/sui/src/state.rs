@@ -5,7 +5,7 @@ use sui_rpc::Client;
 use sui_sdk_types as sui;
 use sui_crypto::ed25519::Ed25519PrivateKey;
 use tracing::info;
-use crate::chain::load_sender_from_env;
+use crate::chain::load_sender_from_env_or_key;
 use anyhow::Result;
 
 // Global static values initialized once from environment variables
@@ -25,7 +25,13 @@ pub struct SharedSuiState {
 
 impl SharedSuiState {
     /// Initialize the global SharedSuiState instance
+    /// If private_key_str is provided, it will be used instead of loading from environment
     pub async fn initialize(rpc_url: &str) -> Result<()> {
+        Self::initialize_with_optional_key(rpc_url, None).await
+    }
+    
+    /// Initialize the global SharedSuiState instance with an optional private key
+    pub async fn initialize_with_optional_key(rpc_url: &str, private_key_str: Option<&str>) -> Result<()> {
         info!("Initializing SharedSuiState with RPC URL: {}", rpc_url);
         
         // Create Sui client
@@ -37,8 +43,10 @@ impl SharedSuiState {
         Self::init_chain();
         Self::init_coordination_package_id();
         
-        // Load sender address and private key from environment
-        let (sui_address, sui_private_key) = load_sender_from_env()?;
+        // Load sender address and private key - use provided key or fall back to environment
+        let (sui_address, sui_private_key) = load_sender_from_env_or_key(
+            private_key_str.map(|s| s.to_string())
+        )?;
         
         // Get coordination package ID from environment
         let coordination_package_id = COORDINATION_PACKAGE_ID.get()

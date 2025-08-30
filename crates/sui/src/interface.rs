@@ -1,4 +1,4 @@
-use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
+use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, restart_failed_job_tx, restart_failed_jobs_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use tracing::{info, warn, error, debug};
 
 /// Interface for calling Sui Move functions related to job management
@@ -76,6 +76,42 @@ impl SilvanaSuiInterface {
             }
             Err(e) => {
                 error!("Failed to terminate job {} on blockchain: {}", job_sequence, e);
+                false
+            }
+        }
+    }
+
+    /// Restart a failed job on the Sui blockchain by calling the restart_failed_app_job Move function
+    /// This moves a job from the failed_jobs table back to the active jobs table
+    /// Returns true if the transaction was successful, false if it failed
+    pub async fn restart_failed_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
+        debug!("Attempting to restart failed job {} on Sui blockchain", job_sequence);
+        
+        match restart_failed_job_tx(app_instance, job_sequence).await {
+            Ok(tx_digest) => {
+                debug!("Successfully restarted failed job {} on blockchain, tx: {}", job_sequence, tx_digest);
+                true
+            }
+            Err(e) => {
+                error!("Failed to restart failed job {} on blockchain: {}", job_sequence, e);
+                false
+            }
+        }
+    }
+
+    /// Restart all failed jobs on the Sui blockchain by calling the restart_failed_app_jobs Move function
+    /// This moves all jobs from the failed_jobs table back to the active jobs table
+    /// Returns true if the transaction was successful, false if it failed
+    pub async fn restart_failed_jobs(&mut self, app_instance: &str) -> bool {
+        debug!("Attempting to restart all failed jobs on Sui blockchain");
+        
+        match restart_failed_jobs_tx(app_instance).await {
+            Ok(tx_digest) => {
+                debug!("Successfully restarted all failed jobs on blockchain, tx: {}", tx_digest);
+                true
+            }
+            Err(e) => {
+                error!("Failed to restart all failed jobs on blockchain: {}", e);
                 false
             }
         }
