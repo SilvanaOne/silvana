@@ -24,6 +24,13 @@ pub async fn start_coordinator(
     // Initialize the global SharedSuiState
     sui::SharedSuiState::initialize(&rpc_url).await?;
     info!("✅ Connected to Sui RPC");
+    
+    // Initialize gas coin pool for better parallel transaction performance
+    info!("🪙 Initializing gas coin pool...");
+    match sui::coin_management::initialize_gas_coin_pool().await {
+        Ok(()) => info!("✅ Gas coin pool initialized"),
+        Err(e) => warn!("⚠️ Failed to initialize gas coin pool: {}. System will continue with existing coins.", e),
+    }
 
     let config = Config {
         package_id,

@@ -1,6 +1,7 @@
 // Module declarations
 pub mod chain;
 pub mod coin;
+pub mod coin_management;
 pub mod error;
 pub mod events;
 pub mod fetch;
@@ -15,6 +16,10 @@ pub mod transactions;
 pub use chain::{get_reference_gas_price, load_sender_from_env, pick_gas_object};
 pub use coin::{
     CoinInfo, CoinLockGuard, CoinLockManager, fetch_coin, get_coin_lock_manager, list_coins,
+};
+pub use coin_management::{
+    ensure_gas_coin_pool, initialize_gas_coin_pool, split_gas_coins, get_gas_coins_info,
+    CoinPoolConfig, GasCoinsInfo,
 };
 pub use object_lock::{ObjectLockGuard, ObjectLockManager, get_object_lock_manager};
 pub use interface::SilvanaSuiInterface;
