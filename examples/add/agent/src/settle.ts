@@ -427,7 +427,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
     // Create and send settlement transaction
     console.log("📝 Creating settlement transaction...");
-    const memo = `Settle Silvana block ${currentBlockNumber} ${
+    const memo = `Silvana block ${currentBlockNumber} ${
       numberOfTransactions
         ? "(" + numberOfTransactions.toString() + " txs)"
         : ""
