@@ -431,7 +431,7 @@ export async function settle(params: SettleParams): Promise<void> {
       numberOfTransactions
         ? "(" + numberOfTransactions.toString() + " txs)"
         : ""
-    })`;
+    }`;
     console.time("prepared tx");
 
     // Fetch the contract state

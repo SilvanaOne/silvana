@@ -24,10 +24,14 @@ export interface SequenceState {
   dataAvailability?: string;
 }
 
-export async function merge(
-  proof1Serialized: string,
-  proof2Serialized: string
-): Promise<string> {
+export async function merge(params: {
+  proof1Serialized: string;
+  proof2Serialized: string;
+  sequences1: bigint[];
+  sequences2: bigint[];
+}): Promise<string> {
+  const { proof1Serialized, proof2Serialized, sequences1, sequences2 } = params;
+
   console.log("Starting proof merge...");
   console.log(`Proof 1 size: ${proof1Serialized.length} chars`);
   console.log(`Proof 2 size: ${proof2Serialized.length} chars`);

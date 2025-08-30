@@ -78,7 +78,99 @@ async fn main() -> Result<()> {
             // Fetch and display the app instance
             match sui::fetch::fetch_app_instance(&instance).await {
                 Ok(app_instance) => {
-                    println!("{:#?}", app_instance);
+                    // Convert timestamps to ISO format
+                    let previous_block_timestamp_iso = DateTime::<Utc>::from_timestamp_millis(app_instance.previous_block_timestamp as i64)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| app_instance.previous_block_timestamp.to_string());
+                    
+                    let created_at_iso = DateTime::<Utc>::from_timestamp_millis(app_instance.created_at as i64)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| app_instance.created_at.to_string());
+                    
+                    // Print formatted app instance
+                    println!("AppInstance {{");
+                    println!("    id: \"{}\",", app_instance.id);
+                    println!("    silvana_app_name: \"{}\",", app_instance.silvana_app_name);
+                    
+                    if let Some(ref desc) = app_instance.description {
+                        println!("    description: Some(\"{}\"),", desc);
+                    } else {
+                        println!("    description: None,");
+                    }
+                    
+                    // Print metadata
+                    if !app_instance.metadata.is_empty() {
+                        println!("    metadata: {{");
+                        for (key, value) in &app_instance.metadata {
+                            println!("        \"{}\": \"{}\",", key, value);
+                        }
+                        println!("    }},");
+                    } else {
+                        println!("    metadata: {{}},");
+                    }
+                    
+                    // Print kv
+                    if !app_instance.kv.is_empty() {
+                        println!("    kv: {{");
+                        for (key, value) in &app_instance.kv {
+                            println!("        \"{}\": \"{}\",", key, value);
+                        }
+                        println!("    }},");
+                    } else {
+                        println!("    kv: {{}},");
+                    }
+                    
+                    // Print methods (as JSON)
+                    println!("    methods: {},", serde_json::to_string(&app_instance.methods).unwrap_or_else(|_| "{}".to_string()));
+                    
+                    // Print state (as JSON)
+                    println!("    state: {},", serde_json::to_string(&app_instance.state).unwrap_or_else(|_| "{}".to_string()));
+                    
+                    println!("    blocks_table_id: \"{}\",", app_instance.blocks_table_id);
+                    println!("    proof_calculations_table_id: \"{}\",", app_instance.proof_calculations_table_id);
+                    
+                    // Print sequence_state_manager (as JSON)
+                    println!("    sequence_state_manager: {},", serde_json::to_string(&app_instance.sequence_state_manager).unwrap_or_else(|_| "{}".to_string()));
+                    
+                    // Print jobs if present
+                    if let Some(ref jobs) = app_instance.jobs {
+                        println!("    jobs: Some(Jobs {{");
+                        println!("        id: \"{}\",", jobs.id);
+                        println!("        jobs_table_id: \"{}\",", jobs.jobs_table_id);
+                        println!("        failed_jobs_table_id: \"{}\",", jobs.failed_jobs_table_id);
+                        println!("        failed_jobs_count: {},", jobs.failed_jobs_count);
+                        println!("        failed_jobs_index: {:?},", jobs.failed_jobs_index);
+                        println!("        pending_jobs: {:?},", jobs.pending_jobs);
+                        println!("        pending_jobs_count: {},", jobs.pending_jobs_count);
+                        println!("        next_job_sequence: {},", jobs.next_job_sequence);
+                        println!("        max_attempts: {},", jobs.max_attempts);
+                        if let Some(ref settlement_job) = jobs.settlement_job {
+                            println!("        settlement_job: Some({}),", settlement_job);
+                        } else {
+                            println!("        settlement_job: None,");
+                        }
+                        println!("    }}),");
+                    } else {
+                        println!("    jobs: None,");
+                    }
+                    
+                    println!("    sequence: {},", app_instance.sequence);
+                    println!("    admin: \"{}\",", app_instance.admin);
+                    println!("    block_number: {},", app_instance.block_number);
+                    println!("    previous_block_timestamp: \"{}\",", previous_block_timestamp_iso);
+                    println!("    previous_block_last_sequence: {},", app_instance.previous_block_last_sequence);
+                    println!("    previous_block_actions_state: \"{}\",", app_instance.previous_block_actions_state);
+                    println!("    last_proved_block_number: {},", app_instance.last_proved_block_number);
+                    println!("    last_settled_block_number: {},", app_instance.last_settled_block_number);
+                    
+                    if let Some(ref chain) = app_instance.settlement_chain {
+                        println!("    settlement_chain: Some(\"{}\"),", chain);
+                    } else {
+                        println!("    settlement_chain: None,");
+                    }
+                    
+                    println!("    created_at: \"{}\",", created_at_iso);
+                    println!("}}");
                 }
                 Err(e) => {
                     error!("Failed to fetch app instance {}: {}", instance, e);
@@ -110,8 +202,93 @@ async fn main() -> Result<()> {
             
             // Fetch and display the block
             match sui::fetch::fetch_block_info(&app_instance, block).await {
-                Ok(Some(block)) => {
-                    println!("{:#?}", block);
+                Ok(Some(block_info)) => {
+                    // Convert commitments to hex
+                    let actions_commitment_hex = hex::encode(&block_info.actions_commitment);
+                    let state_commitment_hex = hex::encode(&block_info.state_commitment);
+                    let start_actions_commitment_hex = hex::encode(&block_info.start_actions_commitment);
+                    let end_actions_commitment_hex = hex::encode(&block_info.end_actions_commitment);
+                    
+                    // Convert timestamps to ISO format
+                    let created_iso = DateTime::<Utc>::from_timestamp_millis(block_info.created_at as i64)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| block_info.created_at.to_string());
+                    
+                    let state_calculated_iso = block_info.state_calculated_at
+                        .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
+                        .map(|dt| dt.to_rfc3339());
+                    
+                    let proved_at_iso = block_info.proved_at
+                        .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
+                        .map(|dt| dt.to_rfc3339());
+                    
+                    let sent_to_settlement_at_iso = block_info.sent_to_settlement_at
+                        .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
+                        .map(|dt| dt.to_rfc3339());
+                    
+                    let settled_at_iso = block_info.settled_at
+                        .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
+                        .map(|dt| dt.to_rfc3339());
+                    
+                    // Print formatted block
+                    println!("Block {{");
+                    println!("    name: \"{}\",", block_info.name);
+                    println!("    block_number: {},", block_info.block_number);
+                    println!("    start_sequence: {},", block_info.start_sequence);
+                    println!("    end_sequence: {},", block_info.end_sequence);
+                    println!("    actions_commitment: \"{}\",", actions_commitment_hex);
+                    println!("    state_commitment: \"{}\",", state_commitment_hex);
+                    println!("    time_since_last_block: {},", block_info.time_since_last_block);
+                    println!("    number_of_transactions: {},", block_info.number_of_transactions);
+                    println!("    start_actions_commitment: \"{}\",", start_actions_commitment_hex);
+                    println!("    end_actions_commitment: \"{}\",", end_actions_commitment_hex);
+                    
+                    if let Some(ref data_avail) = block_info.state_data_availability {
+                        println!("    state_data_availability: Some(\"{}\"),", data_avail);
+                    } else {
+                        println!("    state_data_availability: None,");
+                    }
+                    
+                    if let Some(ref proof_avail) = block_info.proof_data_availability {
+                        println!("    proof_data_availability: Some(\"{}\"),", proof_avail);
+                    } else {
+                        println!("    proof_data_availability: None,");
+                    }
+                    
+                    if let Some(ref tx_hash) = block_info.settlement_tx_hash {
+                        println!("    settlement_tx_hash: Some(\"{}\"),", tx_hash);
+                    } else {
+                        println!("    settlement_tx_hash: None,");
+                    }
+                    
+                    println!("    settlement_tx_included_in_block: {},", block_info.settlement_tx_included_in_block);
+                    println!("    created_at: \"{}\",", created_iso);
+                    
+                    if let Some(ref iso) = state_calculated_iso {
+                        println!("    state_calculated_at: Some(\"{}\"),", iso);
+                    } else {
+                        println!("    state_calculated_at: None,");
+                    }
+                    
+                    if let Some(ref iso) = proved_at_iso {
+                        println!("    proved_at: Some(\"{}\"),", iso);
+                    } else {
+                        println!("    proved_at: None,");
+                    }
+                    
+                    if let Some(ref iso) = sent_to_settlement_at_iso {
+                        println!("    sent_to_settlement_at: Some(\"{}\"),", iso);
+                    } else {
+                        println!("    sent_to_settlement_at: None,");
+                    }
+                    
+                    if let Some(ref iso) = settled_at_iso {
+                        println!("    settled_at: Some(\"{}\"),", iso);
+                    } else {
+                        println!("    settled_at: None,");
+                    }
+                    
+                    println!("}}");
                 }
                 Ok(None) => {
                     println!("Block {} not found", block);

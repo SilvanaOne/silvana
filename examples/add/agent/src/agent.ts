@@ -216,7 +216,12 @@ async function agent() {
               // Merge the proofs
               console.log("Starting proof merge...");
               const mergeStartTime = Date.now();
-              const mergedProof = await merge(proof1Only, proof2Only);
+              const mergedProof = await merge({
+                proof1Serialized: proof1Only,
+                proof2Serialized: proof2Only,
+                sequences1: sequences1,
+                sequences2: sequences2,
+              });
               const mergeTimeMs = Date.now() - mergeStartTime;
               console.log(
                 `Merge completed! Merged proof size: ${mergedProof.length} chars`
