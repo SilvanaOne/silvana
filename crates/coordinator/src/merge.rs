@@ -382,8 +382,9 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                         }
                         // Continue to next iteration to try another merge opportunity
                     } else if error_str.contains("already Started and not timed out") 
-                        || error_str.contains("Cannot merge") {
-                        // These are expected conditions, not errors
+                        || error_str.contains("Cannot merge")
+                        || error_str.contains("Cannot reserve proofs - likely taken by another coordinator") {
+                        // These are expected conditions in a concurrent environment, not errors
                         debug!("   → Expected condition, will try other opportunities: {}", e);
                     } else {
                         warn!("   → Unexpected error, will try other opportunities: {}", e);

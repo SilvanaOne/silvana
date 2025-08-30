@@ -68,6 +68,9 @@ num-bigint = "0.4"
 num_cpus = "1.0"
 sys-info = "0.9"
 
+# Random number generation
+rand.workspace = true
+
 # For parallel coin management (used by sui crate)
 parking_lot.workspace = true
 

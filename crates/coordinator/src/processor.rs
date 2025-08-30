@@ -126,6 +126,7 @@ impl EventProcessor {
                                         let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
                                         let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
                                         let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
+                                        let app_instance_method = extract_field(&job_details, "app_instance_method: ").unwrap_or_default();
                                         let block_number = extract_field(&job_details, "block_number: ")
                                             .and_then(|s| s.parse::<u64>().ok())
                                             .unwrap_or(0);
@@ -141,8 +142,8 @@ impl EventProcessor {
                                         ).await;
                                         
                                         info!(
-                                            "📝 JobCreated: seq={}, dev={}, agent={}/{}, block={}, seqs={}, app={}",
-                                            job_sequence, developer, agent, agent_method, block_number, sequences, 
+                                            "📝 JobCreated: seq={}, dev={}, agent={}/{}, app_method={}, block={}, seqs={}, app={}",
+                                            job_sequence, developer, agent, agent_method, app_instance_method, block_number, sequences, 
                                             &app_instance[..16.min(app_instance.len())]
                                         );
                                     }

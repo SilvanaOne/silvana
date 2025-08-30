@@ -16,6 +16,9 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 
+/// Maximum random delay in milliseconds before starting a job to avoid race conditions
+const MAX_JOB_START_DELAY_MS: u64 = 10000; // 10 seconds
+
 /// State of the job searcher
 #[derive(Debug, Clone, PartialEq)]
 enum SearcherState {
@@ -387,9 +390,15 @@ impl JobSearcher {
             };
 
         // Start the job on Sui blockchain before processing
-        debug!("🔗 Starting job {} on Sui blockchain", job.job_sequence);
+        debug!("🔗 Preparing to start job {} on Sui blockchain", job.job_sequence);
 
-        // First check if job is still in pending_jobs list before attempting to start
+        // Add random delay to avoid race conditions with other coordinators
+        use rand::Rng;
+        let delay_ms = rand::thread_rng().gen_range(0..MAX_JOB_START_DELAY_MS);
+        debug!("Adding random delay of {}ms before starting job {} to avoid race conditions", delay_ms, job.job_sequence);
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+
+        // Check if job is still in pending_jobs list after the delay
         let job_still_pending = if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
             // Check if job is in the pending_jobs VecSet
             if let Some(jobs) = &app_inst.jobs {
@@ -403,12 +412,14 @@ impl JobSearcher {
         };
 
         if !job_still_pending {
-            warn!("Job {} is no longer in pending_jobs list - likely already started by another coordinator", job.job_sequence);
+            warn!("Job {} is no longer in pending_jobs list after delay - already started by another coordinator", job.job_sequence);
             // Add to failed jobs cache to prevent immediate retries
             self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
             self.state.clear_current_agent(&docker_session.session_id).await;
             return;
         }
+
+        debug!("Job {} is still pending after delay, attempting to start", job.job_sequence);
 
         // Try to start the job on blockchain - NO RETRIES since other coordinators might be handling it
         let start_time = Instant::now();
@@ -440,7 +451,9 @@ impl JobSearcher {
                     return;
                 }
                 
-                error!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
+                // This can happen due to race conditions even with our random delay
+                // Log as warning since it's expected in a multi-coordinator environment
+                warn!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
                 
                 // No retries - add to failed cache and move on
                 self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
