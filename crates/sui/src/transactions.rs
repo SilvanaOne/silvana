@@ -9,6 +9,7 @@ use tokio::time::{sleep, Duration};
 
 use crate::chain::get_reference_gas_price;
 use crate::coin::fetch_coin;
+use crate::object_lock::get_object_lock_manager;
 use crate::state::SharedSuiState;
 
 /// Helper function to check transaction effects for errors
@@ -792,7 +793,17 @@ where
     debug!("Gas coin selected: id={} ver={} digest={} balance={}", 
         gas_coin.object_id(), gas_coin.object_ref.version(), gas_coin.object_ref.digest(), gas_coin.balance);
 
-    // Get current version and ownership info of app_instance object
+    // IMPORTANT: Lock the app_instance object BEFORE fetching its version
+    // This prevents race conditions where multiple threads fetch the same version
+    let object_lock_manager = get_object_lock_manager();
+    let app_instance_guard = object_lock_manager
+        .lock_object_with_retry(app_instance_id, 50)
+        .await
+        .context("Failed to lock app_instance object")?;
+    debug!("Locked app_instance object: {}", app_instance_id);
+
+    // Now fetch the current version and ownership info of app_instance object
+    // The object is locked, so no other thread can use it
     let (app_instance_ref, initial_shared_version) = get_object_details(app_instance_id).await
         .context("Failed to get app instance details")?;
     
@@ -912,6 +923,10 @@ where
         warn!("Failed to wait for {} transaction to be available: {}", function_name, e);
         // Continue anyway, the transaction was successful
     }
+    
+    // Release the app_instance lock after transaction is confirmed
+    drop(app_instance_guard);
+    debug!("Released app_instance lock: {}", app_instance_id);
 
     Ok(tx_digest)
 }
