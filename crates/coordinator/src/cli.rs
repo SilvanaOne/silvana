@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "coordinator")]
-#[command(about = "Silvana Coordinator CLI", long_about = None)]
+#[command(about = "Silvana CLI", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -10,7 +10,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Start the Silvana coordinator (default behavior)
+    /// Start the Silvana node
     Start {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: String,
