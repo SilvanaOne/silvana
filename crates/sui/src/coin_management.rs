@@ -87,6 +87,21 @@ pub async fn split_gas_coins(
         source_coin.object_id(), source_coin.balance, num_coins, coin_balance
     );
     
+    // Verify we have enough balance for the split plus gas
+    let total_needed = (num_coins as u64 * coin_balance) + 50_000_000;
+    if source_coin.balance < total_needed {
+        return Err(anyhow!(
+            "Insufficient balance for split: have {} MIST, need {} MIST",
+            source_coin.balance, total_needed
+        ));
+    }
+    
+    debug!("Coin details: id={}, version={}, digest={}", 
+        source_coin.object_id(), 
+        source_coin.object_ref.version(),
+        source_coin.object_ref.digest()
+    );
+    
     // Build the transaction
     let mut tb = TransactionBuilder::new();
     tb.set_sender(sender);
@@ -115,8 +130,12 @@ pub async fn split_gas_coins(
     
     // Transfer the split coins back to sender
     // split_result is an Argument::Result that contains all the split coins
+    // We need to use nested to access each individual coin from the result
     let coin_args: Vec<Argument> = (0..num_coins)
-        .filter_map(|i| Argument::nested(&split_result, i as u16))
+        .map(|i| {
+            // nested returns Option<Argument>, and we know it will succeed for valid indices
+            split_result.nested(i as u16).expect("Invalid nested index")
+        })
         .collect();
     
     let recipient = tb.input(Serialized(&sender));
@@ -132,15 +151,42 @@ pub async fn split_gas_coins(
         transaction: Some(tx.into()),
         signatures: vec![signature.into()],
         read_mask: Some(sui_rpc::field::FieldMask {
-            paths: vec!["digest".into(), "finality".into()],
+            paths: vec![
+                "transaction".into(),
+                "transaction.digest".into(), 
+                "transaction.effects".into(),
+                "transaction.effects.status".into(),
+            ],
         }),
     };
     
     debug!("Executing split transaction...");
     let resp = exec_client.execute_transaction(req).await
-        .context("Failed to execute split transaction")?;
+        .map_err(|e| {
+            error!("gRPC error executing split transaction: {}", e);
+            anyhow!("Failed to execute split transaction: {}", e)
+        })?;
     
-    let tx_digest = resp.into_inner()
+    let inner_resp = resp.into_inner();
+    
+    // Check transaction effects for any errors
+    if let Some(ref transaction) = inner_resp.transaction {
+        if let Some(ref effects) = transaction.effects {
+            if let Some(ref status) = effects.status {
+                // status is ExecutionStatus
+                if let Some(success) = status.success {
+                    if !success {
+                        error!("Split transaction failed. Error: {:?}", status.error);
+                        return Err(anyhow!("Split transaction failed: {:?}", status.error));
+                    } else {
+                        debug!("Split transaction executed successfully");
+                    }
+                }
+            }
+        }
+    }
+    
+    let tx_digest = inner_resp
         .transaction
         .and_then(|t| t.digest)
         .context("Failed to get transaction digest")?;
@@ -164,7 +210,7 @@ async fn wait_for_split_transaction(digest: &str) -> Result<()> {
         let req = proto::GetTransactionRequest {
             digest: Some(digest.to_string()),
             read_mask: Some(sui_rpc::field::FieldMask {
-                paths: vec!["transaction".into(), "finality".into()],
+                paths: vec!["transaction".into()],
             }),
         };
         
