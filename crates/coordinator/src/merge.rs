@@ -823,3 +823,149 @@ mod tests {
         assert!(request.block_proof); // Should be block proof since it covers full range
     }
 }
+
+/// Start periodic block creation task
+pub async fn start_periodic_block_creation(state: crate::state::SharedState) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::interval;
+    
+    info!("📦 Starting periodic block creation task (runs every minute)");
+    
+    let is_running = Arc::new(AtomicBool::new(false));
+    let mut check_interval = interval(Duration::from_secs(60)); // Every minute
+    check_interval.tick().await; // Skip first immediate tick
+    
+    loop {
+        // Check for shutdown
+        if state.is_shutting_down() {
+            info!("Block creation task shutting down...");
+            break;
+        }
+        
+        check_interval.tick().await;
+        
+        if state.is_shutting_down() {
+            break;
+        }
+        
+        // Skip if already running
+        if is_running.load(Ordering::Acquire) {
+            debug!("Block creation already in progress, skipping...");
+            continue;
+        }
+        
+        is_running.store(true, Ordering::Release);
+        
+        debug!("Running periodic block creation check...");
+        
+        // Get all app instances
+        let app_instances = state.get_app_instances().await;
+        
+        if !app_instances.is_empty() {
+            info!("Checking {} app instances for block creation", app_instances.len());
+            
+            for app_instance_id in app_instances {
+                if state.is_shutting_down() {
+                    break;
+                }
+                
+                // Try to create a block for this app instance
+                let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                match crate::block::try_create_block(&mut sui_interface, &app_instance_id).await {
+                    Ok(Some((tx_digest, sequences, time_since))) => {
+                        info!("✅ Created block for app instance {} - tx: {}, sequences: {}, time since last: {}s", 
+                            app_instance_id, tx_digest, sequences, time_since);
+                    }
+                    Ok(None) => {
+                        debug!("No block needed for app instance {}", app_instance_id);
+                    }
+                    Err(e) => {
+                        error!("Failed to create block for app instance {}: {}", app_instance_id, e);
+                    }
+                }
+            }
+        }
+        
+        is_running.store(false, Ordering::Release);
+    }
+}
+
+/// Start periodic proof analysis task
+pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::interval;
+    
+    info!("🔬 Starting periodic proof analysis task (runs every 5 minutes)");
+    
+    let is_running = Arc::new(AtomicBool::new(false));
+    let mut check_interval = interval(Duration::from_secs(300)); // Every 5 minutes
+    check_interval.tick().await; // Skip first immediate tick
+    
+    loop {
+        // Check for shutdown
+        if state.is_shutting_down() {
+            info!("Proof analysis task shutting down...");
+            break;
+        }
+        
+        check_interval.tick().await;
+        
+        if state.is_shutting_down() {
+            break;
+        }
+        
+        // Skip if already running
+        if is_running.load(Ordering::Acquire) {
+            debug!("Proof analysis already in progress, skipping...");
+            continue;
+        }
+        
+        is_running.store(true, Ordering::Release);
+        
+        debug!("Running periodic proof completion analysis...");
+        
+        // Get all app instances
+        let app_instances = state.get_app_instances().await;
+        
+        if !app_instances.is_empty() {
+            info!("Analyzing proof completion for {} app instances", app_instances.len());
+            
+            let mut analyzed_count = 0;
+            
+            for app_instance_id in app_instances {
+                if state.is_shutting_down() {
+                    break;
+                }
+                
+                // Fetch the app instance first
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(app_instance) => {
+                        // Analyze proof completion for this app instance
+                        match crate::proof::analyze_proof_completion(&app_instance).await {
+                            Ok(()) => {
+                                analyzed_count += 1;
+                                debug!("Completed proof analysis for app instance {}", app_instance_id);
+                            }
+                            Err(e) => {
+                                error!("Failed to analyze proofs for app instance {}: {}", app_instance_id, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to fetch app instance {}: {}", app_instance_id, e);
+                    }
+                }
+            }
+            
+            if analyzed_count > 0 {
+                info!("✅ Proof analysis complete: {} instances analyzed", analyzed_count);
+            }
+        }
+        
+        is_running.store(false, Ordering::Release);
+    }
+}

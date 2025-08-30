@@ -1,0 +1,321 @@
+use crate::config::Config;
+use crate::error::Result;
+use crate::job_searcher::JobSearcher;
+use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
+use crate::processor::EventProcessor;
+use crate::state::SharedState;
+use crate::stuck_jobs::StuckJobMonitor;
+use std::time::Duration;
+use tokio::signal;
+use tokio::task;
+use tracing::{debug, error, info, warn};
+
+pub async fn start_coordinator(
+    rpc_url: String,
+    package_id: String,
+    use_tee: bool,
+    container_timeout: u64,
+    grpc_socket_path: String,
+) -> Result<()> {
+    info!("🚀 Starting Silvana Coordinator");
+    info!("🔗 Sui RPC URL: {}", rpc_url);
+    info!("📦 Monitoring package: {}", package_id);
+
+    // Initialize the global SharedSuiState
+    sui::SharedSuiState::initialize(&rpc_url).await?;
+    info!("✅ Connected to Sui RPC");
+
+    let config = Config {
+        package_id,
+        modules: vec!["jobs".to_string()],
+    };
+
+    // Create shared state
+    let state = SharedState::new();
+
+    // Setup signal handlers for graceful shutdown (Ctrl-C and SIGTERM for system reboot)
+    let shutdown_state = state.clone();
+    let force_shutdown_state = state.clone();
+    tokio::spawn(async move {
+        let mut sigint = signal::unix::signal(signal::unix::SignalKind::interrupt())
+            .expect("Failed to create SIGINT handler");
+        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to create SIGTERM handler");
+
+        tokio::select! {
+            _ = sigint.recv() => {
+                if shutdown_state.is_shutting_down() {
+                    // Second Ctrl-C - force shutdown
+                    error!("🛑 Second SIGINT received - forcing immediate shutdown!");
+                    shutdown_state.set_force_shutdown();
+                } else {
+                    // First Ctrl-C - graceful shutdown
+                    warn!("⚠️  Received SIGINT (Ctrl-C), initiating graceful shutdown...");
+                    warn!("    Press Ctrl-C again to force immediate shutdown");
+                    shutdown_state.set_shutdown();
+
+                    // Spawn a task to listen for second Ctrl-C
+                    tokio::spawn(async move {
+                        let mut sigint2 = signal::unix::signal(signal::unix::SignalKind::interrupt())
+                            .expect("Failed to create second SIGINT handler");
+                        sigint2.recv().await;
+                        error!("🛑 Second SIGINT received - forcing immediate shutdown!");
+                        force_shutdown_state.set_force_shutdown();
+                    });
+                }
+            }
+            _ = sigterm.recv() => {
+                warn!("⚠️  Received SIGTERM (system shutdown/reboot), initiating graceful shutdown...");
+                shutdown_state.set_shutdown();
+            }
+        }
+    });
+
+    info!("✅ Coordinator initialized, starting services...");
+
+    // 1. Start gRPC server in a separate thread
+    let grpc_state = state.clone();
+    let grpc_handle = task::spawn(async move {
+        info!("🔌 Starting gRPC server...");
+        if let Err(e) = crate::grpc::start_grpc_server(&grpc_socket_path, grpc_state).await {
+            error!("gRPC server error: {}", e);
+        }
+    });
+
+    // 2. Start reconciliation task in a separate thread (runs every 10 minutes)
+    let reconciliation_state = state.clone();
+    
+    let reconciliation_handle = task::spawn(async move {
+        info!("🔄 Starting reconciliation task (runs every 10 minutes)...");
+        let mut interval = tokio::time::interval(Duration::from_secs(600)); // 10 minutes
+        
+        // Skip the immediate first tick
+        interval.tick().await;
+        
+        loop {
+            // Check for shutdown
+            if reconciliation_state.is_shutting_down() {
+                info!("Reconciliation task shutting down...");
+                break;
+            }
+            
+            interval.tick().await;
+            
+            if reconciliation_state.is_shutting_down() {
+                break;
+            }
+            
+            info!("📊 Running periodic reconciliation check...");
+            
+            // Log current stats before reconciliation
+            let stats = reconciliation_state.get_jobs_tracker().get_stats().await;
+            debug!(
+                "Starting periodic reconciliation (currently tracking {} app_instances, {} agent methods)",
+                stats.app_instances_count,
+                stats.agent_methods_count
+            );
+            
+            // Run reconciliation with chain
+            match reconciliation_state.get_jobs_tracker().reconcile_with_chain().await {
+                Ok(has_pending) => {
+                    if has_pending {
+                        debug!("Reconciliation complete - still have pending jobs");
+                    } else {
+                        debug!("Reconciliation complete - no pending jobs");
+                    }
+                    // Update the pending jobs flag based on reconciliation result
+                    if !has_pending {
+                        reconciliation_state.update_pending_jobs_flag().await;
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to reconcile with chain: {}", e);
+                }
+            }
+            
+            info!("✅ Reconciliation check complete");
+        }
+    });
+    info!("🔄 Started reconciliation task (runs every 10 minutes)");
+
+    // 3. Start stuck job monitor in a separate thread (runs every 2 minutes)
+    let stuck_job_state = state.clone();
+    let stuck_job_handle = task::spawn(async move {
+        let monitor = StuckJobMonitor::new(stuck_job_state);
+        monitor.run().await;
+    });
+    info!("🔍 Started stuck job monitor (checks every 2 minutes)");
+
+    // 4. Start periodic block creation task (runs every minute)
+    let block_creation_state = state.clone();
+    let block_creation_handle = task::spawn(async move {
+        start_periodic_block_creation(block_creation_state).await;
+    });
+    info!("📦 Started periodic block creation task (runs every minute)");
+
+    // 4.5 Start periodic proof analysis task (runs every 5 minutes)
+    let proof_analysis_state = state.clone();
+    let proof_analysis_handle = task::spawn(async move {
+        start_periodic_proof_analysis(proof_analysis_state).await;
+    });
+    info!("🔬 Started proof completion analysis task (runs every 5 minutes)");
+
+    // 5. Start job searcher in a separate thread
+    let job_searcher_state = state.clone();
+    let job_searcher_handle = task::spawn(async move {
+        let mut job_searcher = match JobSearcher::new(
+            job_searcher_state,
+            use_tee,
+            container_timeout,
+        ) {
+            Ok(searcher) => searcher,
+            Err(e) => {
+                error!("Failed to create job searcher: {}", e);
+                return;
+            }
+        };
+        
+        if let Err(e) = job_searcher.run().await {
+            error!("Job searcher error: {}", e);
+        }
+    });
+    info!("🔍 Started job searcher thread");
+
+    // 6. Start event processor in main thread (processes events and updates shared state)
+    let mut processor = EventProcessor::new(config, state.clone()).await?;
+    info!("👁️ Starting event monitoring...");
+    
+    // Run processor in a task so we can monitor shutdown
+    let processor_handle = task::spawn(async move {
+        processor.run().await
+    });
+    
+    // Monitor for shutdown or processor exit
+    loop {
+        if state.is_shutting_down() {
+            info!("🛑 Shutdown requested, starting graceful shutdown sequence...");
+            break;
+        }
+        
+        // Check if processor exited
+        if processor_handle.is_finished() {
+            match processor_handle.await {
+                Ok(processor_result) => {
+                    if let Err(e) = processor_result {
+                        error!("Fatal error in event processor: {}", e);
+                        return Err(e.into());
+                    }
+                }
+                Err(e) => {
+                    error!("Processor task panicked: {}", e);
+                    return Err(anyhow::anyhow!("Processor task panicked: {}", e).into());
+                }
+            }
+            break;
+        }
+        
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    
+    info!("🔄 Starting graceful shutdown sequence...");
+    
+    // Phase 1: Stop accepting new jobs (already done by setting shutdown flag)
+    info!("  1️⃣ Stopping new job acceptance...");
+    
+    // Phase 2: Wait for current jobs to complete (with timeout)
+    info!("  2️⃣ Waiting for current jobs to complete (max 5 minutes)...");
+    let mut wait_time = 0;
+    let max_wait = 300; // 5 minutes in seconds
+    
+    while wait_time < max_wait {
+        // Check for force shutdown
+        if state.is_force_shutdown() {
+            error!("  🛑 Force shutdown requested!");
+            break;
+        }
+        
+        let current_agents = state.get_current_agent_count().await;
+        if current_agents == 0 {
+            info!("  ✅ All jobs completed");
+            break;
+        }
+        
+        // Show more detailed progress
+        if wait_time < 60 {
+            info!("  ⏳ {} agents still running, waiting... ({}/{}s)", current_agents, wait_time, max_wait);
+        } else {
+            let minutes = wait_time / 60;
+            let seconds = wait_time % 60;
+            info!("  ⏳ {} agents still running, waiting... ({}m {}s / 5m)", current_agents, minutes, seconds);
+        }
+        
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        wait_time += 1;
+    }
+    
+    // Phase 3: If jobs are still running, try to get their status and logs
+    let remaining_agents = state.get_current_agent_count().await;
+    if remaining_agents > 0 {
+        if state.is_force_shutdown() {
+            error!("  🛑 Force shutdown - terminating {} running agents...", remaining_agents);
+        } else {
+            warn!("  ⚠️ {} agents still running after timeout, collecting logs...", remaining_agents);
+        }
+        
+        // Get information about running agents
+        let running_agents = state.get_all_current_agents().await;
+        
+        // Try to get Docker container logs and terminate if force shutdown
+        let docker_manager = match docker::DockerManager::new(false) {
+            Ok(dm) => Some(dm),
+            Err(e) => {
+                error!("Failed to create Docker manager for shutdown: {}", e);
+                None
+            }
+        };
+        
+        for (session_id, agent_info) in running_agents {
+            warn!("    - Session {}: {}/{}/{}", 
+                session_id, agent_info.developer, agent_info.agent, agent_info.agent_method);
+        }
+        
+        // Try to get container logs and optionally stop them
+        if let Some(ref dm) = docker_manager {
+            info!("  📋 Fetching logs from running Docker containers...");
+            let container_results = dm.fetch_and_stop_silvana_containers(state.is_force_shutdown()).await;
+            
+            for (container_id, container_name, logs) in container_results {
+                info!("  📦 Container: {} ({})", &container_id[..12.min(container_id.len())], container_name);
+                if !logs.is_empty() {
+                    // Print first 2000 chars of logs to avoid flooding the terminal
+                    let log_preview = if logs.len() > 2000 {
+                        format!("{}
+... [truncated {} more bytes]", &logs[..2000], logs.len() - 2000)
+                    } else {
+                        logs
+                    };
+                    info!("  📄 Container logs: {}", log_preview);
+                } else {
+                    info!("  ⚠️ No logs available from container");
+                }
+            }
+        }
+    }
+    
+    // Phase 4: Cancel all background tasks
+    info!("  3️⃣ Stopping background tasks...");
+    grpc_handle.abort();
+    reconciliation_handle.abort();
+    stuck_job_handle.abort();
+    block_creation_handle.abort();
+    proof_analysis_handle.abort();
+    
+    // Give job_searcher a chance to cleanup
+    if !job_searcher_handle.is_finished() {
+        // Wait a bit for job_searcher to finish gracefully
+        let _ = tokio::time::timeout(Duration::from_secs(5), job_searcher_handle).await;
+    }
+    
+    info!("✅ Graceful shutdown complete");
+    Ok(())
+}
