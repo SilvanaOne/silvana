@@ -20,6 +20,7 @@ import {
   updateBlockProofDataAvailability,
   updateBlockSettlementTxHash,
   updateBlockSettlementTxIncludedInBlock,
+  rejectProof,
 } from "./grpc.js";
 
 interface SettleParams {
@@ -287,20 +288,64 @@ export async function settle(params: SettleParams): Promise<void> {
     const proofData = JSON.parse(blockProofSerialized);
     const proofJson = proofData.proof;
 
-    // Deserialize the proof
+    // Deserialize the proof with rejection on failure
     console.log("🔐 Deserializing and verifying block proof...");
-    const blockProof: AddProgramProof = await AddProgramProof.fromJSON(
-      JSON.parse(proofJson) as JsonProof
-    );
-
-    // Verify the proof
-    const { vkProgram } = await compile();
-    const isValid = await verify(blockProof, vkProgram);
-    if (!isValid) {
-      throw new Error(
-        `Block proof verification failed for block ${currentBlockNumber}`
+    let blockProof: AddProgramProof;
+    
+    try {
+      blockProof = await AddProgramProof.fromJSON(
+        JSON.parse(proofJson) as JsonProof
       );
+    } catch (error) {
+      console.error(`Error deserializing block proof for block ${currentBlockNumber}:`, error);
+      
+      // Get sequences from the block to reject
+      const sequences: bigint[] = [];
+      if (block.block?.startSequence && block.block?.endSequence) {
+        for (let seq = block.block.startSequence; seq <= block.block.endSequence; seq++) {
+          sequences.push(seq);
+        }
+      }
+      
+      const rejectProofResponse = await rejectProof(currentBlockNumber, sequences);
+      if (!rejectProofResponse.success) {
+        throw new Error(
+          `Failed to reject proof for block ${currentBlockNumber}: ${rejectProofResponse.message}`
+        );
+      }
+      throw error;
     }
+
+    // Verify the proof with rejection on failure
+    const { vkProgram } = await compile();
+    
+    try {
+      const isValid = await verify(blockProof, vkProgram);
+      if (!isValid) {
+        throw new Error(
+          `Block proof verification failed for block ${currentBlockNumber}`
+        );
+      }
+    } catch (error) {
+      console.error(`Error verifying block proof for block ${currentBlockNumber}:`, error);
+      
+      // Get sequences from the block to reject
+      const sequences: bigint[] = [];
+      if (block.block?.startSequence && block.block?.endSequence) {
+        for (let seq = block.block.startSequence; seq <= block.block.endSequence; seq++) {
+          sequences.push(seq);
+        }
+      }
+      
+      const rejectProofResponse = await rejectProof(currentBlockNumber, sequences);
+      if (!rejectProofResponse.success) {
+        throw new Error(
+          `Failed to reject proof for block ${currentBlockNumber}: ${rejectProofResponse.message}`
+        );
+      }
+      throw error;
+    }
+    
     console.log("✅ Block proof verified successfully");
 
     // Update block state data availability on Sui (using the same serialized data that contains both proof and state)

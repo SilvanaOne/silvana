@@ -6,7 +6,7 @@ import {
   AddProgramProof,
 } from "./circuit.js";
 import { AddProgramCommitment } from "./commitment.js";
-import { readDataAvailability } from "./grpc.js";
+import { readDataAvailability, rejectProof } from "./grpc.js";
 import {
   UInt32,
   Field,
@@ -25,12 +25,19 @@ export interface SequenceState {
 }
 
 export async function merge(params: {
+  blockNumber: bigint;
   proof1Serialized: string;
   proof2Serialized: string;
   sequences1: bigint[];
   sequences2: bigint[];
 }): Promise<string> {
-  const { proof1Serialized, proof2Serialized, sequences1, sequences2 } = params;
+  const {
+    blockNumber,
+    proof1Serialized,
+    proof2Serialized,
+    sequences1,
+    sequences2,
+  } = params;
 
   console.log("Starting proof merge...");
   console.log(`Proof 1 size: ${proof1Serialized.length} chars`);
@@ -42,31 +49,55 @@ export async function merge(params: {
     throw new Error("Failed to compile circuit for merging");
   }
 
-  // Deserialize the proofs
-  console.log("Deserializing proof 1...");
-  const proof1: AddProgramProof = await AddProgramProof.fromJSON(
-    JSON.parse(proof1Serialized) as JsonProof
-  );
-
-  console.log("Deserializing proof 2...");
-  const proof2: AddProgramProof = await AddProgramProof.fromJSON(
-    JSON.parse(proof2Serialized) as JsonProof
-  );
-
-  // Verify both proofs before merging
-  console.log("Verifying proof 1...");
-  const ok1 = await verify(proof1, vkProgram);
-  if (!ok1) {
-    throw new Error("Proof 1 verification failed");
+  // Process both proofs in a loop
+  const proofData = [
+    { serialized: proof1Serialized, sequences: sequences1, name: "proof 1" },
+    { serialized: proof2Serialized, sequences: sequences2, name: "proof 2" },
+  ];
+  
+  const proofs: AddProgramProof[] = [];
+  
+  for (const { serialized, sequences, name } of proofData) {
+    let proof: AddProgramProof;
+    
+    // Deserialize the proof
+    try {
+      console.log(`Deserializing ${name}...`);
+      proof = await AddProgramProof.fromJSON(
+        JSON.parse(serialized) as JsonProof
+      );
+    } catch (error) {
+      console.error(`Error deserializing ${name}:`, error);
+      const rejectProofResponse = await rejectProof(blockNumber, sequences);
+      if (!rejectProofResponse.success) {
+        throw new Error(
+          `Failed to reject ${name}: ${rejectProofResponse.message}`
+        );
+      }
+      throw error;
+    }
+    
+    // Verify the proof
+    console.log(`Verifying ${name}...`);
+    try {
+      const ok = await verify(proof, vkProgram);
+      if (!ok) {
+        throw new Error(`${name} verification failed`);
+      }
+    } catch (error) {
+      console.error(`Error verifying ${name}:`, error);
+      const rejectProofResponse = await rejectProof(blockNumber, sequences);
+      if (!rejectProofResponse.success) {
+        throw new Error(`Failed to reject ${name}: ${rejectProofResponse.message}`);
+      }
+      throw error;
+    }
+    console.log(`${name} verified`);
+    
+    proofs.push(proof);
   }
-  console.log("Proof 1 verified");
-
-  console.log("Verifying proof 2...");
-  const ok2 = await verify(proof2, vkProgram);
-  if (!ok2) {
-    throw new Error("Proof 2 verification failed");
-  }
-  console.log("Proof 2 verified");
+  
+  const [proof1, proof2] = proofs;
 
   // Merge the proofs
   console.time("merging proofs");

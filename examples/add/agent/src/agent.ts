@@ -217,6 +217,7 @@ async function agent() {
               console.log("Starting proof merge...");
               const mergeStartTime = Date.now();
               const mergedProof = await merge({
+                blockNumber: BigInt(blockNumber),
                 proof1Serialized: proof1Only,
                 proof2Serialized: proof2Only,
                 sequences1: sequences1,

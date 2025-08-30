@@ -26,6 +26,7 @@ import {
   UpdateBlockSettlementTxIncludedInBlockRequestSchema,
   CreateAppJobRequestSchema,
   PurgeSequencesBelowRequestSchema,
+  RejectProofRequestSchema,
   type GetJobResponse,
   type CompleteJobResponse,
   type FailJobResponse,
@@ -52,6 +53,7 @@ import {
   type UpdateBlockSettlementTxIncludedInBlockResponse,
   type CreateAppJobResponse,
   type PurgeSequencesBelowResponse,
+  type RejectProofResponse,
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
 
@@ -684,11 +686,34 @@ export async function getBlock(
   return await client.getBlock(request);
 }
 
+/**
+ * Rejects a proof for specific sequences
+ */
+export async function rejectProof(
+  blockNumber: bigint,
+  sequences: bigint[]
+): Promise<RejectProofResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(RejectProofRequestSchema, {
+    sessionId,
+    blockNumber,
+    sequences,
+    jobId,
+  });
+
+  return await client.rejectProof(request);
+}
+
 // Re-export types for users to access
 export type { 
   Block, 
   Metadata,
   RetrieveSecretResponse,
   TerminateJobResponse,
-  GetBlockResponse 
+  GetBlockResponse,
+  RejectProofResponse 
 };
