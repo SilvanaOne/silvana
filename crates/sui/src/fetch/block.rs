@@ -9,7 +9,7 @@ use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{
     BatchGetObjectsRequest, GetObjectRequest, ListDynamicFieldsRequest,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Block information fetched from blockchain, mirroring the Move struct
 #[derive(Debug, Clone)]
@@ -615,7 +615,7 @@ fn extract_block_info_from_json(
             sent_to_settlement_at,
             settled_at,
         };
-        info!(
+        debug!(
             "✅ Successfully extracted block info for block {}: {}",
             block_number, block
         );

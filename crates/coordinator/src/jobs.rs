@@ -325,6 +325,43 @@ impl JobsTracker {
                                     );
                                 }
                                 
+                                // Add random delay to avoid race conditions with other coordinators
+                                use rand::Rng;
+                                let delay_ms = rand::thread_rng().gen_range(0..10000); // Up to 10 seconds
+                                debug!("Adding random delay of {}ms before failing stuck job {} to avoid race conditions", delay_ms, job.job_sequence);
+                                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                                
+                                // Re-fetch the job to check if it's still stuck
+                                let job_still_stuck = if let Some(ref jobs_obj) = app_instance.jobs {
+                                    match sui::fetch::fetch_job_by_id(&jobs_obj.jobs_table_id, job.job_sequence).await {
+                                        Ok(Some(fresh_job)) => {
+                                            if matches!(fresh_job.status, sui::fetch::JobStatus::Running) {
+                                                let fresh_running_duration_ms = current_time_ms.saturating_sub(fresh_job.updated_at);
+                                                let fresh_running_duration = Duration::from_millis(fresh_running_duration_ms);
+                                                fresh_running_duration > max_running_duration
+                                            } else {
+                                                debug!("Job {} is no longer in Running status after delay - already handled by another coordinator", job.job_sequence);
+                                                false
+                                            }
+                                        }
+                                        Ok(None) => {
+                                            debug!("Job {} no longer exists after delay - already handled", job.job_sequence);
+                                            false
+                                        }
+                                        Err(e) => {
+                                            debug!("Failed to re-fetch job {} after delay: {} - skipping", job.job_sequence, e);
+                                            false
+                                        }
+                                    }
+                                } else {
+                                    debug!("No jobs object found for app_instance - skipping");
+                                    false
+                                };
+                                
+                                if !job_still_stuck {
+                                    continue;
+                                }
+                                
                                 // Fail the job
                                 // Note: Settlement jobs are periodic, so they'll go back to Pending with a 1-minute delay after max attempts
                                 // Regular jobs will either retry (if attempts < max) or be deleted

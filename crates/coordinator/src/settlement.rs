@@ -420,7 +420,12 @@ pub async fn fetch_all_pending_jobs(
                 }
             }
             Err(e) => {
-                error!("Failed to fetch pending job from app_instance {}: {}", app_instance_id, e);
+                // This can happen if a job was terminated between listing and fetching
+                if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
+                    debug!("Job was terminated/deleted before fetch from app_instance {}: {}", app_instance_id, e);
+                } else {
+                    error!("Failed to fetch pending job from app_instance {}: {}", app_instance_id, e);
+                }
             }
         }
     }

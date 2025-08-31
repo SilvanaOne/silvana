@@ -7,7 +7,7 @@ describe("Batch", async () => {
     let batchIteration = 0;
     while (true) {
       batchIteration++;
-      const maxDelay = Math.floor(Math.random() * 60 * 1000) + 5000;
+      const maxDelay = Math.floor(Math.random() * 10 * 1000) + 5000;
       console.log(
         `[${new Date().toISOString()}] Batch iteration ${batchIteration} - Max delay: ${
           maxDelay / 1000
@@ -24,7 +24,7 @@ describe("Batch", async () => {
           value: 1,
           index: 1,
         });
-        const sleepTime = Math.floor(Math.random() * maxDelay) + 1000;
+        const sleepTime = Math.floor(Math.random() * maxDelay) + 2000;
         console.log(
           `[${new Date().toISOString()}] Batch ${batchIteration}, action ${
             i + 1
@@ -32,10 +32,10 @@ describe("Batch", async () => {
         );
         await sleep(sleepTime);
       }
-      console.log(
-        `[${new Date().toISOString()}] Batch ${batchIteration} complete - Sleeping for 5 minutes before next batch`
-      );
-      await sleep(5 * 60 * 1000);
+      // console.log(
+      //   `[${new Date().toISOString()}] Batch ${batchIteration} complete - Sleeping for 1 minute before next batch`
+      // );
+      // await sleep(1 * 60 * 1000);
     }
   });
 });

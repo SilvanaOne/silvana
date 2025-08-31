@@ -1,4 +1,5 @@
 use crate::error::{DockerError, Result};
+use crate::state::get_docker_state;
 use bollard::auth::DockerCredentials;
 use bollard::container::LogOutput;
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
@@ -625,5 +626,32 @@ impl DockerManager {
         }
         
         results
+    }
+    
+    // Container tracking methods
+    
+    /// Track a container as loading (preparing, pulling image, etc)
+    pub async fn track_container_loading(&self, session_id: String, job_id: String) {
+        get_docker_state().track_loading(session_id, job_id).await;
+    }
+    
+    /// Mark a container as running (actually executing)
+    pub async fn mark_container_running(&self, session_id: &str) {
+        get_docker_state().mark_running(session_id).await;
+    }
+    
+    /// Remove container from tracking (finished or failed)
+    pub async fn remove_container_tracking(&self, session_id: &str) {
+        get_docker_state().remove_container(session_id).await;
+    }
+    
+    /// Get count of loading and running containers
+    pub async fn get_container_counts(&self) -> (usize, usize) {
+        get_docker_state().get_container_counts().await
+    }
+    
+    /// Get total count of all tracked containers
+    pub async fn get_total_container_count(&self) -> usize {
+        get_docker_state().get_total_count().await
     }
 }

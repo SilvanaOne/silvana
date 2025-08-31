@@ -9,7 +9,7 @@ use tracing::{debug, error, info};
 
 // Maximum number of concurrent Docker containers/agents that can run simultaneously
 // This can be changed to allow more parallel agents (up to 10)
-pub const MAX_CONCURRENT_AGENTS: usize = 2;
+pub const MAX_CONCURRENT_AGENTS: usize = 10;
 
 #[derive(Debug, Clone)]
 pub struct CurrentAgent {
@@ -88,7 +88,7 @@ impl SharedState {
             agent_method,
         };
         current_agents.insert(session_id, current_agent.clone());
-        info!(
+        debug!(
             "Set current agent for session {}: {}/{}/{}",
             current_agent.session_id,
             current_agent.developer,
@@ -100,7 +100,7 @@ impl SharedState {
     pub async fn clear_current_agent(&self, session_id: &str) {
         let mut current_agents = self.current_agents.write().await;
         if let Some(agent) = current_agents.remove(session_id) {
-            info!(
+            debug!(
                 "Clearing current agent: {}/{}/{} (session: {})",
                 agent.developer, agent.agent, agent.agent_method, session_id
             );
@@ -117,12 +117,8 @@ impl SharedState {
         current_agents.len()
     }
 
-    pub async fn is_agent_running(&self, developer: &str, agent: &str, agent_method: &str) -> bool {
-        let current_agents = self.current_agents.read().await;
-        current_agents
-            .values()
-            .any(|a| a.developer == developer && a.agent == agent && a.agent_method == agent_method)
-    }
+    // Note: Removed is_agent_running() - we now allow multiple instances of the same agent
+    // to run in parallel up to MAX_CONCURRENT_AGENTS limit
     
     /// Get all currently running agents (for shutdown reporting)
     pub async fn get_all_current_agents(&self) -> HashMap<String, CurrentAgent> {
@@ -179,7 +175,7 @@ impl SharedState {
         // Set the flag that we have pending jobs
         self.has_pending_jobs.store(true, Ordering::Release);
 
-        info!(
+        debug!(
             "Added app_instance {} for {}/{}/{}",
             app_instance, developer, agent, agent_method
         );

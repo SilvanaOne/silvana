@@ -125,7 +125,7 @@ impl AgentJobDatabase {
                 pending.insert(job.job_id.clone(), job.clone());
             }
 
-            info!(
+            debug!(
                 "Retrieved ready job {} for agent {}/{}:{}",
                 job.job_id, developer, agent, agent_method
             );

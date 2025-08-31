@@ -865,7 +865,7 @@ pub async fn start_periodic_block_creation(state: crate::state::SharedState) {
         let app_instances = state.get_app_instances().await;
         
         if !app_instances.is_empty() {
-            info!("Checking {} app instances for block creation", app_instances.len());
+            debug!("Checking {} app instances for block creation", app_instances.len());
             
             for app_instance_id in app_instances {
                 if state.is_shutting_down() {
@@ -933,7 +933,7 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
         let app_instances = state.get_app_instances().await;
         
         if !app_instances.is_empty() {
-            info!("Analyzing proof completion for {} app instances", app_instances.len());
+            debug!("Analyzing proof completion for {} app instances", app_instances.len());
             
             let mut analyzed_count = 0;
             

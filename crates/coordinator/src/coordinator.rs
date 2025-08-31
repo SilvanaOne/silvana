@@ -4,7 +4,7 @@ use crate::job_searcher::JobSearcher;
 use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
 use crate::processor::EventProcessor;
 use crate::state::SharedState;
-use crate::stuck_jobs::StuckJobMonitor;
+// use crate::stuck_jobs::StuckJobMonitor; // Removed - reconciliation handles stuck jobs
 use std::time::Duration;
 use tokio::signal;
 use tokio::task;
@@ -41,8 +41,7 @@ pub async fn start_coordinator(
             info!("🌐 Network: {}", network);
             
             if let Some(id) = service_info.chain_id {
-                let short_id = if id.len() > 16 { format!("{}...", &id[..16]) } else { id };
-                debug!("Chain ID: {}", short_id);
+                debug!("Chain ID: {}", id);
             }
             
             if let Some(version) = service_info.server_version {
@@ -194,13 +193,8 @@ pub async fn start_coordinator(
     });
     info!("🔄 Started reconciliation task (runs every 10 minutes)");
 
-    // 3. Start stuck job monitor in a separate thread (runs every 2 minutes)
-    let stuck_job_state = state.clone();
-    let stuck_job_handle = task::spawn(async move {
-        let monitor = StuckJobMonitor::new(stuck_job_state);
-        monitor.run().await;
-    });
-    info!("🔍 Started stuck job monitor (checks every 2 minutes)");
+    // Note: Stuck job monitoring is handled by reconciliation task (every 10 minutes)
+    // to avoid overloading Sui nodes with duplicate checks
 
     // 4. Start periodic block creation task (runs every minute)
     let block_creation_state = state.clone();
@@ -393,7 +387,6 @@ pub async fn start_coordinator(
     info!("  3️⃣ Stopping background tasks...");
     grpc_handle.abort();
     reconciliation_handle.abort();
-    stuck_job_handle.abort();
     block_creation_handle.abort();
     proof_analysis_handle.abort();
     balance_check_handle.abort();

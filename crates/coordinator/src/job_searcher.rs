@@ -19,8 +19,8 @@ use tracing::{debug, error, info, warn};
 /// Maximum random delay in milliseconds before starting a job to avoid race conditions
 const MAX_JOB_START_DELAY_MS: u64 = 10000; // 10 seconds
 
-/// Minimum memory to keep reserved for the system (8GB)
-const MIN_SYSTEM_MEMORY_GB: u64 = 8;
+/// Minimum memory to keep reserved for the system (4GB by default)
+const MIN_SYSTEM_MEMORY_GB: u64 = 2;
 
 /// Check if system has sufficient resources to run an agent
 async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Result<bool> {
@@ -255,20 +255,8 @@ impl JobSearcher {
                                 job.job_sequence, job.app_instance
                             );
 
-                            // Check if this agent is already running
-                            if self
-                                .state
-                                .is_agent_running(&job.developer, &job.agent, &job.agent_method)
-                                .await
-                            {
-                                debug!(
-                                    "Agent {}/{}/{} is already running, skipping",
-                                    job.developer, job.agent, job.agent_method
-                                );
-                                // Small delay before checking again
-                                sleep(Duration::from_millis(500)).await;
-                                continue;
-                            }
+                            // Note: We allow multiple instances of the same agent to run in parallel
+                            // up to MAX_CONCURRENT_AGENTS limit
 
                             // Fetch agent method configuration first to check resource requirements
                             let agent_method = match fetch_agent_method(&job.developer, &job.agent, &job.agent_method).await {
@@ -309,12 +297,11 @@ impl JobSearcher {
                                 }
                             }
 
-                            // Log how many containers are already running
-                            let current_agent_count = self.state.get_current_agent_count().await;
+                            // Log how many containers are already loading/running
+                            let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
                             info!(
-                                "🐳 Starting Docker (currently {} container{} running): dev={}, agent={}/{}, job_seq={}, app={}",
-                                current_agent_count,
-                                if current_agent_count == 1 { "" } else { "s" },
+                                "📋 Picked job for Docker (currently {} loading, {} running): dev={}, agent={}/{}, job_seq={}, app={}",
+                                loading_count, running_count,
                                 job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
                             );
 
@@ -599,7 +586,13 @@ async fn run_docker_container_task(
         }
     };
 
-    // Set current agent in shared state with session_id
+    // Track container as loading in docker state
+    docker_manager.track_container_loading(
+        docker_session.session_id.clone(),
+        job.job_sequence.to_string(),
+    ).await;
+    
+    // Set current agent in coordinator state (for job tracking)
     state
         .set_current_agent(
             docker_session.session_id.clone(),
@@ -609,12 +602,11 @@ async fn run_docker_container_task(
         )
         .await;
     
-    // Log how many containers are now running
-    let running_count = state.get_current_agent_count().await;
-    info!(
-        "🐳 Docker container started: {} container{} now running",
-        running_count,
-        if running_count == 1 { "" } else { "s" }
+    // Log how many containers are loading/running
+    let (loading_count, running_count) = docker_manager.get_container_counts().await;
+    debug!(
+        "🔄 Preparing Docker container: {} loading, {} running",
+        loading_count, running_count
     );
 
     // Start the job on Sui blockchain before processing
@@ -640,10 +632,11 @@ async fn run_docker_container_task(
     };
 
     if !job_still_pending {
-        warn!("Job {} is no longer in pending_jobs list after delay - already started by another coordinator", job.job_sequence);
+        debug!("Job {} is no longer in pending_jobs list after delay - already started by another coordinator", job.job_sequence);
         // Add to failed jobs cache to prevent immediate retries
         failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
         state.clear_current_agent(&docker_session.session_id).await;
+        docker_manager.remove_container_tracking(&docker_session.session_id).await;
         return;
     }
 
@@ -677,6 +670,7 @@ async fn run_docker_container_task(
                 
                 // Clear the agent state and return
                 state.clear_current_agent(&docker_session.session_id).await;
+                docker_manager.remove_container_tracking(&docker_session.session_id).await;
                 return;
             }
             
@@ -687,6 +681,7 @@ async fn run_docker_container_task(
             // No retries - add to failed cache and move on
             failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
             state.clear_current_agent(&docker_session.session_id).await;
+            docker_manager.remove_container_tracking(&docker_session.session_id).await;
             return;
         }
     };
@@ -725,13 +720,13 @@ async fn run_docker_container_task(
                         job.job_sequence, expected_sha, digest
                     );
                     state.clear_current_agent(&docker_session.session_id).await;
+                    docker_manager.remove_container_tracking(&docker_session.session_id).await;
                     
                     // Log container count after clearing
-                    let remaining_count = state.get_current_agent_count().await;
+                    let (loading_count, running_count) = docker_manager.get_container_counts().await;
                     info!(
-                        "🐳 Docker container finished: {} container{} still running",
-                        remaining_count,
-                        if remaining_count == 1 { "" } else { "s" }
+                        "🏁 Docker container aborted (SHA mismatch): {} loading, {} running",
+                        loading_count, running_count
                     );
                     return;
                 }
@@ -741,13 +736,13 @@ async fn run_docker_container_task(
         Err(e) => {
             error!("Failed to pull image for job {}: {}", job.job_sequence, e);
             state.clear_current_agent(&docker_session.session_id).await;
+            docker_manager.remove_container_tracking(&docker_session.session_id).await;
             
             // Log container count after clearing
-            let remaining_count = state.get_current_agent_count().await;
+            let (loading_count, running_count) = docker_manager.get_container_counts().await;
             info!(
-                "🐳 Docker container finished: {} container{} still running",
-                remaining_count,
-                if remaining_count == 1 { "" } else { "s" }
+                "🏁 Docker container aborted (image pull failed): {} loading, {} running",
+                loading_count, running_count
             );
             return;
         }
@@ -807,7 +802,13 @@ async fn run_docker_container_task(
         extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
     };
 
-    // Run the Docker container
+    // Update state to Running and run the Docker container
+    docker_manager.mark_container_running(&docker_session.session_id).await;
+    let (loading_count, running_count) = docker_manager.get_container_counts().await;
+    info!(
+        "🐳 Starting Docker container for job {} ({} loading, {} running)",
+        job.job_sequence, loading_count, running_count
+    );
     let docker_start = Instant::now();
     match docker_manager.run_container(&config).await {
         Ok(result) => {
@@ -842,13 +843,13 @@ async fn run_docker_container_task(
 
     // Clear the agent state after Docker completes
     state.clear_current_agent(&docker_session.session_id).await;
+    docker_manager.remove_container_tracking(&docker_session.session_id).await;
     
-    // Log how many containers are still running
-    let remaining_count = state.get_current_agent_count().await;
+    // Log how many containers are still loading/running
+    let (loading_count, running_count) = docker_manager.get_container_counts().await;
     info!(
-        "🐳 Docker container finished: {} container{} still running",
-        remaining_count,
-        if remaining_count == 1 { "" } else { "s" }
+        "🏁 Docker container finished: {} loading, {} running",
+        loading_count, running_count
     );
 
     // Job will be automatically cleaned up from the database when retrieved or replaced

@@ -4,7 +4,7 @@ use sui_rpc::field::FieldMask;
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
 use sui_sdk_types as sui;
 use sui_crypto::SuiSigner;
-use tracing::{debug, warn, error};
+use tracing::{debug, warn, error, info};
 use tokio::time::{sleep, Duration};
 
 use crate::chain::get_reference_gas_price;
@@ -54,7 +54,7 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                     
                     // Log as warning for expected race conditions
                     if clean_error.contains("reserve_proof") || clean_error.contains("start_job") {
-                        warn!("{} transaction failed (likely race condition): {}", operation, clean_error);
+                        info!("{} transaction failed (likely race condition): {}", operation, clean_error);
                     } else {
                         error!("{} transaction failed: {}", operation, clean_error);
                     }

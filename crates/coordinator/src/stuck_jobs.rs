@@ -1,3 +1,8 @@
+// This module is kept for reference but is no longer used.
+// Stuck job monitoring is handled by the reconciliation task in jobs.rs
+// to avoid duplicate checks and reduce load on Sui nodes.
+#![allow(dead_code)]
+
 use crate::state::SharedState;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sui::fetch::{fetch_all_jobs_from_app_instance, fetch_app_instance, JobStatus};
@@ -5,6 +10,7 @@ use sui::interface::SilvanaSuiInterface;
 use tracing::{debug, error, info, warn};
 
 /// Monitor for stuck jobs that runs periodically
+/// NOTE: This is no longer used - reconciliation handles stuck jobs
 pub struct StuckJobMonitor {
     state: SharedState,
     check_interval_secs: u64,
