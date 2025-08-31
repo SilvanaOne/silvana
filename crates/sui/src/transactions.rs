@@ -52,9 +52,11 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                         error_str
                     };
                     
-                    // Log as warning for expected race conditions
-                    if clean_error.contains("reserve_proof") || clean_error.contains("start_job") {
-                        info!("{} transaction failed (likely race condition): {}", operation, clean_error);
+                    // Log as info for expected race conditions (multiple coordinators competing)
+                    if clean_error.contains("reserve_proof") || 
+                       clean_error.contains("start_job") || 
+                       clean_error.contains("start_proving") {
+                        info!("{} transaction failed (normal for multiple coordinators): {}", operation, clean_error);
                     } else {
                         error!("{} transaction failed: {}", operation, clean_error);
                     }
