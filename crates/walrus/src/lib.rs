@@ -40,7 +40,7 @@ impl Default for WalrusConfig {
     fn default() -> Self {
         Self {
             daemon: Daemon::Testnet,
-            min_epochs: 14,
+            min_epochs: 2,
             max_epochs: 53,
         }
     }

@@ -648,7 +648,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let save_params = walrus::SaveToWalrusParams {
             data: req.proof.clone(),
             address: None,
-            num_epochs: Some(53), // Maximum epochs for longer retention
+            num_epochs: Some(2), // 2 epochs
         };
 
         let walrus_save_start = std::time::Instant::now();

@@ -3,7 +3,7 @@ use crate::error::{CoordinatorError, Result};
 use crate::failed_jobs_cache::FailedJobsCache;
 use crate::hardware::{get_available_memory_gb, get_total_memory_gb, get_hardware_info};
 use crate::session_id::generate_docker_session;
-use crate::settlement::fetch_all_pending_jobs;
+use crate::settlement::{fetch_all_pending_jobs, can_remove_app_instance};
 use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
 use secrets_client::SecretsClient;
@@ -357,15 +357,27 @@ impl JobSearcher {
             app_instances.len()
         );
 
-        // First do a quick check to remove app_instances without pending jobs
-        // Use check-only mode to quickly identify app_instances without jobs
-        match fetch_all_pending_jobs(&app_instances, true).await {
-            Ok(_) => {
-                debug!("Quick check completed, removed app_instances without pending jobs");
+        // Check which app_instances can be removed (completely caught up with no work)
+        let mut instances_to_remove = Vec::new();
+        for app_instance_id in &app_instances {
+            // Fetch the full AppInstance object to check removal conditions
+            match sui::fetch::fetch_app_instance(app_instance_id).await {
+                Ok(app_instance) => {
+                    if can_remove_app_instance(&app_instance) {
+                        debug!("App instance {} is fully caught up and can be removed", app_instance_id);
+                        instances_to_remove.push(app_instance_id.clone());
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to fetch app_instance {} for removal check: {}", app_instance_id, e);
+                }
             }
-            Err(e) => {
-                warn!("Quick check failed: {}", e);
-            }
+        }
+
+        // Remove fully caught up instances
+        for instance_id in &instances_to_remove {
+            self.state.remove_app_instance(instance_id).await;
+            debug!("Removed fully caught up app_instance: {}", instance_id);
         }
 
         // Now fetch actual pending jobs from remaining app_instances

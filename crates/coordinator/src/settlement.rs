@@ -3,6 +3,37 @@ use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use anyhow::{anyhow, Result};
 use tracing::{debug, warn, error};
 
+/// Check if an app_instance can be safely removed from tracking
+/// An app_instance can only be removed when:
+/// 1. All proved blocks are settled (last_settled_block_number == last_proved_block_number)
+/// 2. We're at the start of the next block (last_proved_block_number + 1 == current_block_number)
+/// 3. No sequences processed in current block (previous_block_last_sequence + 1 == current_sequence)
+/// 4. No pending jobs
+pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
+    // Check if all conditions are met
+    let all_blocks_settled = app_instance.last_settled_block_number == app_instance.last_proved_block_number;
+    let at_block_start = app_instance.last_proved_block_number + 1 == app_instance.block_number;
+    let no_sequences_in_current = app_instance.previous_block_last_sequence + 1 == app_instance.sequence;
+    let no_pending_jobs = app_instance.jobs.as_ref()
+        .map(|jobs| jobs.pending_jobs_count == 0)
+        .unwrap_or(true);
+    
+    if all_blocks_settled && at_block_start && no_sequences_in_current && no_pending_jobs {
+        debug!(
+            "App instance {} can be removed: settled={}, proved={}, current_block={}, prev_seq={}, current_seq={}, pending_jobs=0",
+            app_instance.id,
+            app_instance.last_settled_block_number,
+            app_instance.last_proved_block_number,
+            app_instance.block_number,
+            app_instance.previous_block_last_sequence,
+            app_instance.sequence
+        );
+        true
+    } else {
+        false
+    }
+}
+
 /// Check if there's a settlement opportunity for a given block (legacy single-block function)
 #[allow(dead_code)]
 pub async fn check_settlement_opportunity(
