@@ -102,7 +102,16 @@ pub async fn fetch_app_instance(
     // Extract and parse the AppInstance from the response
     if let Some(proto_object) = object_data.object {
         if let Some(json_value) = &proto_object.json {
+            // Debug: Show the raw AppInstance struct from Sui
             if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                debug!("=== Raw AppInstance struct from Sui ===");
+                debug!("AppInstance {{");
+                for (key, value) in &struct_value.fields {
+                    debug!("    {}: {:?},", key, value.kind);
+                }
+                debug!("}}");
+                debug!("=== End Raw AppInstance ===");
+                
                 return parse_app_instance_from_struct(struct_value, &formatted_id);
             }
         }

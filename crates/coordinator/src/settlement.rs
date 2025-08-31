@@ -390,10 +390,20 @@ pub async fn fetch_all_pending_jobs(
     
     let mut all_pending_jobs = Vec::new();
     
+    debug!("fetch_all_pending_jobs called with {} app_instance_ids, only_check={}", 
+        app_instance_ids.len(), only_check);
+    
     for app_instance_id in app_instance_ids {
         // First fetch the AppInstance object
         let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
-            Ok(app_inst) => app_inst,
+            Ok(app_inst) => {
+                debug!("Successfully fetched AppInstance {}", app_instance_id);
+                if let Some(jobs) = &app_inst.jobs {
+                    debug!("AppInstance {} has Jobs with {} pending jobs", 
+                        app_instance_id, jobs.pending_jobs_count);
+                }
+                app_inst
+            },
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 continue;
@@ -468,6 +478,7 @@ pub async fn fetch_all_pending_jobs(
         }
         Ok(Vec::new())
     } else {
+        debug!("Found {} total pending jobs across all app_instances", all_pending_jobs.len());
         // Separate jobs by type
         let mut settlement_jobs: Vec<_> = all_pending_jobs.iter()
             .filter(|(_, is_settlement)| *is_settlement)

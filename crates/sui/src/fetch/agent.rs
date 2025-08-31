@@ -95,35 +95,38 @@ async fn fetch_developer_and_agent(
 ) -> Result<AgentMethod> {
     use sui_rpc::proto::sui::rpc::v2beta2::ListDynamicFieldsRequest;
     
+    let mut page_token: Option<tonic::codegen::Bytes> = None;
     
-    // List dynamic fields in the developers table to find our developer
-    let list_request = ListDynamicFieldsRequest {
-        parent: Some(developers_table_id.to_string()),
-        page_size: Some(100),
-        page_token: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "field_id".to_string(),
-                "name_type".to_string(),
-                "name_value".to_string(),
-                "object.object_id".to_string(),
-            ],
-        }),
-    };
-    
-    let list_response = client
-        .live_data_client()
-        .list_dynamic_fields(list_request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list developers: {}", e)))?;
-    
-    let response = list_response.into_inner();
-    
-    // Find the developer by name
-    for field in &response.dynamic_fields {
-        if let Some(name_value) = &field.name_value {
-            // The name_value is BCS-encoded String
-            if let Ok(name) = bcs::from_bytes::<String>(name_value) {
+    // Loop through pages to find the developer
+    loop {
+        // List dynamic fields in the developers table to find our developer
+        let list_request = ListDynamicFieldsRequest {
+            parent: Some(developers_table_id.to_string()),
+            page_size: Some(100),
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                    "object.object_id".to_string(),
+                ],
+            }),
+        };
+        
+        let list_response = client
+            .live_data_client()
+            .list_dynamic_fields(list_request)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list developers: {}", e)))?;
+        
+        let response = list_response.into_inner();
+        
+        // Find the developer by name in this page
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                // The name_value is BCS-encoded String
+                if let Ok(name) = bcs::from_bytes::<String>(name_value) {
                 if name == developer_name {
                     
                     // Get the developer field object ID
@@ -203,9 +206,22 @@ async fn fetch_developer_and_agent(
                                 }
                             }
                         }
+                        }
                     }
                 }
             }
+        }
+        
+        // Check if there are more pages
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() {
+                page_token = Some(next_token);
+                // Continue to next page
+            } else {
+                break;
+            }
+        } else {
+            break;
         }
     }
     
@@ -224,39 +240,42 @@ async fn fetch_agent_and_method(
 ) -> Result<AgentMethod> {
     use sui_rpc::proto::sui::rpc::v2beta2::ListDynamicFieldsRequest;
     
+    let mut page_token: Option<tonic::codegen::Bytes> = None;
     
-    // List dynamic fields in the agents table to find our agent
-    let list_request = ListDynamicFieldsRequest {
-        parent: Some(agents_table_id.to_string()),
-        page_size: Some(100),
-        page_token: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "field_id".to_string(),
-                "name_type".to_string(),
-                "name_value".to_string(),
-                "object.object_id".to_string(),
-            ],
-        }),
-    };
-    
-    let list_response = client
-        .live_data_client()
-        .list_dynamic_fields(list_request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list agents: {}", e)))?;
-    
-    let response = list_response.into_inner();
-    
-    // Find the agent by name
-    for field in &response.dynamic_fields {
-        if let Some(name_value) = &field.name_value {
-            // The name_value is BCS-encoded String
-            if let Ok(name) = bcs::from_bytes::<String>(name_value) {
-                if name == agent_name {
-                    
-                    // Get the agent object ID
-                    if let Some(field_id) = &field.field_id {
+    // Loop through pages to find the agent
+    loop {
+        // List dynamic fields in the agents table to find our agent
+        let list_request = ListDynamicFieldsRequest {
+            parent: Some(agents_table_id.to_string()),
+            page_size: Some(100),
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                    "object.object_id".to_string(),
+                ],
+            }),
+        };
+        
+        let list_response = client
+            .live_data_client()
+            .list_dynamic_fields(list_request)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list agents: {}", e)))?;
+        
+        let response = list_response.into_inner();
+        
+        // Find the agent by name in this page
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                // The name_value is BCS-encoded String
+                if let Ok(name) = bcs::from_bytes::<String>(name_value) {
+                    if name == agent_name {
+                        
+                        // Get the agent object ID
+                        if let Some(field_id) = &field.field_id {
                         // Fetch the agent object with JSON
                         let agent_request = GetObjectRequest {
                             object_id: Some(field_id.clone()),
@@ -314,9 +333,22 @@ async fn fetch_agent_and_method(
                                 }
                             }
                         }
+                        }
                     }
                 }
             }
+        }
+        
+        // Check if there are more pages
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() {
+                page_token = Some(next_token);
+                // Continue to next page
+            } else {
+                break;
+            }
+        } else {
+            break;
         }
     }
     

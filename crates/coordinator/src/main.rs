@@ -142,6 +142,22 @@ async fn main() -> Result<()> {
                         println!("        failed_jobs_index: {:?},", jobs.failed_jobs_index);
                         println!("        pending_jobs: {:?},", jobs.pending_jobs);
                         println!("        pending_jobs_count: {},", jobs.pending_jobs_count);
+                        
+                        // Display pending_jobs_indexes in a readable format
+                        println!("        pending_jobs_indexes: {{");
+                        for (developer, agents) in &jobs.pending_jobs_indexes {
+                            println!("            \"{}\": {{", developer);
+                            for (agent, methods) in agents {
+                                println!("                \"{}\": {{", agent);
+                                for (method, job_ids) in methods {
+                                    println!("                    \"{}\": {:?},", method, job_ids);
+                                }
+                                println!("                }},");
+                            }
+                            println!("            }},");
+                        }
+                        println!("        }},");
+                        
                         println!("        next_job_sequence: {},", jobs.next_job_sequence);
                         println!("        max_attempts: {},", jobs.max_attempts);
                         if let Some(ref settlement_job) = jobs.settlement_job {

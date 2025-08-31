@@ -141,6 +141,51 @@ pub struct Jobs {
 impl Jobs {
     /// Parse Jobs from protobuf struct value
     pub fn from_proto_struct(struct_value: &prost_types::Struct) -> Option<Self> {
+        // Debug: Show the raw Jobs struct from Sui
+        debug!("=== Raw Jobs struct from Sui ===");
+        debug!("Jobs {{");
+        for (key, value) in &struct_value.fields {
+            // Special handling for nested structures
+            match key.as_str() {
+                "pending_jobs_indexes" => {
+                    debug!("    pending_jobs_indexes: {{");
+                    if let Some(prost_types::value::Kind::StructValue(indexes_struct)) = &value.kind {
+                        if let Some(contents) = indexes_struct.fields.get("contents") {
+                            if let Some(prost_types::value::Kind::ListValue(list)) = &contents.kind {
+                                debug!("        contents: [{} entries]", list.values.len());
+                                for (i, entry) in list.values.iter().enumerate().take(3) {
+                                    debug!("            Entry {}: {:?}", i, entry.kind);
+                                }
+                                if list.values.len() > 3 {
+                                    debug!("            ... and {} more entries", list.values.len() - 3);
+                                }
+                            }
+                        }
+                    }
+                    debug!("    }},");
+                },
+                "pending_jobs" | "failed_jobs_index" => {
+                    if let Some(prost_types::value::Kind::StructValue(vecset_struct)) = &value.kind {
+                        if let Some(contents) = vecset_struct.fields.get("contents") {
+                            if let Some(prost_types::value::Kind::ListValue(list)) = &contents.kind {
+                                debug!("    {}: VecSet with {} items,", key, list.values.len());
+                            } else {
+                                debug!("    {}: {:?},", key, value.kind);
+                            }
+                        } else {
+                            debug!("    {}: {:?},", key, value.kind);
+                        }
+                    } else {
+                        debug!("    {}: {:?},", key, value.kind);
+                    }
+                },
+                _ => {
+                    debug!("    {}: {:?},", key, value.kind);
+                }
+            }
+        }
+        debug!("}}");
+        debug!("=== End Raw Jobs ===");
         
         // Extract Jobs table ID
         let jobs_table_id = struct_value.fields.get("jobs")
@@ -551,12 +596,24 @@ pub async fn fetch_pending_jobs_from_app_instance(
         debug!("Found {} pending jobs, will fetch job_sequence {}", job_sequences.len(), target_job_sequence);
         
         // Fetch the specific job using the jobs table ID
-        if let Some(job) = fetch_job_by_id(&jobs.jobs_table_id, target_job_sequence).await? {
-            return Ok(Some(job));
+        match fetch_job_by_id(&jobs.jobs_table_id, target_job_sequence).await {
+            Ok(Some(job)) => {
+                debug!("Successfully fetched job {} from app_instance {}", target_job_sequence, app_instance.id);
+                return Ok(Some(job));
+            },
+            Ok(None) => {
+                debug!("Job {} not found in jobs table {} for app_instance {}", 
+                    target_job_sequence, jobs.jobs_table_id, app_instance.id);
+            },
+            Err(e) => {
+                debug!("Error fetching job {} from app_instance {}: {}", 
+                    target_job_sequence, app_instance.id, e);
+                return Err(e);
+            }
         }
     }
     
-    debug!("No jobs found in app_instance {}", app_instance.id);
+    debug!("No jobs successfully fetched from app_instance {}", app_instance.id);
     Ok(None)
 }
 
@@ -768,46 +825,77 @@ pub async fn fetch_job_by_id(
     let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching job {} from jobs table {}", job_sequence, jobs_table_id);
     
-    // List dynamic fields to find the specific job
-    let list_request = ListDynamicFieldsRequest {
-        parent: Some(jobs_table_id.to_string()),
-        page_size: Some(100),
-        page_token: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "field_id".to_string(),
-                "name_type".to_string(),
-                "name_value".to_string(),
-            ],
-        }),
-    };
+    let mut page_token: Option<tonic::codegen::Bytes> = None;
+    let mut total_fields_checked = 0;
     
-    let list_response = client
-        .live_data_client()
-        .list_dynamic_fields(list_request)
-        .await
-        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-            format!("Failed to list jobs in table: {}", e)
-        ))?;
-    
-    let response = list_response.into_inner();
-    
-    // Find the specific job entry
-    for field in &response.dynamic_fields {
-        if let Some(name_value) = &field.name_value {
-            // The name_value is BCS-encoded u64 (job_sequence)
-            if let Ok(field_job_sequence) = bcs::from_bytes::<u64>(name_value) {
-                if field_job_sequence == job_sequence {
-                    if let Some(field_id) = &field.field_id {
-                        // Found the job, fetch its content
-                        return fetch_job_object_by_field_id(field_id, job_sequence).await;
+    // Loop through pages until we find the job or exhaust all pages
+    loop {
+        // List dynamic fields to find the specific job
+        let list_request = ListDynamicFieldsRequest {
+            parent: Some(jobs_table_id.to_string()),
+            page_size: Some(100),
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                ],
+            }),
+        };
+        
+        let list_response = client
+            .live_data_client()
+            .list_dynamic_fields(list_request)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+                format!("Failed to list jobs in table: {}", e)
+            ))?;
+        
+        let response = list_response.into_inner();
+        
+        debug!("Listed {} dynamic fields in page (total checked: {})", 
+            response.dynamic_fields.len(), 
+            total_fields_checked + response.dynamic_fields.len());
+        
+        // Find the specific job entry in this page
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                // The name_value is BCS-encoded u64 (job_sequence)
+                match bcs::from_bytes::<u64>(name_value) {
+                    Ok(field_job_sequence) => {
+                        if field_job_sequence == job_sequence {
+                            if let Some(field_id) = &field.field_id {
+                                debug!("Found job {} in jobs table with field_id {}", job_sequence, field_id);
+                                // Found the job, fetch its content
+                                return fetch_job_object_by_field_id(field_id, job_sequence).await;
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        debug!("Failed to decode BCS for field name_value: {:?}, error: {}", name_value, e);
                     }
                 }
             }
         }
+        
+        total_fields_checked += response.dynamic_fields.len();
+        
+        // Check if there are more pages
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() {
+                page_token = Some(next_token);
+                debug!("Continuing to next page of dynamic fields...");
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
     }
     
-    debug!("Job {} not found in jobs table", job_sequence);
+    debug!("Job {} not found in jobs table {} after checking {} fields", 
+        job_sequence, jobs_table_id, total_fields_checked);
     Ok(None)
 }
 
@@ -906,16 +994,40 @@ pub async fn fetch_pending_job_sequences_from_app_instance(
     
     // Use the Jobs struct that's already in the AppInstance
     if let Some(jobs) = &app_instance.jobs {
+        // Debug output to see the structure
+        debug!("Jobs structure: pending_jobs_count={}, pending_jobs={:?}, pending_jobs_indexes keys={:?}", 
+            jobs.pending_jobs_count, 
+            jobs.pending_jobs.len(),
+            jobs.pending_jobs_indexes.keys().collect::<Vec<_>>()
+        );
+        
         // Navigate through the nested pending_jobs_indexes structure
         if let Some(dev_agents) = jobs.pending_jobs_indexes.get(developer) {
+            debug!("Found developer '{}' with agents: {:?}", developer, dev_agents.keys().collect::<Vec<_>>());
             if let Some(agent_methods) = dev_agents.get(agent) {
+                debug!("Found agent '{}' with methods: {:?}", agent, agent_methods.keys().collect::<Vec<_>>());
                 if let Some(job_sequences) = agent_methods.get(agent_method) {
                     debug!("Found {} pending job sequences for {}/{}/{}", 
                         job_sequences.len(), developer, agent, agent_method);
                     return Ok(job_sequences.clone());
+                } else {
+                    debug!("Method '{}' not found in agent '{}'", agent_method, agent);
                 }
+            } else {
+                debug!("Agent '{}' not found in developer '{}'", agent, developer);
             }
+        } else {
+            debug!("Developer '{}' not found in pending_jobs_indexes", developer);
         }
+        
+        // If indexes are empty but pending_jobs has items, return all pending jobs
+        if jobs.pending_jobs_indexes.is_empty() && !jobs.pending_jobs.is_empty() {
+            debug!("WARNING: pending_jobs_indexes is empty but pending_jobs has {} items. Returning all pending jobs.", 
+                jobs.pending_jobs.len());
+            return Ok(jobs.pending_jobs.clone());
+        }
+    } else {
+        debug!("No Jobs found in AppInstance");
     }
     
     debug!("No pending jobs found for {}/{}/{}", developer, agent, agent_method);
