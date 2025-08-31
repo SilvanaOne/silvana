@@ -65,54 +65,96 @@ impl SilvanaSuiInterface {
 
     /// Terminate a job on the Sui blockchain by calling the terminate_job Move function
     /// This permanently removes a job (useful for canceling periodic jobs)
-    /// Returns true if the transaction was successful, false if it failed
-    pub async fn terminate_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
+    /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
+    pub async fn terminate_job(&mut self, app_instance: &str, job_sequence: u64, gas_budget_sui: f64) -> Result<String, (String, Option<String>)> {
         debug!("Attempting to terminate job {} on Sui blockchain", job_sequence);
         
-        match terminate_job_tx(app_instance, job_sequence).await {
+        let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
+        match terminate_job_tx(app_instance, job_sequence, Some(gas_budget_mist)).await {
             Ok(tx_digest) => {
                 debug!("Successfully terminated job {} on blockchain, tx: {}", job_sequence, tx_digest);
-                true
+                Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to terminate job {} on blockchain: {}", job_sequence, e);
-                false
+                let error_msg = e.to_string();
+                error!("Failed to terminate job {} on blockchain: {}", job_sequence, error_msg);
+                
+                // Extract tx digest from error if it's a TransactionError
+                let tx_digest = if let Some(sui_error) = e.downcast_ref::<crate::error::SilvanaSuiInterfaceError>() {
+                    if let crate::error::SilvanaSuiInterfaceError::TransactionError { tx_digest, .. } = sui_error {
+                        tx_digest.clone()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                Err((error_msg, tx_digest))
             }
         }
     }
 
     /// Restart a failed job on the Sui blockchain by calling the restart_failed_app_job Move function
     /// This moves a job from the failed_jobs table back to the active jobs table
-    /// Returns true if the transaction was successful, false if it failed
-    pub async fn restart_failed_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
+    /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
+    pub async fn restart_failed_job(&mut self, app_instance: &str, job_sequence: u64, gas_budget_sui: f64) -> Result<String, (String, Option<String>)> {
         debug!("Attempting to restart failed job {} on Sui blockchain", job_sequence);
         
-        match restart_failed_job_tx(app_instance, job_sequence).await {
+        let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
+        match restart_failed_job_tx(app_instance, job_sequence, Some(gas_budget_mist)).await {
             Ok(tx_digest) => {
                 debug!("Successfully restarted failed job {} on blockchain, tx: {}", job_sequence, tx_digest);
-                true
+                Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to restart failed job {} on blockchain: {}", job_sequence, e);
-                false
+                let error_msg = e.to_string();
+                error!("Failed to restart failed job {} on blockchain: {}", job_sequence, error_msg);
+                
+                // Extract tx digest from error if it's a TransactionError
+                let tx_digest = if let Some(sui_error) = e.downcast_ref::<crate::error::SilvanaSuiInterfaceError>() {
+                    if let crate::error::SilvanaSuiInterfaceError::TransactionError { tx_digest, .. } = sui_error {
+                        tx_digest.clone()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                Err((error_msg, tx_digest))
             }
         }
     }
 
     /// Restart all failed jobs on the Sui blockchain by calling the restart_failed_app_jobs Move function
     /// This moves all jobs from the failed_jobs table back to the active jobs table
-    /// Returns true if the transaction was successful, false if it failed
-    pub async fn restart_failed_jobs(&mut self, app_instance: &str) -> bool {
+    /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
+    pub async fn restart_failed_jobs(&mut self, app_instance: &str, gas_budget_sui: f64) -> Result<String, (String, Option<String>)> {
         debug!("Attempting to restart all failed jobs on Sui blockchain");
         
-        match restart_failed_jobs_tx(app_instance).await {
+        let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
+        match restart_failed_jobs_tx(app_instance, Some(gas_budget_mist)).await {
             Ok(tx_digest) => {
                 debug!("Successfully restarted all failed jobs on blockchain, tx: {}", tx_digest);
-                true
+                Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to restart all failed jobs on blockchain: {}", e);
-                false
+                let error_msg = e.to_string();
+                error!("Failed to restart all failed jobs on blockchain: {}", error_msg);
+                
+                // Extract tx digest from error if it's a TransactionError
+                let tx_digest = if let Some(sui_error) = e.downcast_ref::<crate::error::SilvanaSuiInterfaceError>() {
+                    if let crate::error::SilvanaSuiInterfaceError::TransactionError { tx_digest, .. } = sui_error {
+                        tx_digest.clone()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                Err((error_msg, tx_digest))
             }
         }
     }

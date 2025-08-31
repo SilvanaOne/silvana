@@ -11,9 +11,17 @@ use crate::chain::get_reference_gas_price;
 use crate::coin::fetch_coin;
 use crate::object_lock::get_object_lock_manager;
 use crate::state::SharedSuiState;
+use crate::error::SilvanaSuiInterfaceError;
 
 /// Helper function to check transaction effects for errors
 fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operation: &str) -> Result<()> {
+    // Get transaction digest first (available even for failed transactions)
+    let tx_digest = tx_resp.transaction
+        .as_ref()
+        .and_then(|t| t.digest.as_ref())
+        .map(|d| d.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    
     // Check for errors in transaction effects
     if let Some(ref transaction) = tx_resp.transaction {
         if let Some(ref effects) = transaction.effects {
@@ -56,12 +64,15 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                     if clean_error.contains("reserve_proof") || 
                        clean_error.contains("start_job") || 
                        clean_error.contains("start_proving") {
-                        info!("{} transaction failed (normal for multiple coordinators): {}", operation, clean_error);
+                        info!("{} transaction failed (normal for multiple coordinators): {} (tx: {})", operation, clean_error, tx_digest);
                     } else {
-                        error!("{} transaction failed: {}", operation, clean_error);
+                        error!("{} transaction failed: {} (tx: {})", operation, clean_error, tx_digest);
                     }
                     
-                    return Err(anyhow!("{} transaction failed: {}", operation, clean_error));
+                    return Err(SilvanaSuiInterfaceError::TransactionError {
+                        message: format!("{} transaction failed: {}", operation, clean_error),
+                        tx_digest: Some(tx_digest.clone()),
+                    }.into());
                 }
             }
         }
@@ -69,8 +80,11 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
     
     // Check transaction was successful
     if tx_resp.finality.is_none() {
-        error!("{} transaction did not achieve finality", operation);
-        return Err(anyhow!("{} transaction did not achieve finality", operation));
+        error!("{} transaction did not achieve finality (tx: {})", operation, tx_digest);
+        return Err(SilvanaSuiInterfaceError::TransactionError {
+            message: format!("{} transaction did not achieve finality", operation),
+            tx_digest: Some(tx_digest),
+        }.into());
     }
     
     // Check for transaction success in effects
@@ -223,12 +237,14 @@ pub async fn fail_job_tx(
 pub async fn terminate_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
+    gas_budget: Option<u64>,
 ) -> Result<String> {
     debug!("Creating terminate_app_job transaction for job_sequence: {}", job_sequence);
     
-    execute_app_instance_function(
+    execute_app_instance_function_with_gas(
         app_instance_str,
         "terminate_app_job",
+        gas_budget,
         move |tb, app_instance_arg, clock_arg| {
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
@@ -240,12 +256,14 @@ pub async fn terminate_job_tx(
 pub async fn restart_failed_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
+    gas_budget: Option<u64>,
 ) -> Result<String> {
     debug!("Creating restart_failed_app_job transaction for job_sequence: {}", job_sequence);
     
-    execute_app_instance_function(
+    execute_app_instance_function_with_gas(
         app_instance_str,
         "restart_failed_app_job",
+        gas_budget,
         move |tb, app_instance_arg, clock_arg| {
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
@@ -256,12 +274,17 @@ pub async fn restart_failed_job_tx(
 /// Create and submit a transaction to restart all failed jobs
 pub async fn restart_failed_jobs_tx(
     app_instance_str: &str,
+    gas_budget: Option<u64>,
 ) -> Result<String> {
     debug!("Creating restart_failed_app_jobs transaction");
     
-    execute_app_instance_function(
+    // Default to 1 SUI for this heavy operation if not specified
+    let gas = gas_budget.or(Some(1_000_000_000));
+    
+    execute_app_instance_function_with_gas(
         app_instance_str,
         "restart_failed_app_jobs",
+        gas,
         move |_tb, app_instance_arg, clock_arg| {
             vec![app_instance_arg, clock_arg]
         },
@@ -746,6 +769,25 @@ where
         sui_sdk_types::Argument, // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
+    execute_app_instance_function_with_gas(app_instance_str, function_name, None, build_args).await
+}
+
+/// Common helper function to execute app instance transactions with custom gas budget
+/// This reduces code duplication while maintaining all error detection and features
+/// Returns the transaction digest and keeps the coin lock guard alive
+async fn execute_app_instance_function_with_gas<F>(
+    app_instance_str: &str,
+    function_name: &str,
+    custom_gas_budget: Option<u64>,
+    build_args: F,
+) -> Result<String>
+where
+    F: FnOnce(
+        &mut sui_transaction_builder::TransactionBuilder,
+        sui_sdk_types::Argument, // app_instance_arg
+        sui_sdk_types::Argument, // clock_arg
+    ) -> Vec<sui_sdk_types::Argument>,
+{
     debug!("Creating {} transaction for app_instance: {}", function_name, app_instance_str);
     
     // Get shared state and client
@@ -769,7 +811,11 @@ where
     // Build transaction using TransactionBuilder
     let mut tb = sui_transaction_builder::TransactionBuilder::new();
     tb.set_sender(sender);
-    tb.set_gas_budget(100_000_000); // 0.1 SUI
+    
+    // Use custom gas budget or default to 0.1 SUI
+    let gas_budget = custom_gas_budget.unwrap_or(100_000_000);
+    tb.set_gas_budget(gas_budget);
+    debug!("Gas budget: {} MIST ({} SUI)", gas_budget, gas_budget as f64 / 1_000_000_000.0);
 
     // Get gas price and gas coin
     let gas_price = get_reference_gas_price(&mut client).await?;
@@ -778,7 +824,7 @@ where
 
     // Select gas coin using parallel-safe coin management
     // IMPORTANT: Keep the guard alive until after transaction is confirmed
-    let (gas_coin, gas_guard) = match fetch_coin(&mut client, sender, 100_000_000).await? {
+    let (gas_coin, gas_guard) = match fetch_coin(&mut client, sender, gas_budget).await? {
         Some((coin, guard)) => (coin, guard),
         None => {
             error!("No available coins with sufficient balance for gas");

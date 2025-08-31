@@ -5,8 +5,11 @@ pub enum SilvanaSuiInterfaceError {
     #[error("RPC connection failed: {0}")]
     RpcConnectionError(String),
 
-    #[error("Transaction failed: {0}")]
-    TransactionError(String),
+    #[error("Transaction failed: {message}{}", tx_digest.as_ref().map(|d| format!(" (tx: {})", d)).unwrap_or_default())]
+    TransactionError {
+        message: String,
+        tx_digest: Option<String>,
+    },
 
     #[error("Object not found: {0}")]
     ObjectNotFound(String),

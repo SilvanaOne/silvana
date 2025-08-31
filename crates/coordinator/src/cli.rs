@@ -98,8 +98,9 @@ pub enum Commands {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: String,
         
+        /// Private key for signing transactions (optional, defaults to SUI_SECRET_KEY env var)
         #[arg(long, env = "SUI_PRIVATE_KEY")]
-        private_key: String,
+        private_key: Option<String>,
         
         #[command(subcommand)]
         tx_type: TransactionType,
@@ -130,6 +131,10 @@ pub enum TransactionType {
         
         /// The job sequence number to terminate
         job: u64,
+        
+        /// Gas budget in SUI (e.g., 0.2 for 0.2 SUI)
+        #[arg(long, default_value = "0.1")]
+        gas: f64,
     },
     
     /// Restart a specific failed job on the blockchain
@@ -139,12 +144,20 @@ pub enum TransactionType {
         
         /// The job sequence number to restart
         job: u64,
+        
+        /// Gas budget in SUI (e.g., 0.2 for 0.2 SUI)
+        #[arg(long, default_value = "0.1")]
+        gas: f64,
     },
     
     /// Restart all failed jobs on the blockchain
     RestartFailedJobs {
         /// The app instance ID
         instance: String,
+        
+        /// Gas budget in SUI (e.g., 1.0 for 1 SUI, default higher for this heavy operation)
+        #[arg(long, default_value = "1.0")]
+        gas: f64,
     },
 }
 

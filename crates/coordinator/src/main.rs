@@ -21,7 +21,7 @@ mod stuck_jobs;
 
 use clap::Parser;
 use dotenvy::dotenv;
-use tracing::error;
+use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 use chrono::{DateTime, Utc};
 
@@ -521,44 +521,99 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
             
-            // Initialize Sui connection with private key
-            sui::SharedSuiState::initialize_with_optional_key(&rpc_url, Some(&private_key)).await?;
+            // Initialize Sui connection with optional private key (will use env var if not provided)
+            match sui::SharedSuiState::initialize_with_optional_key(&rpc_url, private_key.as_deref()).await {
+                Ok(()) => {},
+                Err(e) => {
+                    error!("Failed to initialize Sui connection: {}", e);
+                    println!("❌ Failed to initialize Sui connection");
+                    println!("Error: {}", e);
+                    return Err(e.into());
+                }
+            }
+            
+            // Initialize gas coin pool for better transaction performance (like in start command)
+            info!("🪙 Initializing gas coin pool...");
+            match sui::coin_management::initialize_gas_coin_pool().await {
+                Ok(()) => info!("✅ Gas coin pool initialized"),
+                Err(e) => {
+                    warn!("⚠️ Failed to initialize gas coin pool: {}. Continuing anyway.", e);
+                    println!("⚠️ Warning: Failed to initialize gas coin pool");
+                    println!("This may cause transaction failures. Error: {}", e);
+                }
+            }
             
             // Create interface
             let mut interface = sui::interface::SilvanaSuiInterface::new();
             
             // Execute the requested transaction
             match tx_type {
-                TransactionType::TerminateJob { instance, job } => {
-                    println!("Terminating job {} in instance {}", job, instance);
+                TransactionType::TerminateJob { instance, job, gas } => {
+                    println!("Terminating job {} in instance {} (gas: {} SUI)", job, instance, gas);
                     
-                    if interface.terminate_job(&instance, job).await {
-                        println!("✅ Successfully terminated job {}", job);
-                    } else {
-                        println!("❌ Failed to terminate job {}", job);
-                        return Err(anyhow::anyhow!("Transaction failed").into());
+                    match interface.terminate_job(&instance, job, gas).await {
+                        Ok(tx_digest) => {
+                            println!("✅ Transaction executed successfully");
+                            println!("Transaction digest: {}", tx_digest);
+                            println!("Job {} has been terminated", job);
+                        }
+                        Err((error_msg, tx_digest)) => {
+                            println!("❌ Transaction execution failed");
+                            if let Some(digest) = tx_digest {
+                                println!("Transaction digest: {}", digest);
+                                println!("Note: Transaction was submitted but failed during execution");
+                            } else {
+                                println!("Transaction was not submitted to the blockchain");
+                            }
+                            println!("Error: {}", error_msg);
+                            return Err(anyhow::anyhow!("Transaction failed").into());
+                        }
                     }
                 }
                 
-                TransactionType::RestartFailedJob { instance, job } => {
-                    println!("Restarting failed job {} in instance {}", job, instance);
+                TransactionType::RestartFailedJob { instance, job, gas } => {
+                    println!("Restarting failed job {} in instance {} (gas: {} SUI)", job, instance, gas);
                     
-                    if interface.restart_failed_job(&instance, job).await {
-                        println!("✅ Successfully restarted failed job {}", job);
-                    } else {
-                        println!("❌ Failed to restart failed job {}", job);
-                        return Err(anyhow::anyhow!("Transaction failed").into());
+                    match interface.restart_failed_job(&instance, job, gas).await {
+                        Ok(tx_digest) => {
+                            println!("✅ Transaction executed successfully");
+                            println!("Transaction digest: {}", tx_digest);
+                            println!("Failed job {} has been restarted", job);
+                        }
+                        Err((error_msg, tx_digest)) => {
+                            println!("❌ Transaction execution failed");
+                            if let Some(digest) = tx_digest {
+                                println!("Transaction digest: {}", digest);
+                                println!("Note: Transaction was submitted but failed during execution");
+                            } else {
+                                println!("Transaction was not submitted to the blockchain");
+                            }
+                            println!("Error: {}", error_msg);
+                            return Err(anyhow::anyhow!("Transaction failed").into());
+                        }
                     }
                 }
                 
-                TransactionType::RestartFailedJobs { instance } => {
-                    println!("Restarting all failed jobs in instance {}", instance);
+                TransactionType::RestartFailedJobs { instance, gas } => {
+                    println!("Restarting all failed jobs in instance {} (gas: {} SUI)", instance, gas);
                     
-                    if interface.restart_failed_jobs(&instance).await {
-                        println!("✅ Successfully restarted all failed jobs");
-                    } else {
-                        println!("❌ Failed to restart failed jobs");
-                        return Err(anyhow::anyhow!("Transaction failed").into());
+                    match interface.restart_failed_jobs(&instance, gas).await {
+                        Ok(tx_digest) => {
+                            println!("✅ Transaction executed successfully");
+                            println!("Transaction digest: {}", tx_digest);
+                            println!("All failed jobs have been restarted");
+                        }
+                        Err((error_msg, tx_digest)) => {
+                            println!("❌ Transaction execution failed");
+                            if let Some(digest) = tx_digest {
+                                println!("Transaction digest: {}", digest);
+                                println!("Note: Transaction was submitted but failed during execution");
+                            } else {
+                                println!("Transaction was not submitted to the blockchain");
+                            }
+                            println!("Error: {}", error_msg);
+                            return Err(anyhow::anyhow!("Transaction failed").into());
+                        }
                     }
                 }
             }

@@ -526,28 +526,37 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Execute terminate_job transaction on Sui
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
 
-        let success = sui_interface
-            .terminate_job(&agent_job.app_instance, agent_job.job_sequence)
+        // Use default gas budget of 0.1 SUI for gRPC calls
+        let result = sui_interface
+            .terminate_job(&agent_job.app_instance, agent_job.job_sequence, 0.1)
             .await;
 
-        if success {
+        match result {
+            Ok(tx_hash) => {
             // Remove job from agent database
             self.state
                 .get_agent_job_db()
                 .terminate_job(&req.job_id)
                 .await;
 
-            info!("Successfully terminated job {}", req.job_id);
-            Ok(Response::new(TerminateJobResponse {
-                success: true,
-                message: format!("Job {} terminated successfully", req.job_id),
-            }))
-        } else {
-            error!("Failed to terminate job {} on blockchain", req.job_id);
-            Ok(Response::new(TerminateJobResponse {
-                success: false,
-                message: format!("Failed to terminate job {} on blockchain", req.job_id),
-            }))
+                info!("Successfully terminated job {} (tx: {})", req.job_id, tx_hash);
+                Ok(Response::new(TerminateJobResponse {
+                    success: true,
+                    message: format!("Job {} terminated successfully (tx: {})", req.job_id, tx_hash),
+                }))
+            }
+            Err((error_msg, tx_digest)) => {
+                error!("Failed to terminate job {} on blockchain: {}", req.job_id, error_msg);
+                let message = if let Some(digest) = tx_digest {
+                    format!("Failed to terminate job {} (tx: {}): {}", req.job_id, digest, error_msg)
+                } else {
+                    format!("Failed to terminate job {}: {}", req.job_id, error_msg)
+                };
+                Ok(Response::new(TerminateJobResponse {
+                    success: false,
+                    message,
+                }))
+            }
         }
     }
 
