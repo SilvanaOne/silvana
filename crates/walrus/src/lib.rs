@@ -11,7 +11,7 @@ fn get_max_retries() -> u32 {
     static MAX_RETRIES_CACHE: OnceLock<u32> = OnceLock::new();
     *MAX_RETRIES_CACHE.get_or_init(|| {
         env::var("WALRUS_MAX_RETRIES")
-            .unwrap_or_else(|_| "10".to_string())
+            .unwrap_or_else(|_| "20".to_string())
             .parse::<u32>()
             .unwrap_or(10)
     })
@@ -104,7 +104,7 @@ impl WalrusClient {
         );
 
         let max_retries = get_max_retries();
-        const RETRY_DELAY_SECS: u64 = 5;
+        const BASE_RETRY_DELAY_SECS: u64 = 5;
 
         for attempt in 1..=max_retries {
             debug!("Writing to Walrus (attempt {}/{})", attempt, max_retries);
@@ -117,11 +117,13 @@ impl WalrusClient {
                 Ok(resp) => resp,
                 Err(e) => {
                     if attempt < max_retries {
+                        // Exponential backoff: double the delay for each retry
+                        let retry_delay = BASE_RETRY_DELAY_SECS * 2_u64.pow((attempt - 1) as u32);
                         warn!(
                             "Failed to send request to Walrus (attempt {}/{}): {}. Retrying in {} seconds...",
-                            attempt, max_retries, e, RETRY_DELAY_SECS
+                            attempt, max_retries, e, retry_delay
                         );
-                        sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                        sleep(Duration::from_secs(retry_delay)).await;
                         continue;
                     } else {
                         error!(
@@ -145,11 +147,13 @@ impl WalrusClient {
                     Ok(json) => json,
                     Err(e) => {
                         if attempt < max_retries {
+                            // Exponential backoff: double the delay for each retry
+                            let retry_delay = BASE_RETRY_DELAY_SECS * 2_u64.pow((attempt - 1) as u32);
                             warn!(
                                 "Failed to parse response (attempt {}/{}): {}. Retrying in {} seconds...",
-                                attempt, max_retries, e, RETRY_DELAY_SECS
+                                attempt, max_retries, e, retry_delay
                             );
-                            sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                            sleep(Duration::from_secs(retry_delay)).await;
                             continue;
                         } else {
                             error!(
@@ -176,11 +180,13 @@ impl WalrusClient {
                     return Ok(Some(id.clone()));
                 } else {
                     if attempt < max_retries {
+                        // Exponential backoff: double the delay for each retry
+                        let retry_delay = BASE_RETRY_DELAY_SECS * 2_u64.pow((attempt - 1) as u32);
                         warn!(
                             "No blob_id in response (attempt {}/{}). Retrying in {} seconds...",
-                            attempt, max_retries, RETRY_DELAY_SECS
+                            attempt, max_retries, retry_delay
                         );
-                        sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                        sleep(Duration::from_secs(retry_delay)).await;
                         continue;
                     } else {
                         error!("No blob_id in response after {} attempts", max_retries);
@@ -196,11 +202,13 @@ impl WalrusClient {
 
                 // For 500 errors and other server errors, retry
                 if status.is_server_error() && attempt < max_retries {
+                    // Exponential backoff: double the delay for each retry
+                    let retry_delay = BASE_RETRY_DELAY_SECS * 2_u64.pow((attempt - 1) as u32);
                     warn!(
                         "Walrus returned error {} {} (attempt {}/{}). Retrying in {} seconds...",
-                        status, status_text, attempt, max_retries, RETRY_DELAY_SECS
+                        status, status_text, attempt, max_retries, retry_delay
                     );
-                    sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                    sleep(Duration::from_secs(retry_delay)).await;
                     continue;
                 } else if attempt >= max_retries {
                     error!(
@@ -232,7 +240,7 @@ impl WalrusClient {
         let url = format!("{}{}", self.config.reader_url(), params.blob_id);
 
         let max_retries = get_max_retries();
-        const RETRY_DELAY_SECS: u64 = 5;
+        const BASE_RETRY_DELAY_SECS: u64 = 5;
 
         for attempt in 1..=max_retries {
             debug!(
@@ -245,11 +253,13 @@ impl WalrusClient {
                 Ok(resp) => resp,
                 Err(e) => {
                     if attempt < max_retries {
+                        // Exponential backoff: double the delay for each retry
+                        let retry_delay = BASE_RETRY_DELAY_SECS * 2_u64.pow((attempt - 1) as u32);
                         warn!(
                             "Failed to read from Walrus (attempt {}/{}): {}. Retrying in {} seconds...",
-                            attempt, max_retries, e, RETRY_DELAY_SECS
+                            attempt, max_retries, e, retry_delay
                         );
-                        sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                        sleep(Duration::from_secs(retry_delay)).await;
                         continue;
                     } else {
                         error!(
@@ -273,11 +283,13 @@ impl WalrusClient {
                     Ok(text) => text,
                     Err(e) => {
                         if attempt < max_retries {
+                            // Exponential backoff: double the delay for each retry
+                            let retry_delay = BASE_RETRY_DELAY_SECS * 2_u64.pow((attempt - 1) as u32);
                             warn!(
                                 "Failed to read response body (attempt {}/{}): {}. Retrying in {} seconds...",
-                                attempt, max_retries, e, RETRY_DELAY_SECS
+                                attempt, max_retries, e, retry_delay
                             );
-                            sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                            sleep(Duration::from_secs(retry_delay)).await;
                             continue;
                         } else {
                             error!(
@@ -303,11 +315,13 @@ impl WalrusClient {
 
                 // For 500 errors and other server errors, retry
                 if status.is_server_error() && attempt < max_retries {
+                    // Exponential backoff: double the delay for each retry
+                    let retry_delay = BASE_RETRY_DELAY_SECS * 2_u64.pow((attempt - 1) as u32);
                     warn!(
                         "Walrus returned error {} {} (attempt {}/{}). Retrying in {} seconds...",
-                        status, status_text, attempt, max_retries, RETRY_DELAY_SECS
+                        status, status_text, attempt, max_retries, retry_delay
                     );
-                    sleep(Duration::from_secs(RETRY_DELAY_SECS)).await;
+                    sleep(Duration::from_secs(retry_delay)).await;
                     continue;
                 } else if attempt >= max_retries {
                     error!(
