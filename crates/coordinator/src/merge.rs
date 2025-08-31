@@ -693,8 +693,82 @@ async fn create_merge_job(
         );
     }
 
-    // Step 2: Try to reserve the proofs with start_proving
-    debug!("🔒 Attempting to reserve proofs for merge job: {}", job_id);
+    // Step 2: Check if proofs can be reserved before attempting
+    // Fetch fresh proof calculation state to check if proofs are available
+    debug!("🔍 Fetching fresh proof calculation state before reservation attempt");
+    let fresh_app_instance = match sui::fetch::app_instance::fetch_app_instance(app_instance).await {
+        Ok(instance) => instance,
+        Err(e) => {
+            warn!("Failed to fetch fresh app instance: {}", e);
+            return Err(anyhow::anyhow!("Failed to fetch app instance: {}", e));
+        }
+    };
+    
+    let fresh_proof_calc = match sui::fetch::prover::fetch_proof_calculation(&fresh_app_instance, block_number).await {
+        Ok(Some(calc)) => calc,
+        Ok(None) => {
+            debug!("No proof calculation found for block {} - cannot reserve", block_number);
+            return Err(anyhow::anyhow!("No proof calculation found for block {}", block_number));
+        }
+        Err(e) => {
+            warn!("Failed to fetch fresh proof calculation: {}", e);
+            return Err(anyhow::anyhow!("Failed to fetch proof calculation: {}", e));
+        }
+    };
+    
+    // Check the combined proof status - if it exists, it must be REJECTED to proceed
+    let combined_proof = fresh_proof_calc.proofs.iter().find(|p| arrays_equal(&p.sequences, &combined_sequences));
+    if let Some(proof) = combined_proof {
+        if proof.status != ProofStatus::Rejected {
+            debug!("❌ Combined proof (sequences {:?}) already exists with status {:?} - cannot start", combined_sequences, proof.status);
+            return Err(anyhow::anyhow!("Combined proof already exists with status {:?}", proof.status));
+        }
+        debug!("✅ Combined proof exists but is REJECTED - can proceed");
+    } else {
+        debug!("✅ Combined proof does not exist yet - can create new");
+    }
+    
+    // Check that sequence1 and sequence2 proofs exist and are CALCULATED
+    let proof1 = fresh_proof_calc.proofs.iter().find(|p| arrays_equal(&p.sequences, &sequences1));
+    let proof2 = fresh_proof_calc.proofs.iter().find(|p| arrays_equal(&p.sequences, &sequences2));
+    
+    let is_block_proof = combined_sequences.len() == (fresh_proof_calc.end_sequence.unwrap_or(0) - fresh_proof_calc.start_sequence + 1) as usize;
+    
+    let can_reserve = match (proof1, proof2) {
+        (Some(p1), Some(p2)) => {
+            // For regular proofs: must be CALCULATED
+            // For block proofs: can be CALCULATED, USED, or RESERVED
+            let p1_ok = p1.status == ProofStatus::Calculated || 
+                       (is_block_proof && (p1.status == ProofStatus::Used || p1.status == ProofStatus::Reserved));
+            let p2_ok = p2.status == ProofStatus::Calculated || 
+                       (is_block_proof && (p2.status == ProofStatus::Used || p2.status == ProofStatus::Reserved));
+            
+            if !p1_ok {
+                debug!("❌ Proof1 (sequences {:?}) cannot be reserved - status: {:?}", sequences1, p1.status);
+            }
+            if !p2_ok {
+                debug!("❌ Proof2 (sequences {:?}) cannot be reserved - status: {:?}", sequences2, p2.status);
+            }
+            
+            p1_ok && p2_ok
+        }
+        (None, _) => {
+            debug!("❌ Proof1 (sequences {:?}) not found in proof calculation", sequences1);
+            false
+        }
+        (_, None) => {
+            debug!("❌ Proof2 (sequences {:?}) not found in proof calculation", sequences2);
+            false
+        }
+    };
+    
+    if !can_reserve {
+        debug!("⚠️ Proofs cannot be reserved for merge job {} - skipping transaction", job_id);
+        return Err(anyhow::anyhow!("Proofs not in reservable state for sequences {:?} and {:?}", sequences1, sequences2));
+    }
+    
+    // Step 3: Try to reserve the proofs with start_proving
+    debug!("🔒 Proofs are reservable, attempting to reserve for merge job: {}", job_id);
     match sui_interface
         .start_proving(
             app_instance,
