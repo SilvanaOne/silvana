@@ -1417,12 +1417,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
             match sui::fetch::fetch_proof_calculation(&app_instance, req.block_number).await {
                 Ok(Some(proof_calc)) => proof_calc,
                 Ok(None) => {
-                    warn!("No ProofCalculation found for block {}", req.block_number);
+                    // ProofCalculation not found - expected for settled blocks as they are deleted after settlement
+                    debug!("No ProofCalculation found for block {} (may have been deleted after settlement)", req.block_number);
                     return Ok(Response::new(GetProofResponse {
                         success: false,
                         proof: None,
                         message: format!(
-                            "No ProofCalculation found for block {}",
+                            "No ProofCalculation found for block {} (may have been deleted after settlement)",
                             req.block_number
                         ),
                     }));
@@ -1619,12 +1620,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let proof_calculation = match sui::fetch::fetch_proof_calculation(&app_instance, req.block_number).await {
             Ok(Some(calc)) => calc,
             Ok(None) => {
-                warn!("No ProofCalculation found for block {}", req.block_number);
+                // ProofCalculation not found - expected for settled blocks as they are deleted after settlement
+                debug!("No ProofCalculation found for block {} (may have been deleted after settlement)", req.block_number);
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
                     message: format!(
-                        "No ProofCalculation found for block {}",
+                        "No ProofCalculation found for block {} (may have been deleted after settlement)",
                         req.block_number
                     ),
                 }));

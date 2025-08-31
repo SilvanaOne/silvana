@@ -211,8 +211,10 @@ async fn fetch_proof_calculations_from_table_range(
     );
 
     if field_ids_to_fetch.is_empty() {
-        warn!(
-            "❌ No proof calculations found in range {}-{} after searching {} pages",
+        // ProofCalculations not found - this is expected for settled blocks as they are deleted
+        // after settlement to save on-chain storage (see update_block_settlement_tx_included_in_block)
+        debug!(
+            "No proof calculations found in range {}-{} after searching {} pages (may have been deleted after settlement)",
             start_block, end_block, pages_searched
         );
         return Ok(HashMap::new());
@@ -456,8 +458,10 @@ async fn fetch_proof_calculation_from_table(
         }
     }
 
-    warn!(
-        "ProofCalculation not found for block {} after searching {} pages",
+    // ProofCalculation not found - this is expected for settled blocks as they are deleted
+    // after settlement to save on-chain storage (see update_block_settlement_tx_included_in_block)
+    debug!(
+        "ProofCalculation not found for block {} after searching {} pages (may have been deleted after settlement)",
         target_block_number, pages_searched
     );
     Ok(None)
