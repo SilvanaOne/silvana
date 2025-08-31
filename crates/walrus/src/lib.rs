@@ -11,9 +11,9 @@ fn get_max_retries() -> u32 {
     static MAX_RETRIES_CACHE: OnceLock<u32> = OnceLock::new();
     *MAX_RETRIES_CACHE.get_or_init(|| {
         env::var("WALRUS_MAX_RETRIES")
-            .unwrap_or_else(|_| "20".to_string())
+            .unwrap_or_else(|_| "4".to_string())
             .parse::<u32>()
-            .unwrap_or(10)
+            .unwrap_or(4)
     })
 }
 
