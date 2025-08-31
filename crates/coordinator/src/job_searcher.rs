@@ -299,7 +299,7 @@ impl JobSearcher {
 
                             // Log how many containers are already loading/running
                             let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
-                            info!(
+                            debug!(
                                 "📋 Picked job for Docker (currently {} loading, {} running): dev={}, agent={}/{}, job_seq={}, app={}",
                                 loading_count, running_count,
                                 job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
@@ -344,7 +344,7 @@ impl JobSearcher {
 
     /// Check for pending jobs and clean up app_instances without jobs
     /// This combines job searching with cleanup that reconciliation would do
-    /// Returns the first job that is not in the failed cache
+    /// Returns a randomly selected job from a pool of viable jobs
     async fn check_and_clean_pending_jobs(&self) -> Result<Option<Job>> {
         let app_instances = self.state.get_app_instances().await;
 
@@ -390,19 +390,81 @@ impl JobSearcher {
                 
                 let total_jobs = pending_jobs.len();
                 
-                // Try to find a job that is not in the failed cache
+                // Filter out jobs that are in the failed cache
+                let mut viable_jobs = Vec::new();
                 for job in pending_jobs {
                     if !self.failed_jobs_cache.is_recently_failed(&job.app_instance, job.job_sequence).await {
-                        debug!("Found viable job {} from app_instance {}", job.job_sequence, job.app_instance);
-                        return Ok(Some(job));
+                        viable_jobs.push(job);
                     } else {
                         debug!("Skipping job {} from app_instance {} (in failed cache)", job.job_sequence, job.app_instance);
                     }
                 }
                 
-                // All jobs are in the failed cache
-                debug!("All {} pending jobs are in the failed cache", total_jobs);
-                Ok(None)
+                if viable_jobs.is_empty() {
+                    debug!("All {} pending jobs are in the failed cache", total_jobs);
+                    return Ok(None);
+                }
+                
+                // Build job pool based on priority:
+                // 1. Settlement jobs (highest priority - always picked if available)
+                // 2. Merge jobs (collect all, up to pool size)
+                // 3. Other jobs (fill remaining slots)
+                const JOB_POOL_SIZE: usize = 10;
+                
+                // Check for settlement jobs first
+                let settlement_jobs: Vec<Job> = viable_jobs
+                    .iter()
+                    .filter(|job| job.app_instance_method == "settle")
+                    .cloned()
+                    .collect();
+                
+                if !settlement_jobs.is_empty() {
+                    // Always pick settlement job immediately (highest priority)
+                    let job = settlement_jobs.into_iter().next().unwrap();
+                    debug!("Selected settlement job {} from app_instance {}", job.job_sequence, job.app_instance);
+                    return Ok(Some(job));
+                }
+                
+                // Collect merge jobs
+                let mut job_pool: Vec<Job> = viable_jobs
+                    .iter()
+                    .filter(|job| job.app_instance_method == "merge")
+                    .cloned()
+                    .collect();
+                
+                let merge_count = job_pool.len();
+                debug!("Found {} merge jobs", merge_count);
+                
+                // If we have less than pool size, add other jobs
+                if job_pool.len() < JOB_POOL_SIZE {
+                    let mut other_jobs: Vec<Job> = viable_jobs
+                        .iter()
+                        .filter(|job| job.app_instance_method != "merge" && job.app_instance_method != "settle")
+                        .cloned()
+                        .collect();
+                    
+                    // Sort other jobs by sequence to get lowest ones
+                    other_jobs.sort_by_key(|job| job.job_sequence);
+                    
+                    // Take enough to fill the pool
+                    let slots_remaining = JOB_POOL_SIZE - job_pool.len();
+                    job_pool.extend(other_jobs.into_iter().take(slots_remaining));
+                    
+                    debug!("Added {} other jobs to pool (total pool size: {})", 
+                           job_pool.len() - merge_count, job_pool.len());
+                }
+                
+                // Select randomly from the pool
+                use rand::Rng;
+                let pool_size = job_pool.len();
+                let selected_index = rand::thread_rng().gen_range(0..pool_size);
+                let selected_job = job_pool[selected_index].clone();
+                
+                debug!("Randomly selected job {} from app_instance {} (index {}/{}, pool had {} merge jobs)", 
+                       selected_job.job_sequence, selected_job.app_instance, 
+                       selected_index, pool_size, merge_count);
+                
+                Ok(Some(selected_job))
             }
             Err(e) => {
                 error!("Failed to fetch pending jobs: {}", e);
