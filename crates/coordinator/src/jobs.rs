@@ -138,14 +138,13 @@ impl JobsTracker {
         instances.len()
     }
 
-
     /// Reconcile with on-chain state by checking pending_jobs_count for each tracked app_instance
     /// Also checks for stuck running jobs and fails them if they've been running too long
     /// Only removes app_instances that haven't been updated during the reconciliation
     /// Returns true if there are still pending jobs after reconciliation
     pub async fn reconcile_with_chain(&self) -> Result<bool> {
         let initial_count = self.app_instances_count().await;
-        debug!("Starting reconciliation with on-chain state ({} app_instances tracked)", initial_count);
+        info!("🔄 Starting reconciliation with on-chain state ({} app_instances tracked)", initial_count);
         
         // Get a snapshot of instances to check with their timestamps
         let instances_to_check: Vec<(String, Instant)> = {
@@ -266,6 +265,7 @@ impl JobsTracker {
         }
         
         info!("Checking {} app_instances for stuck running jobs and orphaned pending jobs", instances_to_check.len());
+        info!("App instances being checked: {:?}", instances_to_check.iter().map(|(id, _)| id).collect::<Vec<_>>());
         
         for (app_instance_id, _) in instances_to_check {
             // First fetch the AppInstance object
@@ -282,6 +282,10 @@ impl JobsTracker {
             // Fetch all jobs for this app_instance
             match sui::fetch::fetch_all_jobs_from_app_instance(&app_instance).await {
                 Ok(jobs) => {
+                    let job_numbers: Vec<u64> = jobs.iter().map(|j| j.job_sequence).collect();
+                    info!("Found {} total jobs for app_instance {}: {:?}", 
+                        jobs.len(), app_instance_id, job_numbers);
+                    
                     // Get current time
                     let current_time_ms = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -290,8 +294,10 @@ impl JobsTracker {
                     
                     // Check if this app_instance has a settlement job
                     let settlement_job_id = if let Ok(Some(id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await {
+                        info!("App instance {} has settlement job ID: {}", app_instance_id, id);
                         Some(id)
                     } else {
+                        debug!("App instance {} has no settlement job", app_instance_id);
                         None
                     };
                     
@@ -304,10 +310,22 @@ impl JobsTracker {
                     
                     // Check each job for stuck running state or orphaned pending state
                     for job in jobs {
+                        debug!("Checking job {} with status {:?}, updated_at: {}, attempts: {}", 
+                            job.job_sequence, job.status, job.updated_at, job.attempts);
+                        
                         if matches!(job.status, sui::fetch::JobStatus::Running) {
                             // Check if job has been running for more than 10 minutes
                             let running_duration_ms = current_time_ms.saturating_sub(job.updated_at);
                             let running_duration = Duration::from_millis(running_duration_ms);
+                            
+                            let hours = running_duration.as_secs() / 3600;
+                            let minutes = (running_duration.as_secs() % 3600) / 60;
+                            let seconds = running_duration.as_secs() % 60;
+                            
+                            info!("Job {} is Running: updated_at={}, current_time={}, duration={}h {}m {}s ({}ms), max_duration={}s", 
+                                job.job_sequence, job.updated_at, current_time_ms, 
+                                hours, minutes, seconds, running_duration_ms, 
+                                max_running_duration.as_secs());
                             
                             if running_duration > max_running_duration {
                                 // Check if this is the settlement job

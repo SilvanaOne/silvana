@@ -901,8 +901,9 @@ async fn run_docker_container_task(
                 );
             }
 
+            // Always display Docker logs after container exits
             if !result.logs.is_empty() {
-                debug!("Docker logs: {}", result.logs);
+                info!("📋 Docker container logs for job {}:\n{}", job.job_sequence, result.logs);
             }
         }
         Err(e) => {

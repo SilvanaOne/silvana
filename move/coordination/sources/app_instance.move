@@ -573,8 +573,8 @@ public fun update_block_settlement_tx_hash(
     );
 }
 
-#[error]
-const EBlockNotSentToMina: vector<u8> = b"Block not sent to Mina";
+// #[error]
+// const EBlockNotSentToMina: vector<u8> = b"Block not sent to Mina";
 
 public fun update_block_settlement_tx_included_in_block(
     app_instance: &mut AppInstance,
@@ -592,14 +592,16 @@ public fun update_block_settlement_tx_included_in_block(
         block::get_state_data_availability(block).is_some() && (block::get_proof_data_availability(block).is_some() || block_number == 0),
         EBlockNotProved,
     );
-    assert!(
-        block::get_sent_to_settlement_at(block).is_some(),
-        EBlockNotSentToMina,
-    );
-    assert!(
-        block::get_settlement_tx_hash(block).is_some(),
-        EBlockNotSentToMina,
-    );
+    // In case of failure to record sent_to_settlement_at and settlement_tx_hash, we can still settle the block
+    // and update the last_settled_block_number
+    // assert!(
+    //     block::get_sent_to_settlement_at(block).is_some(),
+    //     EBlockNotSentToMina,
+    // );
+    // assert!(
+    //     block::get_settlement_tx_hash(block).is_some(),
+    //     EBlockNotSentToMina,
+    // );
     let sent_to_settlement_at = block::get_sent_to_settlement_at(block);
     let settlement_tx_hash = block::get_settlement_tx_hash(block);
     block::set_settlement_tx(
@@ -656,6 +658,15 @@ public fun update_block_settlement_tx_included_in_block(
         );
         prover::delete_proof_calculation(proof_calculation, clock);
     };
+    let block = app_instance
+        .blocks
+        .borrow(app_instance.last_settled_block_number);
+    let proved_sequence = block::get_end_sequence(block);
+
+    let rollback = app_instance.state.get_rollback_mut();
+    commitment::rollback::purge_records(rollback, proved_sequence);
+
+    app_instance.purge_sequences_below(proved_sequence, clock);
 }
 
 // Methods for managing metadata and kv
