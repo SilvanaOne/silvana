@@ -201,7 +201,6 @@ public fun commit_action(
             new_sequence,
             action,
             rollback_elements,
-            ctx,
         );
     app_state.sequence = new_sequence;
 
@@ -270,14 +269,20 @@ public fun get_commitment_data(app_state: &AppState): CommitmentData {
     }
 }
 
-public fun get_commitment_data_actions_commitment(commitment_data: &CommitmentData): Element<Scalar> {
+public fun get_commitment_data_actions_commitment(
+    commitment_data: &CommitmentData,
+): Element<Scalar> {
     commitment_data.actions_commitment
 }
 
-public fun get_commitment_data_actions_sequence(commitment_data: &CommitmentData): u64 {
+public fun get_commitment_data_actions_sequence(
+    commitment_data: &CommitmentData,
+): u64 {
     commitment_data.actions_sequence
 }
 
-public fun get_commitment_data_state_commitment(commitment_data: &CommitmentData): Element<Scalar> {
+public fun get_commitment_data_state_commitment(
+    commitment_data: &CommitmentData,
+): Element<Scalar> {
     commitment_data.state_commitment
 }

@@ -17,6 +17,7 @@ async fn test_save_to_walrus() {
     };
 
     let result = client.save_to_walrus(params).await;
+    println!("save_to_walrus result: {:?}", result);
 
     match result {
         Ok(Some(blob_id)) => {
@@ -52,6 +53,7 @@ async fn test_save_and_read_string() {
     let read_params = ReadFromWalrusParams { blob_id };
 
     let result = client.read_from_walrus(read_params).await;
+    println!("read_from_walrus result: {:?}", result);
 
     match result {
         Ok(Some(retrieved_data)) => {
