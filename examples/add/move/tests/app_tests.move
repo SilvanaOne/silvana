@@ -4,6 +4,7 @@ module add::app_tests;
 use add::main::{create_app, init_app_with_instance, add, multiply, get_value, get_sum};
 use coordination::app_instance::AppInstance;
 use coordination::registry::{SilvanaRegistry, create_registry, add_app};
+use std::string::String;
 use sui::clock;
 use sui::test_scenario as test;
 
@@ -86,8 +87,8 @@ fun test_create_app() {
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let app = create_app(
         &mut registry, 
-        option::none(), // settlement_chain
-        option::none(), // settlement_address
+        vector::empty<String>(), // settlement_chains
+        vector::empty<Option<String>>(), // settlement_addresses
         &clock, 
         test::ctx(&mut scenario)
     );
@@ -123,8 +124,8 @@ fun test_add_function_single_index() {
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let mut app = create_app(
         &mut registry,
-        option::none(), // settlement_chain
-        option::none(), // settlement_address
+        vector::empty<String>(), // settlement_chains
+        vector::empty<Option<String>>(), // settlement_addresses
         &clock,
         test::ctx(&mut scenario)
     );
@@ -165,8 +166,8 @@ fun test_multiply_function_single_index() {
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let mut app = create_app(
         &mut registry,
-        option::none(), // settlement_chain
-        option::none(), // settlement_address
+        vector::empty<String>(), // settlement_chains
+        vector::empty<Option<String>>(), // settlement_addresses
         &clock,
         test::ctx(&mut scenario)
     );
@@ -207,8 +208,8 @@ fun test_multiple_indexes_sequential() {
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let mut app = create_app(
         &mut registry,
-        option::none(), // settlement_chain
-        option::none(), // settlement_address
+        vector::empty<String>(), // settlement_chains
+        vector::empty<Option<String>>(), // settlement_addresses
         &clock,
         test::ctx(&mut scenario)
     );
@@ -270,8 +271,8 @@ fun test_add_reserved_index_0() {
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let mut app = create_app(
         &mut registry,
-        option::none(), // settlement_chain
-        option::none(), // settlement_address
+        vector::empty<String>(), // settlement_chains
+        vector::empty<Option<String>>(), // settlement_addresses
         &clock,
         test::ctx(&mut scenario)
     );
@@ -302,8 +303,8 @@ fun test_add_invalid_value_100() {
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let mut app = create_app(
         &mut registry,
-        option::none(), // settlement_chain
-        option::none(), // settlement_address
+        vector::empty<String>(), // settlement_chains
+        vector::empty<Option<String>>(), // settlement_addresses
         &clock,
         test::ctx(&mut scenario)
     );
@@ -333,8 +334,8 @@ fun test_zero_operations() {
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let mut app = create_app(
         &mut registry,
-        option::none(), // settlement_chain
-        option::none(), // settlement_address
+        vector::empty<String>(), // settlement_chains
+        vector::empty<Option<String>>(), // settlement_addresses
         &clock,
         test::ctx(&mut scenario)
     );

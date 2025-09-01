@@ -264,12 +264,18 @@ export async function createApp(params: {
   const tx = new Transaction();
 
   // Call create_app with the registry, settlement info, and clock
+  // Create vectors for chains and addresses
+  const chains = params.chain ? [params.chain] : [];
+  const addresses = params.contractAddress 
+    ? [params.contractAddress]  // Will be wrapped as Some(address) in the vector
+    : [];  // Empty vector if no address
+  
   const app = tx.moveCall({
     target: `${packageID}::main::create_app`,
     arguments: [
       tx.object(registryAddress), // SilvanaRegistry reference
-      tx.pure.option("string", params.chain), // settlement_chain (e.g., "mina:devnet")
-      tx.pure.option("string", params.contractAddress), // settlement_address
+      tx.pure.vector("string", chains), // vector of settlement chains
+      tx.pure("vector<option<string>>", addresses), // vector of Option<String>
       tx.object(SUI_CLOCK_OBJECT_ID), // Clock reference
     ],
   });
