@@ -79,7 +79,7 @@ async fn test_submit_and_get_proof() {
     let submit_request = Request::new(SubmitProofRequest {
         proof_data: TEST_PROOF_DATA.to_string(),
         metadata: metadata.clone(),
-        expires_at_ms: Some(expires_at),
+        expires_at: Some(expires_at),
     });
     
     let proof_hash = match client.submit_proof(submit_request).await {
@@ -162,7 +162,7 @@ async fn test_submit_and_get_proof() {
     let submit_request = Request::new(SubmitProofRequest {
         proof_data: "minimal_proof_data".to_string(),
         metadata: HashMap::new(),
-        expires_at_ms: None, // Use default expiration
+        expires_at: None, // Use default expiration
     });
     
     let minimal_proof_hash = match client.submit_proof(submit_request).await {
@@ -268,7 +268,7 @@ async fn test_proof_storage_concurrent() {
             let submit_request = Request::new(SubmitProofRequest {
                 proof_data: proof_data.clone(),
                 metadata: metadata.clone(),
-                expires_at_ms: None,
+                expires_at: None,
             });
             
             match client_clone.submit_proof(submit_request).await {
@@ -413,7 +413,7 @@ async fn test_proof_storage_large_data() {
     let submit_request = Request::new(SubmitProofRequest {
         proof_data: large_proof_data.clone(),
         metadata: metadata.clone(),
-        expires_at_ms: None,
+        expires_at: None,
     });
     
     let proof_hash = match client.submit_proof(submit_request).await {
@@ -516,7 +516,7 @@ async fn test_proof_with_special_characters() {
     let submit_request = Request::new(SubmitProofRequest {
         proof_data: special_proof_data.to_string(),
         metadata: metadata.clone(),
-        expires_at_ms: None,
+        expires_at: None,
     });
     
     let proof_hash = match client.submit_proof(submit_request).await {

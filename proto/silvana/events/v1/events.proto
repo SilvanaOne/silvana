@@ -256,7 +256,7 @@ message SearchCoordinatorMessageEventsResponse {
 message SubmitProofRequest {
   string proof_data = 1;
   map<string, string> metadata = 2;
-  optional uint64 expires_at_ms = 3;  // Unix timestamp in milliseconds
+  optional uint64 expires_at = 3;  // Unix timestamp in milliseconds
 }
 
 message SubmitProofResponse {
