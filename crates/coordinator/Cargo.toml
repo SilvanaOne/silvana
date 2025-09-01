@@ -43,9 +43,10 @@ async-trait.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 
-# Logging
+# Logging and monitoring
 tracing.workspace = true
 tracing-subscriber.workspace = true
+monitoring = { path = "../monitoring" }
 
 # Serialization
 serde.workspace = true

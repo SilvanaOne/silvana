@@ -23,5 +23,5 @@ tracing-appender = "0.2"
 # OpenTelemetry dependencies for BetterStack integration
 opentelemetry = "0.30"
 opentelemetry_sdk = { version = "0.30", features = ["rt-tokio", "logs", "metrics"] }
-opentelemetry-otlp = { version = "0.30", features = ["logs", "metrics", "grpc-tonic", "tls"] }
+opentelemetry-otlp = { version = "0.30", features = ["logs", "metrics", "grpc-tonic", "http-proto", "tls"] }
 tonic = { workspace = true, features = ["tls-webpki-roots"] }

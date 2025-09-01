@@ -90,6 +90,7 @@
 // Module declarations
 pub mod logging;
 pub mod metrics;
+pub mod newrelic;
 pub mod opentelemetry;
 
 // Re-export the BufferableEvent trait for convenience
@@ -108,4 +109,10 @@ pub use logging::init_logging;
 pub use opentelemetry::{
     OpenTelemetryConfig, init_opentelemetry, send_buffer_metrics, send_log, send_metric,
     send_system_metrics, system_metrics_exporter, test_integration,
+};
+
+// Re-export New Relic functionality
+pub use newrelic::{
+    NewRelicConfig, init_newrelic, init_logging_with_newrelic, 
+    send_log_to_newrelic, test_newrelic_integration,
 };

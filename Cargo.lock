@@ -1234,6 +1234,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "hex",
+ "monitoring",
  "num-bigint",
  "num_cpus",
  "parking_lot",

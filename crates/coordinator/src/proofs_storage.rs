@@ -7,10 +7,8 @@ use tracing::{info, warn};
 use storage::walrus::{GetWalrusUrlParams, ReadFromWalrusParams, SaveToWalrusParams, WalrusClient};
 
 // Import proto types for gRPC communication
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::{GetProofRequest, SubmitProofRequest};
 use tonic::Request;
-use tonic::transport::Channel;
 
 /// Proof descriptor format: chain:network:hash
 /// Examples:
@@ -206,22 +204,14 @@ impl ProofStorageBackend for WalrusStorage {
 
 /// Cache storage backend implementation (via gRPC)
 pub struct CacheStorage {
-    rpc_endpoint: String,
     network: String,
 }
 
 impl CacheStorage {
-    pub fn new(rpc_endpoint: String, network: String) -> Self {
+    pub fn new(network: String) -> Self {
         CacheStorage {
-            rpc_endpoint,
             network,
         }
-    }
-
-    async fn get_client(&self) -> Result<SilvanaEventsServiceClient<Channel>> {
-        SilvanaEventsServiceClient::connect(self.rpc_endpoint.clone())
-            .await
-            .map_err(|e| anyhow!("Failed to connect to RPC server: {}", e))
     }
 }
 
@@ -234,7 +224,9 @@ impl ProofStorageBackend for CacheStorage {
     ) -> Result<ProofDescriptor> {
         info!("Storing proof to cache via gRPC ({})", self.network);
 
-        let mut client = self.get_client().await?;
+        let mut client = rpc_client::shared::get_shared_client()
+            .await
+            .map_err(|e| anyhow!("Failed to get shared RPC client: {}", e))?;
 
         let mut grpc_metadata = HashMap::new();
         let mut expires_at = None;
@@ -278,7 +270,9 @@ impl ProofStorageBackend for CacheStorage {
 
         info!("Retrieving proof from cache: {}", descriptor.hash);
 
-        let mut client = self.get_client().await?;
+        let mut client = rpc_client::shared::get_shared_client()
+            .await
+            .map_err(|e| anyhow!("Failed to get shared RPC client: {}", e))?;
 
         let request = Request::new(GetProofRequest {
             proof_hash: descriptor.hash.clone(),
@@ -338,10 +332,12 @@ impl ProofStorage {
         // Initialize backends based on environment configuration
         let walrus = Some(WalrusStorage::new(walrus_network));
 
-        let cache = if let Ok(rpc_endpoint) = std::env::var("RPC_ENDPOINT") {
-            Some(CacheStorage::new(rpc_endpoint, "public".to_string()))
+        // Use shared gRPC client for cache storage if SILVANA_RPC_SERVER is configured
+        let cache = if std::env::var("SILVANA_RPC_SERVER").is_ok() || std::env::var("RPC_ENDPOINT").is_ok() {
+            info!("Cache storage enabled via shared gRPC client");
+            Some(CacheStorage::new("public".to_string()))
         } else {
-            warn!("RPC_ENDPOINT not set, cache storage disabled");
+            warn!("SILVANA_RPC_SERVER not set, cache storage disabled");
             None
         };
 
@@ -471,8 +467,8 @@ mod tests {
         // Walrus should always be available
         assert!(storage.walrus.is_some());
 
-        // Cache depends on RPC_ENDPOINT environment variable
-        if std::env::var("RPC_ENDPOINT").is_ok() {
+        // Cache depends on SILVANA_RPC_SERVER or RPC_ENDPOINT environment variable
+        if std::env::var("SILVANA_RPC_SERVER").is_ok() || std::env::var("RPC_ENDPOINT").is_ok() {
             assert!(storage.cache.is_some());
         } else {
             assert!(storage.cache.is_none());

@@ -18,10 +18,13 @@ pub use proto::{
 // Re-export the proto events module
 pub use proto::events;
 
+// Shared client module
+pub mod shared;
+
 // Initialize rustls crypto provider once
 static INIT: Once = Once::new();
 
-fn init_rustls() {
+pub(crate) fn init_rustls() {
     INIT.call_once(|| {
         // Install the default crypto provider (aws-lc-rs) - same as integration tests
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();

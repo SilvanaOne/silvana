@@ -1,6 +1,7 @@
 use crate::agent::AgentJobDatabase;
 use crate::jobs::JobsTracker;
-use rpc_client::{RpcClient, RpcClientConfig, create_rpc_client};
+use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use tonic::transport::Channel;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,23 +27,22 @@ pub struct SharedState {
     jobs_tracker: JobsTracker,
     agent_job_db: AgentJobDatabase, // Memory database for agent job tracking
     has_pending_jobs: Arc<AtomicBool>, // Fast check for pending jobs availability
-    rpc_client: Arc<RwLock<Option<RpcClient>>>, // Silvana RPC service client
+    rpc_client: Arc<RwLock<Option<SilvanaEventsServiceClient<Channel>>>>, // Silvana RPC service client
     shutdown_flag: Arc<AtomicBool>, // Global shutdown flag for graceful shutdown
     force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
 }
 
 impl SharedState {
     pub fn new() -> Self {
-        // Initialize the Silvana RPC client asynchronously
+        // Initialize the Silvana RPC client asynchronously using shared client
         let rpc_client = Arc::new(RwLock::new(None));
         let rpc_client_clone = rpc_client.clone();
         tokio::spawn(async move {
-            let config = RpcClientConfig::from_env();
-            match create_rpc_client(config).await {
+            match rpc_client::shared::get_shared_client().await {
                 Ok(client) => {
                     let mut lock = rpc_client_clone.write().await;
                     *lock = Some(client);
-                    info!("Silvana RPC client initialized successfully");
+                    info!("Silvana RPC client initialized successfully using shared connection");
                 }
                 Err(e) => {
                     error!("Failed to initialize Silvana RPC client: {}", e);
@@ -227,7 +227,7 @@ impl SharedState {
 
 
     /// Get the Silvana RPC client (if initialized)
-    pub async fn get_rpc_client(&self) -> Option<RpcClient> {
+    pub async fn get_rpc_client(&self) -> Option<SilvanaEventsServiceClient<Channel>> {
         let lock = self.rpc_client.read().await;
         lock.clone()
     }
