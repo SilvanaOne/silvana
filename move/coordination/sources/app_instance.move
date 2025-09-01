@@ -6,6 +6,7 @@ use coordination::block::{Self, Block};
 use coordination::jobs::{Self, Jobs};
 use coordination::prover::{Self, ProofCalculation};
 use coordination::sequence_state::{Self, SequenceState, SequenceStateManager};
+use coordination::settlement::{Self, Settlement};
 use coordination::silvana_app::{Self, SilvanaApp};
 use std::string::String;
 use sui::bls12381::{Scalar, scalar_zero};
@@ -26,6 +27,7 @@ public struct AppInstance has key, store {
     methods: VecMap<String, AppMethod>,
     state: AppState,
     blocks: ObjectTable<u64, Block>, // key is block number
+    settlements: VecMap<String, Settlement>, // key is chain
     proof_calculations: ObjectTable<u64, ProofCalculation>, // key is block number
     sequence_state_manager: SequenceStateManager,
     jobs: Jobs,
@@ -36,9 +38,6 @@ public struct AppInstance has key, store {
     previous_block_last_sequence: u64,
     previous_block_actions_state: Element<Scalar>,
     last_proved_block_number: u64,
-    last_settled_block_number: u64,
-    settlement_chain: Option<String>,
-    settlement_address: Option<String>,
     isPaused: bool,
     created_at: u64,
     updated_at: u64,
@@ -118,11 +117,18 @@ fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
 public fun create_app_instance(
     app: &mut SilvanaApp,
     instance_description: Option<String>,
-    settlement_chain: Option<String>,
-    settlement_address: Option<String>,
+    settlement_chains: vector<String>, // vector of chain names
+    settlement_addresses: vector<Option<String>>, // vector of optional settlement addresses
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstanceCap {
+    // Create settlements VecMap from provided chains
+    // First check that both vectors have the same length
+    assert!(
+        vector::length(&settlement_chains) == vector::length(&settlement_addresses),
+        ESettlementVectorLengthMismatch,
+    );
+
     let timestamp = clock.timestamp_ms();
 
     let blocks = object_table::new<u64, Block>(ctx);
@@ -153,6 +159,19 @@ public fun create_app_instance(
     let instance_id = object::new(ctx);
     let instance_address = instance_id.to_address();
 
+    let mut settlements = vec_map::empty<String, Settlement>();
+    let mut i = 0;
+    while (i < vector::length(&settlement_chains)) {
+        let chain = *vector::borrow(&settlement_chains, i);
+        let address = *vector::borrow(&settlement_addresses, i);
+        let settlement = settlement::create_settlement(
+            chain,
+            address,
+        );
+        vec_map::insert(&mut settlements, chain, settlement);
+        i = i + 1;
+    };
+
     let mut app_instance: AppInstance = AppInstance {
         id: instance_id,
         silvana_app_name: app_name,
@@ -162,6 +181,7 @@ public fun create_app_instance(
         methods,
         state,
         blocks,
+        settlements,
         proof_calculations,
         sequence_state_manager,
         jobs,
@@ -172,9 +192,6 @@ public fun create_app_instance(
         previous_block_last_sequence: 0u64,
         previous_block_actions_state: scalar_zero(),
         last_proved_block_number: 0u64,
-        last_settled_block_number: 0u64,
-        settlement_chain,
-        settlement_address,
         isPaused: false,
         created_at: timestamp,
         updated_at: timestamp,
@@ -485,11 +502,7 @@ public(package) fun create_block_internal(
         actions_commitment,
         option::none(),
         option::none(),
-        option::none(),
-        false,
         timestamp,
-        option::none(),
-        option::none(),
         option::none(),
         option::none(),
         ctx,
@@ -546,9 +559,15 @@ public fun update_block_proof_data_availability(
 
 #[error]
 const EBlockNotProved: vector<u8> = b"Block not proved";
+#[error]
+const ESettlementChainNotFound: vector<u8> = b"Settlement chain not found";
+#[error]
+const ESettlementVectorLengthMismatch: vector<u8> =
+    b"Settlement chains and addresses vectors must have the same length";
 
 public fun update_block_settlement_tx_hash(
     app_instance: &mut AppInstance,
+    chain: String,
     block_number: u64,
     settlement_tx_hash: String,
     clock: &Clock,
@@ -556,16 +575,24 @@ public fun update_block_settlement_tx_hash(
 ) {
     // only_admin(app_instance, ctx);
     let timestamp = clock.timestamp_ms();
-    let block = borrow_mut(
-        &mut app_instance.blocks,
+    let block = borrow(
+        &app_instance.blocks,
         block_number,
     );
     assert!(
         block::get_state_data_availability(block).is_some() && (block::get_proof_data_availability(block).is_some() || block_number == 0),
         EBlockNotProved,
     );
-    block::set_settlement_tx(
-        block,
+
+    // Update settlement for the specific chain
+    assert!(
+        vec_map::contains(&app_instance.settlements, &chain),
+        ESettlementChainNotFound,
+    );
+    let settlement = vec_map::get_mut(&mut app_instance.settlements, &chain);
+    settlement::set_block_settlement_tx(
+        settlement,
+        block_number,
         option::some(settlement_tx_hash),
         false,
         option::some(timestamp),
@@ -578,34 +605,41 @@ public fun update_block_settlement_tx_hash(
 
 public fun update_block_settlement_tx_included_in_block(
     app_instance: &mut AppInstance,
+    chain: String,
     block_number: u64,
     settled_at: u64,
     clock: &Clock,
     _ctx: &mut TxContext,
 ) {
     // only_admin(app_instance, ctx);
-    let block = borrow_mut(
-        &mut app_instance.blocks,
+    let block = borrow(
+        &app_instance.blocks,
         block_number,
     );
     assert!(
         block::get_state_data_availability(block).is_some() && (block::get_proof_data_availability(block).is_some() || block_number == 0),
         EBlockNotProved,
     );
-    // In case of failure to record sent_to_settlement_at and settlement_tx_hash, we can still settle the block
-    // and update the last_settled_block_number
-    // assert!(
-    //     block::get_sent_to_settlement_at(block).is_some(),
-    //     EBlockNotSentToMina,
-    // );
-    // assert!(
-    //     block::get_settlement_tx_hash(block).is_some(),
-    //     EBlockNotSentToMina,
-    // );
-    let sent_to_settlement_at = block::get_sent_to_settlement_at(block);
-    let settlement_tx_hash = block::get_settlement_tx_hash(block);
-    block::set_settlement_tx(
-        block,
+
+    // Update settlement for the specific chain
+    assert!(
+        vec_map::contains(&app_instance.settlements, &chain),
+        ESettlementChainNotFound,
+    );
+    let settlement = vec_map::get_mut(&mut app_instance.settlements, &chain);
+
+    let sent_to_settlement_at = settlement::get_sent_to_settlement_at(
+        settlement,
+        block_number,
+    );
+    let settlement_tx_hash = settlement::get_block_settlement_tx_hash(
+        settlement,
+        block_number,
+    );
+
+    settlement::set_block_settlement_tx(
+        settlement,
+        block_number,
         settlement_tx_hash,
         true,
         sent_to_settlement_at,
@@ -615,14 +649,18 @@ public fun update_block_settlement_tx_included_in_block(
     // Update last_settled_block_number by checking all blocks from
     // last_settled_block_number + 1 up to and including the current block_number
     // to find the highest consecutive settled block
-    let mut i = app_instance.last_settled_block_number + 1;
+    let current_last_settled = settlement::get_last_settled_block_number(
+        settlement,
+    );
+    let mut i = current_last_settled + 1;
     while (
         i <= block_number && object_table::contains(&app_instance.blocks, i)
     ) {
-        let check_block = borrow(&app_instance.blocks, i);
-        if (block::get_settlement_tx_included_in_block(check_block)) {
+        if (
+            settlement::get_block_settlement_tx_included_in_block(settlement, i)
+        ) {
             // This block is settled, update last_settled_block_number
-            app_instance.last_settled_block_number = i;
+            settlement::set_last_settled_block_number(settlement, i);
             i = i + 1;
         } else {
             // Found a gap - this block is not settled yet
@@ -631,14 +669,21 @@ public fun update_block_settlement_tx_included_in_block(
     };
 
     // Also check if there are any blocks after block_number that were settled out of order
-    if (app_instance.last_settled_block_number == block_number) {
+    let updated_last_settled = settlement::get_last_settled_block_number(
+        settlement,
+    );
+    if (updated_last_settled == block_number) {
         let mut j = block_number + 1;
         while (
             j < app_instance.block_number && object_table::contains(&app_instance.blocks, j)
         ) {
-            let next_block = borrow(&app_instance.blocks, j);
-            if (block::get_settlement_tx_included_in_block(next_block)) {
-                app_instance.last_settled_block_number = j;
+            if (
+                settlement::get_block_settlement_tx_included_in_block(
+                    settlement,
+                    j,
+                )
+            ) {
+                settlement::set_last_settled_block_number(settlement, j);
                 j = j + 1;
             } else {
                 break
@@ -658,9 +703,10 @@ public fun update_block_settlement_tx_included_in_block(
         );
         prover::delete_proof_calculation(proof_calculation, clock);
     };
-    let block = app_instance
-        .blocks
-        .borrow(app_instance.last_settled_block_number);
+    let final_last_settled = settlement::get_last_settled_block_number(
+        settlement,
+    );
+    let block = app_instance.blocks.borrow(final_last_settled);
     let proved_sequence = block::get_end_sequence(block);
 
     let rollback = app_instance.state.get_rollback_mut();
@@ -780,16 +826,30 @@ public fun last_proved_block_number(app_instance: &AppInstance): u64 {
     app_instance.last_proved_block_number
 }
 
-public fun last_settled_block_number(app_instance: &AppInstance): u64 {
-    app_instance.last_settled_block_number
+public fun last_settled_block_number(
+    app_instance: &AppInstance,
+    chain: String,
+): u64 {
+    if (!vec_map::contains(&app_instance.settlements, &chain)) {
+        return 0
+    };
+    let settlement = vec_map::get(&app_instance.settlements, &chain);
+    settlement::get_last_settled_block_number(settlement)
 }
 
-public fun settlement_chain(app_instance: &AppInstance): &Option<String> {
-    &app_instance.settlement_chain
+public fun get_settlement_chains(app_instance: &AppInstance): vector<String> {
+    vec_map::keys(&app_instance.settlements)
 }
 
-public fun settlement_address(app_instance: &AppInstance): &Option<String> {
-    &app_instance.settlement_address
+public fun get_settlement_address(
+    app_instance: &AppInstance,
+    chain: String,
+): Option<String> {
+    if (!vec_map::contains(&app_instance.settlements, &chain)) {
+        return option::none()
+    };
+    let settlement = vec_map::get(&app_instance.settlements, &chain);
+    settlement::get_settlement_address(settlement)
 }
 
 public fun is_paused(app_instance: &AppInstance): bool {

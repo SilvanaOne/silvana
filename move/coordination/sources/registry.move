@@ -613,8 +613,8 @@ public fun create_app_instance_from_registry(
     registry: &mut SilvanaRegistry,
     app_name: String,
     description: Option<String>,
-    settlement_chain: Option<String>,
-    settlement_address: Option<String>,
+    settlement_chains: vector<String>, // vector of chain names
+    settlement_addresses: vector<Option<String>>, // vector of optional settlement addresses
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstanceCap {
@@ -622,8 +622,8 @@ public fun create_app_instance_from_registry(
     coordination::app_instance::create_app_instance(
         app,
         description,
-        settlement_chain,
-        settlement_address,
+        settlement_chains,
+        settlement_addresses,
         clock,
         ctx,
     )

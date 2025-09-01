@@ -5,6 +5,7 @@ use coordination::registry::{
     SilvanaRegistry,
     create_app_instance_from_registry
 };
+use std::string::String;
 use sui::clock::Clock;
 use sui::event;
 
@@ -32,8 +33,8 @@ public fun create_test_app(
         registry,
         b"test_app".to_string(),
         option::none(),
-        option::none(),  // settlement_chain
-        option::none(),  // settlement_address
+        vector::empty<String>(),  // no settlement chains
+        vector::empty<Option<String>>(),  // no settlement addresses
         clock,
         ctx,
     );
