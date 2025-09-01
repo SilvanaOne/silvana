@@ -67,24 +67,6 @@ export = async () => {
     }
   );
 
-  // Create policy for S3 access (for certificates)
-  const s3Policy = new aws.iam.Policy("silvana-rpc-s3-policy", {
-    description: "Policy for accessing S3 bucket for SSL certificates",
-    policy: JSON.stringify({
-      Version: "2012-10-17",
-      Statement: [
-        {
-          Effect: "Allow",
-          Action: ["s3:GetObject", "s3:PutObject"],
-          Resource: "arn:aws:s3:::silvana-tee-images/*",
-        },
-      ],
-    }),
-    tags: {
-      Name: "silvana-rpc-s3-policy",
-      Project: "silvana-rpc",
-    },
-  });
 
   // -------------------------
   // KMS Key for Secrets Encryption
@@ -164,6 +146,66 @@ export = async () => {
   });
 
   // -------------------------
+  // S3 Bucket for Proofs Cache
+  // -------------------------
+  const proofsCacheBucket = new aws.s3.Bucket("proofs-cache", {
+    bucket: "proofs-cache",
+    acl: "private",
+    lifecycleRules: [
+      {
+        enabled: true,
+        id: "expire-after-one-week",
+        expiration: {
+          days: 7,
+        },
+      },
+    ],
+    tags: {
+      Name: "proofs-cache",
+      Purpose: "Cache for proof data with automatic expiration",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // Update S3 policy to include proofs-cache bucket
+  const s3PolicyWithProofsCache = new aws.iam.Policy("silvana-rpc-s3-policy-with-proofs", {
+    description: "Policy for accessing S3 buckets for SSL certificates and proofs cache",
+    policy: pulumi.interpolate`{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": ["s3:GetObject", "s3:PutObject"],
+          "Resource": "arn:aws:s3:::silvana-tee-images/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:GetObjectTagging",
+            "s3:PutObjectTagging"
+          ],
+          "Resource": "${proofsCacheBucket.arn}/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:ListBucket",
+            "s3:GetBucketLocation"
+          ],
+          "Resource": "${proofsCacheBucket.arn}"
+        }
+      ]
+    }`,
+    tags: {
+      Name: "silvana-rpc-s3-policy-with-proofs",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // -------------------------
   // IAM User for S3 uploads (API keys)
   // -------------------------
   const s3UploaderUser = new aws.iam.User("silvana-rpc-s3-uploader", {
@@ -176,7 +218,7 @@ export = async () => {
   // Attach S3 policy to the user so the generated API keys have upload permissions
   new aws.iam.UserPolicyAttachment("silvana-rpc-s3-uploader-attachment", {
     user: s3UploaderUser.name,
-    policyArn: s3Policy.arn,
+    policyArn: s3PolicyWithProofsCache.arn,
   });
 
   // Create an access key (AccessKeyId / SecretAccessKey) for the user
@@ -208,7 +250,7 @@ export = async () => {
 
   new aws.iam.RolePolicyAttachment("silvana-rpc-s3-attachment", {
     role: ec2Role.name,
-    policyArn: s3Policy.arn,
+    policyArn: s3PolicyWithProofsCache.arn,
   });
 
   new aws.iam.RolePolicyAttachment("silvana-rpc-secrets-attachment", {
@@ -234,11 +276,14 @@ export = async () => {
 
   // Read and store the .env.rpc file in Parameter Store
   const envContent = fs.readFileSync("./.env.rpc", "utf8");
+  
+  // Append the S3 bucket name to the environment variables
+  const envContentWithBucket = pulumi.interpolate`${envContent}\nPROOFS_CACHE_BUCKET=${proofsCacheBucket.bucket}`;
 
   const envParameter = new aws.ssm.Parameter("silvana-rpc-env-dev", {
     name: "/silvana-rpc/dev/env",
     type: "SecureString",
-    value: envContent,
+    value: envContentWithBucket,
     keyId: "alias/aws/ssm",
     description: "Silvana RPC environment variables for development",
     tags: {
@@ -397,5 +442,8 @@ export = async () => {
     secretsTableArn: secretsTable.arn,
     secretsKmsKeyId: secretsKmsKey.id,
     secretsKmsKeyAlias: secretsKmsKeyAlias.name,
+    // Proofs cache bucket
+    proofsCacheBucketName: proofsCacheBucket.bucket,
+    proofsCacheBucketArn: proofsCacheBucket.arn,
   };
 };

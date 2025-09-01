@@ -1,10 +1,11 @@
 module commitment::rollback;
 
 use commitment::action::Action;
+use std::hash::sha2_256;
 use sui::bls12381::Scalar;
 use sui::event;
 use sui::group_ops::Element;
-use sui::object_table::{Self, ObjectTable};
+use sui::vec_map::{Self, VecMap};
 
 public struct RollbackElement has copy, drop, store {
     index: u32,
@@ -24,15 +25,13 @@ public struct RollbackSequence has key, store {
 public struct Rollback has key, store {
     id: UID,
     start_sequence: u64,
-    traced_sequence: u64,
     end_sequence: u64,
-    rollback_sequences: ObjectTable<u64, RollbackSequence>,
+    rollback_sequences: VecMap<u64, vector<u8>>, // sequence -> hash of the rollback sequence
 }
 
 public struct RollbackCreatedEvent has copy, drop {
     id: address,
     start_sequence: u64,
-    traced_sequence: u64,
     end_sequence: u64,
 }
 
@@ -58,21 +57,12 @@ public struct RecordsPurgedEvent has copy, drop {
     purged_from_sequence: u64,
     purged_to_sequence: u64,
     new_start_sequence: u64,
-    old_traced_sequence: u64,
-    new_traced_sequence: u64,
-}
-
-public struct TracedSequenceSetEvent has copy, drop {
-    rollback_id: address,
-    old_traced_sequence: u64,
-    new_traced_sequence: u64,
 }
 
 // Error constants
 const EInvalidSequence: u64 = 1;
 const ESequenceNotFound: u64 = 2;
-const EInvalidTracedSequence: u64 = 3;
-const EInvalidPurgeSequence: u64 = 4;
+const EInvalidPurgeSequence: u64 = 3;
 
 /// Create Rollback
 public fun create_rollback(ctx: &mut TxContext): Rollback {
@@ -82,15 +72,13 @@ public fun create_rollback(ctx: &mut TxContext): Rollback {
     let rollback = Rollback {
         id: rollback_id,
         start_sequence: 0,
-        traced_sequence: 0,
         end_sequence: 0,
-        rollback_sequences: object_table::new(ctx),
+        rollback_sequences: vec_map::empty(),
     };
 
     event::emit(RollbackCreatedEvent {
         id: address,
         start_sequence: 0,
-        traced_sequence: 0,
         end_sequence: 0,
     });
 
