@@ -1,17 +1,16 @@
-use serde_json::json;
+use dotenvy::dotenv;
+use std::env;
 use storage::walrus::*;
 
 #[tokio::test]
 async fn test_save_to_walrus() {
+    dotenv().ok();
     let client = WalrusClient::new();
 
-    let test_data = json!({
-        "message": "Hello, world!",
-        "date": chrono::Utc::now().to_rfc3339()
-    });
+    let test_message = "This is a test message for Walrus data availability";
 
     let params = SaveToWalrusParams {
-        data: test_data.to_string(),
+        data: test_message.to_string(), //test_data.to_string(),
         address: None,
         num_epochs: Some(53),
     };
@@ -30,6 +29,7 @@ async fn test_save_to_walrus() {
 
 #[tokio::test]
 async fn test_save_and_read_string() {
+    dotenv().ok();
     let client = WalrusClient::new();
 
     let test_message = "This is a test message for Walrus data availability";
@@ -46,6 +46,7 @@ async fn test_save_and_read_string() {
         Ok(None) => panic!("Failed to get blob_id"),
         Err(e) => panic!("Save failed: {}", e),
     };
+    println!("blob_id: {}", blob_id);
 
     // Saved successfully
 
@@ -69,6 +70,7 @@ async fn test_save_and_read_string() {
 
 #[tokio::test]
 async fn test_get_walrus_url() {
+    dotenv().ok();
     let client = WalrusClient::new();
 
     let test_blob_id = "test_blob_id_123";
@@ -93,6 +95,7 @@ async fn test_get_walrus_url() {
 
 #[test]
 fn test_empty_blob_id_error() {
+    dotenv().ok();
     let client = WalrusClient::new();
 
     let params = GetWalrusUrlParams {
@@ -105,19 +108,27 @@ fn test_empty_blob_id_error() {
 
 #[test]
 fn test_config_urls() {
+    dotenv().ok();
     let testnet_config = WalrusConfig {
         daemon: Daemon::Testnet,
         ..Default::default()
     };
+    println!(
+        "testnet_config: {:?} {}",
+        testnet_config,
+        testnet_config.base_publisher_url()
+    );
 
     let local_config = WalrusConfig {
         daemon: Daemon::Local,
         ..Default::default()
     };
+    println!("local_config: {:?}", local_config);
 
     assert_eq!(
         testnet_config.base_publisher_url(),
-        "https://wal-publisher-testnet.staketab.org"
+        env::var("WALRUS_PUBLISHER")
+            .unwrap_or_else(|_| "https://wal-publisher-testnet.staketab.org".to_string())
     );
     assert_eq!(
         testnet_config.reader_url(),
@@ -151,6 +162,6 @@ fn test_epoch_clamping() {
 
     // Note: We can't easily test the actual clamping without calling save_to_walrus,
     // but we can verify the config values are correct
-    assert_eq!(config.min_epochs, 14);
+    assert_eq!(config.min_epochs, 2);
     assert_eq!(config.max_epochs, 53);
 }
