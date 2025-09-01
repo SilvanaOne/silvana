@@ -165,6 +165,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             );
 
             // Call settle for the complete block with the DA hash
+            // This will create settlement jobs for all configured chains
             settle(
                 app_instance,
                 proof_calc.block_number,

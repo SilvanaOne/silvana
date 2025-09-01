@@ -691,32 +691,54 @@ public fun update_block_settlement_tx_included_in_block(
         };
     };
 
-    // Delete the proof_calculation for this block as it's no longer needed
-    // All information has been preserved in events
-    // Note: Block 0 (genesis) doesn't have proof_calculation, only blocks >= 1
-    if (
-        block_number > 0 && object_table::contains(&app_instance.proof_calculations, block_number)
-    ) {
-        let proof_calculation = object_table::remove(
-            &mut app_instance.proof_calculations,
-            block_number,
-        );
-        prover::delete_proof_calculation(proof_calculation, clock);
+    // Check if ALL chains have settled this block before deleting ProofCalculation and purging
+    // We need to ensure all chains have last_settled_block_number >= block_number
+    let mut all_chains_settled = true;
+    let mut min_settled_block = block_number;
+    
+    let settlements_size = vec_map::size(&app_instance.settlements);
+    let mut idx = 0;
+    while (idx < settlements_size) {
+        let (_, other_settlement) = vec_map::get_entry_by_idx(&app_instance.settlements, idx);
+        let other_last_settled = settlement::get_last_settled_block_number(other_settlement);
+        if (other_last_settled < block_number) {
+            all_chains_settled = false;
+            // Track the minimum settled block across all chains
+            if (other_last_settled < min_settled_block) {
+                min_settled_block = other_last_settled;
+            };
+        };
+        idx = idx + 1;
     };
-    let final_last_settled = settlement::get_last_settled_block_number(
-        settlement,
-    );
-    let block = app_instance.blocks.borrow(final_last_settled);
-    let proved_sequence = block::get_end_sequence(block);
 
-    let rollback = app_instance.state.get_rollback_mut();
-    commitment::rollback::purge_records(rollback, proved_sequence);
+    // Only delete ProofCalculation and purge sequence states if ALL chains have settled this block
+    if (all_chains_settled) {
+        // Delete the proof_calculation for this block as it's no longer needed
+        // All information has been preserved in events
+        // Note: Block 0 (genesis) doesn't have proof_calculation, only blocks >= 1
+        if (
+            block_number > 0 && object_table::contains(&app_instance.proof_calculations, block_number)
+        ) {
+            let proof_calculation = object_table::remove(
+                &mut app_instance.proof_calculations,
+                block_number,
+            );
+            prover::delete_proof_calculation(proof_calculation, clock);
+        };
+        
+        // Use the block's end_sequence for purging
+        let block_to_purge = app_instance.blocks.borrow(block_number);
+        let proved_sequence = block::get_end_sequence(block_to_purge);
 
-    sequence_state::purge(
-        &mut app_instance.sequence_state_manager,
-        proved_sequence,
-        clock,
-    );
+        let rollback = app_instance.state.get_rollback_mut();
+        commitment::rollback::purge_records(rollback, proved_sequence);
+
+        sequence_state::purge(
+            &mut app_instance.sequence_state_manager,
+            proved_sequence,
+            clock,
+        );
+    };
 }
 
 // Methods for managing metadata and kv
@@ -936,7 +958,7 @@ public fun create_app_job(
     data: vector<u8>,
     interval_ms: Option<u64>,
     next_scheduled_at: Option<u64>,
-    is_settlement_job: bool,
+    settlement_chain: Option<String>, // None for regular jobs, Some(chain) for settlement jobs
     clock: &Clock,
     ctx: &mut TxContext,
 ): u64 {
@@ -947,7 +969,7 @@ public fun create_app_job(
     );
     let method = vec_map::get(&app_instance.methods, &method_name);
 
-    jobs::create_job(
+    let job_id = jobs::create_job(
         &mut app_instance.jobs,
         job_description,
         *app_method::developer(method),
@@ -963,10 +985,22 @@ public fun create_app_job(
         data,
         interval_ms,
         next_scheduled_at,
-        is_settlement_job,
         clock,
         ctx,
-    )
+    );
+
+    // If this is a settlement job, update the settlement_job field in the Settlement struct
+    if (option::is_some(&settlement_chain)) {
+        let chain = *option::borrow(&settlement_chain);
+        assert!(
+            vec_map::contains(&app_instance.settlements, &chain),
+            ESettlementChainNotFound,
+        );
+        let settlement = vec_map::get_mut(&mut app_instance.settlements, &chain);
+        settlement::set_settlement_job(settlement, option::some(job_id));
+    };
+
+    job_id
 }
 
 public fun start_app_job(
@@ -999,6 +1033,20 @@ public fun terminate_app_job(
     job_id: u64,
     clock: &Clock,
 ) {
+    // Check if this job is a settlement job for any chain and clear it
+    let keys = vec_map::keys(&app_instance.settlements);
+    let mut i = 0;
+    let len = vector::length(&keys);
+    while (i < len) {
+        let chain = vector::borrow(&keys, i);
+        let settlement = vec_map::get_mut(&mut app_instance.settlements, chain);
+        let settlement_job_id = settlement::get_settlement_job(settlement);
+        if (option::is_some(&settlement_job_id) && *option::borrow(&settlement_job_id) == job_id) {
+            settlement::set_settlement_job(settlement, option::none());
+        };
+        i = i + 1;
+    };
+    
     jobs::terminate_job(&mut app_instance.jobs, job_id, clock)
 }
 

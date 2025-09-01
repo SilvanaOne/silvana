@@ -15,10 +15,11 @@ pub mod coordinator {
 }
 
 use coordinator::{
-    AddMetadataRequest, AddMetadataResponse, Block, CompleteJobRequest, CompleteJobResponse,
+    AddMetadataRequest, AddMetadataResponse, Block, BlockSettlement, CompleteJobRequest, CompleteJobResponse,
     CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest, DeleteKvResponse,
     FailJobRequest, FailJobResponse, GetBlockProofRequest, GetBlockProofResponse,
-    GetBlockRequest, GetBlockResponse, GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
+    GetBlockRequest, GetBlockResponse, GetBlockSettlementRequest, GetBlockSettlementResponse,
+    GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
     GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
     GetSequenceStatesResponse, Job, Metadata, PurgeSequencesBelowRequest, PurgeSequencesBelowResponse,
     ReadDataAvailabilityRequest, ReadDataAvailabilityResponse, RejectProofRequest,
@@ -27,6 +28,7 @@ use coordinator::{
     SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
     TerminateJobResponse, TryCreateBlockRequest, TryCreateBlockResponse,
     UpdateBlockProofDataAvailabilityRequest, UpdateBlockProofDataAvailabilityResponse,
+    UpdateBlockSettlementRequest, UpdateBlockSettlementResponse,
     UpdateBlockSettlementTxHashRequest, UpdateBlockSettlementTxHashResponse,
     UpdateBlockSettlementTxIncludedInBlockRequest, UpdateBlockSettlementTxIncludedInBlockResponse,
     UpdateBlockStateDataAvailabilityRequest, UpdateBlockStateDataAvailabilityResponse,
@@ -98,6 +100,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 elapsed
             );
 
+            // Check if this is a settlement job by looking at the app instance settlements
+            let chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                // Find which chain this job belongs to by checking settlement_job in each settlement
+                app_instance.settlements.iter()
+                    .find(|(_, settlement)| settlement.settlement_job == Some(agent_job.job_sequence))
+                    .map(|(chain_name, _)| chain_name.clone())
+            } else {
+                None
+            };
+
             // Convert AgentJob to protobuf Job
             let job = Job {
                 job_sequence: agent_job.job_sequence,
@@ -117,6 +129,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 attempts: agent_job.pending_job.attempts as u32,
                 created_at: agent_job.pending_job.created_at,
                 updated_at: agent_job.pending_job.updated_at,
+                chain,
             };
 
             return Ok(Response::new(GetJobResponse {
@@ -231,6 +244,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                         attempts: agent_job.pending_job.attempts as u32,
                                         created_at: agent_job.pending_job.created_at,
                                         updated_at: agent_job.pending_job.updated_at,
+                                        chain: None, // Will be populated for settlement jobs
                                     };
 
                                     return Ok(Response::new(GetJobResponse {
@@ -2312,12 +2326,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         previous_block_timestamp: app_instance.previous_block_timestamp,
                         previous_block_last_sequence: app_instance.previous_block_last_sequence,
                         last_proved_block_number: app_instance.last_proved_block_number,
-                        last_settled_block_number: app_instance.last_settled_block_number,
-                        settlement_chain: app_instance.settlement_chain.clone(),
-                        settlement_address: app_instance.settlement_address.clone(),
                         is_paused: app_instance.is_paused,
                         created_at: app_instance.created_at,
                         updated_at: app_instance.updated_at,
+                        // Populate the new settlements map
+                        settlements: app_instance.settlements.iter()
+                            .map(|(chain, settlement)| {
+                                (chain.clone(), coordinator::SettlementInfo {
+                                    chain: chain.clone(),
+                                    last_settled_block_number: settlement.last_settled_block_number,
+                                    settlement_address: settlement.settlement_address.clone(),
+                                    settlement_job: settlement.settlement_job,
+                                })
+                            })
+                            .collect(),
                     }),
                 }))
             }
@@ -2673,6 +2695,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .update_block_settlement_tx_hash(
                 &agent_job.app_instance,
                 req.block_number,
+                req.chain.clone(),
                 req.settlement_tx_hash,
             )
             .await
@@ -2733,6 +2756,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .update_block_settlement_tx_included_in_block(
                 &agent_job.app_instance,
                 req.block_number,
+                req.chain.clone(),
                 req.settled_at,
             )
             .await
@@ -2801,7 +2825,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 req.data,
                 req.interval_ms,
                 req.next_scheduled_at,
-                req.is_settlement_job,
+                req.settlement_chain,
             )
             .await
         {
@@ -2943,13 +2967,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     end_actions_commitment: block_info.end_actions_commitment,
                     state_data_availability: block_info.state_data_availability,
                     proof_data_availability: block_info.proof_data_availability,
-                    settlement_tx_hash: block_info.settlement_tx_hash,
-                    settlement_tx_included_in_block: block_info.settlement_tx_included_in_block,
+                    // Settlement fields removed - now handled in Settlement per chain
                     created_at: block_info.created_at,
                     state_calculated_at: block_info.state_calculated_at,
                     proved_at: block_info.proved_at,
-                    sent_to_settlement_at: block_info.sent_to_settlement_at,
-                    settled_at: block_info.settled_at,
                 };
                 
                 Ok(Response::new(GetBlockResponse {
@@ -2975,6 +2996,110 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
         }
+    }
+
+    async fn get_block_settlement(
+        &self,
+        request: Request<GetBlockSettlementRequest>,
+    ) -> Result<Response<GetBlockSettlementResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            chain = %req.chain,
+            "Received GetBlockSettlement request"
+        );
+
+        // Get the app instance from the job
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("GetBlockSettlement request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(GetBlockSettlementResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    block_settlement: None,
+                    chain: req.chain.clone(),
+                }));
+            }
+        };
+
+        // Fetch the app instance and get settlement info for the specific chain
+        match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+            Ok(app_instance) => {
+                // Get the settlement for the specified chain
+                if let Some(settlement) = app_instance.settlements.get(&req.chain) {
+                    // Get the block settlement for the specified block
+                    if let Some(block_settlement) = settlement.block_settlements.get(&req.block_number) {
+                        let response_settlement = BlockSettlement {
+                            block_number: block_settlement.block_number,
+                            settlement_tx_hash: block_settlement.settlement_tx_hash.clone(),
+                            settlement_tx_included_in_block: block_settlement.settlement_tx_included_in_block,
+                            sent_to_settlement_at: block_settlement.sent_to_settlement_at,
+                            settled_at: block_settlement.settled_at,
+                        };
+                        
+                        Ok(Response::new(GetBlockSettlementResponse {
+                            success: true,
+                            message: format!("Block settlement {} for chain {} retrieved successfully", req.block_number, req.chain),
+                            block_settlement: Some(response_settlement),
+                            chain: req.chain.clone(),
+                        }))
+                    } else {
+                        Ok(Response::new(GetBlockSettlementResponse {
+                            success: false,
+                            message: format!("Block settlement {} not found for chain {}", req.block_number, req.chain),
+                            block_settlement: None,
+                            chain: req.chain.clone(),
+                        }))
+                    }
+                } else {
+                    Ok(Response::new(GetBlockSettlementResponse {
+                        success: false,
+                        message: format!("Chain {} not found in settlements", req.chain),
+                        block_settlement: None,
+                        chain: req.chain.clone(),
+                    }))
+                }
+            }
+            Err(e) => {
+                error!("Failed to fetch app instance: {}", e);
+                Ok(Response::new(GetBlockSettlementResponse {
+                    success: false,
+                    message: format!("Failed to fetch app instance: {}", e),
+                    block_settlement: None,
+                    chain: req.chain.clone(),
+                }))
+            }
+        }
+    }
+
+    async fn update_block_settlement(
+        &self,
+        request: Request<UpdateBlockSettlementRequest>,
+    ) -> Result<Response<UpdateBlockSettlementResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            chain = %req.chain,
+            "Received UpdateBlockSettlement request"
+        );
+
+        // For now, we'll just return a placeholder response
+        // In the future, this would update the settlement status on the blockchain
+        Ok(Response::new(UpdateBlockSettlementResponse {
+            success: true,
+            message: format!("Block settlement update for block {} on chain {} acknowledged", req.block_number, req.chain),
+            tx_hash: String::new(), // Placeholder for now
+        }))
     }
 }
 

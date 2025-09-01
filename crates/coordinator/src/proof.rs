@@ -1,9 +1,44 @@
 
 use anyhow::Result;
-use sui::fetch::{AppInstance, ProofCalculation, fetch_blocks_range, fetch_proof_calculations_range};
+use sui::fetch::{AppInstance, ProofCalculation, Settlement, fetch_blocks_range, fetch_proof_calculations_range};
 use tracing::{debug, info, warn};
 use crate::settlement;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
+use std::collections::HashMap;
+
+// Helper function to get the minimum last settled block number across all chains
+fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
+    if settlements.is_empty() {
+        return 0;
+    }
+    settlements.values()
+        .map(|s| s.last_settled_block_number)
+        .min()
+        .unwrap_or(0)
+}
+
+// Helper function to check if a block needs settlement on any chain
+fn block_needs_settlement(block_number: u64, settlements: &HashMap<String, Settlement>) -> (bool, Option<String>) {
+    for (chain, settlement) in settlements.iter() {
+        // Check if this block has settlement info
+        if let Some(block_settlement) = settlement.block_settlements.get(&block_number) {
+            // Check if it needs settlement
+            if block_settlement.settlement_tx_hash.is_none() {
+                return (true, Some(chain.clone())); // No settlement tx yet
+            }
+            if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
+                return (true, Some(chain.clone())); // Tx exists but not included
+            }
+        } else if block_number <= settlement.last_settled_block_number {
+            // Block is already settled (before the last settled block)
+            continue;
+        } else {
+            // No settlement record for this block on this chain - needs settlement
+            return (true, Some(chain.clone()));
+        }
+    }
+    (false, None)
+}
 
 // Helper function to analyze proof completion and determine next action
 pub async fn analyze_proof_completion(
@@ -13,7 +48,8 @@ pub async fn analyze_proof_completion(
   debug!("🔍 Starting proof completion analysis for app: {}", app_instance.silvana_app_name);
   
   let last_proved_block_number = app_instance.last_proved_block_number;
-  let last_settled_block_number = app_instance.last_settled_block_number;
+  // Get the minimum last_settled_block_number across all chains (most conservative)
+  let last_settled_block_number = get_min_last_settled_block_number(&app_instance.settlements);
   let current_block_number = app_instance.block_number;
   let previous_block_last_sequence = app_instance.previous_block_last_sequence;
   let current_sequence = app_instance.sequence;
@@ -107,25 +143,22 @@ pub async fn analyze_proof_completion(
                   .map(|bp| !bp.is_empty())
                   .unwrap_or(false);
               
-              // Check settlement opportunities:
-              // 1. Proof is available but no settlement transaction
+              // Check settlement opportunities using the new settlement structure
               let proof_available = block_details.proof_data_availability.is_some() || has_block_proof;
-              let no_settlement_tx = block_details.settlement_tx_hash.is_none();
               
-              if proof_available && no_settlement_tx {
-                  debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
-                  found_settlement_opportunity = true;
-                  break;
-              }
-              
-              // 2. Settlement transaction exists but not included in block
-              let has_settlement_tx = block_details.settlement_tx_hash.is_some();
-              let not_included = !block_details.settlement_tx_included_in_block;
-              
-              if has_settlement_tx && not_included {
-                  debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
-                  found_settlement_opportunity = true;
-                  break;
+              if proof_available {
+                  // Check if this block needs settlement on any chain
+                  let (needs_settlement, chain) = block_needs_settlement(block_number, &app_instance.settlements);
+                  
+                  if needs_settlement {
+                      if let Some(chain_name) = chain {
+                          debug!("Settlement opportunity found for block {} on chain {}", block_number, chain_name);
+                      } else {
+                          debug!("Settlement opportunity found for block {}", block_number);
+                      }
+                      found_settlement_opportunity = true;
+                      break;
+                  }
               }
           }
       }
@@ -134,13 +167,13 @@ pub async fn analyze_proof_completion(
           last_proved_block_number, last_settled_block_number);
   }
   
-  // Check for existing settlement job
-  let existing_settle_job_id = sui::fetch::app_instance::get_settlement_job_id(app_instance).await
-      .unwrap_or(None);
+  // Check for existing settlement jobs across all chains
+  let existing_settlement_jobs = sui::fetch::app_instance::get_settlement_job_ids_for_instance(app_instance).await
+      .unwrap_or_default();
   
   if found_settlement_opportunity {
       // Create settlement job if it doesn't exist
-      if existing_settle_job_id.is_none() {
+      if existing_settlement_jobs.is_empty() {
           debug!("📝 Creating periodic settle job for app instance {} (will settle blocks 1 to {})", 
               app_instance.silvana_app_name, last_proved_block_number);
           if let Err(e) = settlement::create_periodic_settle_job(app_instance).await {
@@ -149,18 +182,25 @@ pub async fn analyze_proof_completion(
               debug!("✅ Successfully created periodic settle job");
           }
       } else {
-          debug!("📋 Settlement job already exists with ID {}, will handle blocks 1 to {}", 
-              existing_settle_job_id.unwrap(), last_proved_block_number);
+          debug!("📋 Settlement jobs already exist for {} chains, will handle blocks 1 to {}", 
+              existing_settlement_jobs.len(), last_proved_block_number);
+          for (chain, job_id) in &existing_settlement_jobs {
+              debug!("  - Chain {}: job ID {}", chain, job_id);
+          }
       }
   } else {
       // No settlement opportunities - terminate existing settlement job if it exists
-      if let Some(job_id) = existing_settle_job_id {
-          debug!("🚫 No valid blocks to settle (only block 0 or no new proved blocks), terminating settlement job {}", job_id);
+      if !existing_settlement_jobs.is_empty() {
+          debug!("🚫 No valid blocks to settle (only block 0 or no new proved blocks), terminating {} settlement jobs", 
+              existing_settlement_jobs.len());
           let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-          if let Err(e) = sui_interface.terminate_app_job(&app_instance.id, job_id).await {
-              warn!("Failed to terminate settlement job {}: {}", job_id, e);
-          } else {
-              debug!("✅ Successfully terminated settlement job {}", job_id);
+          for (chain, job_id) in &existing_settlement_jobs {
+              debug!("  - Terminating job {} for chain {}", job_id, chain);
+              if let Err(e) = sui_interface.terminate_app_job(&app_instance.id, *job_id).await {
+                  warn!("Failed to terminate settlement job {} for chain {}: {}", job_id, chain, e);
+              } else {
+                  debug!("✅ Successfully terminated settlement job {} for chain {}", job_id, chain);
+              }
           }
       }
   }
@@ -228,13 +268,13 @@ pub async fn analyze_proof_completion(
   
   // Prepare comprehensive stats
   let settlement_status = if found_settlement_opportunity {
-      if existing_settle_job_id.is_some() {
-          format!("settle_job_exists(id={})", existing_settle_job_id.unwrap())
+      if !existing_settlement_jobs.is_empty() {
+          format!("settle_jobs_exist(count={})", existing_settlement_jobs.len())
       } else {
           "settle_job_created".to_string()
       }
-  } else if existing_settle_job_id.is_some() {
-      "settle_job_terminated".to_string()
+  } else if !existing_settlement_jobs.is_empty() {
+      "settle_jobs_terminated".to_string()
   } else {
       "no_settlement_needed".to_string()
   };

@@ -1,12 +1,32 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
-use tracing::{debug, info, warn};
+use tracing::debug;
 use crate::error::SilvanaSuiInterfaceError;
 use crate::parse::{get_string, get_u64, get_bool, get_table_id, proto_to_json, parse_string_vecmap, parse_struct_vecmap};
 use crate::state::SharedSuiState;
 use super::jobs::Jobs;
 use std::collections::HashMap;
+
+/// Rust representation of the Move BlockSettlement struct
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockSettlement {
+    pub block_number: u64,
+    pub settlement_tx_hash: Option<String>,
+    pub settlement_tx_included_in_block: bool,
+    pub sent_to_settlement_at: Option<u64>,
+    pub settled_at: Option<u64>,
+}
+
+/// Rust representation of the Move Settlement struct
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settlement {
+    pub chain: String,
+    pub last_settled_block_number: u64,
+    pub settlement_address: Option<String>,
+    pub block_settlements: HashMap<u64, BlockSettlement>,
+    pub settlement_job: Option<u64>, // ID of the active settlement job for this chain
+}
 
 /// Rust representation of the Move AppInstance struct
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,12 +67,8 @@ pub struct AppInstance {
     pub previous_block_actions_state: serde_json::Value,
     /// Last proved block number
     pub last_proved_block_number: u64,
-    /// Last settled block number
-    pub last_settled_block_number: u64,
-    /// Settlement chain name (optional)
-    pub settlement_chain: Option<String>,
-    /// Settlement address (optional)
-    pub settlement_address: Option<String>,
+    /// Settlements map (chain -> Settlement)
+    pub settlements: HashMap<String, Settlement>,
     /// Whether the app is paused
     pub is_paused: bool,
     /// Creation timestamp
@@ -123,6 +139,103 @@ pub async fn fetch_app_instance(
     ))
 }
 
+/// Parse settlements from the protocol buffer struct
+fn parse_settlements(struct_value: &prost_types::Struct) -> HashMap<String, Settlement> {
+    let mut settlements = HashMap::new();
+    
+    if let Some(field) = struct_value.fields.get("settlements") {
+        if let Some(prost_types::value::Kind::StructValue(settlements_struct)) = &field.kind {
+            // Parse the VecMap contents
+            if let Some(contents_field) = settlements_struct.fields.get("contents") {
+                if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
+                    for item in &list.values {
+                        if let Some(prost_types::value::Kind::StructValue(entry)) = &item.kind {
+                            // Parse Entry struct (has k and v fields)
+                            if let (Some(key_field), Some(value_field)) = 
+                                (entry.fields.get("k"), entry.fields.get("v")) {
+                                
+                                // Parse the chain string (key)
+                                let chain = if let Some(prost_types::value::Kind::StringValue(s)) = &key_field.kind {
+                                    s.clone()
+                                } else {
+                                    continue;
+                                };
+                                
+                                // Parse the Settlement struct (value)
+                                if let Some(prost_types::value::Kind::StructValue(settlement_struct)) = &value_field.kind {
+                                    let settlement = Settlement {
+                                        chain: get_string(settlement_struct, "chain").unwrap_or_default(),
+                                        last_settled_block_number: get_u64(settlement_struct, "last_settled_block_number"),
+                                        settlement_address: get_string(settlement_struct, "settlement_address"),
+                                        block_settlements: parse_block_settlements(settlement_struct),
+                                        settlement_job: settlement_struct.fields.get("settlement_job")
+                                            .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
+                                                s.parse::<u64>().ok()
+                                            } else { None }),
+                                    };
+                                    settlements.insert(chain, settlement);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    settlements
+}
+
+/// Parse block settlements from the protocol buffer struct
+fn parse_block_settlements(settlement_struct: &prost_types::Struct) -> HashMap<u64, BlockSettlement> {
+    let mut block_settlements = HashMap::new();
+    
+    if let Some(field) = settlement_struct.fields.get("block_settlements") {
+        if let Some(prost_types::value::Kind::StructValue(bs_struct)) = &field.kind {
+            // Parse the VecMap contents
+            if let Some(contents_field) = bs_struct.fields.get("contents") {
+                if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
+                    for item in &list.values {
+                        if let Some(prost_types::value::Kind::StructValue(entry)) = &item.kind {
+                            // Parse Entry struct (has k and v fields)
+                            if let (Some(key_field), Some(value_field)) = 
+                                (entry.fields.get("k"), entry.fields.get("v")) {
+                                
+                                // Parse the block number (key)
+                                let block_number = if let Some(prost_types::value::Kind::StringValue(s)) = &key_field.kind {
+                                    s.parse::<u64>().unwrap_or(0)
+                                } else {
+                                    continue;
+                                };
+                                
+                                // Parse the BlockSettlement struct (value)
+                                if let Some(prost_types::value::Kind::StructValue(bs)) = &value_field.kind {
+                                    let block_settlement = BlockSettlement {
+                                        block_number: get_u64(bs, "block_number"),
+                                        settlement_tx_hash: get_string(bs, "settlement_tx_hash"),
+                                        settlement_tx_included_in_block: get_bool(bs, "settlement_tx_included_in_block"),
+                                        sent_to_settlement_at: bs.fields.get("sent_to_settlement_at")
+                                            .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
+                                                s.parse::<u64>().ok()
+                                            } else { None }),
+                                        settled_at: bs.fields.get("settled_at")
+                                            .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
+                                                s.parse::<u64>().ok()
+                                            } else { None }),
+                                    };
+                                    block_settlements.insert(block_number, block_settlement);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    block_settlements
+}
+
 /// Parse AppInstance from protobuf struct representation
 pub fn parse_app_instance_from_struct(
     struct_value: &prost_types::Struct,
@@ -168,9 +281,7 @@ pub fn parse_app_instance_from_struct(
             .map(proto_to_json)
             .unwrap_or(serde_json::Value::Null),
         last_proved_block_number: get_u64(struct_value, "last_proved_block_number"),
-        last_settled_block_number: get_u64(struct_value, "last_settled_block_number"),
-        settlement_chain: get_string(struct_value, "settlement_chain"),
-        settlement_address: get_string(struct_value, "settlement_address"),
+        settlements: parse_settlements(struct_value),
         is_paused: get_bool(struct_value, "isPaused"),
         created_at: get_u64(struct_value, "created_at"),
         updated_at: get_u64(struct_value, "updated_at"),
@@ -210,9 +321,16 @@ mod tests {
             previous_block_last_sequence: 99,
             previous_block_actions_state: serde_json::Value::Null,
             last_proved_block_number: 9,
-            last_settled_block_number: 8,
-            settlement_chain: Some("mina".to_string()),
-            settlement_address: Some("0xsettlement".to_string()),
+            settlements: {
+                let mut settlements = HashMap::new();
+                settlements.insert("mina".to_string(), Settlement {
+                    chain: "mina".to_string(),
+                    last_settled_block_number: 8,
+                    settlement_address: Some("0xsettlement".to_string()),
+                    block_settlements: HashMap::new(),
+                });
+                settlements
+            },
             is_paused: false,
             created_at: 1234567890,
             updated_at: 1234567891,
@@ -227,87 +345,28 @@ mod tests {
 
 
 /// Get the settlement job ID for a specific app instance ID
-pub async fn get_settlement_job_id_for_instance(
+/// Get all settlement job IDs per chain for an app instance
+pub async fn get_settlement_job_ids_for_instance(
     app_instance: &AppInstance,
-) -> Result<Option<u64>> {
-    debug!("Getting settlement job ID for app instance {}", app_instance.id);
+) -> Result<HashMap<String, u64>> {
+    debug!("Getting settlement job IDs for app instance {}", app_instance.id);
     
-    // Use the jobs data directly from the AppInstance
-    if let Some(jobs) = &app_instance.jobs {
-        if let Some(settlement_job_id) = jobs.settlement_job {
-            debug!("Found existing settlement job with ID {}", settlement_job_id);
-            return Ok(Some(settlement_job_id));
+    let mut settlement_jobs = HashMap::new();
+    
+    // Check each settlement for its job ID
+    for (chain, settlement) in &app_instance.settlements {
+        if let Some(job_id) = settlement.settlement_job {
+            debug!("Found settlement job {} for chain {}", job_id, chain);
+            settlement_jobs.insert(chain.clone(), job_id);
         }
     }
     
-    debug!("No settlement job found");
-    Ok(None)
-}
-
-/// Get the settlement job ID if it exists
-pub async fn get_settlement_job_id(
-    app_instance: &AppInstance,
-) -> Result<Option<u64>> {
-    debug!("Getting settlement job ID for app instance {}", app_instance.id);
-    let mut client = SharedSuiState::get_instance().get_sui_client();
-    
-    // Fetch the Jobs object to check the settlement_job field
-    let formatted_id = if app_instance.id.starts_with("0x") {
-        app_instance.id.clone()
+    if settlement_jobs.is_empty() {
+        debug!("No settlement jobs found");
     } else {
-        format!("0x{}", app_instance.id)
-    };
-    
-    // Fetch the AppInstance object
-    let request = sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string()],
-        }),
-    };
-
-    let response = match client.ledger_client().get_object(request).await {
-        Ok(resp) => resp.into_inner(),
-        Err(e) => {
-            warn!("Failed to fetch AppInstance {}: {}", formatted_id, e);
-            return Ok(None);
-        }
-    };
-
-    if let Some(proto_object) = response.object {
-        if let Some(json_value) = &proto_object.json {
-            if let Some(prost_types::value::Kind::StructValue(app_instance_struct)) = &json_value.kind {
-                // Get the embedded jobs field
-                if let Some(jobs_field) = app_instance_struct.fields.get("jobs") {
-                    if let Some(prost_types::value::Kind::StructValue(jobs_struct)) = &jobs_field.kind {
-                        // Get the settlement_job field
-                        if let Some(settlement_job_field) = jobs_struct.fields.get("settlement_job") {
-                            match &settlement_job_field.kind {
-                                Some(prost_types::value::Kind::StringValue(s)) => {
-                                    if let Ok(job_id) = s.parse::<u64>() {
-                                        debug!("Found existing settlement job with ID {}", job_id);
-                                        return Ok(Some(job_id));
-                                    }
-                                }
-                                Some(prost_types::value::Kind::NumberValue(n)) => {
-                                    let job_id = n.round() as u64;
-                                    info!("Found existing settlement job with ID {}", job_id);
-                                    return Ok(Some(job_id));
-                                }
-                                Some(prost_types::value::Kind::NullValue(_)) => {
-                                    debug!("Settlement job field is null");
-                                    return Ok(None);
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        debug!("Found {} settlement jobs", settlement_jobs.len());
     }
     
-    debug!("No settlement job found");
-    Ok(None)
+    Ok(settlement_jobs)
 }
+

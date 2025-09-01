@@ -161,11 +161,7 @@ async fn main() -> Result<()> {
                         
                         println!("        next_job_sequence: {},", jobs.next_job_sequence);
                         println!("        max_attempts: {},", jobs.max_attempts);
-                        if let Some(ref settlement_job) = jobs.settlement_job {
-                            println!("        settlement_job: Some({}),", settlement_job);
-                        } else {
-                            println!("        settlement_job: None,");
-                        }
+                        // Settlement jobs are now per-chain in settlements
                         println!("    }}),");
                     } else {
                         println!("    jobs: None,");
@@ -178,12 +174,43 @@ async fn main() -> Result<()> {
                     println!("    previous_block_last_sequence: {},", app_instance.previous_block_last_sequence);
                     println!("    previous_block_actions_state: \"{}\",", app_instance.previous_block_actions_state);
                     println!("    last_proved_block_number: {},", app_instance.last_proved_block_number);
-                    println!("    last_settled_block_number: {},", app_instance.last_settled_block_number);
+                    // Print settlement data for every chain
+                    println!("    settlements: {{");
+                    for (chain, settlement) in &app_instance.settlements {
+                        println!("        \"{}\": Settlement {{", chain);
+                        println!("            chain: \"{}\",", settlement.chain);
+                        println!("            last_settled_block_number: {},", settlement.last_settled_block_number);
+                        if let Some(ref addr) = settlement.settlement_address {
+                            println!("            settlement_address: Some(\"{}\"),", addr);
+                        } else {
+                            println!("            settlement_address: None,");
+                        }
+                        if let Some(job_id) = settlement.settlement_job {
+                            println!("            settlement_job: Some({}),", job_id);
+                        } else {
+                            println!("            settlement_job: None,");
+                        }
+                        println!("            block_settlements: {} entries,", settlement.block_settlements.len());
+                        println!("        }},");
+                    }
+                    println!("    }},");
                     
-                    if let Some(ref chain) = app_instance.settlement_chain {
-                        println!("    settlement_chain: Some(\"{}\"),", chain);
+                    // Print settlement chains
+                    if !app_instance.settlements.is_empty() {
+                        println!("    settlement_chains: {{");
+                        for (chain, settlement) in &app_instance.settlements {
+                            println!("        \"{}\": {{", chain);
+                            println!("            last_settled_block_number: {},", settlement.last_settled_block_number);
+                            if let Some(ref addr) = settlement.settlement_address {
+                                println!("            settlement_address: Some(\"{}\"),", addr);
+                            } else {
+                                println!("            settlement_address: None,");
+                            }
+                            println!("        }},");
+                        }
+                        println!("    }},");
                     } else {
-                        println!("    settlement_chain: None,");
+                        println!("    settlement_chains: None,");
                     }
                     
                     println!("    created_at: \"{}\",", created_at_iso);
@@ -239,14 +266,6 @@ async fn main() -> Result<()> {
                         .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
                         .map(|dt| dt.to_rfc3339());
                     
-                    let sent_to_settlement_at_iso = block_info.sent_to_settlement_at
-                        .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
-                        .map(|dt| dt.to_rfc3339());
-                    
-                    let settled_at_iso = block_info.settled_at
-                        .and_then(|ts| DateTime::<Utc>::from_timestamp_millis(ts as i64))
-                        .map(|dt| dt.to_rfc3339());
-                    
                     // Print formatted block
                     println!("Block {{");
                     println!("    name: \"{}\",", block_info.name);
@@ -272,13 +291,6 @@ async fn main() -> Result<()> {
                         println!("    proof_data_availability: None,");
                     }
                     
-                    if let Some(ref tx_hash) = block_info.settlement_tx_hash {
-                        println!("    settlement_tx_hash: Some(\"{}\"),", tx_hash);
-                    } else {
-                        println!("    settlement_tx_hash: None,");
-                    }
-                    
-                    println!("    settlement_tx_included_in_block: {},", block_info.settlement_tx_included_in_block);
                     println!("    created_at: \"{}\",", created_iso);
                     
                     if let Some(ref iso) = state_calculated_iso {
@@ -293,17 +305,45 @@ async fn main() -> Result<()> {
                         println!("    proved_at: None,");
                     }
                     
-                    if let Some(ref iso) = sent_to_settlement_at_iso {
-                        println!("    sent_to_settlement_at: Some(\"{}\"),", iso);
-                    } else {
-                        println!("    sent_to_settlement_at: None,");
+                    // Print settlement information for all chains
+                    println!("    block_settlements: {{");
+                    for (chain, settlement) in &app_instance.settlements {
+                        if let Some(block_settlement) = settlement.block_settlements.get(&block) {
+                            println!("        \"{}\": BlockSettlement {{", chain);
+                            println!("            block_number: {},", block_settlement.block_number);
+                            
+                            if let Some(ref tx_hash) = block_settlement.settlement_tx_hash {
+                                println!("            settlement_tx_hash: Some(\"{}\"),", tx_hash);
+                            } else {
+                                println!("            settlement_tx_hash: None,");
+                            }
+                            
+                            println!("            settlement_tx_included_in_block: {},", block_settlement.settlement_tx_included_in_block);
+                            
+                            if let Some(sent_at) = block_settlement.sent_to_settlement_at {
+                                let sent_iso = DateTime::<Utc>::from_timestamp_millis(sent_at as i64)
+                                    .map(|dt| dt.to_rfc3339())
+                                    .unwrap_or_else(|| sent_at.to_string());
+                                println!("            sent_to_settlement_at: Some(\"{}\"),", sent_iso);
+                            } else {
+                                println!("            sent_to_settlement_at: None,");
+                            }
+                            
+                            if let Some(settled_at) = block_settlement.settled_at {
+                                let settled_iso = DateTime::<Utc>::from_timestamp_millis(settled_at as i64)
+                                    .map(|dt| dt.to_rfc3339())
+                                    .unwrap_or_else(|| settled_at.to_string());
+                                println!("            settled_at: Some(\"{}\"),", settled_iso);
+                            } else {
+                                println!("            settled_at: None,");
+                            }
+                            
+                            println!("        }},");
+                        } else {
+                            println!("        \"{}\": None, // No settlement record for this block", chain);
+                        }
                     }
-                    
-                    if let Some(ref iso) = settled_at_iso {
-                        println!("    settled_at: Some(\"{}\"),", iso);
-                    } else {
-                        println!("    settled_at: None,");
-                    }
+                    println!("    }},");
                     
                     println!("}}");
                 }

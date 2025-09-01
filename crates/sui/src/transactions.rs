@@ -381,7 +381,7 @@ pub async fn create_app_job_tx(
     data: Vec<u8>,
     interval_ms: Option<u64>,
     next_scheduled_at: Option<u64>,
-    is_settlement_job: bool,
+    settlement_chain: Option<String>,
 ) -> Result<String> {
     debug!("Creating app job transaction for method: {}, data size: {} bytes", 
         method_name, data.len());
@@ -398,10 +398,10 @@ pub async fn create_app_job_tx(
             let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&sequences1));
             let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&sequences2));
             let data_arg = tb.input(sui_transaction_builder::Serialized(&data));
-            // Add the periodic job parameters and is_settlement_job flag
+            // Add the periodic job parameters and settlement_chain
             let interval_ms_arg = tb.input(sui_transaction_builder::Serialized(&interval_ms));
             let next_scheduled_at_arg = tb.input(sui_transaction_builder::Serialized(&next_scheduled_at));
-            let is_settlement_job_arg = tb.input(sui_transaction_builder::Serialized(&is_settlement_job));
+            let settlement_chain_arg = tb.input(sui_transaction_builder::Serialized(&settlement_chain));
             
             vec![
                 app_instance_arg,
@@ -414,7 +414,7 @@ pub async fn create_app_job_tx(
                 data_arg,
                 interval_ms_arg,
                 next_scheduled_at_arg,
-                is_settlement_job_arg,
+                settlement_chain_arg,
                 clock_arg,
             ]
         },
@@ -513,7 +513,7 @@ pub async fn create_merge_job_tx(
         vec![],                     // Empty data since we're using the Job fields now
         None,                       // No interval for merge jobs
         None,                       // No scheduled time for merge jobs
-        false,                      // Not a settlement job
+        None,                       // Not a settlement job
     ).await
 }
 
@@ -579,6 +579,7 @@ pub async fn purge_sequences_below_tx(
 pub async fn create_settle_job_tx(
     app_instance_str: &str,
     block_number: u64,
+    chain: String,
     job_description: Option<String>,
 ) -> Result<String> {
     // Call the general create_app_job_tx function with settle method
@@ -600,7 +601,7 @@ pub async fn create_settle_job_tx(
         vec![],                     // Empty data
         Some(interval_ms),          // 1 minute interval for periodic settle jobs
         Some(next_scheduled_at),    // Start now
-        true,                       // This is a settlement job
+        Some(chain),                // This is a settlement job for the specified chain
     ).await
 }
 
@@ -630,18 +631,20 @@ pub async fn terminate_app_job_tx(
 pub async fn update_block_settlement_tx_hash_tx(
     app_instance_str: &str,
     block_number: u64,
+    chain: String,
     settlement_tx_hash: String,
 ) -> Result<String> {
-    debug!("Creating update_block_settlement_tx_hash transaction for block_number: {}", block_number);
+    debug!("Creating update_block_settlement_tx_hash transaction for block_number: {} on chain: {}", block_number, chain);
     
     execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_hash",
         move |tb, app_instance_arg, clock_arg| {
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
             let settlement_tx_hash_arg = tb.input(sui_transaction_builder::Serialized(&settlement_tx_hash));
             
-            vec![app_instance_arg, block_number_arg, settlement_tx_hash_arg, clock_arg]
+            vec![app_instance_arg, block_number_arg, chain_arg, settlement_tx_hash_arg, clock_arg]
         },
     ).await
 }
@@ -650,18 +653,20 @@ pub async fn update_block_settlement_tx_hash_tx(
 pub async fn update_block_settlement_tx_included_in_block_tx(
     app_instance_str: &str,
     block_number: u64,
+    chain: String,
     settled_at: u64,
 ) -> Result<String> {
-    debug!("Creating update_block_settlement_tx_included_in_block transaction for block_number: {}", block_number);
+    debug!("Creating update_block_settlement_tx_included_in_block transaction for block_number: {} on chain: {}", block_number, chain);
     
     execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_included_in_block",
         move |tb, app_instance_arg, clock_arg| {
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
             let settled_at_arg = tb.input(sui_transaction_builder::Serialized(&settled_at));
             
-            vec![app_instance_arg, block_number_arg, settled_at_arg, clock_arg]
+            vec![app_instance_arg, block_number_arg, chain_arg, settled_at_arg, clock_arg]
         },
     ).await
 }
@@ -676,12 +681,12 @@ async fn query_job_status(
     // Use the existing fetch_app_instance function which handles formatting correctly
     match fetch_app_instance(&app_instance_id.to_string()).await {
         Ok(app_instance) => {
-            // Check if this is a settlement job
-            if let Some(jobs) = &app_instance.jobs {
-                if let Some(settlement_job) = jobs.settlement_job {
+            // Check if this is a settlement job for any chain
+            for (chain, settlement) in &app_instance.settlements {
+                if let Some(settlement_job) = settlement.settlement_job {
                     if settlement_job == job_sequence {
-                        debug!("Job {} is the settlement job", job_sequence);
-                        return Ok(format!("Job {} is settlement job", job_sequence));
+                        debug!("Job {} is the settlement job for chain {}", job_sequence, chain);
+                        return Ok(format!("Job {} is settlement job for chain {}", job_sequence, chain));
                     }
                 }
             }

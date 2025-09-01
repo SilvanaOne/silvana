@@ -55,7 +55,6 @@ public struct Jobs has key, store {
     >,
     next_job_sequence: u64,
     max_attempts: u8,
-    settlement_job: Option<u64>,
 }
 
 public struct JobCreatedEvent has copy, drop {
@@ -159,10 +158,6 @@ const EIntervalTooShort: vector<u8> = b"Interval must be >= 60000 ms";
 #[error]
 const ENotDueYet: vector<u8> = b"Periodic job is not due yet";
 
-#[error]
-const ESettlementJobAlreadyExists: vector<u8> =
-    b"Settlement job already exists";
-
 // Initialize Jobs storage with optional max_attempts
 public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
     let attempts = if (option::is_some(&max_attempts)) {
@@ -181,7 +176,6 @@ public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
         pending_jobs_indexes: vec_map::empty(),
         next_job_sequence: 1,
         max_attempts: attempts,
-        settlement_job: option::none(),
     }
 }
 
@@ -202,7 +196,6 @@ public fun create_job(
     data: vector<u8>,
     interval_ms: Option<u64>,
     next_scheduled_at: Option<u64>,
-    is_settlement_job: bool,
     clock: &Clock,
     ctx: &mut TxContext,
 ): u64 {
@@ -214,13 +207,7 @@ public fun create_job(
 
     let job_sequence = jobs.next_job_sequence;
     let now = clock::timestamp_ms(clock);
-    if (is_settlement_job) {
-        assert!(
-            option::is_none(&jobs.settlement_job),
-            ESettlementJobAlreadyExists,
-        );
-        jobs.settlement_job = option::some(job_sequence);
-    };
+    // Settlement job tracking is now handled per-chain in the Settlement struct
 
     let job = Job {
         id: object::new(ctx),
@@ -563,12 +550,7 @@ public fun remove_failed_jobs(
 public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
     assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
 
-    if (
-        option::is_some(&jobs.settlement_job)
-        && *option::borrow(&jobs.settlement_job) == job_sequence
-    ) {
-        jobs.settlement_job = option::none();
-    };
+    // Settlement job tracking is now handled per-chain in the Settlement struct
 
     let now = clock::timestamp_ms(clock);
     remove_pending_job(jobs, job_sequence);

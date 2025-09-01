@@ -38,30 +38,90 @@ pub async fn settle(
         }
     }
 
-    // 2. Now create a settle job on the blockchain (after DA is updated)
-    let job_description = Some(format!(
-        "Settle block {} with proof DA hash",
-        block_number
-    ));
-    
-    match sui_interface.create_settle_job(
-        app_instance,
-        block_number,
-        job_description,
-    ).await {
-        Ok(tx_digest) => {
-            info!(
-                "✅ Successfully created settle job for block {} - Transaction: {}",
-                block_number, tx_digest
-            );
-        }
+    // 2. Fetch the app instance to get all configured chains
+    let app_inst = match sui::fetch::fetch_app_instance(app_instance).await {
+        Ok(inst) => inst,
         Err(e) => {
-            error!(
-                "❌ Failed to create settle job for block {}: {}",
-                block_number, e
-            );
-            return Err(anyhow::anyhow!("Failed to create settle job: {}", e));
+            error!("❌ Failed to fetch app instance {}: {}", app_instance, e);
+            return Err(anyhow::anyhow!("Failed to fetch app instance: {}", e));
         }
+    };
+    
+    // 3. Create settle jobs for chains that don't already have one
+    let mut chains_needing_jobs = Vec::new();
+    let mut chains_with_existing_jobs = Vec::new();
+    
+    for (chain, settlement) in &app_inst.settlements {
+        if settlement.settlement_job.is_some() {
+            chains_with_existing_jobs.push(chain.clone());
+            debug!(
+                "Chain {} already has settlement job ID {}",
+                chain, settlement.settlement_job.unwrap()
+            );
+        } else {
+            chains_needing_jobs.push(chain.clone());
+        }
+    }
+    
+    if !chains_with_existing_jobs.is_empty() {
+        info!(
+            "Skipping {} chains with existing settlement jobs: {:?}",
+            chains_with_existing_jobs.len(),
+            chains_with_existing_jobs
+        );
+    }
+    
+    if chains_needing_jobs.is_empty() {
+        info!(
+            "All {} configured chains already have settlement jobs",
+            app_inst.settlements.len()
+        );
+        return Ok(());
+    }
+    
+    info!(
+        "Creating settlement jobs for {} chains: {:?}",
+        chains_needing_jobs.len(),
+        chains_needing_jobs
+    );
+    
+    let mut success_count = 0;
+    let mut failed_chains = Vec::new();
+    
+    for chain in chains_needing_jobs {
+        let job_description = Some(format!(
+            "Settle block {} on chain {} with proof DA hash",
+            block_number, chain
+        ));
+        
+        match sui_interface.create_settle_job(
+            app_instance,
+            block_number,
+            chain.clone(),
+            job_description,
+        ).await {
+            Ok(tx_digest) => {
+                info!(
+                    "✅ Successfully created settle job for block {} on chain {} - Transaction: {}",
+                    block_number, chain, tx_digest
+                );
+                success_count += 1;
+            }
+            Err(e) => {
+                error!(
+                    "❌ Failed to create settle job for block {} on chain {}: {}",
+                    block_number, chain, e
+                );
+                failed_chains.push(chain);
+            }
+        }
+    }
+    
+    if !failed_chains.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Failed to create settle jobs for chains: {:?}. Successfully created {} jobs.",
+            failed_chains, success_count
+        ));
     }
 
     info!("Block {} settlement complete - proof recorded with DA hash: {}", block_number, proof_da_hash);

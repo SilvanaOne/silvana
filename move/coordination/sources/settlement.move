@@ -17,6 +17,7 @@ public struct Settlement has store {
     last_settled_block_number: u64,
     settlement_address: Option<String>,
     block_settlements: VecMap<u64, BlockSettlement>, // key is block number
+    settlement_job: Option<u64>, // ID of the active settlement job for this chain
 }
 
 public struct SettlementCreatedEvent has copy, drop {
@@ -42,6 +43,7 @@ public fun create_settlement(
         last_settled_block_number: 0,
         settlement_address,
         block_settlements: vec_map::empty(),
+        settlement_job: option::none(),
     };
     event::emit(SettlementCreatedEvent {
         chain,
@@ -100,6 +102,14 @@ public fun get_settlement_address(settlement: &Settlement): Option<String> {
 
 public fun set_last_settled_block_number(settlement: &mut Settlement, block_number: u64) {
     settlement.last_settled_block_number = block_number;
+}
+
+public fun get_settlement_job(settlement: &Settlement): Option<u64> {
+    settlement.settlement_job
+}
+
+public fun set_settlement_job(settlement: &mut Settlement, job_id: Option<u64>) {
+    settlement.settlement_job = job_id;
 }
 
 // Getter functions for BlockSettlement

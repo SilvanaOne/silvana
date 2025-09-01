@@ -292,14 +292,22 @@ impl JobsTracker {
                         .unwrap()
                         .as_millis() as u64;
                     
-                    // Check if this app_instance has a settlement job
-                    let settlement_job_id = if let Ok(Some(id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await {
-                        info!("App instance {} has settlement job ID: {}", app_instance_id, id);
-                        Some(id)
+                    // Check if this app_instance has a settlement job for any chain
+                    let settlement_job_ids = sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app_instance).await
+                        .unwrap_or_default();
+                    
+                    // Print all settlement job IDs with their chain names
+                    if !settlement_job_ids.is_empty() {
+                        info!("App instance {} has {} settlement job(s):", app_instance_id, settlement_job_ids.len());
+                        for (chain, job_id) in &settlement_job_ids {
+                            info!("  - Chain '{}': settlement job ID {}", chain, job_id);
+                        }
                     } else {
-                        debug!("App instance {} has no settlement job", app_instance_id);
-                        None
-                    };
+                        debug!("App instance {} has no settlement jobs", app_instance_id);
+                    }
+                    
+                    // Get the first settlement job ID for backward compatibility
+                    let settlement_job_id = settlement_job_ids.values().next().copied();
                     
                     // Get the list of pending_jobs from the Jobs object
                     let pending_jobs_list = if let Some(ref jobs_obj) = app_instance.jobs {

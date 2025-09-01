@@ -1,7 +1,19 @@
-use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info, fetch_blocks_range};
+use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info, fetch_blocks_range};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
+use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use tracing::{debug, warn, error};
+
+// Helper function to get the minimum last settled block number across all chains
+fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
+    if settlements.is_empty() {
+        return 0;
+    }
+    settlements.values()
+        .map(|s| s.last_settled_block_number)
+        .min()
+        .unwrap_or(0)
+}
 
 /// Check if an app_instance can be safely removed from tracking
 /// An app_instance can only be removed when:
@@ -11,7 +23,8 @@ use tracing::{debug, warn, error};
 /// 4. No pending jobs
 pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
     // Check if all conditions are met
-    let all_blocks_settled = app_instance.last_settled_block_number == app_instance.last_proved_block_number;
+    let last_settled_block_number = get_min_last_settled_block_number(&app_instance.settlements);
+    let all_blocks_settled = last_settled_block_number == app_instance.last_proved_block_number;
     let at_block_start = app_instance.last_proved_block_number + 1 == app_instance.block_number;
     let no_sequences_in_current = app_instance.previous_block_last_sequence + 1 == app_instance.sequence;
     let no_pending_jobs = app_instance.jobs.as_ref()
@@ -22,7 +35,7 @@ pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
         debug!(
             "App instance {} can be removed: settled={}, proved={}, current_block={}, prev_seq={}, current_seq={}, pending_jobs=0",
             app_instance.id,
-            app_instance.last_settled_block_number,
+            last_settled_block_number,
             app_instance.last_proved_block_number,
             app_instance.block_number,
             app_instance.previous_block_last_sequence,
@@ -71,22 +84,29 @@ pub async fn check_settlement_opportunity(
         .unwrap_or(false);
     
     // Check settlement opportunities:
-    // 1. Proof is available but no settlement transaction
+    // For legacy single-block function, we just check if proof is available
+    // The actual settlement checking is now done per-chain in the proof module
     let proof_available = block_details.proof_data_availability.is_some() || has_block_proof;
-    let no_settlement_tx = block_details.settlement_tx_hash.is_none();
     
-    if proof_available && no_settlement_tx {
-        debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
-        return Ok(true);
-    }
-    
-    // 2. Settlement transaction exists but not included in block
-    let has_settlement_tx = block_details.settlement_tx_hash.is_some();
-    let not_included = !block_details.settlement_tx_included_in_block;
-    
-    if has_settlement_tx && not_included {
-        debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
-        return Ok(true);
+    if proof_available {
+        // Check if any chain needs settlement for this block
+        for (_chain, settlement) in &app_instance.settlements {
+            if let Some(block_settlement) = settlement.block_settlements.get(&block_number) {
+                // Check if it needs settlement
+                if block_settlement.settlement_tx_hash.is_none() {
+                    debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
+                    return Ok(true);
+                }
+                if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
+                    debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
+                    return Ok(true);
+                }
+            } else if block_number > settlement.last_settled_block_number {
+                // No settlement record for this block but it's after last settled - needs settlement
+                debug!("Settlement opportunity found for block {}: no settlement record", block_number);
+                return Ok(true);
+            }
+        }
     }
     
     debug!("No settlement opportunity for block {}", block_number);
@@ -133,23 +153,35 @@ pub async fn check_settlement_opportunities_range(
                 .unwrap_or(false);
             
             // Check settlement opportunities:
-            // 1. Proof is available but no settlement transaction
+            // For batch checking, we check if proof is available and any chain needs settlement
             let proof_available = block_details.proof_data_availability.is_some() || has_block_proof;
-            let no_settlement_tx = block_details.settlement_tx_hash.is_none();
             
-            if proof_available && no_settlement_tx {
-                debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
-                opportunities.push(block_number);
-                continue;
-            }
-            
-            // 2. Settlement transaction exists but not included in block
-            let has_settlement_tx = block_details.settlement_tx_hash.is_some();
-            let not_included = !block_details.settlement_tx_included_in_block;
-            
-            if has_settlement_tx && not_included {
-                debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
-                opportunities.push(block_number);
+            if proof_available {
+                // Check if any chain needs settlement for this block
+                let mut needs_settlement = false;
+                for (_chain, settlement) in &app_instance.settlements {
+                    if let Some(block_settlement) = settlement.block_settlements.get(&block_number) {
+                        // Check if it needs settlement
+                        if block_settlement.settlement_tx_hash.is_none() {
+                            debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
+                            needs_settlement = true;
+                            break;
+                        }
+                        if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
+                            debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
+                            needs_settlement = true;
+                            break;
+                        }
+                    } else if block_number > settlement.last_settled_block_number {
+                        // No settlement record for this block but it's after last settled - needs settlement
+                        debug!("Settlement opportunity found for block {}: no settlement record", block_number);
+                        needs_settlement = true;
+                        break;
+                    }
+                }
+                if needs_settlement {
+                    opportunities.push(block_number);
+                }
             }
         }
     }
@@ -202,7 +234,7 @@ pub async fn create_periodic_settle_job(
         job_data,
         Some(interval_ms),
         Some(next_run_time),
-        true, // This is a settlement job
+        Some("mina".to_string()), // Settlement job for mina chain
     ).await {
         Ok(tx_digest) => {
             debug!("Successfully created periodic settle job - tx: {}", tx_digest);
@@ -264,37 +296,54 @@ pub async fn fetch_pending_job_from_instances(
             continue;
         }
         
-        // Check if there's a settlement job first
-        let settlement_job_id = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await
-            .unwrap_or(None);
+        // Check for settlement jobs across all chains
+        let settlement_job_ids = sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app_instance).await
+            .unwrap_or_default();
         
         // Batch fetch all jobs at once
         let jobs_map = fetch_jobs_batch(&jobs_table_id, &job_sequences).await?;
         
-        // Process settlement job if it exists and is in the pending jobs
-        if let Some(settle_id) = settlement_job_id {
+        // Process all settlement jobs, collecting those that are ready to run
+        let mut ready_settlement_jobs = Vec::new();
+        for (chain, settle_id) in &settlement_job_ids {
             if let Some(job) = jobs_map.get(&settle_id) {
                 // Check if it's ready to run (next_scheduled_at)
                 if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
-                    all_jobs.push((
-                        settle_id,
-                        app_instance_id.clone(),
-                        jobs_table_id.clone(),
+                    // All jobs have updated_at
+                    ready_settlement_jobs.push((
+                        *settle_id,
+                        chain.clone(),
+                        job.updated_at,
                         job.app_instance_method.clone(),
                         job.next_scheduled_at,
-                        true // is_settlement_job
                     ));
                 } else {
-                    debug!("Settlement job {} not ready yet, scheduled for {}", 
-                        settle_id, job.next_scheduled_at.unwrap());
+                    debug!("Settlement job {} for chain {} not ready yet, scheduled for {}", 
+                        settle_id, chain, job.next_scheduled_at.unwrap());
                 }
             }
         }
         
+        // Sort by updated_at (lowest/oldest first) and add the settlement job with lowest updated_at
+        if !ready_settlement_jobs.is_empty() {
+            ready_settlement_jobs.sort_by_key(|(_, _, updated_at, _, _)| *updated_at);
+            let (settle_id, chain, updated_at, method, next_scheduled) = &ready_settlement_jobs[0];
+            debug!("Selected settlement job {} for chain {} with lowest updated_at: {}", 
+                settle_id, chain, updated_at);
+            all_jobs.push((
+                *settle_id,
+                app_instance_id.clone(),
+                jobs_table_id.clone(),
+                method.clone(),
+                *next_scheduled,
+                true // is_settlement_job
+            ));
+        }
+        
         // Process all other jobs
         for (job_sequence, job) in jobs_map.iter() {
-            // Skip if this is the settlement job we already processed
-            if Some(*job_sequence) == settlement_job_id {
+            // Skip if this is any settlement job
+            if settlement_job_ids.values().any(|&id| id == *job_sequence) {
                 continue;
             }
             
@@ -410,33 +459,51 @@ pub async fn fetch_all_pending_jobs(
             }
         };
         
-        // First check for settlement job if not in check-only mode
+        // First check for settlement jobs across all chains if not in check-only mode
         if !only_check {
-            if let Ok(Some(settle_job_id)) = sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_instance).await {
-                // Fetch the settlement job to check if it's pending and ready
+            let settlement_job_ids = sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app_instance).await
+                .unwrap_or_default();
+            
+            if !settlement_job_ids.is_empty() {
                 if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(&app_instance).await {
-                    match fetch_job_by_id(&jobs_table_id, settle_job_id).await {
-                        Ok(Some(settle_job)) => {
-                            // Check if it's pending and ready to run
-                            if matches!(settle_job.status, sui::fetch::JobStatus::Pending) {
-                                if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() <= current_time_ms {
-                                    debug!("Found pending settlement job {} in app_instance {}", settle_job.job_sequence, app_instance_id);
-                                    all_pending_jobs.push((settle_job, true)); // true = is_settlement
+                    // Collect all ready settlement jobs with their timestamps
+                    let mut ready_settlement_jobs = Vec::new();
+                    
+                    for (chain, settle_job_id) in &settlement_job_ids {
+                        match fetch_job_by_id(&jobs_table_id, *settle_job_id).await {
+                            Ok(Some(settle_job)) => {
+                                // Check if it's pending and ready to run
+                                if matches!(settle_job.status, sui::fetch::JobStatus::Pending) {
+                                    if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() <= current_time_ms {
+                                        let sort_time = settle_job.updated_at;
+                                        debug!("Found pending settlement job {} for chain {} (updated_at: {})", 
+                                            settle_job.job_sequence, chain, sort_time);
+                                        ready_settlement_jobs.push((settle_job, sort_time, chain.clone()));
+                                    } else {
+                                        debug!("Settlement job {} for chain {} is pending but not ready yet (scheduled for {:?})", 
+                                               settle_job_id, chain, settle_job.next_scheduled_at);
+                                    }
                                 } else {
-                                    debug!("Settlement job {} is pending but not ready yet (scheduled for {:?})", 
-                                           settle_job.job_sequence, settle_job.next_scheduled_at);
+                                    debug!("Settlement job {} for chain {} exists but status is {:?}, not Pending", 
+                                           settle_job_id, chain, settle_job.status);
                                 }
-                            } else {
-                                debug!("Settlement job {} exists but status is {:?}, not Pending", 
-                                       settle_job.job_sequence, settle_job.status);
+                            }
+                            Ok(None) => {
+                                debug!("Settlement job ID {} for chain {} not found in jobs table", settle_job_id, chain);
+                            }
+                            Err(e) => {
+                                debug!("Failed to fetch settlement job {} for chain {}: {}", settle_job_id, chain, e);
                             }
                         }
-                        Ok(None) => {
-                            debug!("Settlement job ID {} not found in jobs table", settle_job_id);
-                        }
-                        Err(e) => {
-                            debug!("Failed to fetch settlement job {}: {}", settle_job_id, e);
-                        }
+                    }
+                    
+                    // If we found ready settlement jobs, add only the oldest one
+                    if !ready_settlement_jobs.is_empty() {
+                        ready_settlement_jobs.sort_by_key(|(_, sort_time, _)| *sort_time);
+                        let (oldest_job, _, chain) = ready_settlement_jobs.into_iter().next().unwrap();
+                        debug!("Selected oldest ready settlement job {} for chain {} in app_instance {}", 
+                            oldest_job.job_sequence, chain, app_instance_id);
+                        all_pending_jobs.push((oldest_job, true)); // true = is_settlement
                     }
                 }
             }

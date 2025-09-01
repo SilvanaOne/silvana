@@ -196,7 +196,7 @@ impl SilvanaSuiInterface {
         data: Vec<u8>,
         interval_ms: Option<u64>,
         next_scheduled_at: Option<u64>,
-        is_settlement_job: bool,
+        settlement_chain: Option<String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!(
             "Attempting to create app job for method '{}' on Sui blockchain (data size: {} bytes)",
@@ -214,7 +214,7 @@ impl SilvanaSuiInterface {
             data,
             interval_ms,
             next_scheduled_at,
-            is_settlement_job,
+            settlement_chain,
         )
         .await
         {
@@ -281,16 +281,18 @@ impl SilvanaSuiInterface {
         &mut self,
         app_instance: &str,
         block_number: u64,
+        chain: String,
         job_description: Option<String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!(
-            "Attempting to create settle job for block {} on Sui blockchain",
-            block_number
+            "Attempting to create settle job for block {} on chain {} on Sui blockchain",
+            block_number, chain
         );
 
         match create_settle_job_tx(
             app_instance,
             block_number,
+            chain,
             job_description,
         )
         .await
@@ -353,6 +355,7 @@ impl SilvanaSuiInterface {
         &mut self,
         app_instance: &str,
         block_number: u64,
+        chain: String,
         settlement_tx_hash: String,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!(
@@ -363,6 +366,7 @@ impl SilvanaSuiInterface {
         match update_block_settlement_tx_hash_tx(
             app_instance,
             block_number,
+            chain.clone(),
             settlement_tx_hash.clone(),
         )
         .await
@@ -389,6 +393,7 @@ impl SilvanaSuiInterface {
         &mut self,
         app_instance: &str,
         block_number: u64,
+        chain: String,
         settled_at: u64,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         info!(
@@ -399,6 +404,7 @@ impl SilvanaSuiInterface {
         match update_block_settlement_tx_included_in_block_tx(
             app_instance,
             block_number,
+            chain.clone(),
             settled_at,
         )
         .await

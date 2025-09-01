@@ -103,14 +103,10 @@ impl StuckJobMonitor {
                 if running_duration > Duration::from_secs(self.timeout_duration_secs) {
                     *stuck_count += 1;
                     
-                    // Check if this is a settlement job
-                    let is_settlement = if let Ok(Some(settle_id)) = 
-                        sui::fetch::app_instance::get_settlement_job_id_for_instance(&app_inst).await 
-                    {
-                        settle_id == job.job_sequence
-                    } else {
-                        false
-                    };
+                    // Check if this is a settlement job for any chain
+                    let settlement_job_ids = sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app_inst).await
+                        .unwrap_or_default();
+                    let is_settlement = settlement_job_ids.values().any(|&id| id == job.job_sequence);
                     
                     if is_settlement {
                         warn!(

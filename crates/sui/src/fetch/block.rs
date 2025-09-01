@@ -1,6 +1,6 @@
 use crate::error::{Result, SilvanaSuiInterfaceError};
 use crate::fetch::AppInstance;
-use crate::parse::{get_bool, get_option_string, get_option_u64, get_string, get_u64};
+use crate::parse::{get_option_string, get_option_u64, get_string, get_u64};
 use crate::state::SharedSuiState;
 use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
@@ -27,18 +27,14 @@ pub struct Block {
     pub end_actions_commitment: Vec<u8>,   // Element<Scalar> bytes field
     pub state_data_availability: Option<String>,
     pub proof_data_availability: Option<String>,
-    pub settlement_tx_hash: Option<String>,
-    pub settlement_tx_included_in_block: bool,
     pub created_at: u64,
     pub state_calculated_at: Option<u64>,
     pub proved_at: Option<u64>,
-    pub sent_to_settlement_at: Option<u64>,
-    pub settled_at: Option<u64>,
 }
 
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Block {{ name: \"{}\", block_number: {}, start_sequence: {}, end_sequence: {}, time_since_last_block: {}, number_of_transactions: {}, state_data_availability: {:?}, proof_data_availability: {:?}, settlement_tx_hash: {:?}, settlement_tx_included_in_block: {}, created_at: {}, state_calculated_at: {:?}, proved_at: {:?}, sent_to_settlement_at: {:?}, settled_at: {:?} }}",
+        write!(f, "Block {{ name: \"{}\", block_number: {}, start_sequence: {}, end_sequence: {}, time_since_last_block: {}, number_of_transactions: {}, state_data_availability: {:?}, proof_data_availability: {:?}, created_at: {}, state_calculated_at: {:?}, proved_at: {:?} }}",
             self.name,
             self.block_number,
             self.start_sequence,
@@ -47,13 +43,9 @@ impl fmt::Display for Block {
             self.number_of_transactions,
             self.state_data_availability,
             self.proof_data_availability,
-            self.settlement_tx_hash,
-            self.settlement_tx_included_in_block,
             self.created_at,
             self.state_calculated_at,
-            self.proved_at,
-            self.sent_to_settlement_at,
-            self.settled_at
+            self.proved_at
         )
     }
 }
@@ -584,15 +576,10 @@ fn extract_block_info_from_json(
         // Extract optional fields
         let state_data_availability = get_option_string(struct_value, "state_data_availability");
         let proof_data_availability = get_option_string(struct_value, "proof_data_availability");
-        let settlement_tx_hash = get_option_string(struct_value, "settlement_tx_hash");
-        let settlement_tx_included_in_block =
-            get_bool(struct_value, "settlement_tx_included_in_block");
 
         // Extract optional timestamp fields
         let state_calculated_at = get_option_u64(struct_value, "state_calculated_at");
         let proved_at = get_option_u64(struct_value, "proved_at");
-        let sent_to_settlement_at = get_option_u64(struct_value, "sent_to_settlement_at");
-        let settled_at = get_option_u64(struct_value, "settled_at");
 
         let block = Block {
             name,
@@ -607,13 +594,9 @@ fn extract_block_info_from_json(
             end_actions_commitment,
             state_data_availability,
             proof_data_availability,
-            settlement_tx_hash,
-            settlement_tx_included_in_block,
             created_at,
             state_calculated_at,
             proved_at,
-            sent_to_settlement_at,
-            settled_at,
         };
         debug!(
             "✅ Successfully extracted block info for block {}: {}",

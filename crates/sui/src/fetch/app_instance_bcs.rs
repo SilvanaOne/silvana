@@ -106,6 +106,25 @@ pub struct AppState {
     pub rollback: Rollback,
 }
 
+// Settlement-related structs
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct BlockSettlementBcs {
+    pub block_number: u64,
+    pub settlement_tx_hash: Option<MoveString>,
+    pub settlement_tx_included_in_block: bool,
+    pub sent_to_settlement_at: Option<u64>,
+    pub settled_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SettlementBcs {
+    pub chain: MoveString,
+    pub last_settled_block_number: u64,
+    pub settlement_address: Option<MoveString>,
+    pub block_settlements: VecMap<u64, BlockSettlementBcs>,
+    pub settlement_job: Option<u64>,
+}
+
 // coordination::app_method::AppMethod
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AppMethod {
@@ -131,13 +150,10 @@ pub struct Block {
     pub end_actions_commitment: Element<Scalar>,
     pub state_data_availability: Option<MoveString>,
     pub proof_data_availability: Option<MoveString>,
-    pub settlement_tx_hash: Option<MoveString>,
-    pub settlement_tx_included_in_block: bool,
+    // Settlement fields removed - now handled in Settlement per chain
     pub created_at: u64,
     pub state_calculated_at: Option<u64>,
     pub proved_at: Option<u64>,
-    pub sent_to_settlement_at: Option<u64>,
-    pub settled_at: Option<u64>,
 }
 
 // coordination::prover::ProofCalculation
@@ -226,7 +242,6 @@ pub struct Jobs {
     pub pending_jobs_indexes: VecMap<MoveString, VecMap<MoveString, VecMap<MoveString, VecSet<u64>>>>,
     pub next_job_sequence: u64,
     pub max_attempts: u8,
-    pub settlement_job: Option<u64>,
 }
 
 // coordination::app_instance::AppInstance
@@ -250,9 +265,7 @@ pub struct AppInstanceBcs {
     pub previous_block_last_sequence: u64,
     pub previous_block_actions_state: Element<Scalar>,
     pub last_proved_block_number: u64,
-    pub last_settled_block_number: u64,
-    pub settlement_chain: Option<MoveString>,
-    pub settlement_address: Option<MoveString>,
+    pub settlements: VecMap<MoveString, SettlementBcs>,
     #[serde(rename = "isPaused")]
     pub is_paused: bool,
     pub created_at: u64,
@@ -428,6 +441,38 @@ pub async fn fetch_app_instance_bcs(
     // Build methods to match server JSON
     let methods_hm = methods_json(raw.methods);
 
+    // Parse settlements
+    let parse_block_settlements_bcs = |block_settlements: VecMap<u64, BlockSettlementBcs>| -> HashMap<u64, super::BlockSettlement> {
+        let mut map = HashMap::new();
+        for entry in block_settlements.contents {
+            let block_settlement = super::BlockSettlement {
+                block_number: entry.value.block_number,
+                settlement_tx_hash: entry.value.settlement_tx_hash.as_ref().map(|s| to_utf8(s)),
+                settlement_tx_included_in_block: entry.value.settlement_tx_included_in_block,
+                sent_to_settlement_at: entry.value.sent_to_settlement_at,
+                settled_at: entry.value.settled_at,
+            };
+            map.insert(entry.key, block_settlement);
+        }
+        map
+    };
+
+    let parse_settlements_bcs = |settlements: VecMap<MoveString, SettlementBcs>| -> HashMap<String, super::Settlement> {
+        let mut map = HashMap::new();
+        for entry in settlements.contents {
+            let chain = to_utf8(&entry.key);
+            let settlement = super::Settlement {
+                chain: to_utf8(&entry.value.chain),
+                last_settled_block_number: entry.value.last_settled_block_number,
+                settlement_address: entry.value.settlement_address.as_ref().map(|s| to_utf8(s)),
+                block_settlements: parse_block_settlements_bcs(entry.value.block_settlements),
+                settlement_job: entry.value.settlement_job,
+            };
+            map.insert(chain, settlement);
+        }
+        map
+    };
+
     Ok(AppInstance {
         id: id_hex,
         silvana_app_name: to_utf8(&raw.silvana_app_name),
@@ -449,7 +494,6 @@ pub async fn fetch_app_instance_bcs(
             pending_jobs_indexes: vecmap_nested_to_hashmap(raw.jobs.pending_jobs_indexes),
             next_job_sequence: raw.jobs.next_job_sequence,
             max_attempts: raw.jobs.max_attempts,
-            settlement_job: raw.jobs.settlement_job,
         }),
         sequence: raw.sequence,
         admin: admin_hex,
@@ -458,9 +502,7 @@ pub async fn fetch_app_instance_bcs(
         previous_block_last_sequence: raw.previous_block_last_sequence,
         previous_block_actions_state: elem_bytes_json(&raw.previous_block_actions_state),
         last_proved_block_number: raw.last_proved_block_number,
-        last_settled_block_number: raw.last_settled_block_number,
-        settlement_chain: raw.settlement_chain.as_ref().map(|s| to_utf8(s)),
-        settlement_address: raw.settlement_address.as_ref().map(|s| to_utf8(s)),
+        settlements: parse_settlements_bcs(raw.settlements),
         is_paused: raw.is_paused,
         created_at: raw.created_at,
         updated_at: raw.updated_at,

@@ -31,6 +31,8 @@ message Job {
   // Metadata of the job
   uint64 created_at = 16;
   uint64 updated_at = 17;
+  // Chain for settlement jobs
+  optional string chain = 18;
 }
 
 // Request message for getting a job
@@ -282,6 +284,14 @@ message GetMetadataRequest {
 }
 
 // Metadata message containing AppInstance information
+// Settlement info for a specific chain
+message SettlementInfo {
+  string chain = 1;
+  uint64 last_settled_block_number = 2;
+  optional string settlement_address = 3;
+  optional uint64 settlement_job = 4;
+}
+
 message Metadata {
   optional string value = 1; // The metadata value if a key was requested
   // AppInstance fields
@@ -294,12 +304,11 @@ message Metadata {
   uint64 previous_block_timestamp = 8;
   uint64 previous_block_last_sequence = 9;
   uint64 last_proved_block_number = 10;
-  uint64 last_settled_block_number = 11;
-  optional string settlement_chain = 12;
-  optional string settlement_address = 13;
-  bool is_paused = 14;
-  uint64 created_at = 15;
-  uint64 updated_at = 16;
+  bool is_paused = 11;
+  uint64 created_at = 12;
+  uint64 updated_at = 13;
+  // Multi-chain settlement support
+  map<string, SettlementInfo> settlements = 14; // key is chain identifier
 }
 
 // Response message for getting metadata
@@ -359,6 +368,7 @@ message UpdateBlockSettlementTxHashRequest {
   string session_id = 2;
   uint64 block_number = 3;
   string settlement_tx_hash = 4;
+  string chain = 5; // Chain identifier for multi-chain settlement
 }
 
 // Response message for updating block settlement tx hash
@@ -374,6 +384,7 @@ message UpdateBlockSettlementTxIncludedInBlockRequest {
   string session_id = 2;
   uint64 block_number = 3;
   uint64 settled_at = 4;
+  string chain = 5; // Chain identifier for multi-chain settlement
 }
 
 // Response message for updating block settlement tx included in block
@@ -396,7 +407,7 @@ message CreateAppJobRequest {
   bytes data = 9;
   optional uint64 interval_ms = 10;
   optional uint64 next_scheduled_at = 11;
-  bool is_settlement_job = 12;
+  optional string settlement_chain = 12; // Chain identifier for settlement jobs
 }
 
 // Response message for creating an app job
@@ -436,13 +447,10 @@ message Block {
   bytes end_actions_commitment = 11;              // Element<Scalar> as bytes
   optional string state_data_availability = 12;
   optional string proof_data_availability = 13;
-  optional string settlement_tx_hash = 14;
-  bool settlement_tx_included_in_block = 15;
-  uint64 created_at = 16;
-  optional uint64 state_calculated_at = 17;
-  optional uint64 proved_at = 18;
-  optional uint64 sent_to_settlement_at = 19;
-  optional uint64 settled_at = 20;
+  // Settlement fields removed - now in Settlement per chain
+  uint64 created_at = 14;
+  optional uint64 state_calculated_at = 15;
+  optional uint64 proved_at = 16;
 }
 
 // Request message for getting a block
@@ -457,6 +465,50 @@ message GetBlockResponse {
   bool success = 1;
   string message = 2;
   optional Block block = 3;
+}
+
+// BlockSettlement message for settlement info on a specific chain
+message BlockSettlement {
+  uint64 block_number = 1;
+  optional string settlement_tx_hash = 2;
+  bool settlement_tx_included_in_block = 3;
+  optional uint64 sent_to_settlement_at = 4;
+  optional uint64 settled_at = 5;
+}
+
+// Request message for getting block settlement info for a specific chain
+message GetBlockSettlementRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  string chain = 4; // Chain identifier
+}
+
+// Response message for getting block settlement info
+message GetBlockSettlementResponse {
+  bool success = 1;
+  string message = 2;
+  optional BlockSettlement block_settlement = 3;
+  string chain = 4;
+}
+
+// Request message for updating block settlement on a specific chain
+message UpdateBlockSettlementRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  string chain = 4;
+  optional string settlement_tx_hash = 5;
+  bool settlement_tx_included_in_block = 6;
+  optional uint64 sent_to_settlement_at = 7;
+  optional uint64 settled_at = 8;
+}
+
+// Response message for updating block settlement
+message UpdateBlockSettlementResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
 }
 
 // gRPC service definition
@@ -486,4 +538,7 @@ service CoordinatorService {
   rpc CreateAppJob(CreateAppJobRequest) returns (CreateAppJobResponse);
   rpc PurgeSequencesBelow(PurgeSequencesBelowRequest) returns (PurgeSequencesBelowResponse);
   rpc GetBlock(GetBlockRequest) returns (GetBlockResponse);
+  // New BlockSettlement RPCs for multi-chain support
+  rpc GetBlockSettlement(GetBlockSettlementRequest) returns (GetBlockSettlementResponse);
+  rpc UpdateBlockSettlement(UpdateBlockSettlementRequest) returns (UpdateBlockSettlementResponse);
 }
