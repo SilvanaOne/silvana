@@ -381,24 +381,3 @@ public fun get_sum(instance: &AppInstance): u256 {
     event::emit(GetSumEvent { sum });
     sum
 }
-
-public fun purge_rollback_records(
-    app: &mut App,
-    instance: &mut AppInstance,
-    proved_sequence: u64,
-    clock: &Clock,
-) {
-    let state = instance.state_mut(&app.instance_cap);
-    let rollback = state.get_rollback_mut();
-    commitment::rollback::purge_records(rollback, proved_sequence);
-
-    // Purge sequence states for sequences older than proved_sequence - 10
-    if (proved_sequence > 10) {
-        let threshold_sequence = proved_sequence - 10;
-        coordination::app_instance::purge_sequences_below(
-            instance,
-            threshold_sequence,
-            clock,
-        );
-    };
-}

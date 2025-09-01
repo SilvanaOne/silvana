@@ -122,7 +122,7 @@ impl ProofStorageBackend for WalrusStorage {
         let params = SaveToWalrusParams {
             data: data_to_store,
             address: None,
-            num_epochs: Some(53), // Default to max epochs
+            num_epochs: Some(2), // Default to max epochs TODO: calculate using expiires_at and epoch duration
         };
 
         match self.client.save_to_walrus(params).await {
@@ -327,14 +327,14 @@ impl ProofStorage {
     pub fn new() -> Self {
         // Get SUI_CHAIN from environment, default to devnet
         let sui_chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
-        
+
         // Map SUI chain to walrus network (devnet/testnet use walrus testnet, mainnet uses walrus mainnet)
         let walrus_network = if sui_chain == "mainnet" {
             "mainnet".to_string()
         } else {
             "testnet".to_string()
         };
-        
+
         // Initialize backends based on environment configuration
         let walrus = Some(WalrusStorage::new(walrus_network));
 
