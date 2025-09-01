@@ -16,6 +16,7 @@ use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
 use rpc::SilvanaEventsServiceImpl;
 use rpc::database::EventDatabase;
 use db::secrets_storage::SecureSecretsStorage;
+use storage::ProofsCache;
 
 // Import buffer directly
 use buffer::EventBuffer;
@@ -171,6 +172,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         warn!("⚠️  Secrets storage not configured - SECRETS_TABLE_NAME and SECRETS_KMS_KEY_ID environment variables not set");
         warn!("⚠️  Secrets API endpoints will return 'not available' errors");
+    }
+    
+    // Initialize proofs cache if configured
+    let proofs_cache_bucket = env::var("PROOFS_CACHE_BUCKET").ok();
+    
+    if proofs_cache_bucket.is_some() || env::var("PROOFS_CACHE_BUCKET").is_ok() {
+        info!("📦 Initializing proofs cache");
+        match ProofsCache::new(proofs_cache_bucket).await {
+            Ok(cache) => {
+                events_service = events_service.with_proofs_cache(Arc::new(cache));
+                info!("✅ Proofs cache initialized successfully");
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize proofs cache: {}", e);
+                warn!("⚠️  Continuing without proofs cache - proofs API will return errors");
+            }
+        }
+    } else {
+        warn!("⚠️  Proofs cache not configured - PROOFS_CACHE_BUCKET environment variable not set");
+        warn!("⚠️  Proofs API endpoints will return 'not available' errors");
     }
 
     // Create gRPC service with Prometheus metrics layer

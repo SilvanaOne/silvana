@@ -21,6 +21,8 @@ nats = { path = "../nats" }
 # Database and KMS for secrets storage
 db = { path = "../db" }
 kms = { path = "../kms" }
+# Storage for proofs cache
+storage = { path = "../storage" }
 
 tonic = { workspace = true, features = [ "tls-webpki-roots"] }
 tonic-web = "0.13"

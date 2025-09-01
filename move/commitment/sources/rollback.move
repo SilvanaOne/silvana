@@ -2,6 +2,7 @@ module commitment::rollback;
 
 use commitment::action::Action;
 use std::hash::sha2_256;
+use sui::bcs;
 use sui::bls12381::Scalar;
 use sui::event;
 use sui::group_ops::Element;
@@ -15,8 +16,7 @@ public struct RollbackElement has copy, drop, store {
     commitment_after: Element<Scalar>,
 }
 
-public struct RollbackSequence has key, store {
-    id: UID,
+public struct RollbackSequence has copy, drop {
     sequence: u64,
     action: Action,
     elements: vector<RollbackElement>,
@@ -44,10 +44,8 @@ public struct RollbackElementCreatedEvent has copy, drop {
 }
 
 public struct RollbackSequenceAddedEvent has copy, drop {
-    rollback_id: address,
-    sequence_id: address,
-    sequence: u64,
-    action: Action,
+    rollback_sequence: RollbackSequence,
+    rollback_sequence_hash: vector<u8>,
     elements_count: u64,
     new_end_sequence: u64,
 }
@@ -118,32 +116,27 @@ public fun add_rollback_sequence(
     sequence: u64,
     action: Action,
     elements: vector<RollbackElement>,
-    ctx: &mut TxContext,
 ) {
     assert!(sequence == rollback.end_sequence + 1, EInvalidSequence);
 
-    let rollback_sequence_id = object::new(ctx);
-    let sequence_address = rollback_sequence_id.to_address();
-
     let rollback_sequence = RollbackSequence {
-        id: rollback_sequence_id,
         sequence,
         action,
         elements,
     };
 
-    object_table::add(
+    let hash = sha2_256(bcs::to_bytes(&rollback_sequence));
+
+    vec_map::insert(
         &mut rollback.rollback_sequences,
         sequence,
-        rollback_sequence,
+        hash,
     );
     rollback.end_sequence = sequence;
 
     event::emit(RollbackSequenceAddedEvent {
-        rollback_id: rollback.id.to_address(),
-        sequence_id: sequence_address,
-        sequence,
-        action,
+        rollback_sequence,
+        rollback_sequence_hash: hash,
         elements_count: elements.length(),
         new_end_sequence: rollback.end_sequence,
     });

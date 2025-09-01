@@ -252,6 +252,30 @@ message SearchCoordinatorMessageEventsResponse {
   uint32 returned_count = 5;             // Number of events in this response
 }
 
+// Proof cache messages
+message SubmitProofRequest {
+  string proof_data = 1;
+  map<string, string> metadata = 2;
+  optional uint64 expires_at_ms = 3;  // Unix timestamp in milliseconds
+}
+
+message SubmitProofResponse {
+  bool success = 1;
+  string message = 2;
+  string proof_hash = 3;  // The hash of the submitted proof
+}
+
+message GetProofRequest {
+  string proof_hash = 1;
+}
+
+message GetProofResponse {
+  bool success = 1;
+  string message = 2;
+  string proof_data = 3;
+  map<string, string> metadata = 4;
+}
+
 // Secrets storage messages
 message SecretReference {
   string developer = 1;
@@ -294,6 +318,10 @@ service SilvanaEventsService {
   
   // Full-text search methods
   rpc SearchCoordinatorMessageEvents(SearchCoordinatorMessageEventsRequest) returns (SearchCoordinatorMessageEventsResponse);
+  
+  // Proof cache methods
+  rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc GetProof(GetProofRequest) returns (GetProofResponse);
   
   // Secrets storage methods
   rpc StoreSecret(StoreSecretRequest) returns (StoreSecretResponse);

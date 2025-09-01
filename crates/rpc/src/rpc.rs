@@ -7,6 +7,7 @@ use crate::database::EventDatabase;
 use buffer::EventBuffer;
 use db::secrets_storage::SecureSecretsStorage;
 use monitoring::record_grpc_request;
+use storage::ProofsCache;
 use proto::{
     AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
     Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
@@ -14,6 +15,7 @@ use proto::{
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
     SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
     StoreSecretRequest, StoreSecretResponse, RetrieveSecretRequest, RetrieveSecretResponse,
+    SubmitProofRequest, SubmitProofResponse, GetProofRequest, GetProofResponse,
     silvana_events_service_server::SilvanaEventsService,
 };
 
@@ -21,6 +23,7 @@ pub struct SilvanaEventsServiceImpl {
     event_buffer: EventBuffer<Event>,
     database: Arc<EventDatabase>,
     secrets_storage: Option<Arc<SecureSecretsStorage>>,
+    proofs_cache: Option<Arc<ProofsCache>>,
 }
 
 impl SilvanaEventsServiceImpl {
@@ -29,11 +32,17 @@ impl SilvanaEventsServiceImpl {
             event_buffer,
             database,
             secrets_storage: None,
+            proofs_cache: None,
         }
     }
     
     pub fn with_secrets_storage(mut self, secrets_storage: Arc<SecureSecretsStorage>) -> Self {
         self.secrets_storage = Some(secrets_storage);
+        self
+    }
+    
+    pub fn with_proofs_cache(mut self, proofs_cache: Arc<ProofsCache>) -> Self {
+        self.proofs_cache = Some(proofs_cache);
         self
     }
 }
@@ -511,6 +520,101 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                 error!("Failed to retrieve secret: {}", e);
                 record_grpc_request("retrieve_secret", "error", start_time.elapsed().as_secs_f64());
                 Err(Status::internal("Failed to retrieve secret"))
+            }
+        }
+    }
+    
+    async fn submit_proof(
+        &self,
+        request: Request<SubmitProofRequest>,
+    ) -> Result<Response<SubmitProofResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Received submit proof request with {} bytes of data", req.proof_data.len());
+        
+        let proofs_cache = match &self.proofs_cache {
+            Some(cache) => cache,
+            None => {
+                error!("Proofs cache not configured");
+                return Err(Status::unavailable("Proofs cache not available"));
+            }
+        };
+        
+        // Convert metadata from HashMap to Vec<(String, String)>
+        let metadata = if req.metadata.is_empty() {
+            None
+        } else {
+            Some(req.metadata.into_iter().collect::<Vec<_>>())
+        };
+        
+        // Use provided expiration or None for default
+        let expires_at = req.expires_at_ms;
+        
+        match proofs_cache.submit_proof(req.proof_data, metadata, expires_at).await {
+            Ok(proof_hash) => {
+                record_grpc_request("submit_proof", "success", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(SubmitProofResponse {
+                    success: true,
+                    message: "Proof submitted successfully".to_string(),
+                    proof_hash,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to submit proof: {}", e);
+                record_grpc_request("submit_proof", "error", start_time.elapsed().as_secs_f64());
+                Err(Status::internal("Failed to submit proof"))
+            }
+        }
+    }
+    
+    async fn get_proof(
+        &self,
+        request: Request<GetProofRequest>,
+    ) -> Result<Response<GetProofResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Received get proof request for hash: {}", req.proof_hash);
+        
+        let proofs_cache = match &self.proofs_cache {
+            Some(cache) => cache,
+            None => {
+                error!("Proofs cache not configured");
+                return Err(Status::unavailable("Proofs cache not available"));
+            }
+        };
+        
+        if req.proof_hash.is_empty() {
+            return Err(Status::invalid_argument("Proof hash is required"));
+        }
+        
+        match proofs_cache.read_proof(&req.proof_hash).await {
+            Ok(proof_data) => {
+                record_grpc_request("get_proof", "success", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(GetProofResponse {
+                    success: true,
+                    message: "Proof retrieved successfully".to_string(),
+                    proof_data: proof_data.data,
+                    metadata: proof_data.metadata,
+                }))
+            }
+            Err(e) => {
+                // Check if it's a not found error
+                let error_message = e.to_string();
+                if error_message.contains("not found") || error_message.contains("NoSuchKey") {
+                    record_grpc_request("get_proof", "not_found", start_time.elapsed().as_secs_f64());
+                    Ok(Response::new(GetProofResponse {
+                        success: false,
+                        message: "Proof not found".to_string(),
+                        proof_data: String::new(),
+                        metadata: std::collections::HashMap::new(),
+                    }))
+                } else {
+                    error!("Failed to retrieve proof: {}", e);
+                    record_grpc_request("get_proof", "error", start_time.elapsed().as_secs_f64());
+                    Err(Status::internal("Failed to retrieve proof"))
+                }
             }
         }
     }
