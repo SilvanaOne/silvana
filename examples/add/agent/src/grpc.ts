@@ -12,6 +12,8 @@ import {
   GetProofRequestSchema,
   GetBlockProofRequestSchema,
   GetBlockRequestSchema,
+  GetBlockSettlementRequestSchema,
+  UpdateBlockSettlementRequestSchema,
   TerminateJobRequestSchema,
   ReadDataAvailabilityRequestSchema,
   SetKVRequestSchema,
@@ -37,7 +39,10 @@ import {
   type GetProofResponse,
   type GetBlockProofResponse,
   type GetBlockResponse,
+  type GetBlockSettlementResponse,
+  type UpdateBlockSettlementResponse,
   type Block,
+  type BlockSettlement,
   type Metadata,
   type ReadDataAvailabilityResponse,
   type RetrieveSecretResponse,
@@ -567,7 +572,8 @@ export async function updateBlockProofDataAvailability(
  */
 export async function updateBlockSettlementTxHash(
   blockNumber: bigint,
-  settlementTxHash: string
+  settlementTxHash: string,
+  settlementChain: string
 ): Promise<UpdateBlockSettlementTxHashResponse> {
   if (!jobId) {
     throw new Error("Call getJob() first");
@@ -579,6 +585,7 @@ export async function updateBlockSettlementTxHash(
     jobId,
     blockNumber,
     settlementTxHash,
+    chain: settlementChain,
   });
 
   return await client.updateBlockSettlementTxHash(request);
@@ -589,7 +596,8 @@ export async function updateBlockSettlementTxHash(
  */
 export async function updateBlockSettlementTxIncludedInBlock(
   blockNumber: bigint,
-  settledAt: bigint
+  settledAt: bigint,
+  settlementChain: string
 ): Promise<UpdateBlockSettlementTxIncludedInBlockResponse> {
   if (!jobId) {
     throw new Error("Call getJob() first");
@@ -601,6 +609,7 @@ export async function updateBlockSettlementTxIncludedInBlock(
     jobId,
     blockNumber,
     settledAt,
+    chain: settlementChain,
   });
 
   return await client.updateBlockSettlementTxIncludedInBlock(request);
@@ -620,7 +629,7 @@ export async function createAppJob(
     sequences2?: bigint[];
     intervalMs?: bigint;
     nextScheduledAt?: bigint;
-    isSettlementJob?: boolean;
+    settlementChain?: string;
   }
 ): Promise<CreateAppJobResponse> {
   if (!jobId) {
@@ -640,7 +649,7 @@ export async function createAppJob(
     data,
     intervalMs: options?.intervalMs,
     nextScheduledAt: options?.nextScheduledAt,
-    isSettlementJob: options?.isSettlementJob || false,
+    settlementChain: options?.settlementChain,
   });
 
   return await client.createAppJob(request);
@@ -708,12 +717,69 @@ export async function rejectProof(
   return await client.rejectProof(request);
 }
 
+/**
+ * Gets a block settlement for a specific chain
+ */
+export async function getBlockSettlement(
+  blockNumber: bigint,
+  chain: string
+): Promise<GetBlockSettlementResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(GetBlockSettlementRequestSchema, {
+    sessionId,
+    jobId,
+    blockNumber,
+    chain,
+  });
+
+  return await client.getBlockSettlement(request);
+}
+
+/**
+ * Updates a block settlement for a specific chain
+ */
+export async function updateBlockSettlement(
+  blockNumber: bigint,
+  chain: string,
+  settlementData: {
+    settlementTxHash?: string;
+    settlementTxIncludedInBlock?: boolean;
+    sentToSettlementAt?: bigint;
+    settledAt?: bigint;
+  }
+): Promise<UpdateBlockSettlementResponse> {
+  if (!jobId) {
+    throw new Error("Call getJob() first");
+  }
+  const { client, sessionId } = getCoordinatorClient();
+
+  const request = create(UpdateBlockSettlementRequestSchema, {
+    sessionId,
+    jobId,
+    blockNumber,
+    chain,
+    settlementTxHash: settlementData.settlementTxHash,
+    settlementTxIncludedInBlock: settlementData.settlementTxIncludedInBlock ?? false,
+    sentToSettlementAt: settlementData.sentToSettlementAt,
+    settledAt: settlementData.settledAt,
+  });
+
+  return await client.updateBlockSettlement(request);
+}
+
 // Re-export types for users to access
 export type { 
-  Block, 
+  Block,
+  BlockSettlement,
   Metadata,
   RetrieveSecretResponse,
   TerminateJobResponse,
   GetBlockResponse,
+  GetBlockSettlementResponse,
+  UpdateBlockSettlementResponse,
   RejectProofResponse 
 };

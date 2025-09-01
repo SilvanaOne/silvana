@@ -11,6 +11,7 @@ import {
 } from "@silvana-one/mina-utils";
 import {
   getBlock,
+  getBlockSettlement,
   getBlockProof,
   setKv,
   getKv,
@@ -26,6 +27,7 @@ import {
 interface SettleParams {
   privateKey?: string; // Optional - will use secret if not provided
   contractAddress?: string; // Optional - will use settlement address from metadata if not provided
+  settlementChain: string; // Required - the chain to settle for
 }
 
 export async function settle(params: SettleParams): Promise<void> {
@@ -48,8 +50,18 @@ export async function settle(params: SettleParams): Promise<void> {
 
   // Get the admin address from metadata value (if present) or use the AppInstance admin field
   let settlementAdminAddress = metadataResponse.metadata.value;
-  const contractAddress =
-    metadataResponse.metadata.settlementAddress || params.contractAddress;
+  
+  // Use the required settlement chain
+  const settlementChain = params.settlementChain;
+  console.log(`🔗 Settling for chain: ${settlementChain}`);
+  
+  // Verify the chain exists in settlements
+  if (!metadataResponse.metadata.settlements?.[settlementChain]) {
+    throw new Error(`Settlement chain '${settlementChain}' not found in app instance settlements`);
+  }
+  
+  // Get the contract address for this chain
+  const contractAddress = metadataResponse.metadata.settlements[settlementChain].settlementAddress || params.contractAddress;
 
   // Print AppInstance info
   console.log("📊 AppInstance Information:");
@@ -57,19 +69,19 @@ export async function settle(params: SettleParams): Promise<void> {
   console.log(`  - App Name: ${metadataResponse.metadata.silvanaAppName}`);
   console.log(`  - Admin Address: ${metadataResponse.metadata.admin}`);
   console.log(`  - Settlement Admin: ${settlementAdminAddress ?? "none"}`);
-  console.log(
-    `  - Settlement Chain: ${
-      metadataResponse.metadata.settlementChain ?? "none"
-    }`
-  );
+  console.log(`  - Settlement Chain: ${settlementChain}`);
   console.log(`  - Contract Address: ${contractAddress ?? "none"}`);
+  console.log(`  - Available Chains: ${metadataResponse.metadata.settlements ? Object.keys(metadataResponse.metadata.settlements).join(", ") : "none"}`);
   console.log(`  - Current Sequence: ${metadataResponse.metadata.sequence}`);
   console.log(`  - Current Block: ${metadataResponse.metadata.blockNumber}`);
   console.log(
     `  - Last Proved Block: ${metadataResponse.metadata.lastProvedBlockNumber}`
   );
+  
+  // Get last settled block for this chain
+  const lastSettledBlockForChain = metadataResponse.metadata.settlements?.[settlementChain]?.lastSettledBlockNumber || 0n;
   console.log(
-    `  - Last Settled Block: ${metadataResponse.metadata.lastSettledBlockNumber}`
+    `  - Last Settled Block (${settlementChain}): ${lastSettledBlockForChain}`
   );
 
   if (!contractAddress) {
@@ -122,7 +134,7 @@ export async function settle(params: SettleParams): Promise<void> {
   console.log("🔄 Started recording tx inclusion for blocks...");
 
   for (
-    let i = metadataResponse.metadata.lastSettledBlockNumber;
+    let i = lastSettledBlockForChain;
     i <= lastSettledBlock;
     i++
   ) {
@@ -130,27 +142,30 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log("Skipping block 0");
       continue;
     }
-    const block = await getBlock(i);
-    if (!block) {
-      console.log(`No block found for block ${i}`);
+    
+    // Get block settlement for this specific chain
+    const blockSettlement = await getBlockSettlement(i, settlementChain);
+    if (!blockSettlement || !blockSettlement.success || !blockSettlement.blockSettlement) {
+      console.log(`No block settlement found for block ${i} on chain ${settlementChain}`);
       continue;
     }
 
-    if (block.block?.settlementTxIncludedInBlock === false) {
-      console.log(`Recording tx inclusion for block ${i}`);
+    if (blockSettlement.blockSettlement?.settlementTxIncludedInBlock === false) {
+      console.log(`Recording tx inclusion for block ${i} on chain ${settlementChain}`);
       const updateResult = await updateBlockSettlementTxIncludedInBlock(
         i,
-        BigInt(Date.now())
+        BigInt(Date.now()),
+        settlementChain
       );
       if (!updateResult.success) {
         console.error(
-          `Failed to update tx inclusion for block ${i}: ${updateResult.message}`
+          `Failed to update tx inclusion for block ${i} on ${settlementChain}: ${updateResult.message}`
         );
         throw new Error(
-          `Failed to update tx inclusion for block ${i}: ${updateResult.message}`
+          `Failed to update tx inclusion for block ${i} on ${settlementChain}: ${updateResult.message}`
         );
       }
-      console.log(`✅ Tx inclusion recorded for block ${i}`);
+      console.log(`✅ Tx inclusion recorded for block ${i} on ${settlementChain}`);
     }
   }
 
@@ -227,13 +242,16 @@ export async function settle(params: SettleParams): Promise<void> {
     
     console.log(`\n📦 Processing block ${currentBlockNumber}...`);
 
+    // Get both block and block settlement data
     const block = await getBlock(currentBlockNumber);
-
     if (!block || !block.success || !block.block) {
       console.log(`No block found for block ${currentBlockNumber}`);
       console.log("✅ Settlement complete - reached last block");
       break;
     }
+    
+    const blockSettlement = await getBlockSettlement(currentBlockNumber, settlementChain);
+    const settlementData = blockSettlement?.blockSettlement;
 
     // Format block data for logging (exclude commitments, convert times to UTC)
     const formatTime = (timestamp: bigint | undefined) => {
@@ -252,37 +270,40 @@ export async function settle(params: SettleParams): Promise<void> {
       numberOfTransactions: block.block.numberOfTransactions?.toString(),
       stateDataAvailability: block.block.stateDataAvailability || "none",
       proofDataAvailability: block.block.proofDataAvailability || "none",
-      settlementTxHash: block.block.settlementTxHash || "none",
-      settlementTxIncludedInBlock: block.block.settlementTxIncludedInBlock,
       createdAt: formatTime(block.block.createdAt),
       stateCalculatedAt: formatTime(block.block.stateCalculatedAt),
       provedAt: formatTime(block.block.provedAt),
-      sentToSettlementAt: formatTime(block.block.sentToSettlementAt),
-      settledAt: formatTime(block.block.settledAt),
+    });
+    
+    console.log(`📦 Settlement data for ${settlementChain}:`, {
+      settlementTxHash: settlementData?.settlementTxHash || "none",
+      settlementTxIncludedInBlock: settlementData?.settlementTxIncludedInBlock || false,
+      sentToSettlementAt: formatTime(settlementData?.sentToSettlementAt),
+      settledAt: formatTime(settlementData?.settledAt),
     });
 
     let shouldSettle = true;
-    if (block.block?.settlementTxHash) {
+    if (settlementData?.settlementTxHash) {
       console.log(
-        `Block ${currentBlockNumber} has already been settled, txHash: ${block.block.settlementTxHash}`
+        `Block ${currentBlockNumber} has already been settled on ${settlementChain}, txHash: ${settlementData.settlementTxHash}`
       );
-      if (block.block.sentToSettlementAt) {
+      if (settlementData.sentToSettlementAt) {
         const now = BigInt(Date.now());
         console.log("now", now);
-        console.log("sentToSettlementAt", block.block.sentToSettlementAt);
-        if (block.block.sentToSettlementAt + 60n * 60n * 1000n > now) {
+        console.log("sentToSettlementAt", settlementData.sentToSettlementAt);
+        if (settlementData.sentToSettlementAt + 60n * 60n * 1000n > now) {
           console.log(
-            `Block ${currentBlockNumber} was settled less than 1 hour ago, skipping...`
+            `Block ${currentBlockNumber} was settled less than 1 hour ago on ${settlementChain}, skipping...`
           );
           shouldSettle = false;
         } else {
           console.log(
-            `Block ${currentBlockNumber} was settled more than 1 hour ago, setting...`
+            `Block ${currentBlockNumber} was settled more than 1 hour ago on ${settlementChain}, resettling...`
           );
         }
       } else {
         console.log(
-          `Block ${currentBlockNumber} was settled but no sentToSettlementAt timestamp, skipping...`
+          `Block ${currentBlockNumber} was settled on ${settlementChain} but no sentToSettlementAt timestamp, skipping...`
         );
         shouldSettle = false;
       }
@@ -559,18 +580,19 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log(`✅ Transaction sent successfully!`);
       console.log(`  Transaction Hash: ${txHash}`);
 
-      // Save transaction hash to blockchain
+      // Save transaction hash to blockchain for this specific chain
       const updateResult = await updateBlockSettlementTxHash(
         currentBlockNumber,
-        txHash
+        txHash,
+        settlementChain
       );
       if (!updateResult.success) {
         console.warn(
-          `⚠️ Failed to update settlement tx hash on chain: ${updateResult.message}`
+          `⚠️ Failed to update settlement tx hash on chain ${settlementChain}: ${updateResult.message}`
         );
       } else {
         console.log(
-          `  Settlement tx hash saved on chain: ${updateResult.txHash}`
+          `  Settlement tx hash saved on chain ${settlementChain}: ${updateResult.txHash}`
         );
       }
 

@@ -40,11 +40,18 @@ async function agent() {
           // Check if this is a settle job by app_instance_method
           if (response.job.appInstanceMethod === "settle") {
             console.log("⚖️ SETTLE JOB DETECTED");
+            
+            // Verify chain is provided for settle jobs
+            if (!response.job.chain) {
+              throw new Error("Settlement job received without chain parameter. Chain is required for settle jobs.");
+            }
+            
             // Print all job details
             console.log("=== SETTLE JOB DETAILS ===");
             console.log(`Job Sequence: ${response.job.jobSequence}`);
             console.log(`Job ID: ${response.job.jobId}`);
             console.log(`Description: ${response.job.description || "none"}`);
+            console.log(`Settlement Chain: ${response.job.chain}`);
             console.log(`Developer: ${response.job.developer}`);
             console.log(`Agent: ${response.job.agent}`);
             console.log(`Agent Method: ${response.job.agentMethod}`);
@@ -81,6 +88,7 @@ async function agent() {
                 // - Submit proof to Mina blockchain
                 // - Update settlement tx hash on Sui blockchain
                 await settle({
+                  settlementChain: response.job.chain,
                   // privateKey and contractAddress are optional
                   // They will be fetched from metadata if not provided
                 });
