@@ -9,18 +9,23 @@ use coordination::jobs::{
     complete_job,
     fail_job,
     terminate_job,
+    restart_failed_jobs,
+    remove_failed_jobs,
     get_job,
     job_exists,
+    is_job_in_failed_index,
     get_pending_jobs,
     get_pending_jobs_count,
     get_pending_jobs_for_method,
     get_next_pending_job,
+    get_failed_jobs_count,
     update_max_attempts,
     job_sequence,
     job_attempts,
     max_attempts,
     is_job_pending,
     is_job_running,
+    is_job_failed,
 };
 use sui::clock::{Self, Clock};
 use sui::test_scenario::{Self as ts, Scenario};
@@ -289,10 +294,13 @@ fun test_fail_job_with_retry() {
         start_job(&mut jobs, job_sequence, &clock);
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 3, 6);
         
-        // Fail after max attempts - job should be deleted
+        // Fail after max attempts - job should be marked as failed
         fail_job(&mut jobs, job_sequence, b"Error 3".to_string(), &clock);
-        assert!(!job_exists(&jobs, job_sequence), 7);
-        assert!(get_pending_jobs_count(&jobs) == 0, 8);
+        assert!(job_exists(&jobs, job_sequence), 7);
+        assert!(is_job_failed(get_job(&jobs, job_sequence)), 8);
+        assert!(is_job_in_failed_index(&jobs, job_sequence), 9);
+        assert!(get_failed_jobs_count(&jobs) == 1, 10);
+        assert!(get_pending_jobs_count(&jobs) == 0, 11);
         
         transfer::public_share_object(jobs);
     };
@@ -797,12 +805,14 @@ fun test_index_with_retry() {
         );
         assert!(vector::contains(&jobs_after_fail, &job_sequence), 2);
         
-        // Start again and fail on max attempts - should be removed permanently
+        // Start again and fail on max attempts - should be marked as failed
         start_job(&mut jobs, job_sequence, &clock);
         fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock);
         
-        // Job should be deleted (max attempts reached)
-        assert!(!job_exists(&jobs, job_sequence), 3);
+        // Job should exist but be marked as failed (max attempts reached)
+        assert!(job_exists(&jobs, job_sequence), 3);
+        assert!(is_job_failed(get_job(&jobs, job_sequence)), 4);
+        assert!(is_job_in_failed_index(&jobs, job_sequence), 5);
         let jobs_final = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),
@@ -1319,6 +1329,199 @@ fun test_mixed_periodic_and_onetime_jobs() {
         assert!(job_exists(&jobs, periodic_job), 3);
         assert!(is_job_pending(get_job(&jobs, periodic_job)), 4);
         assert!(get_pending_jobs_count(&jobs) == 1, 5);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+#[test]
+fun test_restart_failed_jobs_with_vector() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
+        
+        // Create multiple jobs
+        let job1 = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev".to_string(),
+            b"agent".to_string(),
+            b"method".to_string(),
+            b"app".to_string(),
+            b"instance".to_string(),
+            b"app_method".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data1",
+            option::none(),
+            option::none(),
+            false,
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        let job2 = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev".to_string(),
+            b"agent".to_string(),
+            b"method".to_string(),
+            b"app".to_string(),
+            b"instance".to_string(),
+            b"app_method".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data2",
+            option::none(),
+            option::none(),
+            false,
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        let job3 = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev".to_string(),
+            b"agent".to_string(),
+            b"method".to_string(),
+            b"app".to_string(),
+            b"instance".to_string(),
+            b"app_method".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data3",
+            option::none(),
+            option::none(),
+            false,
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Fail all three jobs
+        start_job(&mut jobs, job1, &clock);
+        fail_job(&mut jobs, job1, b"Error".to_string(), &clock);
+        
+        start_job(&mut jobs, job2, &clock);
+        fail_job(&mut jobs, job2, b"Error".to_string(), &clock);
+        
+        start_job(&mut jobs, job3, &clock);
+        fail_job(&mut jobs, job3, b"Error".to_string(), &clock);
+        
+        // All should be failed
+        assert!(get_failed_jobs_count(&jobs) == 3, 0);
+        
+        // Restart only job1 and job3
+        let mut jobs_to_restart = vector::empty<u64>();
+        vector::push_back(&mut jobs_to_restart, job1);
+        vector::push_back(&mut jobs_to_restart, job3);
+        restart_failed_jobs(&mut jobs, option::some(jobs_to_restart), &clock);
+        
+        // job1 and job3 should be pending, job2 still failed
+        assert!(is_job_pending(get_job(&jobs, job1)), 1);
+        assert!(is_job_failed(get_job(&jobs, job2)), 2);
+        assert!(is_job_pending(get_job(&jobs, job3)), 3);
+        assert!(get_failed_jobs_count(&jobs) == 1, 4);
+        assert!(get_pending_jobs_count(&jobs) == 2, 5);
+        
+        // Restart all remaining failed jobs (just job2)
+        restart_failed_jobs(&mut jobs, option::none(), &clock);
+        assert!(is_job_pending(get_job(&jobs, job2)), 6);
+        assert!(get_failed_jobs_count(&jobs) == 0, 7);
+        assert!(get_pending_jobs_count(&jobs) == 3, 8);
+        
+        transfer::public_share_object(jobs);
+    };
+    
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test]
+fun test_remove_failed_jobs() {
+    let (mut scenario, clock) = setup_test();
+    
+    ts::next_tx(&mut scenario, TEST_ADDR);
+    {
+        let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
+        
+        // Create multiple jobs
+        let job1 = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev".to_string(),
+            b"agent".to_string(),
+            b"method".to_string(),
+            b"app".to_string(),
+            b"instance".to_string(),
+            b"app_method".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data1",
+            option::none(),
+            option::none(),
+            false,
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        let job2 = create_job(
+            &mut jobs,
+            option::none(),
+            b"dev".to_string(),
+            b"agent".to_string(),
+            b"method".to_string(),
+            b"app".to_string(),
+            b"instance".to_string(),
+            b"app_method".to_string(),
+            option::none(),
+            option::none(),
+            option::none(),
+            option::none(),
+            b"data2",
+            option::none(),
+            option::none(),
+            false,
+            &clock,
+            ts::ctx(&mut scenario),
+        );
+        
+        // Fail both jobs
+        start_job(&mut jobs, job1, &clock);
+        fail_job(&mut jobs, job1, b"Error".to_string(), &clock);
+        
+        start_job(&mut jobs, job2, &clock);
+        fail_job(&mut jobs, job2, b"Error".to_string(), &clock);
+        
+        assert!(get_failed_jobs_count(&jobs) == 2, 0);
+        
+        // Remove only job1
+        let mut jobs_to_remove = vector::empty<u64>();
+        vector::push_back(&mut jobs_to_remove, job1);
+        remove_failed_jobs(&mut jobs, option::some(jobs_to_remove), &clock);
+        
+        // job1 should be deleted, job2 still failed
+        assert!(!job_exists(&jobs, job1), 1);
+        assert!(job_exists(&jobs, job2), 2);
+        assert!(is_job_failed(get_job(&jobs, job2)), 3);
+        assert!(get_failed_jobs_count(&jobs) == 1, 4);
+        
+        // Remove all remaining failed jobs
+        remove_failed_jobs(&mut jobs, option::none(), &clock);
+        assert!(!job_exists(&jobs, job2), 5);
+        assert!(get_failed_jobs_count(&jobs) == 0, 6);
         
         transfer::public_share_object(jobs);
     };

@@ -666,7 +666,11 @@ public fun update_block_settlement_tx_included_in_block(
     let rollback = app_instance.state.get_rollback_mut();
     commitment::rollback::purge_records(rollback, proved_sequence);
 
-    app_instance.purge_sequences_below(proved_sequence, clock);
+    sequence_state::purge(
+        &mut app_instance.sequence_state_manager,
+        proved_sequence,
+        clock,
+    );
 }
 
 // Methods for managing metadata and kv
@@ -938,19 +942,20 @@ public fun terminate_app_job(
     jobs::terminate_job(&mut app_instance.jobs, job_id, clock)
 }
 
-public fun restart_failed_app_job(
-    app_instance: &mut AppInstance,
-    job_id: u64,
-    clock: &Clock,
-) {
-    jobs::restart_failed_job(&mut app_instance.jobs, job_id, clock)
-}
-
 public fun restart_failed_app_jobs(
     app_instance: &mut AppInstance,
+    job_sequences: Option<vector<u64>>,
     clock: &Clock,
 ) {
-    jobs::restart_failed_jobs(&mut app_instance.jobs, clock)
+    jobs::restart_failed_jobs(&mut app_instance.jobs, job_sequences, clock)
+}
+
+public fun remove_failed_app_jobs(
+    app_instance: &mut AppInstance,
+    job_sequences: Option<vector<u64>>,
+    clock: &Clock,
+) {
+    jobs::remove_failed_jobs(&mut app_instance.jobs, job_sequences, clock)
 }
 
 public fun get_app_job(app_instance: &AppInstance, job_id: u64): &jobs::Job {
@@ -967,6 +972,14 @@ public fun get_app_pending_jobs_count(app_instance: &AppInstance): u64 {
 
 public fun get_next_pending_app_job(app_instance: &AppInstance): Option<u64> {
     jobs::get_next_pending_job(&app_instance.jobs)
+}
+
+public fun get_app_failed_jobs(app_instance: &AppInstance): vector<u64> {
+    jobs::get_failed_jobs(&app_instance.jobs)
+}
+
+public fun get_app_failed_jobs_count(app_instance: &AppInstance): u64 {
+    jobs::get_failed_jobs_count(&app_instance.jobs)
 }
 
 // Sequence state management wrapper functions
@@ -1004,18 +1017,6 @@ public fun update_state_for_sequence(
         sequence,
         new_state_data,
         new_data_availability_hash,
-        clock,
-    );
-}
-
-public fun purge_sequences_below(
-    app_instance: &mut AppInstance,
-    threshold_sequence: u64,
-    clock: &Clock,
-) {
-    sequence_state::purge(
-        &mut app_instance.sequence_state_manager,
-        threshold_sequence,
         clock,
     );
 }
