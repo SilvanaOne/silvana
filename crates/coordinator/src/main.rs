@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
                         println!("    jobs: Some(Jobs {{");
                         println!("        id: \"{}\",", jobs.id);
                         println!("        jobs_table_id: \"{}\",", jobs.jobs_table_id);
-                        println!("        failed_jobs_table_id: \"{}\",", jobs.failed_jobs_table_id);
+                        // Note: failed_jobs_table_id no longer exists - failed jobs are in main jobs table
                         println!("        failed_jobs_count: {},", jobs.failed_jobs_count);
                         println!("        failed_jobs_index: {:?},", jobs.failed_jobs_index);
                         println!("        pending_jobs: {:?},", jobs.pending_jobs);
@@ -376,12 +376,9 @@ async fn main() -> Result<()> {
             };
             
             // Fetch and display the job
+            // Note: Failed jobs are now in the main jobs table, not a separate table
             let jobs_table_id = if let Some(ref jobs) = app_instance.jobs {
-                if failed {
-                    &jobs.failed_jobs_table_id
-                } else {
-                    &jobs.jobs_table_id
-                }
+                &jobs.jobs_table_id
             } else {
                 error!("App instance has no jobs object");
                 return Err(anyhow::anyhow!("App instance has no jobs").into());

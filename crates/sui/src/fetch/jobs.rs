@@ -117,8 +117,6 @@ pub struct Jobs {
     pub id: String,
     /// ObjectTable ID for jobs (u64 -> Job mapping)
     pub jobs_table_id: String,
-    /// ObjectTable ID for failed_jobs (u64 -> Job mapping)
-    pub failed_jobs_table_id: String,
     /// Count of failed jobs
     pub failed_jobs_count: u64,
     /// Set of failed job IDs
@@ -203,21 +201,7 @@ impl Jobs {
                 }
             })?;
         
-        // Extract failed_jobs table ID
-        let failed_jobs_table_id = struct_value.fields.get("failed_jobs")
-            .and_then(|f| {
-                if let Some(prost_types::value::Kind::StructValue(table_struct)) = &f.kind {
-                    table_struct.fields.get("id").and_then(|id_field| {
-                        if let Some(prost_types::value::Kind::StringValue(id)) = &id_field.kind {
-                            Some(id.clone())
-                        } else {
-                            None
-                        }
-                    })
-                } else {
-                    None
-                }
-            }).unwrap_or_default();
+        // Note: failed_jobs ObjectTable no longer exists in the new structure
         
         // Extract failed_jobs_index VecSet
         let failed_jobs_index = struct_value.fields.get("failed_jobs_index")
@@ -300,7 +284,6 @@ impl Jobs {
         Some(Jobs {
             id: get_string(struct_value, "id").unwrap_or_default(),
             jobs_table_id,
-            failed_jobs_table_id,
             failed_jobs_count: get_u64(struct_value, "failed_jobs_count"),
             failed_jobs_index,
             pending_jobs,
@@ -617,7 +600,7 @@ pub async fn fetch_pending_jobs_from_app_instance(
     Ok(None)
 }
 
-/// Batch fetch multiple jobs by their IDs from any jobs ObjectTable (jobs or failed_jobs)
+/// Batch fetch multiple jobs by their IDs from the jobs ObjectTable
 /// Returns a HashMap of job_sequence -> Job for all found jobs
 pub async fn fetch_jobs_batch(
     jobs_table_id: &str,
@@ -1131,8 +1114,8 @@ pub async fn fetch_failed_jobs_from_app_instance(
             return Ok(Vec::new());
         }
         
-        // Fetch all failed jobs using batch fetch
-        let failed_jobs_map = fetch_jobs_batch(&jobs.failed_jobs_table_id, &jobs.failed_jobs_index).await?;
+        // Fetch all failed jobs from the main jobs table using the failed_jobs_index
+        let failed_jobs_map = fetch_jobs_batch(&jobs.jobs_table_id, &jobs.failed_jobs_index).await?;
         let mut failed_jobs: Vec<Job> = failed_jobs_map.into_iter().map(|(_, job)| job).collect();
         
         // Sort by job_sequence for consistent ordering
