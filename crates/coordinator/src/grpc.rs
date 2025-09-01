@@ -1,9 +1,9 @@
 use crate::agent::AgentJob;
 use crate::proof::analyze_proof_completion;
+use crate::proofs_storage::{ProofStorage, ProofMetadata};
 use crate::settlement::fetch_pending_job_from_instances;
 use crate::state::SharedState;
 use std::path::Path;
-use storage::{WalrusClient, SaveToWalrusParams, ReadFromWalrusParams};
 use sui::start_job_tx;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -36,11 +36,15 @@ use coordinator::{
 #[derive(Clone)]
 pub struct CoordinatorServiceImpl {
     state: SharedState,
+    proof_storage: std::sync::Arc<ProofStorage>,
 }
 
 impl CoordinatorServiceImpl {
     pub fn new(state: SharedState) -> Self {
-        Self { state }
+        Self { 
+            state,
+            proof_storage: std::sync::Arc::new(ProofStorage::new()),
+        }
     }
 }
 
@@ -642,37 +646,40 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Err(Status::unauthenticated("Invalid session ID"));
         }
 
-        // Save proof to Walrus DA
-        debug!("Saving proof to Walrus DA for job {}", req.job_id);
-        let walrus_client = WalrusClient::new();
-
-        let save_params = SaveToWalrusParams {
-            data: req.proof.clone(),
-            address: None,
-            num_epochs: Some(2), // 2 epochs
-        };
-
-        let walrus_save_start = std::time::Instant::now();
-        let da_hash = match walrus_client.save_to_walrus(save_params).await {
-            Ok(Some(blob_id)) => {
-                let walrus_save_duration = walrus_save_start.elapsed();
+        // Save proof to cache storage
+        debug!("Saving proof to cache storage for job {}", req.job_id);
+        
+        // Prepare metadata for the proof
+        let mut metadata = ProofMetadata::default();
+        metadata.data.insert("job_id".to_string(), req.job_id.clone());
+        metadata.data.insert("session_id".to_string(), req.session_id.clone());
+        metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
+        metadata.data.insert("block_number".to_string(), req.block_number.to_string());
+        metadata.data.insert("sequences".to_string(), format!("{:?}", sequences));
+        metadata.data.insert("project".to_string(), "silvana".to_string());
+        metadata.data.insert("sui_chain".to_string(), 
+            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
+        
+        let storage_start = std::time::Instant::now();
+        let descriptor = match self.proof_storage.store_proof(
+            "cache",
+            "public", 
+            &req.proof,
+            Some(metadata)
+        ).await {
+            Ok(desc) => {
+                let storage_duration = storage_start.elapsed();
                 debug!(
-                    "Successfully saved proof to Walrus with blob_id: {} (took {}ms)",
-                    blob_id,
-                    walrus_save_duration.as_millis()
+                    "Successfully saved proof to cache with descriptor: {} (took {}ms)",
+                    desc.to_string(),
+                    storage_duration.as_millis()
                 );
-                blob_id
-            }
-            Ok(None) => {
-                error!("Failed to save proof to Walrus: no blob_id returned");
-                return Err(Status::internal(
-                    "Failed to save proof to data availability layer",
-                ));
+                desc
             }
             Err(e) => {
-                error!("Error saving proof to Walrus: {}", e);
+                error!("Error saving proof to cache storage: {}", e);
                 return Err(Status::internal(
-                    "Failed to save proof to data availability layer",
+                    "Failed to save proof to storage",
                 ));
             }
         };
@@ -705,7 +712,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 merged_sequences_1,
                 merged_sequences_2,
                 req.job_id.clone(),
-                da_hash.clone(),
+                descriptor.hash.clone(),
                 hardware_info.cpu_cores,
                 hardware_info.prover_architecture.clone(),
                 hardware_info.prover_memory,
@@ -726,7 +733,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     agent_job.pending_job.app_instance_method,
                     req.block_number,
                     sequences,
-                    da_hash,
+                    descriptor.to_string(),
                     tx_hash,
                     elapsed
                 );
@@ -771,7 +778,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     success: true,
                     message: "Proof submitted successfully".to_string(),
                     tx_hash, 
-                    da_hash 
+                    da_hash: descriptor.to_string()
                 }))
             }
             Err(e) => {
@@ -1006,36 +1013,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Err(Status::unauthenticated("Invalid session ID"));
         }
 
-        // Save serialized state to Walrus DA if provided
-        let da_hash = if let Some(serialized_state) = req.serialized_state {
-            debug!("Saving state to Walrus DA for sequence {}", req.sequence);
-            let walrus_client = WalrusClient::new();
-
-            let save_params = SaveToWalrusParams {
-                data: serialized_state,
-                address: None,
-                num_epochs: Some(53), // Maximum epochs for longer retention
-            };
-
-            let walrus_save_start = std::time::Instant::now();
-            match walrus_client.save_to_walrus(save_params).await {
-                Ok(Some(blob_id)) => {
-                    let walrus_save_duration = walrus_save_start.elapsed();
+        // Save serialized state to cache storage if provided
+        let da_descriptor = if let Some(serialized_state) = req.serialized_state {
+            debug!("Saving state to cache storage for sequence {}", req.sequence);
+            
+            // Prepare metadata for the state
+            let mut metadata = ProofMetadata::default();
+            metadata.data.insert("job_id".to_string(), req.job_id.clone());
+            metadata.data.insert("session_id".to_string(), req.session_id.clone());
+            metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
+            metadata.data.insert("sequence".to_string(), req.sequence.to_string());
+            metadata.data.insert("type".to_string(), "sequence_state".to_string());
+            metadata.data.insert("project".to_string(), "silvana".to_string());
+            metadata.data.insert("sui_chain".to_string(), 
+                std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
+            
+            let storage_start = std::time::Instant::now();
+            match self.proof_storage.store_proof(
+                "cache",
+                "public",
+                &serialized_state,
+                Some(metadata)
+            ).await {
+                Ok(desc) => {
+                    let storage_duration = storage_start.elapsed();
                     debug!(
-                        "Successfully saved state to Walrus with blob_id: {} (took {}ms)",
-                        blob_id,
-                        walrus_save_duration.as_millis()
+                        "Successfully saved state to cache with descriptor: {} (took {}ms)",
+                        desc.to_string(),
+                        storage_duration.as_millis()
                     );
-                    Some(blob_id)
-                }
-                Ok(None) => {
-                    error!("Failed to save state to Walrus: no blob_id returned");
-                    return Err(Status::internal(
-                        "Failed to save state to data availability layer",
-                    ));
+                    Some(desc.to_string())
                 }
                 Err(e) => {
-                    error!("Error saving state to Walrus: {}", e);
+                    error!("Error saving state to cache storage: {}", e);
                     return Err(Status::internal(
                         "Failed to save state to data availability layer",
                     ));
@@ -1053,7 +1063,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 &agent_job.app_instance,
                 req.sequence,
                 req.new_state_data,
-                da_hash.clone(),
+                da_descriptor.clone(),
             )
             .await;
 
@@ -1068,7 +1078,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     agent_job.agent_method,
                     req.sequence,
                     req.job_id,
-                    da_hash,
+                    da_descriptor,
                     elapsed
                 );
 
@@ -1076,7 +1086,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     success: true,
                     message: "State submitted successfully".to_string(),
                     tx_hash, 
-                    da_hash 
+                    da_hash: da_descriptor 
                 }))
             }
             Err(e) => {
@@ -1280,16 +1290,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
-        // Use walrus client to read the data
-        let walrus_client = WalrusClient::new();
-        let read_params = ReadFromWalrusParams {
-            blob_id: req.da_hash.clone(),
-        };
-
-        match walrus_client.read_from_walrus(read_params).await {
-            Ok(Some(data)) => {
+        // Use proofs_storage to read the data using descriptor
+        match self.proof_storage.get_proof(&req.da_hash).await {
+            Ok((data, _metadata)) => {
                 info!(
-                    "✅ ReadDA: session={}, da_hash={}, size={} bytes, time={:?}",
+                    "✅ ReadDA: session={}, descriptor={}, size={} bytes, time={:?}",
                     req.session_id,
                     req.da_hash,
                     data.len(),
@@ -1298,20 +1303,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Response::new(ReadDataAvailabilityResponse {
                     data: Some(data),
                     success: true,
-                    message: format!("Successfully read data for hash: {}", req.da_hash),
-                }))
-            }
-            Ok(None) => {
-                warn!("No data found for da_hash: {}", req.da_hash);
-                Ok(Response::new(ReadDataAvailabilityResponse {
-                    data: None,
-                    success: false,
-                    message: format!("No data found for hash: {}", req.da_hash),
+                    message: format!("Successfully read data for descriptor: {}", req.da_hash),
                 }))
             }
             Err(e) => {
                 error!(
-                    "Failed to read data from Walrus for da_hash {}: {}",
+                    "Failed to read data for descriptor {}: {}",
                     req.da_hash, e
                 );
                 Ok(Response::new(ReadDataAvailabilityResponse {
@@ -1482,19 +1479,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        debug!("Found proof with da_hash: {}", da_hash);
+        debug!("Found proof with descriptor: {}", da_hash);
 
-        // Use walrus client to read the proof data
-        let walrus_client = WalrusClient::new();
-        let read_params = ReadFromWalrusParams {
-            blob_id: da_hash.clone(),
-        };
-
-        match walrus_client.read_from_walrus(read_params).await {
-            Ok(Some(data)) => {
+        // Use proofs_storage to read the proof data using descriptor
+        match self.proof_storage.get_proof(&da_hash).await {
+            Ok((data, _metadata)) => {
                 let elapsed = start_time.elapsed();
                 info!(
-                    "✅ GetProof: app={}, block={}, sequences={:?}, da_hash={}, proof_size={} bytes, time={:?}",
+                    "✅ GetProof: app={}, block={}, sequences={:?}, descriptor={}, proof_size={} bytes, time={:?}",
                     app_instance_id,
                     req.block_number,
                     req.sequences,
@@ -1508,22 +1500,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     message: "Proof retrieved successfully".to_string(),
                 }))
             }
-            Ok(None) => {
-                let elapsed = start_time.elapsed();
-                warn!(
-                    "❌ GetProof: app={}, block={}, sequences={:?}, error=No data found for da_hash: {}, time={:?}",
-                    app_instance_id, req.block_number, req.sequences, da_hash, elapsed
-                );
-                Ok(Response::new(GetProofResponse {
-                    success: false,
-                    proof: None,
-                    message: format!("No data found for hash: {}", da_hash),
-                }))
-            }
             Err(e) => {
                 let elapsed = start_time.elapsed();
                 error!(
-                    "❌ GetProof: app={}, block={}, sequences={:?}, da_hash={}, error={}, time={:?}",
+                    "❌ GetProof: app={}, block={}, sequences={:?}, descriptor={}, error={}, time={:?}",
                     app_instance_id, req.block_number, req.sequences, da_hash, e, elapsed
                 );
                 Ok(Response::new(GetProofResponse {
@@ -1667,19 +1647,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        debug!("Found block proof with da_hash: {}", da_hash);
+        debug!("Found block proof with descriptor: {}", da_hash);
 
-        // Use walrus client to read the proof data
-        let walrus_client = WalrusClient::new();
-        let read_params = ReadFromWalrusParams {
-            blob_id: da_hash.clone(),
-        };
-
-        match walrus_client.read_from_walrus(read_params).await {
-            Ok(Some(data)) => {
+        // Use proofs_storage to read the proof data using descriptor
+        match self.proof_storage.get_proof(&da_hash).await {
+            Ok((data, _metadata)) => {
                 let elapsed = start_time.elapsed();
                 info!(
-                    "✅ GetBlockProof: block={}, job_id={}, da_hash={}, time={}ms",
+                    "✅ GetBlockProof: block={}, job_id={}, descriptor={}, time={}ms",
                     req.block_number,
                     req.job_id,
                     da_hash,
@@ -1691,25 +1666,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     message: "Block proof retrieved successfully".to_string(),
                 }))
             }
-            Ok(None) => {
+            Err(e) => {
                 let elapsed = start_time.elapsed();
-                warn!(
-                    "❌ GetBlockProof: block={}, job_id={}, da_hash={}, no_data, time={}ms",
+                error!(
+                    "❌ GetBlockProof: block={}, job_id={}, descriptor={}, error={}, time={}ms",
                     req.block_number,
                     req.job_id,
                     da_hash,
+                    e,
                     elapsed.as_millis()
-                );
-                Ok(Response::new(GetBlockProofResponse {
-                    success: false,
-                    block_proof: None,
-                    message: format!("No data found for hash: {}", da_hash),
-                }))
-            }
-            Err(e) => {
-                error!(
-                    "Failed to read block proof from Walrus for da_hash {}: {}",
-                    da_hash, e
                 );
                 Ok(Response::new(GetBlockProofResponse {
                     success: false,
@@ -2452,61 +2417,87 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Save state to Walrus DA
+        // Prepare metadata for the block state
+        let mut metadata = ProofMetadata::default();
+        metadata.data.insert("job_id".to_string(), req.job_id.clone());
+        metadata.data.insert("session_id".to_string(), req.session_id.clone());
+        metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
+        metadata.data.insert("block_number".to_string(), req.block_number.to_string());
+        metadata.data.insert("type".to_string(), "block_state".to_string());
+        metadata.data.insert("project".to_string(), "silvana".to_string());
+        metadata.data.insert("sui_chain".to_string(), 
+            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
+        
+        // Try to save to Walrus first
         debug!("Saving block state to Walrus DA for block {}", req.block_number);
-        let walrus_client = WalrusClient::new();
-
-        let save_params = SaveToWalrusParams {
-            data: req.state_data_availability.clone(),
-            address: None,
-            num_epochs: Some(53), // Maximum epochs for longer retention
-        };
-
-        let walrus_save_start = std::time::Instant::now();
-        let da_hash = match walrus_client.save_to_walrus(save_params).await {
-            Ok(Some(blob_id)) => {
-                let walrus_save_duration = walrus_save_start.elapsed();
+        let storage_start = std::time::Instant::now();
+        
+        let descriptor = match self.proof_storage.store_proof(
+            "walrus",
+            "testnet",
+            &req.state_data_availability,
+            Some(metadata.clone())
+        ).await {
+            Ok(desc) => {
+                let storage_duration = storage_start.elapsed();
                 info!(
-                    "Successfully saved block state to Walrus with blob_id: {} (took {}ms)",
-                    blob_id,
-                    walrus_save_duration.as_millis()
+                    "Successfully saved block state to Walrus with descriptor: {} (took {}ms)",
+                    desc.to_string(),
+                    storage_duration.as_millis()
                 );
-                blob_id
+                desc
             }
-            Ok(None) => {
-                error!("Failed to save block state to Walrus: no blob_id returned");
-                return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
-                    success: false,
-                    message: "Failed to save state to data availability layer".to_string(),
-                    tx_hash: String::new(),
-                }));
-            }
-            Err(e) => {
-                error!("Error saving block state to Walrus: {}", e);
-                return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
-                    success: false,
-                    message: format!("Failed to save state to data availability layer: {}", e),
-                    tx_hash: String::new(),
-                }));
+            Err(walrus_err) => {
+                // Log the Walrus error and try cache as fallback
+                error!("Failed to save block state to Walrus: {}, falling back to cache storage", walrus_err);
+                
+                match self.proof_storage.store_proof(
+                    "cache",
+                    "public",
+                    &req.state_data_availability,
+                    Some(metadata)
+                ).await {
+                    Ok(desc) => {
+                        let storage_duration = storage_start.elapsed();
+                        warn!(
+                            "Successfully saved block state to cache (fallback) with descriptor: {} (took {}ms)",
+                            desc.to_string(),
+                            storage_duration.as_millis()
+                        );
+                        desc
+                    }
+                    Err(cache_err) => {
+                        error!(
+                            "Failed to save block state to both Walrus and cache: walrus_err={}, cache_err={}",
+                            walrus_err, cache_err
+                        );
+                        return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
+                            success: false,
+                            message: format!("Failed to save state to data availability layer: {}", cache_err),
+                            tx_hash: String::new(),
+                        }));
+                    }
+                }
             }
         };
 
-        // Update block state data availability with the Walrus blob ID
+        // Update block state data availability with the descriptor string
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        let descriptor_str = descriptor.to_string();
         match sui_interface
             .update_block_state_data_availability(
                 &agent_job.app_instance,
                 req.block_number,
-                da_hash.clone(),
+                descriptor_str.clone(),
             )
             .await
         {
             Ok(tx_hash) => {
-                info!("✅ UpdateBlockStateDataAvailability successful, block: {}, da_hash: {}, tx: {}", 
-                    req.block_number, da_hash, tx_hash);
+                info!("✅ UpdateBlockStateDataAvailability successful, block: {}, descriptor: {}, tx: {}", 
+                    req.block_number, descriptor_str, tx_hash);
                 Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
                     success: true,
-                    message: format!("Block state DA updated successfully with blob_id: {}", da_hash),
+                    message: format!("Block state DA updated successfully with descriptor: {}", descriptor_str),
                     tx_hash,
                 }))
             }
@@ -2551,61 +2542,87 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Save proof to Walrus DA
+        // Prepare metadata for the block proof
+        let mut metadata = ProofMetadata::default();
+        metadata.data.insert("job_id".to_string(), req.job_id.clone());
+        metadata.data.insert("session_id".to_string(), req.session_id.clone());
+        metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
+        metadata.data.insert("block_number".to_string(), req.block_number.to_string());
+        metadata.data.insert("type".to_string(), "block_proof".to_string());
+        metadata.data.insert("project".to_string(), "silvana".to_string());
+        metadata.data.insert("sui_chain".to_string(), 
+            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
+        
+        // Try to save to Walrus first
         debug!("Saving block proof to Walrus DA for block {}", req.block_number);
-        let walrus_client = WalrusClient::new();
-
-        let save_params = SaveToWalrusParams {
-            data: req.proof_data_availability.clone(),
-            address: None,
-            num_epochs: Some(53), // Maximum epochs for longer retention
-        };
-
-        let walrus_save_start = std::time::Instant::now();
-        let da_hash = match walrus_client.save_to_walrus(save_params).await {
-            Ok(Some(blob_id)) => {
-                let walrus_save_duration = walrus_save_start.elapsed();
+        let storage_start = std::time::Instant::now();
+        
+        let descriptor = match self.proof_storage.store_proof(
+            "walrus",
+            "testnet",
+            &req.proof_data_availability,
+            Some(metadata.clone())
+        ).await {
+            Ok(desc) => {
+                let storage_duration = storage_start.elapsed();
                 info!(
-                    "Successfully saved block proof to Walrus with blob_id: {} (took {}ms)",
-                    blob_id,
-                    walrus_save_duration.as_millis()
+                    "Successfully saved block proof to Walrus with descriptor: {} (took {}ms)",
+                    desc.to_string(),
+                    storage_duration.as_millis()
                 );
-                blob_id
+                desc
             }
-            Ok(None) => {
-                error!("Failed to save block proof to Walrus: no blob_id returned");
-                return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
-                    success: false,
-                    message: "Failed to save proof to data availability layer".to_string(),
-                    tx_hash: String::new(),
-                }));
-            }
-            Err(e) => {
-                error!("Error saving block proof to Walrus: {}", e);
-                return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
-                    success: false,
-                    message: format!("Failed to save proof to data availability layer: {}", e),
-                    tx_hash: String::new(),
-                }));
+            Err(walrus_err) => {
+                // Log the Walrus error and try cache as fallback
+                error!("Failed to save block proof to Walrus: {}, falling back to cache storage", walrus_err);
+                
+                match self.proof_storage.store_proof(
+                    "cache",
+                    "public",
+                    &req.proof_data_availability,
+                    Some(metadata)
+                ).await {
+                    Ok(desc) => {
+                        let storage_duration = storage_start.elapsed();
+                        warn!(
+                            "Successfully saved block proof to cache (fallback) with descriptor: {} (took {}ms)",
+                            desc.to_string(),
+                            storage_duration.as_millis()
+                        );
+                        desc
+                    }
+                    Err(cache_err) => {
+                        error!(
+                            "Failed to save block proof to both Walrus and cache: walrus_err={}, cache_err={}",
+                            walrus_err, cache_err
+                        );
+                        return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                            success: false,
+                            message: format!("Failed to save proof to data availability layer: {}", cache_err),
+                            tx_hash: String::new(),
+                        }));
+                    }
+                }
             }
         };
 
-        // Update block proof data availability with the Walrus blob ID
+        // Update block proof data availability with the descriptor string
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        let descriptor_str = descriptor.to_string();
         match sui_interface
             .update_block_proof_data_availability(
                 &agent_job.app_instance,
                 req.block_number,
-                da_hash.clone(),
+                descriptor_str.clone(),
             )
             .await
         {
             Ok(tx_hash) => {
-                info!("✅ UpdateBlockProofDataAvailability successful, block: {}, da_hash: {}, tx: {}", 
-                    req.block_number, da_hash, tx_hash);
+                info!("✅ UpdateBlockProofDataAvailability successful, block: {}, descriptor: {}, tx: {}", 
+                    req.block_number, descriptor_str, tx_hash);
                 Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: true,
-                    message: format!("Block proof DA updated successfully with blob_id: {}", da_hash),
+                    message: format!("Block proof DA updated successfully with descriptor: {}", descriptor_str),
                     tx_hash,
                 }))
             }

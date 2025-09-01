@@ -1,14 +1,14 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::collections::HashMap;
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 // Re-export storage modules
 use storage::walrus::{GetWalrusUrlParams, ReadFromWalrusParams, SaveToWalrusParams, WalrusClient};
 
 // Import proto types for gRPC communication
 use proto::silvana_events_service_client::SilvanaEventsServiceClient;
-use proto::{GetProofRequest, GetProofResponse, SubmitProofRequest, SubmitProofResponse};
+use proto::{GetProofRequest, SubmitProofRequest};
 use tonic::Request;
 use tonic::transport::Channel;
 
@@ -79,6 +79,7 @@ pub trait ProofStorageBackend: Send + Sync {
     async fn get_proof(&self, descriptor: &ProofDescriptor) -> Result<(String, ProofMetadata)>;
 
     /// Check if a proof exists
+    #[allow(dead_code)]
     async fn proof_exists(&self, descriptor: &ProofDescriptor) -> Result<bool>;
 }
 
@@ -324,8 +325,18 @@ pub struct ProofStorage {
 impl ProofStorage {
     /// Create a new proof storage manager with configured backends
     pub fn new() -> Self {
+        // Get SUI_CHAIN from environment, default to devnet
+        let sui_chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
+        
+        // Map SUI chain to walrus network (devnet/testnet use walrus testnet, mainnet uses walrus mainnet)
+        let walrus_network = if sui_chain == "mainnet" {
+            "mainnet".to_string()
+        } else {
+            "testnet".to_string()
+        };
+        
         // Initialize backends based on environment configuration
-        let walrus = Some(WalrusStorage::new("testnet".to_string()));
+        let walrus = Some(WalrusStorage::new(walrus_network));
 
         let cache = if let Ok(rpc_endpoint) = std::env::var("RPC_ENDPOINT") {
             Some(CacheStorage::new(rpc_endpoint, "public".to_string()))
@@ -341,7 +352,7 @@ impl ProofStorage {
     pub async fn store_proof(
         &self,
         chain: &str,
-        network: &str,
+        _network: &str,
         proof_data: &str,
         metadata: Option<ProofMetadata>,
     ) -> Result<ProofDescriptor> {
@@ -388,6 +399,7 @@ impl ProofStorage {
     }
 
     /// Check if a proof exists
+    #[allow(dead_code)]
     pub async fn proof_exists(&self, descriptor_str: &str) -> Result<bool> {
         let descriptor = ProofDescriptor::parse(descriptor_str)?;
 
