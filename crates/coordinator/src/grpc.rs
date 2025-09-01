@@ -3,6 +3,7 @@ use crate::proof::analyze_proof_completion;
 use crate::settlement::fetch_pending_job_from_instances;
 use crate::state::SharedState;
 use std::path::Path;
+use storage::{WalrusClient, SaveToWalrusParams, ReadFromWalrusParams};
 use sui::start_job_tx;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -643,9 +644,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Save proof to Walrus DA
         debug!("Saving proof to Walrus DA for job {}", req.job_id);
-        let walrus_client = walrus::WalrusClient::new();
+        let walrus_client = WalrusClient::new();
 
-        let save_params = walrus::SaveToWalrusParams {
+        let save_params = SaveToWalrusParams {
             data: req.proof.clone(),
             address: None,
             num_epochs: Some(2), // 2 epochs
@@ -1008,9 +1009,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Save serialized state to Walrus DA if provided
         let da_hash = if let Some(serialized_state) = req.serialized_state {
             debug!("Saving state to Walrus DA for sequence {}", req.sequence);
-            let walrus_client = walrus::WalrusClient::new();
+            let walrus_client = WalrusClient::new();
 
-            let save_params = walrus::SaveToWalrusParams {
+            let save_params = SaveToWalrusParams {
                 data: serialized_state,
                 address: None,
                 num_epochs: Some(53), // Maximum epochs for longer retention
@@ -1280,8 +1281,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Use walrus client to read the data
-        let walrus_client = walrus::WalrusClient::new();
-        let read_params = walrus::ReadFromWalrusParams {
+        let walrus_client = WalrusClient::new();
+        let read_params = ReadFromWalrusParams {
             blob_id: req.da_hash.clone(),
         };
 
@@ -1484,8 +1485,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
         debug!("Found proof with da_hash: {}", da_hash);
 
         // Use walrus client to read the proof data
-        let walrus_client = walrus::WalrusClient::new();
-        let read_params = walrus::ReadFromWalrusParams {
+        let walrus_client = WalrusClient::new();
+        let read_params = ReadFromWalrusParams {
             blob_id: da_hash.clone(),
         };
 
@@ -1669,8 +1670,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
         debug!("Found block proof with da_hash: {}", da_hash);
 
         // Use walrus client to read the proof data
-        let walrus_client = walrus::WalrusClient::new();
-        let read_params = walrus::ReadFromWalrusParams {
+        let walrus_client = WalrusClient::new();
+        let read_params = ReadFromWalrusParams {
             blob_id: da_hash.clone(),
         };
 
@@ -2453,9 +2454,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Save state to Walrus DA
         debug!("Saving block state to Walrus DA for block {}", req.block_number);
-        let walrus_client = walrus::WalrusClient::new();
+        let walrus_client = WalrusClient::new();
 
-        let save_params = walrus::SaveToWalrusParams {
+        let save_params = SaveToWalrusParams {
             data: req.state_data_availability.clone(),
             address: None,
             num_epochs: Some(53), // Maximum epochs for longer retention
@@ -2552,9 +2553,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Save proof to Walrus DA
         debug!("Saving block proof to Walrus DA for block {}", req.block_number);
-        let walrus_client = walrus::WalrusClient::new();
+        let walrus_client = WalrusClient::new();
 
-        let save_params = walrus::SaveToWalrusParams {
+        let save_params = SaveToWalrusParams {
             data: req.proof_data_availability.clone(),
             address: None,
             num_epochs: Some(53), // Maximum epochs for longer retention

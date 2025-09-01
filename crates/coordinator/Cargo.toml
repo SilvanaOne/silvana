@@ -19,7 +19,7 @@ rpc-client = { path = "../rpc-client" }
 secrets-client = { path = "../secrets-client" }
 
 # Walrus data availability
-walrus = { path = "../walrus" }
+storage = { path = "../storage" }
 
 # Async runtime
 tokio.workspace = true

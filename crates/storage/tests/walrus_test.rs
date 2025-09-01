@@ -1,10 +1,10 @@
-use walrus::*;
 use serde_json::json;
+use storage::walrus::*;
 
 #[tokio::test]
 async fn test_save_to_walrus() {
     let client = WalrusClient::new();
-    
+
     let test_data = json!({
         "message": "Hello, world!",
         "date": chrono::Utc::now().to_rfc3339()
@@ -17,7 +17,7 @@ async fn test_save_to_walrus() {
     };
 
     let result = client.save_to_walrus(params).await;
-    
+
     match result {
         Ok(Some(blob_id)) => {
             assert!(!blob_id.is_empty(), "blob_id should not be empty");
@@ -30,7 +30,7 @@ async fn test_save_to_walrus() {
 #[tokio::test]
 async fn test_save_and_read_string() {
     let client = WalrusClient::new();
-    
+
     let test_message = "This is a test message for Walrus data availability";
 
     // Save the string
@@ -52,10 +52,13 @@ async fn test_save_and_read_string() {
     let read_params = ReadFromWalrusParams { blob_id };
 
     let result = client.read_from_walrus(read_params).await;
-    
+
     match result {
         Ok(Some(retrieved_data)) => {
-            assert_eq!(retrieved_data, test_message, "Retrieved data should match original");
+            assert_eq!(
+                retrieved_data, test_message,
+                "Retrieved data should match original"
+            );
         }
         Ok(None) => panic!("Expected data but got None"),
         Err(e) => panic!("Failed to read from Walrus: {}", e),
@@ -65,19 +68,22 @@ async fn test_save_and_read_string() {
 #[tokio::test]
 async fn test_get_walrus_url() {
     let client = WalrusClient::new();
-    
+
     let test_blob_id = "test_blob_id_123";
-    
+
     let params = GetWalrusUrlParams {
         blob_id: test_blob_id.to_string(),
     };
 
     let result = client.get_walrus_url(params);
-    
+
     match result {
         Ok(url) => {
             assert!(url.contains(test_blob_id), "URL should contain blob_id");
-            assert!(url.starts_with("https://") || url.starts_with("http://"), "URL should be valid");
+            assert!(
+                url.starts_with("https://") || url.starts_with("http://"),
+                "URL should be valid"
+            );
         }
         Err(e) => panic!("Failed to generate URL: {}", e),
     }
@@ -86,7 +92,7 @@ async fn test_get_walrus_url() {
 #[test]
 fn test_empty_blob_id_error() {
     let client = WalrusClient::new();
-    
+
     let params = GetWalrusUrlParams {
         blob_id: String::new(),
     };
@@ -101,7 +107,7 @@ fn test_config_urls() {
         daemon: Daemon::Testnet,
         ..Default::default()
     };
-    
+
     let local_config = WalrusConfig {
         daemon: Daemon::Local,
         ..Default::default()
@@ -117,7 +123,10 @@ fn test_config_urls() {
     );
 
     assert_eq!(local_config.base_publisher_url(), "http://127.0.0.1:31415");
-    assert_eq!(local_config.reader_url(), "http://127.0.0.1:31415/v1/blobs/");
+    assert_eq!(
+        local_config.reader_url(),
+        "http://127.0.0.1:31415/v1/blobs/"
+    );
 }
 
 #[test]
