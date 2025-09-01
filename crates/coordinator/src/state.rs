@@ -153,6 +153,22 @@ impl SharedState {
     pub fn is_force_shutdown(&self) -> bool {
         self.force_shutdown_flag.load(Ordering::SeqCst)
     }
+    
+    /// Alias for is_force_shutdown
+    pub fn is_force_shutting_down(&self) -> bool {
+        self.is_force_shutdown()
+    }
+    
+    /// Get the count of current agents
+    pub async fn get_current_agents_count(&self) -> usize {
+        let current_agents = self.current_agents.read().await;
+        current_agents.len()
+    }
+    
+    /// Get agent job database statistics
+    pub async fn get_agent_job_stats(&self) -> (usize, usize, usize, usize, usize) {
+        self.agent_job_db.get_stats().await
+    }
 
     /// Add a new job to tracking from JobCreatedEvent
     pub async fn add_job(

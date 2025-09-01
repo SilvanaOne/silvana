@@ -232,6 +232,22 @@ impl AgentJobDatabase {
         pending.values().cloned().collect()
     }
 
+    /// Get statistics about jobs in the database
+    /// Returns (total_jobs, ready_jobs, processing_jobs, completed_jobs, failed_jobs)
+    pub async fn get_stats(&self) -> (usize, usize, usize, usize, usize) {
+        let ready = self.ready_jobs.read().await;
+        let pending = self.pending_jobs.read().await;
+        let lookup = self.job_lookup.read().await;
+        
+        let total_jobs = lookup.len();
+        let ready_jobs = ready.len();  // Jobs ready to be picked up by agents
+        let processing_jobs = pending.len();  // Jobs currently being processed by agents
+        let completed_jobs = 0; // We don't track completed jobs in memory
+        let failed_jobs = 0; // We don't track failed jobs in memory
+        
+        (total_jobs, ready_jobs, processing_jobs, completed_jobs, failed_jobs)
+    }
+
     /// Clean up both ready and pending jobs for a specific agent method
     /// Returns jobs that need to be failed on the blockchain
     #[allow(dead_code)]
@@ -362,13 +378,6 @@ impl AgentJobDatabase {
         jobs_to_fail
     }
 
-    /// Get statistics about the job database
-    #[allow(dead_code)]
-    pub async fn get_stats(&self) -> (usize, usize) {
-        let ready_count = self.ready_jobs.read().await.len();
-        let pending_count = self.pending_jobs.read().await.len();
-        (ready_count, pending_count)
-    }
 
     /// Generate agent key for HashMap lookups
     fn get_agent_key(&self, developer: &str, agent: &str, agent_method: &str) -> String {

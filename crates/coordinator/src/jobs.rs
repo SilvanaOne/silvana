@@ -108,6 +108,12 @@ impl JobsTracker {
         }
     }
 
+    /// Get all app instances with jobs (for metrics)
+    pub async fn get_app_instances_with_jobs(&self) -> Vec<String> {
+        let app_instances = self.app_instances_with_jobs.read().await;
+        app_instances.keys().cloned().collect()
+    }
+    
     /// Get app_instances that have pending jobs for a specific (developer, agent, agent_method)
     /// This is used by gRPC to quickly find relevant app_instances
     pub async fn get_app_instances_for_agent_method(

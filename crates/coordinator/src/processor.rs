@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::error::{CoordinatorError, Result};
 use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, CoordinationEvent};
+use crate::metrics::CoordinatorMetrics;
 use crate::state::SharedState;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -18,6 +19,7 @@ pub struct EventProcessor {
     config: Config,
     processed_events: HashMap<String, bool>,
     state: SharedState,
+    metrics: Option<std::sync::Arc<CoordinatorMetrics>>,
 }
 
 impl EventProcessor {
@@ -28,9 +30,14 @@ impl EventProcessor {
             config,
             processed_events: HashMap::new(),
             state,
+            metrics: None,
         })
     }
 
+    pub fn set_metrics(&mut self, metrics: std::sync::Arc<CoordinatorMetrics>) {
+        self.metrics = Some(metrics);
+    }
+    
     pub async fn run(&mut self) -> Result<()> {
         let mut retry_count = 0;
 

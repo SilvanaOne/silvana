@@ -2,6 +2,7 @@ use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
 use crate::failed_jobs_cache::FailedJobsCache;
 use crate::hardware::{get_available_memory_gb, get_total_memory_gb, get_hardware_info};
+use crate::metrics::CoordinatorMetrics;
 use crate::session_id::generate_docker_session;
 use crate::settlement::{fetch_all_pending_jobs, can_remove_app_instance};
 use crate::state::SharedState;
@@ -105,6 +106,7 @@ pub struct JobSearcher {
     secrets_client: Option<SecretsClient>,
     failed_jobs_cache: FailedJobsCache,
     current_job_info: Arc<RwLock<Option<(String, Job)>>>, // (container_id, job)
+    metrics: Option<Arc<CoordinatorMetrics>>,
 }
 
 impl JobSearcher {
@@ -120,6 +122,7 @@ impl JobSearcher {
             secrets_client: None,
             failed_jobs_cache: FailedJobsCache::new(),
             current_job_info: Arc::new(RwLock::new(None)),
+            metrics: None,
         })
     }
 
@@ -128,6 +131,11 @@ impl JobSearcher {
     pub fn with_secrets_client(mut self, secrets_client: SecretsClient) -> Self {
         self.secrets_client = Some(secrets_client);
         self
+    }
+    
+    /// Set the metrics reporter
+    pub fn set_metrics(&mut self, metrics: Arc<CoordinatorMetrics>) {
+        self.metrics = Some(metrics);
     }
 
     /// Main loop for the job searcher
@@ -299,6 +307,12 @@ impl JobSearcher {
 
                             // Log how many containers are already loading/running
                             let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
+                            
+                            // Update metrics
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.set_docker_containers(loading_count, running_count);
+                            }
+                            
                             debug!(
                                 "📋 Picked job for Docker (currently {} loading, {} running): dev={}, agent={}/{}, job_seq={}, app={}",
                                 loading_count, running_count,

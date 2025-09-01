@@ -8,7 +8,8 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, Severity};
-use opentelemetry_otlp::{LogExporter, MetricExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry::trace::{Tracer, Span};
+use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::{
     Resource,
@@ -94,8 +95,11 @@ pub async fn init_newrelic() -> Result<()> {
 
         // Initialize logs exporter
         init_logs_exporter(&config).await?;
+        
+        // Initialize traces exporter for APM
+        init_traces_exporter(&config).await?;
 
-        info!("✅ New Relic metrics and logs exporters initialized successfully");
+        info!("✅ New Relic metrics, logs, and traces exporters initialized successfully");
     }
 
     Ok(())
@@ -121,12 +125,23 @@ async fn init_metrics_exporter(config: &NewRelicConfig) -> Result<()> {
         .build();
 
     // Create resource with service identification and SUI address
+    // Following OpenTelemetry semantic conventions for APM
     let resource = Resource::builder()
         .with_service_name("silvana-coordinator")
         .with_attributes(vec![
+            // Required service attributes for APM
+            KeyValue::new("service.name", "silvana-coordinator"),
             KeyValue::new("service.version", "0.1.0"),
-            KeyValue::new("host.sui_address", config.sui_address.clone()),
+            KeyValue::new("service.instance.id", config.sui_address.clone()),
+            // Additional service attributes
+            KeyValue::new("service.namespace", "silvana"),
             KeyValue::new("deployment.environment", env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string())),
+            // Host attributes
+            KeyValue::new("host.name", config.sui_address.clone()),
+            KeyValue::new("host.type", "coordinator"),
+            // Custom attributes
+            KeyValue::new("sui.address", config.sui_address.clone()),
+            KeyValue::new("sui.network", env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string())),
         ])
         .build();
 
@@ -140,6 +155,54 @@ async fn init_metrics_exporter(config: &NewRelicConfig) -> Result<()> {
     global::set_meter_provider(meter_provider);
 
     info!("📊 New Relic metrics exporter initialized");
+    Ok(())
+}
+
+/// Initialize the traces exporter with HTTP/protobuf for APM
+async fn init_traces_exporter(config: &NewRelicConfig) -> Result<()> {
+    // Build the OTLP HTTP trace exporter
+    let mut headers = std::collections::HashMap::new();
+    headers.insert("api-key".to_string(), config.api_key.clone());
+    
+    let trace_exporter = SpanExporter::builder()
+        .with_http()
+        .with_endpoint(format!("{}/v1/traces", config.endpoint))
+        .with_headers(headers)
+        .with_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| anyhow!("Failed to build trace exporter: {}", e))?;
+
+    // Create resource with service identification - matching metrics and logs
+    let resource = Resource::builder()
+        .with_service_name("silvana-coordinator")
+        .with_attributes(vec![
+            // Required service attributes for APM
+            KeyValue::new("service.name", "silvana-coordinator"),
+            KeyValue::new("service.version", "0.1.0"),
+            KeyValue::new("service.instance.id", config.sui_address.clone()),
+            // Additional service attributes
+            KeyValue::new("service.namespace", "silvana"),
+            KeyValue::new("deployment.environment", env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string())),
+            // Host attributes
+            KeyValue::new("host.name", config.sui_address.clone()),
+            KeyValue::new("host.type", "coordinator"),
+            // Custom attributes
+            KeyValue::new("sui.address", config.sui_address.clone()),
+            KeyValue::new("sui.network", env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string())),
+        ])
+        .build();
+
+    // Create tracer provider with batch processor
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_simple_exporter(trace_exporter)
+        .with_resource(resource)
+        .build();
+
+    // Set global tracer provider
+    global::set_tracer_provider(tracer_provider);
+
+    info!("📊 New Relic traces exporter initialized for APM");
     Ok(())
 }
 
@@ -157,13 +220,23 @@ async fn init_logs_exporter(config: &NewRelicConfig) -> Result<()> {
         .build()
         .map_err(|e| anyhow!("Failed to build log exporter: {}", e))?;
 
-    // Resource describing this service
+    // Resource describing this service - matching metrics resource
     let resource = Resource::builder()
         .with_service_name("silvana-coordinator")
         .with_attributes(vec![
+            // Required service attributes for APM
+            KeyValue::new("service.name", "silvana-coordinator"),
             KeyValue::new("service.version", "0.1.0"),
-            KeyValue::new("host.sui_address", config.sui_address.clone()),
+            KeyValue::new("service.instance.id", config.sui_address.clone()),
+            // Additional service attributes
+            KeyValue::new("service.namespace", "silvana"),
             KeyValue::new("deployment.environment", env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string())),
+            // Host attributes
+            KeyValue::new("host.name", config.sui_address.clone()),
+            KeyValue::new("host.type", "coordinator"),
+            // Custom attributes
+            KeyValue::new("sui.address", config.sui_address.clone()),
+            KeyValue::new("sui.network", env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string())),
         ])
         .build();
 
@@ -366,6 +439,37 @@ impl tracing::field::Visit for MessageVisitor {
     }
 }
 
+/// Send APM-specific metrics that New Relic expects
+pub async fn send_apm_metrics() {
+    if !NewRelicConfig::is_configured() {
+        return;
+    }
+
+    let meter = global::meter("silvana-coordinator");
+    
+    // HTTP server metrics (required for APM)
+    let request_counter = meter.u64_counter("http.server.request.count").build();
+    request_counter.add(1, &[
+        KeyValue::new("http.method", "POST"),
+        KeyValue::new("http.scheme", "grpc"),
+        KeyValue::new("http.status_code", 200),
+    ]);
+    
+    // Process metrics
+    let cpu_gauge = meter.f64_gauge("process.cpu.utilization").build();
+    cpu_gauge.record(0.5, &[]);
+    
+    let memory_gauge = meter.u64_gauge("process.memory.usage").build();
+    memory_gauge.record(1024 * 1024 * 100, &[]); // 100MB
+    
+    // Custom business metrics
+    let jobs_counter = meter.u64_counter("silvana.jobs.processed").build();
+    jobs_counter.add(1, &[
+        KeyValue::new("job.type", "proof"),
+        KeyValue::new("job.status", "success"),
+    ]);
+}
+
 /// Test function to verify New Relic integration
 pub async fn test_newrelic_integration() -> Result<()> {
     if !NewRelicConfig::is_configured() {
@@ -380,10 +484,19 @@ pub async fn test_newrelic_integration() -> Result<()> {
     send_log_to_newrelic("warn", "New Relic integration test - warning log").await?;
     send_log_to_newrelic("error", "New Relic integration test - error log").await?;
 
-    // Test sending a metric
+    // Test sending metrics
     let meter = global::meter("silvana-coordinator");
     let counter = meter.f64_counter("test_counter").build();
     counter.add(1.0, &[]);
+    
+    // Send APM metrics
+    send_apm_metrics().await;
+    
+    // Test sending a trace span
+    let tracer = global::tracer("silvana-coordinator");
+    let mut span = tracer.start("test_span");
+    span.set_attribute(KeyValue::new("test.attribute", "test_value"));
+    span.end();
 
     info!("🧪 New Relic integration test completed");
     Ok(())

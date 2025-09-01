@@ -12,6 +12,7 @@ mod job_id;
 mod job_searcher;
 mod jobs;
 mod merge;
+mod metrics;
 mod processor;
 mod proof;
 mod proofs_storage;

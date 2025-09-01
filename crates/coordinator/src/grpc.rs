@@ -3,6 +3,7 @@ use crate::proof::analyze_proof_completion;
 use crate::proofs_storage::{ProofStorage, ProofMetadata};
 use crate::settlement::fetch_pending_job_from_instances;
 use crate::state::SharedState;
+use monitoring::coordinator_metrics;
 use std::path::Path;
 use sui::start_job_tx;
 use tokio::net::UnixListener;
@@ -132,6 +133,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 chain,
             };
 
+            let elapsed = start_time.elapsed();
+            let elapsed_ms = elapsed.as_millis() as f64;
+            
+            // Record successful gRPC span for APM
+            coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
+            
             return Ok(Response::new(GetJobResponse {
                 success: true,
                 message: format!("Job {} retrieved from database", agent_job.job_sequence),
@@ -292,6 +299,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // No matching job found
         let elapsed = start_time.elapsed();
+        let elapsed_ms = elapsed.as_millis() as f64;
+        
+        // Record gRPC span for APM
+        coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
+        
         info!(
             "⭕ GetJob: dev={}, agent={}/{}, no_job_found, time={:?}",
             req.developer, req.agent, req.agent_method, elapsed

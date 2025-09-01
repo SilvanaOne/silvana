@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
 use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
+use crate::metrics::{CoordinatorMetrics, start_metrics_reporter};
 use crate::processor::EventProcessor;
 use crate::state::SharedState;
 // use crate::stuck_jobs::StuckJobMonitor; // Removed - reconciliation handles stuck jobs
@@ -240,7 +241,17 @@ pub async fn start_coordinator(
     });
     info!("🔬 Started proof completion analysis task (runs every 5 minutes)");
 
-    // 5. Start periodic balance check task (runs every 30 minutes)
+    // 5. Start metrics reporter for New Relic
+    let metrics = std::sync::Arc::new(CoordinatorMetrics::new());
+    let metrics_state = state.clone();
+    let metrics_clone = metrics.clone();
+    let jobs_tracker_clone = state.get_jobs_tracker().clone();
+    let _metrics_handle = task::spawn(async move {
+        start_metrics_reporter(metrics_state, metrics_clone, jobs_tracker_clone).await;
+    });
+    info!("📊 Started New Relic metrics reporter");
+
+    // 6. Start periodic balance check task (runs every 30 minutes)
     let balance_check_handle = task::spawn(async move {
         info!("💰 Starting periodic balance check task (runs every 30 minutes)...");
         let mut interval = tokio::time::interval(Duration::from_secs(1800)); // 30 minutes
@@ -277,6 +288,7 @@ pub async fn start_coordinator(
 
     // 6. Start job searcher in a separate thread
     let job_searcher_state = state.clone();
+    let job_searcher_metrics = metrics.clone();
     let job_searcher_handle = task::spawn(async move {
         let mut job_searcher =
             match JobSearcher::new(job_searcher_state, use_tee, container_timeout) {
@@ -286,6 +298,9 @@ pub async fn start_coordinator(
                     return;
                 }
             };
+        
+        // Set metrics reference
+        job_searcher.set_metrics(job_searcher_metrics);
 
         if let Err(e) = job_searcher.run().await {
             error!("Job searcher error: {}", e);
@@ -295,6 +310,7 @@ pub async fn start_coordinator(
 
     // 7. Start event processor in main thread (processes events and updates shared state)
     let mut processor = EventProcessor::new(config, state.clone()).await?;
+    processor.set_metrics(metrics.clone());
     info!("👁️ Starting event monitoring...");
 
     // Run processor in a task so we can monitor shutdown
