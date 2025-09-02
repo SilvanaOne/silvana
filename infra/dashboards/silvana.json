@@ -1,15 +1,15 @@
 {
   "name": "Silvana Coordinator Dashboard",
-  "description": "Real-time monitoring dashboard for Silvana Coordinator service with OpenTelemetry metrics",
+  "description": "Real-time monitoring dashboard for Silvana Coordinator service",
   "permissions": "PUBLIC_READ_WRITE",
   "pages": [
     {
       "guid": "NzA3Nzk1NXxWSVp8REFTSEJPQVJEfDI2MjUyNzc",
       "name": "Silvana Coordinator Overview",
-      "description": "Main dashboard for Silvana Coordinator monitoring",
+      "description": null,
       "widgets": [
         {
-          "title": null,
+          "title": "",
           "layout": {
             "column": 1,
             "row": 1,
@@ -21,31 +21,15 @@
             "id": "viz.markdown"
           },
           "rawConfiguration": {
-            "text": "# 🚀 Silvana Coordinator Dashboard\n\n## Service Overview\nReal-time monitoring of the Silvana Coordinator service including job processing, container management, and system health.\n\n### Key Metrics\n- **Golden Signals**: Response time, Throughput, Error rate, Saturation\n- **Job Processing**: Queue status, processing rate, success/failure rates\n- **Container Management**: Docker container states and utilization\n- **System Health**: CPU, memory, and resource utilization"
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 3,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 📊 Golden Signals (APM Metrics)"
+            "text": "# Silvana Coordinator Dashboard\n\n## Service Overview\nReal-time monitoring of the Silvana Coordinator service including job processing, container management, and system health."
           }
         },
         {
           "title": "Response Time (ms)",
           "layout": {
             "column": 1,
-            "row": 4,
-            "width": 3,
+            "row": 3,
+            "width": 4,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -53,29 +37,29 @@
             "id": "viz.line"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "legend": {
               "enabled": true
             },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
+                "accountIds": [7077955],
                 "query": "SELECT average(http.server.duration) as 'Response Time (ms)' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
               }
             ],
-            "yAxisLeft": {
-              "zero": true
-            },
             "platformOptions": {
               "ignoreTimeRange": false
             }
           }
         },
         {
-          "title": "Throughput (requests/min)",
+          "title": "Throughput (jobs/min)",
           "layout": {
-            "column": 4,
-            "row": 4,
-            "width": 3,
+            "column": 5,
+            "row": 3,
+            "width": 4,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -83,18 +67,18 @@
             "id": "viz.area"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "legend": {
               "enabled": true
             },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
-                "query": "SELECT rate(sum(silvana.job.count), 1 minute) as 'Throughput (jobs/min)' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
+                "accountIds": [7077955],
+                "query": "SELECT rate(sum(silvana.job.count), 1 minute) as 'Throughput' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
               }
             ],
-            "yAxisLeft": {
-              "zero": true
-            },
             "platformOptions": {
               "ignoreTimeRange": false
             }
@@ -103,9 +87,9 @@
         {
           "title": "Error Rate (%)",
           "layout": {
-            "column": 7,
-            "row": 4,
-            "width": 3,
+            "column": 9,
+            "row": 3,
+            "width": 4,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -113,12 +97,18 @@
             "id": "viz.billboard"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
-                "query": "SELECT (sum(silvana.job.errors) / sum(silvana.job.count)) * 100 as 'Error Rate %' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 30 minutes ago"
+                "accountIds": [7077955],
+                "query": "SELECT (sum(silvana.job.errors) / sum(silvana.job.count)) * 100 as 'Error Rate' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 30 minutes ago"
               }
             ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
             "thresholds": [
               {
                 "alertSeverity": "WARNING",
@@ -128,68 +118,15 @@
                 "alertSeverity": "CRITICAL",
                 "value": 10
               }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Container Utilization (%)",
-          "layout": {
-            "column": 10,
-            "row": 4,
-            "width": 3,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.billboard"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT latest(silvana.container.utilization) * 100 as 'Container Utilization %' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 5 minutes ago"
-              }
-            ],
-            "thresholds": [
-              {
-                "alertSeverity": "WARNING",
-                "value": 70
-              },
-              {
-                "alertSeverity": "CRITICAL",
-                "value": 90
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 7,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 💼 Job Processing Metrics"
+            ]
           }
         },
         {
           "title": "Job Processing Rate",
           "layout": {
             "column": 1,
-            "row": 8,
-            "width": 4,
+            "row": 6,
+            "width": 6,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -197,167 +134,29 @@
             "id": "viz.line"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "legend": {
               "enabled": true
             },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
+                "accountIds": [7077955],
                 "query": "SELECT rate(sum(silvana.job.count), 1 minute) as 'Jobs/min' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
               }
             ],
-            "yAxisLeft": {
-              "zero": true
-            },
             "platformOptions": {
               "ignoreTimeRange": false
             }
-          }
-        },
-        {
-          "title": "Job Queue Status",
-          "layout": {
-            "column": 5,
-            "row": 8,
-            "width": 4,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.stacked-bar"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT latest(silvana.jobs.queue) as 'Job Count' FROM Metric WHERE service.name = 'silvana-coordinator' FACET job.state TIMESERIES AUTO"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Job Success vs Failure",
-          "layout": {
-            "column": 9,
-            "row": 8,
-            "width": 4,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.pie"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT sum(silvana.jobs.queue) as 'Total Jobs' FROM Metric WHERE service.name = 'silvana-coordinator' AND job.state IN ('completed', 'failed') FACET job.state SINCE 1 hour ago"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Job Processing Duration",
-          "layout": {
-            "column": 1,
-            "row": 11,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.line"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT percentile(silvana.job.duration, 50) as 'P50', percentile(silvana.job.duration, 90) as 'P90', percentile(silvana.job.duration, 99) as 'P99' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
-              }
-            ],
-            "yAxisLeft": {
-              "zero": false
-            },
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Failed Jobs Counter",
-          "layout": {
-            "column": 7,
-            "row": 11,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.area"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT rate(sum(silvana.job.errors), 1 minute) as 'Failed Jobs/min' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
-              }
-            ],
-            "colors": {
-              "seriesOverrides": [
-                {
-                  "seriesName": "Failed Jobs/min",
-                  "color": "#ff4444"
-                }
-              ]
-            },
-            "yAxisLeft": {
-              "zero": true
-            },
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 14,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 🐳 Docker Container Management"
           }
         },
         {
           "title": "Container States",
           "layout": {
-            "column": 1,
-            "row": 15,
-            "width": 4,
+            "column": 7,
+            "row": 6,
+            "width": 6,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -365,96 +164,29 @@
             "id": "viz.stacked-bar"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "legend": {
               "enabled": true
             },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
+                "accountIds": [7077955],
                 "query": "SELECT latest(silvana.docker.containers) as 'Containers' FROM Metric WHERE service.name = 'silvana-coordinator' FACET container.state TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
               "ignoreTimeRange": false
             }
-          }
-        },
-        {
-          "title": "Total Containers",
-          "layout": {
-            "column": 5,
-            "row": 15,
-            "width": 4,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.billboard"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT sum(latest(silvana.docker.containers)) as 'Count' FROM Metric WHERE service.name = 'silvana-coordinator' FACET container.state SINCE 5 minutes ago"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Container Lifecycle",
-          "layout": {
-            "column": 9,
-            "row": 15,
-            "width": 4,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.line"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT latest(silvana.docker.containers) as 'Containers' FROM Metric WHERE service.name = 'silvana-coordinator' FACET container.state TIMESERIES AUTO"
-              }
-            ],
-            "yAxisLeft": {
-              "zero": true
-            },
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 18,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 🎯 Agent & Application Metrics"
           }
         },
         {
           "title": "Active Agents",
           "layout": {
             "column": 1,
-            "row": 19,
-            "width": 3,
+            "row": 9,
+            "width": 4,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -462,9 +194,12 @@
             "id": "viz.billboard"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
+                "accountIds": [7077955],
                 "query": "SELECT latest(silvana.agents.current) as 'Active Agents' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 5 minutes ago"
               }
             ],
@@ -474,11 +209,11 @@
           }
         },
         {
-          "title": "App Instances Tracked",
+          "title": "App Instances",
           "layout": {
-            "column": 4,
-            "row": 19,
-            "width": 3,
+            "column": 5,
+            "row": 9,
+            "width": 4,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -486,9 +221,12 @@
             "id": "viz.billboard"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
+                "accountIds": [7077955],
                 "query": "SELECT latest(silvana.app_instances.count) as 'App Instances' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 5 minutes ago"
               }
             ],
@@ -498,86 +236,10 @@
           }
         },
         {
-          "title": "Pending Jobs Status",
-          "layout": {
-            "column": 7,
-            "row": 19,
-            "width": 3,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.billboard"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT latest(silvana.jobs.pending) as 'Has Pending Jobs' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 5 minutes ago"
-              }
-            ],
-            "thresholds": [
-              {
-                "alertSeverity": "WARNING",
-                "value": 1
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Service Uptime",
-          "layout": {
-            "column": 10,
-            "row": 19,
-            "width": 3,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.line"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": false
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT rate(sum(silvana.uptime), 1 minute) as 'Uptime Signal' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
-              }
-            ],
-            "yAxisLeft": {
-              "zero": false
-            },
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 22,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 💻 System Resources"
-          }
-        },
-        {
           "title": "CPU Utilization (%)",
           "layout": {
-            "column": 1,
-            "row": 23,
+            "column": 9,
+            "row": 9,
             "width": 4,
             "height": 3
           },
@@ -586,19 +248,18 @@
             "id": "viz.line"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "legend": {
               "enabled": true
             },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
+                "accountIds": [7077955],
                 "query": "SELECT average(process.runtime.cpu.utilization) * 100 as 'CPU %' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
               }
             ],
-            "yAxisLeft": {
-              "zero": true,
-              "max": 100
-            },
             "platformOptions": {
               "ignoreTimeRange": false
             }
@@ -607,9 +268,9 @@
         {
           "title": "Memory Usage (MB)",
           "layout": {
-            "column": 5,
-            "row": 23,
-            "width": 4,
+            "column": 1,
+            "row": 12,
+            "width": 6,
             "height": 3
           },
           "linkedEntityGuids": null,
@@ -617,232 +278,28 @@
             "id": "viz.area"
           },
           "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
             "legend": {
               "enabled": true
             },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
+                "accountIds": [7077955],
                 "query": "SELECT average(process.runtime.memory.usage) / 1024 / 1024 as 'Memory MB' FROM Metric WHERE service.name = 'silvana-coordinator' TIMESERIES AUTO"
               }
             ],
-            "yAxisLeft": {
-              "zero": true
-            },
             "platformOptions": {
               "ignoreTimeRange": false
             }
           }
         },
         {
-          "title": "System Status Flags",
-          "layout": {
-            "column": 9,
-            "row": 23,
-            "width": 4,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.table"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT latest(silvana.system.status) as 'Status Value' FROM Metric WHERE service.name = 'silvana-coordinator' FACET status.type SINCE 5 minutes ago"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 26,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 🔍 gRPC Endpoints Performance"
-          }
-        },
-        {
-          "title": "gRPC Request Duration",
-          "layout": {
-            "column": 1,
-            "row": 27,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.line"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT average(http.server.duration) as 'Duration (ms)' FROM Metric WHERE service.name = 'silvana-coordinator' FACET http.target TIMESERIES AUTO"
-              }
-            ],
-            "yAxisLeft": {
-              "zero": false
-            },
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "gRPC Request Rate",
+          "title": "Recent Errors",
           "layout": {
             "column": 7,
-            "row": 27,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.stacked-bar"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT rate(count(*), 1 minute) as 'Requests/min' FROM Span WHERE service.name = 'silvana-coordinator' AND rpc.system = 'grpc' FACET rpc.method TIMESERIES AUTO"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 30,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 📋 Recent Logs & Errors"
-          }
-        },
-        {
-          "title": "Error Logs",
-          "layout": {
-            "column": 1,
-            "row": 31,
-            "width": 6,
-            "height": 4
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.table"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT timestamp, message FROM Log WHERE service.name = 'silvana-coordinator' AND severity = 'ERROR' SINCE 1 hour ago LIMIT 20"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Warning Logs",
-          "layout": {
-            "column": 7,
-            "row": 31,
-            "width": 6,
-            "height": 4
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.table"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT timestamp, message FROM Log WHERE service.name = 'silvana-coordinator' AND severity = 'WARN' SINCE 1 hour ago LIMIT 20"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Log Volume by Severity",
-          "layout": {
-            "column": 1,
-            "row": 35,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.stacked-bar"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT count(*) as 'Log Count' FROM Log WHERE service.name = 'silvana-coordinator' FACET severity TIMESERIES AUTO"
-              }
-            ],
-            "colors": {
-              "seriesOverrides": [
-                {
-                  "seriesName": "ERROR",
-                  "color": "#ff0000"
-                },
-                {
-                  "seriesName": "WARN",
-                  "color": "#ffa500"
-                },
-                {
-                  "seriesName": "INFO",
-                  "color": "#00ff00"
-                }
-              ]
-            },
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Distributed Tracing Summary",
-          "layout": {
-            "column": 7,
-            "row": 35,
+            "row": 12,
             "width": 6,
             "height": 3
           },
@@ -851,174 +308,19 @@
             "id": "viz.table"
           },
           "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT count(*) as 'Count', average(duration) * 1000 as 'Avg Duration (ms)' FROM Span WHERE service.name = 'silvana-coordinator' FACET name SINCE 1 hour ago LIMIT 10"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": null,
-          "layout": {
-            "column": 1,
-            "row": 38,
-            "width": 12,
-            "height": 1
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.markdown"
-          },
-          "rawConfiguration": {
-            "text": "## 📈 Additional Performance Insights"
-          }
-        },
-        {
-          "title": "Job Queue Depth Over Time",
-          "layout": {
-            "column": 1,
-            "row": 39,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.line"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": true
+            "facet": {
+              "showOtherSeries": false
             },
             "nrqlQueries": [
               {
-                "accountId": 7077955,
-                "query": "SELECT sum(silvana.jobs.queue) as 'Queue Depth' FROM Metric WHERE service.name = 'silvana-coordinator' AND job.state = 'ready' TIMESERIES AUTO"
+                "accountIds": [7077955],
+                "query": "SELECT timestamp, message FROM Log WHERE service.name = 'silvana-coordinator' AND severity = 'ERROR' SINCE 1 hour ago LIMIT 10"
               }
-            ],
-            "yAxisLeft": {
-              "zero": true
-            },
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Service Health Score",
-          "layout": {
-            "column": 7,
-            "row": 39,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.billboard"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT (1 - (sum(silvana.job.errors) / sum(silvana.job.count))) * 100 as 'Health Score %' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 1 hour ago"
-              }
-            ],
-            "thresholds": [
-              {
-                "alertSeverity": "CRITICAL",
-                "value": 95
-              },
-              {
-                "alertSeverity": "WARNING",
-                "value": 98
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Top Error Types",
-          "layout": {
-            "column": 1,
-            "row": 42,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.bar"
-          },
-          "rawConfiguration": {
-            "legend": {
-              "enabled": false
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT count(*) as 'Error Count' FROM Log WHERE service.name = 'silvana-coordinator' AND severity = 'ERROR' FACET message SINCE 1 hour ago LIMIT 5"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
-          }
-        },
-        {
-          "title": "Performance Percentiles",
-          "layout": {
-            "column": 7,
-            "row": 42,
-            "width": 6,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.billboard"
-          },
-          "rawConfiguration": {
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT percentile(http.server.duration, 50) as 'P50 (ms)', percentile(http.server.duration, 95) as 'P95 (ms)', percentile(http.server.duration, 99) as 'P99 (ms)' FROM Metric WHERE service.name = 'silvana-coordinator' SINCE 30 minutes ago"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            }
+            ]
           }
         }
       ]
     }
   ],
-  "variables": [
-    {
-      "name": "timeRange",
-      "items": null,
-      "defaultValues": [],
-      "nrqlQuery": null,
-      "title": "Time Range",
-      "type": "TIME",
-      "isMultiSelection": false,
-      "replacementStrategy": "DEFAULT"
-    },
-    {
-      "name": "serviceInstance",
-      "items": null,
-      "defaultValues": [],
-      "nrqlQuery": {
-        "accountIds": [7077955],
-        "query": "SELECT uniques(service.instance.id) FROM Metric WHERE service.name = 'silvana-coordinator'"
-      },
-      "title": "Service Instance (SUI Address)",
-      "type": "NRQL",
-      "isMultiSelection": true,
-      "replacementStrategy": "STRING"
-    }
-  ]
+  "variables": []
 }
