@@ -330,6 +330,32 @@ impl AgentJobDatabase {
         jobs_to_fail
     }
 
+    /// Check if a job with the given app_instance and job_sequence is already being tracked
+    /// This includes both ready and pending jobs
+    pub async fn is_job_tracked(&self, app_instance: &str, job_sequence: u64) -> bool {
+        // Check ready jobs
+        {
+            let ready = self.ready_jobs.read().await;
+            for job in ready.values() {
+                if job.app_instance == app_instance && job.job_sequence == job_sequence {
+                    return true;
+                }
+            }
+        }
+        
+        // Check pending jobs
+        {
+            let pending = self.pending_jobs.read().await;
+            for job in pending.values() {
+                if job.app_instance == app_instance && job.job_sequence == job_sequence {
+                    return true;
+                }
+            }
+        }
+        
+        false
+    }
+
     /// Clean up pending jobs for a specific agent method
     /// Returns jobs that need to be failed on the blockchain
     #[allow(dead_code)]

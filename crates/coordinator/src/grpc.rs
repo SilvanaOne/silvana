@@ -834,7 +834,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 merged_sequences_1,
                 merged_sequences_2,
                 req.job_id.clone(),
-                descriptor.hash.clone(),
+                descriptor.to_string(),  // Use full descriptor (chain:network:hash) instead of just hash
                 hardware_info.cpu_cores,
                 hardware_info.prover_architecture.clone(),
                 hardware_info.prover_memory,

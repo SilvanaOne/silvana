@@ -728,7 +728,20 @@ async fn run_docker_container_task(
         return;
     }
 
-    debug!("Job {} is still pending after delay, attempting to start", job.job_sequence);
+    debug!("Job {} is still pending after delay, checking if already tracked locally", job.job_sequence);
+
+    // Check if this job is already being tracked by this coordinator
+    // This prevents duplicate starts when the blockchain state is delayed
+    if state.get_agent_job_db().is_job_tracked(&job.app_instance, job.job_sequence).await {
+        debug!("Job {} is already being tracked by this coordinator - skipping duplicate start", job.job_sequence);
+        // Add to failed jobs cache to prevent immediate retries
+        failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+        state.clear_current_agent(&docker_session.session_id).await;
+        docker_manager.remove_container_tracking(&docker_session.session_id).await;
+        return;
+    }
+
+    debug!("Job {} not tracked locally, attempting to start", job.job_sequence);
 
     // Try to start the job on blockchain - NO RETRIES since other coordinators might be handling it
     let start_time = Instant::now();
