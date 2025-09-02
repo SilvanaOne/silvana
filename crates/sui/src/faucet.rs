@@ -294,8 +294,8 @@ pub async fn ensure_sufficient_balance(min_balance_sui: f64) -> Result<bool> {
         
         // Determine chain from environment or default to devnet
         let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
-        // Request 10 SUI from faucet (maximum allowed for testnet)
-        let amount = if chain.to_lowercase() == "testnet" { Some(10.0) } else { None };
+        // Request 5 SUI from faucet (reasonable amount that faucet can provide)
+        let amount = if chain.to_lowercase() == "testnet" { Some(5) } else { None };
         request_tokens_from_faucet(&chain, &address.to_string(), amount).await?;
         
         // Wait a bit for tokens to arrive
@@ -349,9 +349,9 @@ pub async fn ensure_sufficient_balance_network(
             total_balance_sui, min_balance_sui, network
         );
         
-        // For testnet, always request 10 SUI (maximum allowed)
+        // For testnet, request a reasonable amount (2.5 SUI)
         let request_amount = if matches!(network, FaucetNetwork::Testnet) { 
-            Some(10.0) 
+            Some(2.5) 
         } else { 
             amount 
         };
@@ -420,8 +420,8 @@ pub async fn initialize_faucet() -> Result<()> {
     
     // Check if we need tokens (minimum 10 SUI for testnet, 5 for devnet)
     let min_balance = if matches!(network, FaucetNetwork::Testnet) { 10.0 } else { 5.0 };
-    // Request 10 SUI for testnet (maximum allowed)
-    let amount = if matches!(network, FaucetNetwork::Testnet) { Some(10.0) } else { None };
+    // Request 2.5 SUI for testnet (reasonable amount that faucet can provide)
+    let amount = if matches!(network, FaucetNetwork::Testnet) { Some(2.5) } else { None };
     
     match ensure_sufficient_balance_network(min_balance, network, amount).await {
         Ok(requested) => {
