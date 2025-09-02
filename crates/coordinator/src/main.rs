@@ -590,7 +590,97 @@ async fn main() -> Result<()> {
 
             match sui::fetch::fetch_job_by_id(jobs_table_id, job).await {
                 Ok(Some(job)) => {
-                    println!("{:#?}", job);
+                    // Convert data to hex
+                    let data_hex = hex::encode(&job.data);
+                    
+                    // Convert timestamps to ISO format
+                    let created_iso = DateTime::<Utc>::from_timestamp_millis(job.created_at as i64)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| job.created_at.to_string());
+                    let updated_iso = DateTime::<Utc>::from_timestamp_millis(job.updated_at as i64)
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_else(|| job.updated_at.to_string());
+                    
+                    // Print formatted job
+                    println!("Job {{");
+                    println!("    id: \"{}\",", job.id);
+                    println!("    job_sequence: {},", job.job_sequence);
+                    
+                    if let Some(ref desc) = job.description {
+                        println!("    description: Some(\"{}\"),", desc);
+                    } else {
+                        println!("    description: None,");
+                    }
+                    
+                    println!("    developer: \"{}\",", job.developer);
+                    println!("    agent: \"{}\",", job.agent);
+                    println!("    agent_method: \"{}\",", job.agent_method);
+                    println!("    app: \"{}\",", job.app);
+                    println!("    app_instance: \"{}\",", job.app_instance);
+                    println!("    app_instance_method: \"{}\",", job.app_instance_method);
+                    
+                    if let Some(block) = job.block_number {
+                        println!("    block_number: Some({}),", block);
+                    } else {
+                        println!("    block_number: None,");
+                    }
+                    
+                    // Print sequences on one line
+                    if let Some(ref seqs) = job.sequences {
+                        print!("    sequences: Some([");
+                        for (i, seq) in seqs.iter().enumerate() {
+                            if i > 0 { print!(", "); }
+                            print!("{}", seq);
+                        }
+                        println!("]),");
+                    } else {
+                        println!("    sequences: None,");
+                    }
+                    
+                    if let Some(ref seqs1) = job.sequences1 {
+                        print!("    sequences1: Some([");
+                        for (i, seq) in seqs1.iter().enumerate() {
+                            if i > 0 { print!(", "); }
+                            print!("{}", seq);
+                        }
+                        println!("]),");
+                    } else {
+                        println!("    sequences1: None,");
+                    }
+                    
+                    if let Some(ref seqs2) = job.sequences2 {
+                        print!("    sequences2: Some([");
+                        for (i, seq) in seqs2.iter().enumerate() {
+                            if i > 0 { print!(", "); }
+                            print!("{}", seq);
+                        }
+                        println!("]),");
+                    } else {
+                        println!("    sequences2: None,");
+                    }
+                    
+                    println!("    data: \"0x{}\",", data_hex);
+                    println!("    status: {:?},", job.status);
+                    println!("    attempts: {},", job.attempts);
+                    
+                    if let Some(interval) = job.interval_ms {
+                        println!("    interval_ms: Some({}),", interval);
+                    } else {
+                        println!("    interval_ms: None,");
+                    }
+                    
+                    if let Some(next_at) = job.next_scheduled_at {
+                        let next_iso = DateTime::<Utc>::from_timestamp_millis(next_at as i64)
+                            .map(|dt| dt.to_rfc3339())
+                            .unwrap_or_else(|| next_at.to_string());
+                        println!("    next_scheduled_at: Some(\"{}\"),", next_iso);
+                    } else {
+                        println!("    next_scheduled_at: None,");
+                    }
+                    
+                    println!("    created_at: \"{}\",", created_iso);
+                    println!("    updated_at: \"{}\",", updated_iso);
+                    println!("}}");
                 }
                 Ok(None) => {
                     if failed {

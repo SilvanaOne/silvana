@@ -929,7 +929,9 @@ async fn fetch_job_object_by_field_id(
                                 debug!("📗 Job {} JSON retrieved, extracting data", job_sequence);
                                 // We already know this is the correct job from the name_value check
                                 // so we can directly extract the job data
-                                if let Ok(job) = extract_job_from_json(job_json) {
+                                if let Ok(mut job) = extract_job_from_json(job_json) {
+                                    // Set the job ID to the actual object ID
+                                    job.id = job_object_id.clone();
                                     return Ok(Some(job));
                                 } else {
                                     warn!("❌ Failed to extract job {} from JSON", job_sequence);

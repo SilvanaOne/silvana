@@ -437,7 +437,14 @@ async fn fetch_proof_calculation_from_table(
                     );
                 }
             } else {
-                warn!("❌ No name_value found in dynamic field");
+                warn!(
+                    "❌ No name_value found in dynamic field. Table ID: {}, Target block: {}, Field: {:?}",
+                    table_id, target_block_number, field
+                );
+                info!(
+                    "Field details - field_id: {:?}, name_type: {:?}, value_type: {:?}",
+                    field.field_id, field.name_type, field.value_type
+                );
             }
         }
 

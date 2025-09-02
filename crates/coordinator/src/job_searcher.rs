@@ -505,7 +505,7 @@ impl JobSearcher {
                 for job in pending_jobs {
                     // Skip if job is currently locked (being processed)
                     if lock_manager.is_locked(&job.app_instance, job.job_sequence) {
-                        info!(
+                        debug!(
                             "Skipping job {} from app_instance {} (currently locked)",
                             job.job_sequence, job.app_instance
                         );
@@ -519,7 +519,7 @@ impl JobSearcher {
                         .is_recently_failed(&job.app_instance, job.job_sequence)
                         .await
                     {
-                        warn!(
+                        info!(
                             "Skipping job {} from app_instance {} (recently failed)",
                             job.job_sequence, job.app_instance
                         );
@@ -956,7 +956,7 @@ async fn run_docker_container_task(
 
             // This can happen due to race conditions even with our random delay
             // Log as warning since it's expected in a multi-coordinator environment
-            info!(
+            warn!(
                 "Failed to start job {} on blockchain: {}",
                 job.job_sequence, e
             );

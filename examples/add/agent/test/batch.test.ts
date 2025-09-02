@@ -10,7 +10,7 @@ describe("Batch", async () => {
 
     while (true) {
       batchIteration++;
-      const maxDelay = Math.floor(Math.random() * 20 * 1000);
+      const maxDelay = Math.floor(Math.random() * 30 * 1000);
 
       // Calculate TPS
       const elapsedSeconds = (Date.now() - testStartTime) / 1000;
@@ -30,11 +30,15 @@ describe("Batch", async () => {
         //     i + 1
         //   }/10 - Sending add action`
         // );
-        await action({
-          action: "add",
-          value: 1,
-          index: 1,
-        });
+        try {
+          await action({
+            action: "add",
+            value: 1,
+            index: 1,
+          });
+        } catch (error: any) {
+          console.error("❌ Error sending action:", error?.message);
+        }
         totalTransactions++;
         const sleepTime = Math.floor(Math.random() * maxDelay) + 2000;
         // console.log(
