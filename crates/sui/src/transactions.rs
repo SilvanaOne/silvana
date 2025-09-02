@@ -640,11 +640,12 @@ pub async fn update_block_settlement_tx_hash_tx(
         app_instance_str,
         "update_block_settlement_tx_hash",
         move |tb, app_instance_arg, clock_arg| {
-            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            // Order must match Move function signature: chain, block_number, settlement_tx_hash
             let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let settlement_tx_hash_arg = tb.input(sui_transaction_builder::Serialized(&settlement_tx_hash));
             
-            vec![app_instance_arg, block_number_arg, chain_arg, settlement_tx_hash_arg, clock_arg]
+            vec![app_instance_arg, chain_arg, block_number_arg, settlement_tx_hash_arg, clock_arg]
         },
     ).await
 }
@@ -662,11 +663,12 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
         app_instance_str,
         "update_block_settlement_tx_included_in_block",
         move |tb, app_instance_arg, clock_arg| {
-            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            // Order must match Move function signature: chain, block_number, settled_at
             let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let settled_at_arg = tb.input(sui_transaction_builder::Serialized(&settled_at));
             
-            vec![app_instance_arg, block_number_arg, chain_arg, settled_at_arg, clock_arg]
+            vec![app_instance_arg, chain_arg, block_number_arg, settled_at_arg, clock_arg]
         },
     ).await
 }
