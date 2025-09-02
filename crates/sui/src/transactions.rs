@@ -252,41 +252,43 @@ pub async fn terminate_job_tx(
     ).await
 }
 
-/// Create and submit a transaction to restart a failed job
-pub async fn restart_failed_job_tx(
+/// Create and submit a transaction to restart failed jobs (with optional specific job sequences)
+pub async fn restart_failed_jobs_with_sequences_tx(
     app_instance_str: &str,
-    job_sequence: u64,
+    job_sequences: Option<Vec<u64>>,
     gas_budget: Option<u64>,
 ) -> Result<String> {
-    debug!("Creating restart_failed_app_job transaction for job_sequence: {}", job_sequence);
+    debug!("Creating restart_failed_app_jobs transaction with job_sequences: {:?}", job_sequences);
     
-    execute_app_instance_function_with_gas(
-        app_instance_str,
-        "restart_failed_app_job",
-        gas_budget,
-        move |tb, app_instance_arg, clock_arg| {
-            let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
-            vec![app_instance_arg, job_sequence_arg, clock_arg]
-        },
-    ).await
-}
-
-/// Create and submit a transaction to restart all failed jobs
-pub async fn restart_failed_jobs_tx(
-    app_instance_str: &str,
-    gas_budget: Option<u64>,
-) -> Result<String> {
-    debug!("Creating restart_failed_app_jobs transaction");
-    
-    // Default to 1 SUI for this heavy operation if not specified
+    // Default to 1 SUI for this potentially heavy operation if not specified
     let gas = gas_budget.or(Some(1_000_000_000));
     
     execute_app_instance_function_with_gas(
         app_instance_str,
         "restart_failed_app_jobs",
         gas,
-        move |_tb, app_instance_arg, clock_arg| {
-            vec![app_instance_arg, clock_arg]
+        move |tb, app_instance_arg, clock_arg| {
+            let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
+            vec![app_instance_arg, job_sequences_arg, clock_arg]
+        },
+    ).await
+}
+
+/// Create and submit a transaction to remove failed jobs (with optional specific job sequences)
+pub async fn remove_failed_jobs_tx(
+    app_instance_str: &str,
+    job_sequences: Option<Vec<u64>>,
+    gas_budget: Option<u64>,
+) -> Result<String> {
+    debug!("Creating remove_failed_app_jobs transaction with job_sequences: {:?}", job_sequences);
+    
+    execute_app_instance_function_with_gas(
+        app_instance_str,
+        "remove_failed_app_jobs",
+        gas_budget,
+        move |tb, app_instance_arg, clock_arg| {
+            let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
+            vec![app_instance_arg, job_sequences_arg, clock_arg]
         },
     ).await
 }
@@ -557,20 +559,23 @@ pub async fn update_block_state_data_availability_tx(
     ).await
 }
 
-/// Purge sequences below a threshold
-pub async fn purge_sequences_below_tx(
+/// Create and submit a transaction to increase sequence (add new action)
+pub async fn increase_sequence_tx(
     app_instance_str: &str,
-    threshold_sequence: u64,
+    optimistic_state: Vec<u8>,
+    transition_data: Vec<u8>,
 ) -> Result<String> {
-    debug!("Creating purge_sequences_below transaction for threshold: {}", threshold_sequence);
+    debug!("Creating increase_sequence transaction with optimistic_state size: {} bytes, transition_data size: {} bytes", 
+        optimistic_state.len(), transition_data.len());
     
     execute_app_instance_function(
         app_instance_str,
-        "purge_sequences_below",
+        "increase_sequence",
         move |tb, app_instance_arg, clock_arg| {
-            let threshold_arg = tb.input(sui_transaction_builder::Serialized(&threshold_sequence));
+            let optimistic_state_arg = tb.input(sui_transaction_builder::Serialized(&optimistic_state));
+            let transition_data_arg = tb.input(sui_transaction_builder::Serialized(&transition_data));
             
-            vec![app_instance_arg, threshold_arg, clock_arg]
+            vec![app_instance_arg, optimistic_state_arg, transition_data_arg, clock_arg]
         },
     ).await
 }

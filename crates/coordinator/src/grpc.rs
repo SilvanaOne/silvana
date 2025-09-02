@@ -22,7 +22,7 @@ use coordinator::{
     GetBlockRequest, GetBlockResponse, GetBlockSettlementRequest, GetBlockSettlementResponse,
     GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
     GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
-    GetSequenceStatesResponse, Job, Metadata, PurgeSequencesBelowRequest, PurgeSequencesBelowResponse,
+    GetSequenceStatesResponse, Job, Metadata,
     ReadDataAvailabilityRequest, ReadDataAvailabilityResponse, RejectProofRequest,
     RejectProofResponse, RetrieveSecretRequest,
     RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
@@ -2954,61 +2954,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     message: format!("Failed to create app job: {}", e),
                     tx_hash: String::new(),
                     job_sequence: 0,
-                }))
-            }
-        }
-    }
-
-    async fn purge_sequences_below(
-        &self,
-        request: Request<PurgeSequencesBelowRequest>,
-    ) -> Result<Response<PurgeSequencesBelowResponse>, Status> {
-        let req = request.into_inner();
-        info!(
-            job_id = %req.job_id,
-            session_id = %req.session_id,
-            threshold_sequence = %req.threshold_sequence,
-            "Received PurgeSequencesBelow request"
-        );
-
-        // Get job from agent database to validate it exists and get app_instance info
-        let agent_job = match self
-            .state
-            .get_agent_job_db()
-            .get_job_by_id(&req.job_id)
-            .await
-        {
-            Some(job) => job,
-            None => {
-                warn!("PurgeSequencesBelow request for unknown job_id: {}", req.job_id);
-                return Ok(Response::new(PurgeSequencesBelowResponse {
-                    success: false,
-                    message: format!("Job not found: {}", req.job_id),
-                    tx_hash: String::new(),
-                }));
-            }
-        };
-
-        // Purge sequences below threshold
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-        match sui_interface
-            .purge_sequences_below(&agent_job.app_instance, req.threshold_sequence)
-            .await
-        {
-            Ok(tx_hash) => {
-                info!("✅ PurgeSequencesBelow successful, tx: {}", tx_hash);
-                Ok(Response::new(PurgeSequencesBelowResponse {
-                    success: true,
-                    message: format!("Sequences below {} purged successfully", req.threshold_sequence),
-                    tx_hash,
-                }))
-            }
-            Err(e) => {
-                error!("Failed to purge sequences: {}", e);
-                Ok(Response::new(PurgeSequencesBelowResponse {
-                    success: false,
-                    message: format!("Failed to purge sequences: {}", e),
-                    tx_hash: String::new(),
                 }))
             }
         }

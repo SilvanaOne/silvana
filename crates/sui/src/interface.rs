@@ -1,4 +1,4 @@
-use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, restart_failed_job_tx, restart_failed_jobs_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
+use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, restart_failed_jobs_with_sequences_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use tracing::{info, warn, error, debug};
 
 /// Interface for calling Sui Move functions related to job management
@@ -95,14 +95,15 @@ impl SilvanaSuiInterface {
         }
     }
 
-    /// Restart a failed job on the Sui blockchain by calling the restart_failed_app_job Move function
+    /// Restart a failed job on the Sui blockchain by calling the restart_failed_app_jobs Move function
     /// This moves a job from the failed_jobs table back to the active jobs table
     /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
     pub async fn restart_failed_job(&mut self, app_instance: &str, job_sequence: u64, gas_budget_sui: f64) -> Result<String, (String, Option<String>)> {
         debug!("Attempting to restart failed job {} on Sui blockchain", job_sequence);
         
         let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
-        match restart_failed_job_tx(app_instance, job_sequence, Some(gas_budget_mist)).await {
+        // Restart a single specific failed job by passing it in the sequences vector
+        match restart_failed_jobs_with_sequences_tx(app_instance, Some(vec![job_sequence]), Some(gas_budget_mist)).await {
             Ok(tx_digest) => {
                 debug!("Successfully restarted failed job {} on blockchain, tx: {}", job_sequence, tx_digest);
                 Ok(tx_digest)
@@ -134,7 +135,8 @@ impl SilvanaSuiInterface {
         debug!("Attempting to restart all failed jobs on Sui blockchain");
         
         let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
-        match restart_failed_jobs_tx(app_instance, Some(gas_budget_mist)).await {
+        // Restart all failed jobs by passing None for job_sequences
+        match restart_failed_jobs_with_sequences_tx(app_instance, None, Some(gas_budget_mist)).await {
             Ok(tx_digest) => {
                 debug!("Successfully restarted all failed jobs on blockchain, tx: {}", tx_digest);
                 Ok(tx_digest)
@@ -722,37 +724,4 @@ impl SilvanaSuiInterface {
         }
     }
 
-    /// Purge sequences below a threshold on the Sui blockchain
-    pub async fn purge_sequences_below(
-        &mut self,
-        app_instance: &str,
-        threshold_sequence: u64,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        info!(
-            "Attempting to purge sequences below {} on Sui blockchain",
-            threshold_sequence
-        );
-
-        match crate::transactions::purge_sequences_below_tx(
-            app_instance,
-            threshold_sequence,
-        )
-        .await
-        {
-            Ok(tx_digest) => {
-                info!(
-                    "Successfully purged sequences below {} on blockchain, tx: {}",
-                    threshold_sequence, tx_digest
-                );
-                Ok(tx_digest)
-            }
-            Err(e) => {
-                error!(
-                    "Failed to purge sequences below {} on blockchain: {}",
-                    threshold_sequence, e
-                );
-                Err(e.into())
-            }
-        }
-    }
 }

@@ -418,20 +418,6 @@ message CreateAppJobResponse {
   uint64 job_sequence = 4; // The sequence number of the created job
 }
 
-// Request message for purging sequences below threshold
-message PurgeSequencesBelowRequest {
-  string job_id = 1;
-  string session_id = 2;
-  uint64 threshold_sequence = 3;
-}
-
-// Response message for purging sequences
-message PurgeSequencesBelowResponse {
-  bool success = 1;
-  string message = 2;
-  string tx_hash = 3;
-}
-
 // Block message mirroring the Move Block struct
 message Block {
   string id = 1;                                  // UID from Move
@@ -536,7 +522,6 @@ service CoordinatorService {
   rpc UpdateBlockSettlementTxHash(UpdateBlockSettlementTxHashRequest) returns (UpdateBlockSettlementTxHashResponse);
   rpc UpdateBlockSettlementTxIncludedInBlock(UpdateBlockSettlementTxIncludedInBlockRequest) returns (UpdateBlockSettlementTxIncludedInBlockResponse);
   rpc CreateAppJob(CreateAppJobRequest) returns (CreateAppJobResponse);
-  rpc PurgeSequencesBelow(PurgeSequencesBelowRequest) returns (PurgeSequencesBelowResponse);
   rpc GetBlock(GetBlockRequest) returns (GetBlockResponse);
   // New BlockSettlement RPCs for multi-chain support
   rpc GetBlockSettlement(GetBlockSettlementRequest) returns (GetBlockSettlementResponse);
