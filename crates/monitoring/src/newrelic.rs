@@ -306,6 +306,10 @@ pub async fn send_log_to_newrelic(level: &str, message: &str) -> Result<()> {
     };
     record.set_severity_text(sev_text);
 
+    // Add required attributes for New Relic log queries
+    record.add_attribute("level", AnyValue::from(sev_text.to_string()));
+    record.add_attribute("message", AnyValue::from(message.to_string()));
+    
     // Add SUI address as an attribute to the log
     if let Some(config) = NR_CONFIG.get().and_then(|c| c.as_ref()) {
         record.add_attribute("sui_address", AnyValue::from(config.sui_address.clone()));
@@ -381,8 +385,14 @@ where
                 };
                 record.set_severity_text(sev_text);
 
-                // Add attributes
+                // Add required attributes for New Relic log queries
+                record.add_attribute("level", AnyValue::from(sev_text.to_string()));
+                record.add_attribute("message", AnyValue::from(message.clone()));
+                
+                // Add additional attributes
                 record.add_attribute("log.source", AnyValue::from(metadata.target().to_string()));
+                record.add_attribute("source", AnyValue::from(metadata.target().to_string()));
+                record.add_attribute("module", AnyValue::from(metadata.target().to_string()));
                 record.add_attribute(
                     "log.module",
                     AnyValue::from(metadata.module_path().unwrap_or("unknown").to_string()),
@@ -585,7 +595,7 @@ pub async fn test_newrelic_integration() -> Result<()> {
 
     info!("🧪 Testing New Relic OpenTelemetry integration...");
 
-    // Test sending logs directly
+    // Test sending logs directly with different severity levels
     send_log_to_newrelic("info", "New Relic integration test - info log").await?;
     send_log_to_newrelic("warn", "New Relic integration test - warning log").await?;
     send_log_to_newrelic("error", "New Relic integration test - error log").await?;
