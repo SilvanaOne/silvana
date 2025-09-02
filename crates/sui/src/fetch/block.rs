@@ -9,7 +9,7 @@ use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{
     BatchGetObjectsRequest, GetObjectRequest, ListDynamicFieldsRequest,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Block information fetched from blockchain, mirroring the Move struct
 #[derive(Debug, Clone)]
@@ -34,7 +34,9 @@ pub struct Block {
 
 impl fmt::Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Block {{ name: \"{}\", block_number: {}, start_sequence: {}, end_sequence: {}, time_since_last_block: {}, number_of_transactions: {}, state_data_availability: {:?}, proof_data_availability: {:?}, created_at: {}, state_calculated_at: {:?}, proved_at: {:?} }}",
+        write!(
+            f,
+            "Block {{ name: \"{}\", block_number: {}, start_sequence: {}, end_sequence: {}, time_since_last_block: {}, number_of_transactions: {}, state_data_availability: {:?}, proof_data_availability: {:?}, created_at: {}, state_calculated_at: {:?}, proved_at: {:?} }}",
             self.name,
             self.block_number,
             self.start_sequence,
@@ -411,15 +413,14 @@ async fn fetch_block_from_table(
     all_found_blocks.sort();
     all_found_blocks.dedup();
 
-    warn!(
-        "❌ Block {} not found in table {} after searching {} pages",
-        block_number, table_id, pages_searched
-    );
-    warn!(
-        "📊 All block numbers found in the blocks table: {:?}",
+    info!(
+        "lock {} not found in table {} after searching {} pages. 📊 Total unique blocks found: {}. 📊 All block numbers found in the blocks table: {:?}",
+        block_number,
+        table_id,
+        pages_searched,
+        all_found_blocks.len(),
         all_found_blocks
     );
-    warn!("📊 Total unique blocks found: {}", all_found_blocks.len());
 
     Ok(None)
 }
