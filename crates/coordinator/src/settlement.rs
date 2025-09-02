@@ -1,4 +1,4 @@
-use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info, fetch_blocks_range};
+use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use std::collections::HashMap;
 use anyhow::{anyhow, Result};
@@ -95,20 +95,31 @@ pub async fn check_settlement_opportunity(
     if proof_available {
         // Check if any chain needs settlement for this block
         for (_chain, settlement) in &app_instance.settlements {
-            if let Some(block_settlement) = settlement.block_settlements.get(&block_number) {
-                // Check if it needs settlement
-                if block_settlement.settlement_tx_hash.is_none() {
-                    debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
-                    return Ok(true);
+            // Fetch the BlockSettlement from the ObjectTable
+            match fetch_block_settlement(settlement, block_number).await {
+                Ok(Some(block_settlement)) => {
+                    // Check if it needs settlement
+                    if block_settlement.settlement_tx_hash.is_none() {
+                        debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
+                        return Ok(true);
+                    }
+                    if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
+                        debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
+                        return Ok(true);
+                    }
                 }
-                if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
-                    debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
-                    return Ok(true);
+                Ok(None) => {
+                    // No settlement record for this block
+                    if block_number > settlement.last_settled_block_number {
+                        // Block is after last settled - needs settlement
+                        debug!("Settlement opportunity found for block {}: no settlement record", block_number);
+                        return Ok(true);
+                    }
                 }
-            } else if block_number > settlement.last_settled_block_number {
-                // No settlement record for this block but it's after last settled - needs settlement
-                debug!("Settlement opportunity found for block {}: no settlement record", block_number);
-                return Ok(true);
+                Err(e) => {
+                    warn!("Failed to fetch block settlement for block {}: {}", block_number, e);
+                    // Continue checking other chains
+                }
             }
         }
     }
@@ -164,23 +175,34 @@ pub async fn check_settlement_opportunities_range(
                 // Check if any chain needs settlement for this block
                 let mut needs_settlement = false;
                 for (_chain, settlement) in &app_instance.settlements {
-                    if let Some(block_settlement) = settlement.block_settlements.get(&block_number) {
-                        // Check if it needs settlement
-                        if block_settlement.settlement_tx_hash.is_none() {
-                            debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
-                            needs_settlement = true;
-                            break;
+                    // Fetch the BlockSettlement from the ObjectTable
+                    match fetch_block_settlement(settlement, block_number).await {
+                        Ok(Some(block_settlement)) => {
+                            // Check if it needs settlement
+                            if block_settlement.settlement_tx_hash.is_none() {
+                                debug!("Settlement opportunity found for block {}: proof available but no settlement tx", block_number);
+                                needs_settlement = true;
+                                break;
+                            }
+                            if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
+                                debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
+                                needs_settlement = true;
+                                break;
+                            }
                         }
-                        if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
-                            debug!("Settlement opportunity found for block {}: settlement tx exists but not included", block_number);
-                            needs_settlement = true;
-                            break;
+                        Ok(None) => {
+                            // No settlement record for this block
+                            if block_number > settlement.last_settled_block_number {
+                                // Block is after last settled - needs settlement
+                                debug!("Settlement opportunity found for block {}: no settlement record", block_number);
+                                needs_settlement = true;
+                                break;
+                            }
                         }
-                    } else if block_number > settlement.last_settled_block_number {
-                        // No settlement record for this block but it's after last settled - needs settlement
-                        debug!("Settlement opportunity found for block {}: no settlement record", block_number);
-                        needs_settlement = true;
-                        break;
+                        Err(e) => {
+                            warn!("Failed to fetch block settlement for block {}: {}", block_number, e);
+                            // Continue checking other chains
+                        }
                     }
                 }
                 if needs_settlement {

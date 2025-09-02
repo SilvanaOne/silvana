@@ -262,8 +262,8 @@ async fn main() -> Result<()> {
                             println!("            settlement_job: None,");
                         }
                         println!(
-                            "            block_settlements: {} entries,",
-                            settlement.block_settlements.len()
+                            "            block_settlements_table_id: {:?},",
+                            settlement.block_settlements_table_id
                         );
                         println!("        }},");
                     }
@@ -435,7 +435,16 @@ async fn main() -> Result<()> {
                     // Print settlement information for all chains
                     println!("    block_settlements: {{");
                     for (chain, settlement) in &app_instance.settlements {
-                        if let Some(block_settlement) = settlement.block_settlements.get(&block) {
+                        // Fetch the BlockSettlement from the ObjectTable
+                        let block_settlement_opt = match sui::fetch::fetch_block_settlement(settlement, block).await {
+                            Ok(bs) => bs,
+                            Err(e) => {
+                                eprintln!("Error fetching block settlement for chain {}: {}", chain, e);
+                                None
+                            }
+                        };
+                        
+                        if let Some(block_settlement) = block_settlement_opt {
                             println!("        \"{}\": BlockSettlement {{", chain);
                             println!(
                                 "            block_number: {},",

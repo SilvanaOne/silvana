@@ -32,7 +32,7 @@ interface SettleParams {
 
 export async function settle(params: SettleParams): Promise<void> {
   console.log("🚀 Starting settlement process...");
-  
+
   // Time tracking for graceful shutdown
   const startTime = Date.now();
   const maxRunTimeMs = 600 * 1000; // 10 minutes max runtime
@@ -50,18 +50,22 @@ export async function settle(params: SettleParams): Promise<void> {
 
   // Get the admin address from metadata value (if present) or use the AppInstance admin field
   let settlementAdminAddress = metadataResponse.metadata.value;
-  
+
   // Use the required settlement chain
   const settlementChain = params.settlementChain;
   console.log(`🔗 Settling for chain: ${settlementChain}`);
-  
+
   // Verify the chain exists in settlements
   if (!metadataResponse.metadata.settlements?.[settlementChain]) {
-    throw new Error(`Settlement chain '${settlementChain}' not found in app instance settlements`);
+    throw new Error(
+      `Settlement chain '${settlementChain}' not found in app instance settlements`
+    );
   }
-  
+
   // Get the contract address for this chain
-  const contractAddress = metadataResponse.metadata.settlements[settlementChain].settlementAddress || params.contractAddress;
+  const contractAddress =
+    metadataResponse.metadata.settlements[settlementChain].settlementAddress ||
+    params.contractAddress;
 
   // Print AppInstance info
   console.log("📊 AppInstance Information:");
@@ -71,15 +75,23 @@ export async function settle(params: SettleParams): Promise<void> {
   console.log(`  - Settlement Admin: ${settlementAdminAddress ?? "none"}`);
   console.log(`  - Settlement Chain: ${settlementChain}`);
   console.log(`  - Contract Address: ${contractAddress ?? "none"}`);
-  console.log(`  - Available Chains: ${metadataResponse.metadata.settlements ? Object.keys(metadataResponse.metadata.settlements).join(", ") : "none"}`);
+  console.log(
+    `  - Available Chains: ${
+      metadataResponse.metadata.settlements
+        ? Object.keys(metadataResponse.metadata.settlements).join(", ")
+        : "none"
+    }`
+  );
   console.log(`  - Current Sequence: ${metadataResponse.metadata.sequence}`);
   console.log(`  - Current Block: ${metadataResponse.metadata.blockNumber}`);
   console.log(
     `  - Last Proved Block: ${metadataResponse.metadata.lastProvedBlockNumber}`
   );
-  
+
   // Get last settled block for this chain
-  const lastSettledBlockForChain = metadataResponse.metadata.settlements?.[settlementChain]?.lastSettledBlockNumber || 0n;
+  const lastSettledBlockForChain =
+    metadataResponse.metadata.settlements?.[settlementChain]
+      ?.lastSettledBlockNumber || 0n;
   console.log(
     `  - Last Settled Block (${settlementChain}): ${lastSettledBlockForChain}`
   );
@@ -133,25 +145,33 @@ export async function settle(params: SettleParams): Promise<void> {
 
   console.log("🔄 Started recording tx inclusion for blocks...");
 
-  for (
-    let i = lastSettledBlockForChain;
-    i <= lastSettledBlock;
-    i++
-  ) {
+  for (let i = lastSettledBlockForChain; i <= lastSettledBlock; i++) {
     if (i === 0n) {
       console.log("Skipping block 0");
       continue;
     }
-    
+
     // Get block settlement for this specific chain
     const blockSettlement = await getBlockSettlement(i, settlementChain);
-    if (!blockSettlement || !blockSettlement.success || !blockSettlement.blockSettlement) {
-      console.log(`No block settlement found for block ${i} on chain ${settlementChain}`);
-      continue;
+    if (
+      !blockSettlement ||
+      !blockSettlement.success ||
+      !blockSettlement.blockSettlement
+    ) {
+      console.error(
+        `No block settlement found for block ${i} on chain ${settlementChain}`
+      );
     }
 
-    if (blockSettlement.blockSettlement?.settlementTxIncludedInBlock === false) {
-      console.log(`Recording tx inclusion for block ${i} on chain ${settlementChain}`);
+    if (
+      !blockSettlement ||
+      !blockSettlement.success ||
+      !blockSettlement.blockSettlement ||
+      blockSettlement.blockSettlement?.settlementTxIncludedInBlock === false
+    ) {
+      console.log(
+        `Recording tx inclusion for block ${i} on chain ${settlementChain}`
+      );
       const updateResult = await updateBlockSettlementTxIncludedInBlock(
         i,
         BigInt(Date.now()),
@@ -165,7 +185,9 @@ export async function settle(params: SettleParams): Promise<void> {
           `Failed to update tx inclusion for block ${i} on ${settlementChain}: ${updateResult.message}`
         );
       }
-      console.log(`✅ Tx inclusion recorded for block ${i} on ${settlementChain}`);
+      console.log(
+        `✅ Tx inclusion recorded for block ${i} on ${settlementChain}`
+      );
     }
   }
 
@@ -239,7 +261,7 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log("Reached 400 second cutoff - not accepting new blocks");
       break;
     }
-    
+
     console.log(`\n📦 Processing block ${currentBlockNumber}...`);
 
     // Get both block and block settlement data
@@ -249,8 +271,11 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log("✅ Settlement complete - reached last block");
       break;
     }
-    
-    const blockSettlement = await getBlockSettlement(currentBlockNumber, settlementChain);
+
+    const blockSettlement = await getBlockSettlement(
+      currentBlockNumber,
+      settlementChain
+    );
     const settlementData = blockSettlement?.blockSettlement;
 
     // Format block data for logging (exclude commitments, convert times to UTC)
@@ -274,10 +299,11 @@ export async function settle(params: SettleParams): Promise<void> {
       stateCalculatedAt: formatTime(block.block.stateCalculatedAt),
       provedAt: formatTime(block.block.provedAt),
     });
-    
+
     console.log(`📦 Settlement data for ${settlementChain}:`, {
       settlementTxHash: settlementData?.settlementTxHash || "none",
-      settlementTxIncludedInBlock: settlementData?.settlementTxIncludedInBlock || false,
+      settlementTxIncludedInBlock:
+        settlementData?.settlementTxIncludedInBlock || false,
       sentToSettlementAt: formatTime(settlementData?.sentToSettlementAt),
       settledAt: formatTime(settlementData?.settledAt),
     });
@@ -338,23 +364,33 @@ export async function settle(params: SettleParams): Promise<void> {
     // Deserialize the proof with rejection on failure
     console.log("🔐 Deserializing and verifying block proof...");
     let blockProof: AddProgramProof;
-    
+
     try {
       blockProof = await AddProgramProof.fromJSON(
         JSON.parse(proofJson) as JsonProof
       );
     } catch (error) {
-      console.error(`Error deserializing block proof for block ${currentBlockNumber}:`, error);
-      
+      console.error(
+        `Error deserializing block proof for block ${currentBlockNumber}:`,
+        error
+      );
+
       // Get sequences from the block to reject
       const sequences: bigint[] = [];
       if (block.block?.startSequence && block.block?.endSequence) {
-        for (let seq = block.block.startSequence; seq <= block.block.endSequence; seq++) {
+        for (
+          let seq = block.block.startSequence;
+          seq <= block.block.endSequence;
+          seq++
+        ) {
           sequences.push(seq);
         }
       }
-      
-      const rejectProofResponse = await rejectProof(currentBlockNumber, sequences);
+
+      const rejectProofResponse = await rejectProof(
+        currentBlockNumber,
+        sequences
+      );
       if (!rejectProofResponse.success) {
         throw new Error(
           `Failed to reject proof for block ${currentBlockNumber}: ${rejectProofResponse.message}`
@@ -365,7 +401,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
     // Verify the proof with rejection on failure
     const { vkProgram } = await compile();
-    
+
     try {
       const isValid = await verify(blockProof, vkProgram);
       if (!isValid) {
@@ -374,17 +410,27 @@ export async function settle(params: SettleParams): Promise<void> {
         );
       }
     } catch (error) {
-      console.error(`Error verifying block proof for block ${currentBlockNumber}:`, error);
-      
+      console.error(
+        `Error verifying block proof for block ${currentBlockNumber}:`,
+        error
+      );
+
       // Get sequences from the block to reject
       const sequences: bigint[] = [];
       if (block.block?.startSequence && block.block?.endSequence) {
-        for (let seq = block.block.startSequence; seq <= block.block.endSequence; seq++) {
+        for (
+          let seq = block.block.startSequence;
+          seq <= block.block.endSequence;
+          seq++
+        ) {
           sequences.push(seq);
         }
       }
-      
-      const rejectProofResponse = await rejectProof(currentBlockNumber, sequences);
+
+      const rejectProofResponse = await rejectProof(
+        currentBlockNumber,
+        sequences
+      );
       if (!rejectProofResponse.success) {
         throw new Error(
           `Failed to reject proof for block ${currentBlockNumber}: ${rejectProofResponse.message}`
@@ -392,7 +438,7 @@ export async function settle(params: SettleParams): Promise<void> {
       }
       throw error;
     }
-    
+
     console.log("✅ Block proof verified successfully");
 
     // Update block state data availability on Sui (using the same serialized data that contains both proof and state)

@@ -1,6 +1,6 @@
 
 use anyhow::Result;
-use sui::fetch::{AppInstance, ProofCalculation, Settlement, fetch_blocks_range, fetch_proof_calculations_range};
+use sui::fetch::{AppInstance, ProofCalculation, Settlement, fetch_blocks_range, fetch_proof_calculations_range, fetch_block_settlement};
 use tracing::{debug, info, warn};
 use crate::settlement;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
@@ -18,24 +18,32 @@ fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) 
 }
 
 // Helper function to check if a block needs settlement on any chain
-fn block_needs_settlement(block_number: u64, settlements: &HashMap<String, Settlement>) -> Vec<String> {
+async fn block_needs_settlement(block_number: u64, settlements: &HashMap<String, Settlement>) -> Vec<String> {
     let mut chains_needing_settlement = Vec::new();
     
     for (chain, settlement) in settlements.iter() {
-        // Check if this block has settlement info
-        if let Some(block_settlement) = settlement.block_settlements.get(&block_number) {
-            // Check if it needs settlement
-            if block_settlement.settlement_tx_hash.is_none() {
-                chains_needing_settlement.push(chain.clone()); // No settlement tx yet
-            } else if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
-                chains_needing_settlement.push(chain.clone()); // Tx exists but not included
+        // Fetch the BlockSettlement from the ObjectTable
+        match fetch_block_settlement(settlement, block_number).await {
+            Ok(Some(block_settlement)) => {
+                // Check if it needs settlement
+                if block_settlement.settlement_tx_hash.is_none() {
+                    chains_needing_settlement.push(chain.clone()); // No settlement tx yet
+                } else if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
+                    chains_needing_settlement.push(chain.clone()); // Tx exists but not included
+                }
             }
-        } else if block_number <= settlement.last_settled_block_number {
-            // Block is already settled (before the last settled block)
-            continue;
-        } else {
-            // No settlement record for this block on this chain - needs settlement
-            chains_needing_settlement.push(chain.clone());
+            Ok(None) => {
+                // No settlement record for this block
+                if block_number > settlement.last_settled_block_number {
+                    // Block is after last settled block - needs settlement
+                    chains_needing_settlement.push(chain.clone());
+                }
+                // If block_number <= last_settled_block_number, it's already settled
+            }
+            Err(e) => {
+                warn!("Failed to fetch block settlement for block {} on chain {}: {}", block_number, chain, e);
+                // Continue checking other chains
+            }
         }
     }
     
@@ -150,7 +158,7 @@ pub async fn analyze_proof_completion(
               
               if proof_available {
                   // Check which chains need settlement for this block
-                  let chains_needing_settlement = block_needs_settlement(block_number, &app_instance.settlements);
+                  let chains_needing_settlement = block_needs_settlement(block_number, &app_instance.settlements).await;
                   
                   if !chains_needing_settlement.is_empty() {
                       for chain_name in chains_needing_settlement {

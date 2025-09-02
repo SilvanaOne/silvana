@@ -167,6 +167,7 @@ public fun create_app_instance(
         let settlement = settlement::create_settlement(
             chain,
             address,
+            ctx,
         );
         vec_map::insert(&mut settlements, chain, settlement);
         i = i + 1;
@@ -571,7 +572,7 @@ public fun update_block_settlement_tx_hash(
     block_number: u64,
     settlement_tx_hash: String,
     clock: &Clock,
-    _ctx: &mut TxContext,
+    ctx: &mut TxContext,
 ) {
     // only_admin(app_instance, ctx);
     let timestamp = clock.timestamp_ms();
@@ -597,6 +598,7 @@ public fun update_block_settlement_tx_hash(
         false,
         option::some(timestamp),
         option::none(),
+        ctx,
     );
 }
 
@@ -609,7 +611,7 @@ public fun update_block_settlement_tx_included_in_block(
     block_number: u64,
     settled_at: u64,
     clock: &Clock,
-    _ctx: &mut TxContext,
+    ctx: &mut TxContext,
 ) {
     // only_admin(app_instance, ctx);
     let block = borrow(
@@ -644,6 +646,7 @@ public fun update_block_settlement_tx_included_in_block(
         true,
         sent_to_settlement_at,
         option::some(settled_at),
+        ctx,
     );
 
     // Update last_settled_block_number by checking all blocks from

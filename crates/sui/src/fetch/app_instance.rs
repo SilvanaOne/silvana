@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
-use tracing::debug;
+use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use tracing::{debug, warn, error};
 use crate::error::SilvanaSuiInterfaceError;
 use crate::parse::{get_string, get_u64, get_bool, get_table_id, proto_to_json, parse_string_vecmap, parse_struct_vecmap};
 use crate::state::SharedSuiState;
@@ -24,7 +24,7 @@ pub struct Settlement {
     pub chain: String,
     pub last_settled_block_number: u64,
     pub settlement_address: Option<String>,
-    pub block_settlements: HashMap<u64, BlockSettlement>,
+    pub block_settlements_table_id: Option<String>, // ID of the ObjectTable for block_settlements
     pub settlement_job: Option<u64>, // ID of the active settlement job for this chain
 }
 
@@ -163,11 +163,14 @@ fn parse_settlements(struct_value: &prost_types::Struct) -> HashMap<String, Sett
                                 
                                 // Parse the Settlement struct (value)
                                 if let Some(prost_types::value::Kind::StructValue(settlement_struct)) = &value_field.kind {
+                                    // Extract the ObjectTable ID for block_settlements
+                                    let block_settlements_table_id = get_table_id(settlement_struct, "block_settlements").ok();
+                                    
                                     let settlement = Settlement {
                                         chain: get_string(settlement_struct, "chain").unwrap_or_default(),
                                         last_settled_block_number: get_u64(settlement_struct, "last_settled_block_number"),
                                         settlement_address: get_string(settlement_struct, "settlement_address"),
-                                        block_settlements: parse_block_settlements(settlement_struct),
+                                        block_settlements_table_id,
                                         settlement_job: settlement_struct.fields.get("settlement_job")
                                             .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
                                                 s.parse::<u64>().ok()
@@ -186,55 +189,6 @@ fn parse_settlements(struct_value: &prost_types::Struct) -> HashMap<String, Sett
     settlements
 }
 
-/// Parse block settlements from the protocol buffer struct
-fn parse_block_settlements(settlement_struct: &prost_types::Struct) -> HashMap<u64, BlockSettlement> {
-    let mut block_settlements = HashMap::new();
-    
-    if let Some(field) = settlement_struct.fields.get("block_settlements") {
-        if let Some(prost_types::value::Kind::StructValue(bs_struct)) = &field.kind {
-            // Parse the VecMap contents
-            if let Some(contents_field) = bs_struct.fields.get("contents") {
-                if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
-                    for item in &list.values {
-                        if let Some(prost_types::value::Kind::StructValue(entry)) = &item.kind {
-                            // Parse Entry struct (has key and value fields)
-                            if let (Some(key_field), Some(value_field)) = 
-                                (entry.fields.get("key"), entry.fields.get("value")) {
-                                
-                                // Parse the block number (key)
-                                let block_number = if let Some(prost_types::value::Kind::StringValue(s)) = &key_field.kind {
-                                    s.parse::<u64>().unwrap_or(0)
-                                } else {
-                                    continue;
-                                };
-                                
-                                // Parse the BlockSettlement struct (value)
-                                if let Some(prost_types::value::Kind::StructValue(bs)) = &value_field.kind {
-                                    let block_settlement = BlockSettlement {
-                                        block_number: get_u64(bs, "block_number"),
-                                        settlement_tx_hash: get_string(bs, "settlement_tx_hash"),
-                                        settlement_tx_included_in_block: get_bool(bs, "settlement_tx_included_in_block"),
-                                        sent_to_settlement_at: bs.fields.get("sent_to_settlement_at")
-                                            .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
-                                                s.parse::<u64>().ok()
-                                            } else { None }),
-                                        settled_at: bs.fields.get("settled_at")
-                                            .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
-                                                s.parse::<u64>().ok()
-                                            } else { None }),
-                                    };
-                                    block_settlements.insert(block_number, block_settlement);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    block_settlements
-}
 
 /// Parse AppInstance from protobuf struct representation
 pub fn parse_app_instance_from_struct(
@@ -368,5 +322,155 @@ pub async fn get_settlement_job_ids_for_instance(
     }
     
     Ok(settlement_jobs)
+}
+
+/// Fetch a BlockSettlement from a Settlement's ObjectTable
+pub async fn fetch_block_settlement(
+    settlement: &Settlement,
+    block_number: u64,
+) -> Result<Option<BlockSettlement>> {
+    // Check if we have the table ID
+    let table_id = match &settlement.block_settlements_table_id {
+        Some(id) => id,
+        None => {
+            error!("No block_settlements_table_id for chain {}", settlement.chain);
+            return Ok(None);
+        }
+    };
+
+    let mut client = SharedSuiState::get_instance().get_sui_client();
+    debug!(
+        "Fetching BlockSettlement for block {} from table {} (chain: {})",
+        block_number, table_id, settlement.chain
+    );
+
+    // Fetch the BlockSettlement from the ObjectTable
+    fetch_block_settlement_from_table(&mut client, table_id, block_number).await
+}
+
+/// Fetch a BlockSettlement from an ObjectTable by block number
+async fn fetch_block_settlement_from_table(
+    client: &mut sui_rpc::Client,
+    table_id: &str,
+    block_number: u64,
+) -> Result<Option<BlockSettlement>> {
+    // First, find the dynamic field for this block number
+    let mut page_token = None;
+    const PAGE_SIZE: u32 = 100;
+    let mut pages_searched = 0;
+    const MAX_PAGES: u32 = 200;
+
+    loop {
+        let request = ListDynamicFieldsRequest {
+            parent: Some(table_id.to_string()),
+            page_size: Some(PAGE_SIZE),
+            page_token: page_token.clone(),
+            read_mask: Some(prost_types::FieldMask {
+                paths: vec![
+                    "field_id".to_string(),
+                    "name_type".to_string(),
+                    "name_value".to_string(),
+                ],
+            }),
+        };
+
+        let fields_response = client
+            .live_data_client()
+            .list_dynamic_fields(request)
+            .await
+            .map_err(|e| {
+                SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                    "Failed to list dynamic fields for block settlements: {}",
+                    e
+                ))
+            })?;
+
+        let response = fields_response.into_inner();
+        pages_searched += 1;
+
+        // Look for our block number in the dynamic fields
+        for field in &response.dynamic_fields {
+            if let Some(name_value) = &field.name_value {
+                // Try to decode the key as u64 (block number)
+                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+                    if field_block_number == block_number {
+                        // Found our block! Now fetch the BlockSettlement object
+                        if let Some(field_id) = &field.field_id {
+                            debug!("Found BlockSettlement field for block {}: {}", block_number, field_id);
+                            return fetch_block_settlement_object(client, field_id).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if we should continue pagination
+        if let Some(next_token) = response.next_page_token {
+            if !next_token.is_empty() && pages_searched < MAX_PAGES {
+                page_token = Some(next_token);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    debug!("BlockSettlement for block {} not found after searching {} pages", block_number, pages_searched);
+    Ok(None)
+}
+
+/// Fetch the BlockSettlement object from Sui
+async fn fetch_block_settlement_object(
+    client: &mut sui_rpc::Client,
+    object_id: &str,
+) -> Result<Option<BlockSettlement>> {
+    let request = GetObjectRequest {
+        object_id: Some(object_id.to_string()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec!["json".to_string()],
+        }),
+    };
+
+    let response = client
+        .ledger_client()
+        .get_object(request)
+        .await
+        .map_err(|e| {
+            SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                "Failed to fetch BlockSettlement object {}: {}",
+                object_id, e
+            ))
+        })?;
+
+    let object_data = response.into_inner();
+    
+    if let Some(proto_object) = object_data.object {
+        if let Some(json_value) = &proto_object.json {
+            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                // Parse the BlockSettlement struct
+                let block_settlement = BlockSettlement {
+                    block_number: get_u64(struct_value, "block_number"),
+                    settlement_tx_hash: get_string(struct_value, "settlement_tx_hash"),
+                    settlement_tx_included_in_block: get_bool(struct_value, "settlement_tx_included_in_block"),
+                    sent_to_settlement_at: struct_value.fields.get("sent_to_settlement_at")
+                        .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
+                            s.parse::<u64>().ok()
+                        } else { None }),
+                    settled_at: struct_value.fields.get("settled_at")
+                        .and_then(|f| if let Some(prost_types::value::Kind::StringValue(s)) = &f.kind {
+                            s.parse::<u64>().ok()
+                        } else { None }),
+                };
+                
+                debug!("Successfully parsed BlockSettlement for block {}", block_settlement.block_number);
+                return Ok(Some(block_settlement));
+            }
+        }
+    }
+
+    warn!("Failed to parse BlockSettlement from object {}", object_id);
+    Ok(None)
 }
 

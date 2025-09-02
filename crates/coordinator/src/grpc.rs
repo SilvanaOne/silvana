@@ -3088,29 +3088,41 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(app_instance) => {
                 // Get the settlement for the specified chain
                 if let Some(settlement) = app_instance.settlements.get(&req.chain) {
-                    // Get the block settlement for the specified block
-                    if let Some(block_settlement) = settlement.block_settlements.get(&req.block_number) {
-                        let response_settlement = BlockSettlement {
-                            block_number: block_settlement.block_number,
-                            settlement_tx_hash: block_settlement.settlement_tx_hash.clone(),
-                            settlement_tx_included_in_block: block_settlement.settlement_tx_included_in_block,
-                            sent_to_settlement_at: block_settlement.sent_to_settlement_at,
-                            settled_at: block_settlement.settled_at,
-                        };
-                        
-                        Ok(Response::new(GetBlockSettlementResponse {
-                            success: true,
-                            message: format!("Block settlement {} for chain {} retrieved successfully", req.block_number, req.chain),
-                            block_settlement: Some(response_settlement),
-                            chain: req.chain.clone(),
-                        }))
-                    } else {
-                        Ok(Response::new(GetBlockSettlementResponse {
-                            success: false,
-                            message: format!("Block settlement {} not found for chain {}", req.block_number, req.chain),
-                            block_settlement: None,
-                            chain: req.chain.clone(),
-                        }))
+                    // Fetch the block settlement from the ObjectTable
+                    match sui::fetch::fetch_block_settlement(settlement, req.block_number).await {
+                        Ok(Some(block_settlement)) => {
+                            let response_settlement = BlockSettlement {
+                                block_number: block_settlement.block_number,
+                                settlement_tx_hash: block_settlement.settlement_tx_hash.clone(),
+                                settlement_tx_included_in_block: block_settlement.settlement_tx_included_in_block,
+                                sent_to_settlement_at: block_settlement.sent_to_settlement_at,
+                                settled_at: block_settlement.settled_at,
+                            };
+                            
+                            Ok(Response::new(GetBlockSettlementResponse {
+                                success: true,
+                                message: format!("Block settlement {} for chain {} retrieved successfully", req.block_number, req.chain),
+                                block_settlement: Some(response_settlement),
+                                chain: req.chain.clone(),
+                            }))
+                        }
+                        Ok(None) => {
+                            Ok(Response::new(GetBlockSettlementResponse {
+                                success: false,
+                                message: format!("Block settlement {} not found for chain {}", req.block_number, req.chain),
+                                block_settlement: None,
+                                chain: req.chain.clone(),
+                            }))
+                        }
+                        Err(e) => {
+                            error!("Failed to fetch block settlement: {}", e);
+                            Ok(Response::new(GetBlockSettlementResponse {
+                                success: false,
+                                message: format!("Failed to fetch block settlement: {}", e),
+                                block_settlement: None,
+                                chain: req.chain.clone(),
+                            }))
+                        }
                     }
                 } else {
                     Ok(Response::new(GetBlockSettlementResponse {

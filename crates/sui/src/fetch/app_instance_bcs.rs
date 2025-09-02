@@ -109,6 +109,7 @@ pub struct AppState {
 // Settlement-related structs
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct BlockSettlementBcs {
+    pub id: UID,
     pub block_number: u64,
     pub settlement_tx_hash: Option<MoveString>,
     pub settlement_tx_included_in_block: bool,
@@ -121,7 +122,7 @@ pub struct SettlementBcs {
     pub chain: MoveString,
     pub last_settled_block_number: u64,
     pub settlement_address: Option<MoveString>,
-    pub block_settlements: VecMap<u64, BlockSettlementBcs>,
+    pub block_settlements: ObjectTable<u64, BlockSettlementBcs>,
     pub settlement_job: Option<u64>,
 }
 
@@ -442,21 +443,6 @@ pub async fn fetch_app_instance_bcs(
     let methods_hm = methods_json(raw.methods);
 
     // Parse settlements
-    let parse_block_settlements_bcs = |block_settlements: VecMap<u64, BlockSettlementBcs>| -> HashMap<u64, super::BlockSettlement> {
-        let mut map = HashMap::new();
-        for entry in block_settlements.contents {
-            let block_settlement = super::BlockSettlement {
-                block_number: entry.value.block_number,
-                settlement_tx_hash: entry.value.settlement_tx_hash.as_ref().map(|s| to_utf8(s)),
-                settlement_tx_included_in_block: entry.value.settlement_tx_included_in_block,
-                sent_to_settlement_at: entry.value.sent_to_settlement_at,
-                settled_at: entry.value.settled_at,
-            };
-            map.insert(entry.key, block_settlement);
-        }
-        map
-    };
-
     let parse_settlements_bcs = |settlements: VecMap<MoveString, SettlementBcs>| -> HashMap<String, super::Settlement> {
         let mut map = HashMap::new();
         for entry in settlements.contents {
@@ -465,7 +451,8 @@ pub async fn fetch_app_instance_bcs(
                 chain: to_utf8(&entry.value.chain),
                 last_settled_block_number: entry.value.last_settled_block_number,
                 settlement_address: entry.value.settlement_address.as_ref().map(|s| to_utf8(s)),
-                block_settlements: parse_block_settlements_bcs(entry.value.block_settlements),
+                // block_settlements is now an ObjectTable, extract its ID
+                block_settlements_table_id: Some(format!("0x{}", hex::encode(&entry.value.block_settlements.id.id))),
                 settlement_job: entry.value.settlement_job,
             };
             map.insert(chain, settlement);
