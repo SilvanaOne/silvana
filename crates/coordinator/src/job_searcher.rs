@@ -482,7 +482,7 @@ impl JobSearcher {
             remaining_instances.len()
         );
 
-        match fetch_all_pending_jobs(&remaining_instances, false).await {
+        match fetch_all_pending_jobs(&remaining_instances, false, self.state.is_settle_only()).await {
             Ok(pending_jobs) => {
                 if pending_jobs.is_empty() {
                     // No pending jobs found

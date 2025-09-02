@@ -3,7 +3,7 @@ use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, 
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use std::collections::HashMap;
 use anyhow::{anyhow, Result};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, warn, error};
 
 // Helper function to get the minimum last settled block number across all chains
 fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
@@ -282,14 +282,21 @@ pub async fn fetch_pending_job_from_instances(
     developer: &str,
     agent: &str,
     agent_method: &str,
+    is_settle_only: bool,
 ) -> Result<Option<Job>> {
     // Get current time for checking next_scheduled_at
-    // Note: We add a PERIODIC_JOB_BUFFER_MS buffer when checking periodic jobs to account for
-    // clock drift between the coordinator and the blockchain
     let current_time_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
+    
+    // Buffer for periodic jobs to account for clock drift
+    // Settlement nodes get priority with less buffer time
+    let buffer_ms = if is_settle_only {
+        PERIODIC_JOB_BUFFER_MS // Settlement nodes: 10 seconds buffer
+    } else {
+        PERIODIC_JOB_BUFFER_MS * 2 // Regular nodes: 20 seconds buffer, giving settlement nodes priority
+    };
     
     // Collect all job IDs from all app_instances with their app_instance_method and next_scheduled_at
     let mut all_jobs: Vec<(u64, String, String, String, Option<u64>, bool)> = Vec::new(); 
@@ -338,7 +345,7 @@ pub async fn fetch_pending_job_from_instances(
         for (chain, settle_id) in &settlement_job_ids {
             if let Some(job) = jobs_map.get(&settle_id) {
                 // Check if it's ready to run (next_scheduled_at with buffer)
-                if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
+                if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + buffer_ms <= current_time_ms {
                     // All jobs have updated_at
                     ready_settlement_jobs.push((
                         *settle_id,
@@ -378,7 +385,7 @@ pub async fn fetch_pending_job_from_instances(
             }
             
             // Check if job is ready to run (next_scheduled_at with buffer)
-            if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
+            if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + buffer_ms <= current_time_ms {
                 all_jobs.push((
                     *job_sequence, 
                     app_instance_id.clone(), 
@@ -460,14 +467,21 @@ pub async fn fetch_pending_job_from_instances(
 pub async fn fetch_all_pending_jobs(
     app_instance_ids: &[String],
     only_check: bool,
+    is_settle_only: bool,
 ) -> Result<Vec<Job>> {
     // Get current time for checking next_scheduled_at
-    // Note: We add a PERIODIC_JOB_BUFFER_MS buffer when checking periodic jobs to account for
-    // clock drift between the coordinator and the blockchain
     let current_time_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
+    
+    // Buffer for periodic jobs to account for clock drift
+    // Settlement nodes get priority with less buffer time
+    let buffer_ms = if is_settle_only {
+        PERIODIC_JOB_BUFFER_MS // Settlement nodes: 10 seconds buffer
+    } else {
+        PERIODIC_JOB_BUFFER_MS * 2 // Regular nodes: 20 seconds buffer, giving settlement nodes priority
+    };
     
     let mut all_pending_jobs = Vec::new();
     
@@ -506,7 +520,7 @@ pub async fn fetch_all_pending_jobs(
                             Ok(Some(settle_job)) => {
                                 // Check if it's pending and ready to run
                                 if matches!(settle_job.status, sui::fetch::JobStatus::Pending) {
-                                    if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
+                                    if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() + buffer_ms <= current_time_ms {
                                         let sort_time = settle_job.updated_at;
                                         debug!("Found pending settlement job {} for chain {} (updated_at: {})", 
                                             settle_job.job_sequence, chain, sort_time);
@@ -572,7 +586,7 @@ pub async fn fetch_all_pending_jobs(
                                     continue;
                                 }
                                 if job.next_scheduled_at.is_some()
-                                    && job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS > current_time_ms
+                                    && job.next_scheduled_at.unwrap() + buffer_ms > current_time_ms
                                 {
                                     continue;
                                 }
@@ -626,7 +640,7 @@ pub async fn fetch_all_pending_jobs(
         result.extend(other_jobs);
         
         if !result.is_empty() {
-            info!("Found {} pending jobs total, highest priority is job_sequence: {}", 
+            debug!("Found {} pending jobs total, highest priority is job_sequence: {}", 
                    result.len(), result[0].job_sequence);
         }
         

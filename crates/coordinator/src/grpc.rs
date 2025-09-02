@@ -246,6 +246,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         &req.developer,
                         &req.agent,
                         &req.agent_method,
+                        self.state.is_settle_only(),
                     )
                     .await
                     {
