@@ -914,7 +914,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         
-        Commands::Faucet { address } => {
+        Commands::Faucet { address, amount } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
@@ -929,6 +929,18 @@ async fn main() -> Result<()> {
                 eprintln!("❌ Error: Faucet is not available for mainnet");
                 eprintln!("   Please acquire SUI tokens through an exchange or other means");
                 return Err(anyhow!("Faucet not available for mainnet").into());
+            }
+            
+            // Validate amount
+            if amount > 10.0 {
+                eprintln!("❌ Error: Amount exceeds maximum of 10 SUI");
+                eprintln!("   Maximum faucet amount is 10 SUI per request");
+                return Err(anyhow!("Amount exceeds maximum of 10 SUI").into());
+            }
+            
+            if amount <= 0.0 {
+                eprintln!("❌ Error: Amount must be greater than 0");
+                return Err(anyhow!("Invalid amount").into());
             }
             
             // Get the address to fund
@@ -946,7 +958,7 @@ async fn main() -> Result<()> {
                 return Err(anyhow!("Invalid address format").into());
             }
             
-            println!("💧 Requesting tokens from {} faucet...", chain);
+            println!("💧 Requesting {} SUI from {} faucet...", amount, chain);
             println!("📍 Target address: {}", target_address);
             
             // Get RPC URL based on chain using the resolver
@@ -962,7 +974,7 @@ async fn main() -> Result<()> {
             
             // Call the faucet
             println!("\n🚰 Calling faucet...");
-            let faucet_result = call_faucet(&chain, &target_address).await;
+            let faucet_result = call_faucet(&chain, &target_address, amount).await;
             
             match faucet_result {
                 Ok(tx_digest) => {
@@ -995,38 +1007,53 @@ async fn main() -> Result<()> {
 }
 
 /// Call the faucet for the specified chain and address
-async fn call_faucet(chain: &str, address: &str) -> anyhow::Result<String> {
+async fn call_faucet(chain: &str, address: &str, amount_sui: f64) -> anyhow::Result<String> {
     use serde_json::json;
     
-    let (faucet_url, amount) = match chain {
-        "devnet" => ("https://faucet.devnet.sui.io/v1/gas", None),
-        "testnet" => ("https://faucet.testnet.sui.io/v1/gas", Some(10_000_000_000u64)), // 10 SUI in MIST
+    // Get faucet URL from environment or use defaults
+    let faucet_url = match chain {
+        "devnet" => std::env::var("SUI_FAUCET_DEVNET")
+            .unwrap_or_else(|_| "https://faucet.devnet.sui.io/v2/gas".to_string()),
+        "testnet" => std::env::var("SUI_FAUCET_TESTNET")
+            .unwrap_or_else(|_| "https://sui-faucet.staketab.com".to_string()),
         _ => return Err(anyhow!("Invalid chain for faucet: {}", chain)),
     };
+    
+    // Check if using Silvana faucet (staketab.com)
+    let is_silvana_faucet = faucet_url.contains("staketab.com");
     
     // Create HTTP client
     let client = reqwest::Client::new();
     
-    // Build request body
-    let mut body = json!({
-        "FixedAmountRequest": {
-            "recipient": address
-        }
-    });
-    
-    // For testnet, specify the amount
-    if let Some(amount) = amount {
-        body = json!({
+    // Build request body based on faucet type
+    let body = if is_silvana_faucet {
+        // Silvana faucet format - amount is in MIST (1 SUI = 1,000,000,000 MIST)
+        let amount_mist = (amount_sui * 1_000_000_000.0) as u64;
+        json!({
+            "address": address,
+            "amount": amount_mist
+        })
+    } else {
+        // Official Sui faucet format - also in MIST
+        let amount_mist = (amount_sui * 1_000_000_000.0) as u64;
+        json!({
             "FixedAmountRequest": {
                 "recipient": address,
-                "amount": amount
+                "amount": amount_mist
             }
-        });
-    }
+        })
+    };
+    
+    // Determine endpoint
+    let endpoint = if is_silvana_faucet {
+        format!("{}/fund", faucet_url)
+    } else {
+        faucet_url.clone()
+    };
     
     // Send the request
     let response = client
-        .post(faucet_url)
+        .post(&endpoint)
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
@@ -1046,7 +1073,24 @@ async fn call_faucet(chain: &str, address: &str) -> anyhow::Result<String> {
         .await
         .map_err(|e| anyhow!("Failed to parse faucet response: {}", e))?;
     
-    // Extract transaction digest
+    // Handle Silvana faucet response format
+    if is_silvana_faucet {
+        if let Some(success) = result.get("success") {
+            if success.as_bool() == Some(true) {
+                if let Some(tx_hash) = result.get("transaction_hash") {
+                    if let Some(tx_str) = tx_hash.as_str() {
+                        return Ok(tx_str.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(error) = result.get("error") {
+            return Err(anyhow!("Silvana faucet error: {}", error));
+        }
+        return Err(anyhow!("Unexpected Silvana faucet response format: {}", result));
+    }
+    
+    // Handle official Sui faucet response format
     if let Some(transferred_gas_objects) = result.get("transferredGasObjects") {
         if let Some(first_obj) = transferred_gas_objects.as_array().and_then(|arr| arr.first()) {
             if let Some(transfer_tx) = first_obj.get("transferTxDigest") {

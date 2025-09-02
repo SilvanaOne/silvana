@@ -137,6 +137,10 @@ pub enum Commands {
         /// Address to fund (defaults to SUI_ADDRESS env var)
         #[arg(long, env = "SUI_ADDRESS")]
         address: Option<String>,
+        
+        /// Amount of SUI to request (e.g., 10.0 for 10 SUI)
+        #[arg(long, default_value = "10.0")]
+        amount: f64,
     },
 }
 
