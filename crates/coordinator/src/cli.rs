@@ -37,6 +37,10 @@ pub enum Commands {
         /// Filter to only process jobs from a specific app instance
         #[arg(long, env = "APP_INSTANCE_FILTER")]
         instance: Option<String>,
+        
+        /// Run as a dedicated settlement node (only process settlement jobs)
+        #[arg(long, env = "SETTLE_ONLY", default_value = "false")]
+        settle: bool,
     },
     
     /// Fetch and display an app instance by ID

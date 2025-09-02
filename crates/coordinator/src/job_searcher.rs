@@ -533,7 +533,29 @@ impl JobSearcher {
                     return Ok(None);
                 }
 
-                // Build job pool based on priority:
+                // Check if we're in settle_only mode
+                if self.state.is_settle_only() {
+                    // In settle_only mode, only process settlement jobs
+                    let settlement_jobs: Vec<Job> = viable_jobs
+                        .iter()
+                        .filter(|job| job.app_instance_method == "settle")
+                        .cloned()
+                        .collect();
+
+                    if !settlement_jobs.is_empty() {
+                        let job = settlement_jobs.into_iter().next().unwrap();
+                        debug!(
+                            "Selected settlement job {} from app_instance {} (settle_only mode)",
+                            job.job_sequence, job.app_instance
+                        );
+                        return Ok(Some(job));
+                    } else {
+                        debug!("No settlement jobs available (settle_only mode)");
+                        return Ok(None);
+                    }
+                }
+
+                // Normal mode: Build job pool based on priority
                 // 1. Settlement jobs (highest priority - always picked if available)
                 // 2. Merge jobs (collect all, up to pool size)
                 // 3. Other jobs (fill remaining slots)

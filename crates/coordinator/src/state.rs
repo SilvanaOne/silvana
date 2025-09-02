@@ -28,6 +28,7 @@ pub struct SharedState {
     shutdown_flag: Arc<AtomicBool>, // Global shutdown flag for graceful shutdown
     force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
     app_instance_filter: Arc<RwLock<Option<String>>>, // Optional filter to only process jobs from a specific app instance
+    settle_only: Arc<AtomicBool>, // Flag to run as a dedicated settlement node
 }
 
 impl SharedState {
@@ -57,6 +58,7 @@ impl SharedState {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             force_shutdown_flag: Arc::new(AtomicBool::new(false)),
             app_instance_filter: Arc::new(RwLock::new(None)),
+            settle_only: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -298,5 +300,18 @@ impl SharedState {
     pub async fn get_app_instance_filter(&self) -> Option<String> {
         let lock = self.app_instance_filter.read().await;
         lock.clone()
+    }
+    
+    /// Set the settle_only flag
+    pub fn set_settle_only(&self, settle_only: bool) {
+        if settle_only {
+            info!("Running as dedicated settlement node - will only process settlement jobs");
+        }
+        self.settle_only.store(settle_only, Ordering::Release);
+    }
+    
+    /// Check if running in settle_only mode
+    pub fn is_settle_only(&self) -> bool {
+        self.settle_only.load(Ordering::Acquire)
     }
 }
