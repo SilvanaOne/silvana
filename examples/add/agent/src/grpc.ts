@@ -27,7 +27,6 @@ import {
   UpdateBlockSettlementTxHashRequestSchema,
   UpdateBlockSettlementTxIncludedInBlockRequestSchema,
   CreateAppJobRequestSchema,
-  PurgeSequencesBelowRequestSchema,
   RejectProofRequestSchema,
   type GetJobResponse,
   type CompleteJobResponse,
@@ -57,7 +56,6 @@ import {
   type UpdateBlockSettlementTxHashResponse,
   type UpdateBlockSettlementTxIncludedInBlockResponse,
   type CreateAppJobResponse,
-  type PurgeSequencesBelowResponse,
   type RejectProofResponse,
 } from "./proto/silvana/coordinator/v1/coordinator_pb.js";
 import { create } from "@bufbuild/protobuf";
@@ -258,7 +256,7 @@ export async function terminateJob(): Promise<TerminateJobResponse> {
     sessionId,
     jobId,
   });
-  
+
   jobId = null;
 
   return await client.terminateJob(request);
@@ -656,31 +654,9 @@ export async function createAppJob(
 }
 
 /**
- * Purges sequences below a threshold
- */
-export async function purgeSequencesBelow(
-  thresholdSequence: bigint
-): Promise<PurgeSequencesBelowResponse> {
-  if (!jobId) {
-    throw new Error("Call getJob() first");
-  }
-  const { client, sessionId } = getCoordinatorClient();
-
-  const request = create(PurgeSequencesBelowRequestSchema, {
-    sessionId,
-    jobId,
-    thresholdSequence,
-  });
-
-  return await client.purgeSequencesBelow(request);
-}
-
-/**
  * Gets a block by block number
  */
-export async function getBlock(
-  blockNumber: bigint
-): Promise<GetBlockResponse> {
+export async function getBlock(blockNumber: bigint): Promise<GetBlockResponse> {
   if (!jobId) {
     throw new Error("Call getJob() first");
   }
@@ -763,7 +739,8 @@ export async function updateBlockSettlement(
     blockNumber,
     chain,
     settlementTxHash: settlementData.settlementTxHash,
-    settlementTxIncludedInBlock: settlementData.settlementTxIncludedInBlock ?? false,
+    settlementTxIncludedInBlock:
+      settlementData.settlementTxIncludedInBlock ?? false,
     sentToSettlementAt: settlementData.sentToSettlementAt,
     settledAt: settlementData.settledAt,
   });
@@ -772,7 +749,7 @@ export async function updateBlockSettlement(
 }
 
 // Re-export types for users to access
-export type { 
+export type {
   Block,
   BlockSettlement,
   Metadata,
@@ -781,5 +758,5 @@ export type {
   GetBlockResponse,
   GetBlockSettlementResponse,
   UpdateBlockSettlementResponse,
-  RejectProofResponse 
+  RejectProofResponse,
 };
