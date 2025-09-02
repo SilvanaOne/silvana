@@ -770,6 +770,28 @@ async fn run_docker_container_task(
         }
     };
 
+    // Start the job on Sui blockchain before processing
+    debug!(
+        "🔗 Preparing to start job {} on Sui blockchain",
+        job.job_sequence
+    );
+
+    // Check if this job is already being tracked by this coordinator
+    // This prevents duplicate starts when the blockchain state is delayed
+    // Important: Do this check BEFORE setting up tracking to avoid orphaned entries
+    if state
+        .get_agent_job_db()
+        .is_job_tracked(&job.app_instance, job.job_sequence)
+        .await
+    {
+        debug!(
+            "Job {} is already being tracked by this coordinator - skipping duplicate start",
+            job.job_sequence
+        );
+        // Don't set up any tracking since we're not processing this job
+        return;
+    }
+
     // Track container as loading in docker state
     docker_manager
         .track_container_loading(
@@ -794,31 +816,6 @@ async fn run_docker_container_task(
         "🔄 Preparing Docker container: {} loading, {} running",
         loading_count, running_count
     );
-
-    // Start the job on Sui blockchain before processing
-    debug!(
-        "🔗 Preparing to start job {} on Sui blockchain",
-        job.job_sequence
-    );
-
-    // Check if this job is already being tracked by this coordinator
-    // This prevents duplicate starts when the blockchain state is delayed
-    // Important: Do this check BEFORE any delay to avoid race conditions
-    if state
-        .get_agent_job_db()
-        .is_job_tracked(&job.app_instance, job.job_sequence)
-        .await
-    {
-        debug!(
-            "Job {} is already being tracked by this coordinator - skipping duplicate start",
-            job.job_sequence
-        );
-        // The job is already in progress with a different session, just clean up this attempt's tracking
-        docker_manager
-            .remove_container_tracking(&docker_session.session_id)
-            .await;
-        return;
-    }
 
     debug!(
         "Job {} not tracked locally, adding random delay before start",
