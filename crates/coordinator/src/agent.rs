@@ -332,6 +332,7 @@ impl AgentJobDatabase {
 
     /// Check if a job with the given app_instance and job_sequence is already being tracked
     /// This includes both ready and pending jobs
+    #[allow(dead_code)]
     pub async fn is_job_tracked(&self, app_instance: &str, job_sequence: u64) -> bool {
         // Check ready jobs
         {

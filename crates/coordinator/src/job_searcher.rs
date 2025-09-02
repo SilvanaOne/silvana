@@ -1,7 +1,8 @@
 use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
-use crate::failed_jobs_cache::FailedJobsCache;
 use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
+use crate::job_lock::{JobLockGuard, get_job_lock_manager};
+use crate::jobs_cache::JobsCache;
 use crate::metrics::CoordinatorMetrics;
 use crate::session_id::generate_docker_session;
 use crate::settlement::{can_remove_app_instance, fetch_all_pending_jobs};
@@ -113,7 +114,7 @@ pub struct JobSearcher {
     container_timeout_secs: u64,
     searcher_state: Arc<RwLock<SearcherState>>,
     secrets_client: Option<SecretsClient>,
-    failed_jobs_cache: FailedJobsCache,
+    jobs_cache: JobsCache,
     current_job_info: Arc<RwLock<Option<(String, Job)>>>, // (container_id, job)
     metrics: Option<Arc<CoordinatorMetrics>>,
 }
@@ -129,7 +130,7 @@ impl JobSearcher {
             container_timeout_secs,
             searcher_state: Arc::new(RwLock::new(SearcherState::Searching)),
             secrets_client: None,
-            failed_jobs_cache: FailedJobsCache::new(),
+            jobs_cache: JobsCache::new(),
             current_job_info: Arc::new(RwLock::new(None)),
             metrics: None,
         })
@@ -165,7 +166,7 @@ impl JobSearcher {
                     break;
                 }
 
-                sleep(Duration::from_millis(100)).await;
+                sleep(Duration::from_millis(1000)).await;
                 let current_has_jobs = monitor_state.has_pending_jobs_available();
                 if current_has_jobs != last_has_jobs {
                     debug!(
@@ -286,7 +287,7 @@ impl JobSearcher {
                     }
 
                     // Periodically clean up expired entries from the failed jobs cache
-                    self.failed_jobs_cache.cleanup_expired().await;
+                    self.jobs_cache.cleanup_expired().await;
 
                     // Check for pending jobs and clean up app_instances without jobs
                     // This already filters out jobs in the failed cache
@@ -326,7 +327,7 @@ impl JobSearcher {
                                         job.job_sequence, e
                                     );
                                     // Add to failed cache to avoid retrying immediately
-                                    self.failed_jobs_cache
+                                    self.jobs_cache
                                         .add_failed_job(job.app_instance.clone(), job.job_sequence)
                                         .await;
                                     continue;
@@ -374,23 +375,41 @@ impl JobSearcher {
                                 job.app_instance
                             );
 
+                            // Try to acquire a lock for this job
+                            let lock_manager = get_job_lock_manager();
+                            let job_lock = match lock_manager
+                                .try_lock_job(&job.app_instance, job.job_sequence)
+                            {
+                                Some(lock) => lock,
+                                None => {
+                                    debug!(
+                                        "Failed to acquire lock for job {} from app_instance {} - already locked",
+                                        job.job_sequence, job.app_instance
+                                    );
+                                    // Another thread got the lock first, skip this job
+                                    continue;
+                                }
+                            };
+
                             // Clone necessary data for the spawned task
                             let state_clone = self.state.clone();
                             let docker_manager_clone = self.docker_manager.clone();
-                            let failed_jobs_cache_clone = self.failed_jobs_cache.clone();
+                            let jobs_cache_clone = self.jobs_cache.clone();
                             let container_timeout_secs = self.container_timeout_secs;
                             let secrets_client_clone = self.secrets_client.clone();
 
                             // Spawn a task to run the Docker container in parallel
+                            // The job_lock will be held until the task completes or the lock is dropped
                             tokio::spawn(async move {
                                 run_docker_container_task(
                                     job,
                                     agent_method,
                                     state_clone,
                                     docker_manager_clone,
-                                    failed_jobs_cache_clone,
+                                    jobs_cache_clone,
                                     container_timeout_secs,
                                     secrets_client_clone,
+                                    job_lock,
                                 )
                                 .await;
                             });
@@ -478,21 +497,33 @@ impl JobSearcher {
 
                 let total_jobs = pending_jobs.len();
 
-                // Filter out jobs that are in the failed cache
+                // Filter out jobs that are locked or in failed cache
+                let lock_manager = get_job_lock_manager();
                 let mut viable_jobs = Vec::new();
                 for job in pending_jobs {
-                    if !self
-                        .failed_jobs_cache
+                    // Skip if job is currently locked (being processed)
+                    if lock_manager.is_locked(&job.app_instance, job.job_sequence) {
+                        debug!(
+                            "Skipping job {} from app_instance {} (currently locked)",
+                            job.job_sequence, job.app_instance
+                        );
+                        continue;
+                    }
+
+                    // Skip if job recently failed
+                    if self
+                        .jobs_cache
                         .is_recently_failed(&job.app_instance, job.job_sequence)
                         .await
                     {
-                        viable_jobs.push(job);
-                    } else {
                         debug!(
-                            "Skipping job {} from app_instance {} (in failed cache)",
+                            "Skipping job {} from app_instance {} (recently failed)",
                             job.job_sequence, job.app_instance
                         );
+                        continue;
                     }
+
+                    viable_jobs.push(job);
                 }
 
                 if viable_jobs.is_empty() {
@@ -742,14 +773,16 @@ async fn retrieve_secrets_for_job(
 }
 
 /// Standalone function to run a Docker container for a job (for parallel execution)
+/// The job_lock is held for the duration of this task to prevent duplicate processing
 async fn run_docker_container_task(
     job: Job,
     agent_method: AgentMethod,
     state: SharedState,
     docker_manager: Arc<DockerManager>,
-    failed_jobs_cache: FailedJobsCache,
+    jobs_cache: JobsCache,
     container_timeout_secs: u64,
     mut secrets_client: Option<SecretsClient>,
+    _job_lock: JobLockGuard, // Hold the lock for the duration of the task
 ) {
     let job_start = Instant::now();
 
@@ -776,21 +809,8 @@ async fn run_docker_container_task(
         job.job_sequence
     );
 
-    // Check if this job is already being tracked by this coordinator
-    // This prevents duplicate starts when the blockchain state is delayed
-    // Important: Do this check BEFORE setting up tracking to avoid orphaned entries
-    if state
-        .get_agent_job_db()
-        .is_job_tracked(&job.app_instance, job.job_sequence)
-        .await
-    {
-        debug!(
-            "Job {} is already being tracked by this coordinator - skipping duplicate start",
-            job.job_sequence
-        );
-        // Don't set up any tracking since we're not processing this job
-        return;
-    }
+    // We already have the lock for this job, so no other task can process it
+    // The lock will be automatically released when this function returns (via Drop trait)
 
     // Track container as loading in docker state
     docker_manager
@@ -915,7 +935,7 @@ async fn run_docker_container_task(
                 );
 
                 // Add to failed jobs cache so we don't try again for 5 minutes
-                failed_jobs_cache
+                jobs_cache
                     .add_failed_job(job.app_instance.clone(), job.job_sequence)
                     .await;
 
@@ -936,7 +956,7 @@ async fn run_docker_container_task(
 
             // For other blockchain errors, add to failed cache to avoid immediate retry
             // This could be due to gas issues, network problems, etc.
-            failed_jobs_cache
+            jobs_cache
                 .add_failed_job(job.app_instance.clone(), job.job_sequence)
                 .await;
             state.clear_current_agent(&docker_session.session_id).await;
