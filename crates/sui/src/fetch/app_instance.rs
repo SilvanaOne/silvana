@@ -150,9 +150,9 @@ fn parse_settlements(struct_value: &prost_types::Struct) -> HashMap<String, Sett
                 if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
                     for item in &list.values {
                         if let Some(prost_types::value::Kind::StructValue(entry)) = &item.kind {
-                            // Parse Entry struct (has k and v fields)
+                            // Parse Entry struct (has key and value fields)
                             if let (Some(key_field), Some(value_field)) = 
-                                (entry.fields.get("k"), entry.fields.get("v")) {
+                                (entry.fields.get("key"), entry.fields.get("value")) {
                                 
                                 // Parse the chain string (key)
                                 let chain = if let Some(prost_types::value::Kind::StringValue(s)) = &key_field.kind {
@@ -197,9 +197,9 @@ fn parse_block_settlements(settlement_struct: &prost_types::Struct) -> HashMap<u
                 if let Some(prost_types::value::Kind::ListValue(list)) = &contents_field.kind {
                     for item in &list.values {
                         if let Some(prost_types::value::Kind::StructValue(entry)) = &item.kind {
-                            // Parse Entry struct (has k and v fields)
+                            // Parse Entry struct (has key and value fields)
                             if let (Some(key_field), Some(value_field)) = 
-                                (entry.fields.get("k"), entry.fields.get("v")) {
+                                (entry.fields.get("key"), entry.fields.get("value")) {
                                 
                                 // Parse the block number (key)
                                 let block_number = if let Some(prost_types::value::Kind::StringValue(s)) = &key_field.kind {
