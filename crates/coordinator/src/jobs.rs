@@ -149,6 +149,12 @@ impl JobsTracker {
     /// Only removes app_instances that haven't been updated during the reconciliation
     /// Returns true if there are still pending jobs after reconciliation
     pub async fn reconcile_with_chain(&self) -> Result<bool> {
+        // Add random delay between 0 and 5 minutes to prevent all coordinators from reconciling at the same time
+        use rand::Rng;
+        let delay_seconds = rand::thread_rng().gen_range(0..=300);
+        info!("⏱️ Waiting {} seconds before starting reconciliation to prevent coordinator synchronization", delay_seconds);
+        tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds)).await;
+        
         let initial_count = self.app_instances_count().await;
         info!("🔄 Starting reconciliation with on-chain state ({} app_instances tracked)", initial_count);
         
