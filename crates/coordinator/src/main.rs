@@ -27,7 +27,7 @@ use dotenvy::dotenv;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
-use crate::cli::{BalanceCommands, Cli, Commands, TransactionType};
+use crate::cli::{Cli, Commands, TransactionType};
 use crate::error::Result;
 use anyhow::anyhow;
 
@@ -834,7 +834,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        Commands::Balance { rpc_url, command } => {
+        Commands::Balance { rpc_url } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
@@ -845,95 +845,38 @@ async fn main() -> Result<()> {
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
-            match command {
-                BalanceCommands::Check => {
-                    // Use the encapsulated balance function from sui crate
+            // Simply show the balance
+            sui::print_balance_info().await?;
+
+            Ok(())
+        }
+        
+        Commands::Split { rpc_url } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
+            sui::SharedSuiState::initialize(&rpc_url).await?;
+
+            println!("Checking gas coin pool and splitting if needed...");
+
+            match sui::coin_management::ensure_gas_coin_pool().await {
+                Ok(()) => {
+                    println!("✅ Gas coin pool check complete");
+
+                    // Show updated balance info
+                    println!("\nUpdated balance:");
                     sui::print_balance_info().await?;
                 }
-
-                BalanceCommands::Faucet {
-                    min_balance,
-                    network,
-                    amount,
-                } => {
-                    // Parse network
-                    let faucet_network = match network.to_lowercase().as_str() {
-                        "testnet" => sui::FaucetNetwork::Testnet,
-                        "devnet" => sui::FaucetNetwork::Devnet,
-                        _ => {
-                            error!("Invalid network: {}. Use 'devnet' or 'testnet'", network);
-                            return Err(anyhow::anyhow!(
-                                "Invalid network: {}. Use 'devnet' or 'testnet'",
-                                network
-                            )
-                            .into());
-                        }
-                    };
-
-                    // Set default min_balance based on network
-                    let min_bal = min_balance.unwrap_or(
-                        if matches!(faucet_network, sui::FaucetNetwork::Testnet) {
-                            10.0
-                        } else {
-                            5.0
-                        },
+                Err(e) => {
+                    error!("Failed to manage gas coin pool: {}", e);
+                    return Err(
+                        anyhow::anyhow!("Failed to manage gas coin pool: {}", e).into()
                     );
-
-                    println!(
-                        "Checking balance and requesting from {:?} faucet if needed (minimum: {} SUI)...",
-                        faucet_network, min_bal
-                    );
-
-                    match sui::faucet::ensure_sufficient_balance_network(
-                        min_bal,
-                        faucet_network,
-                        amount,
-                    )
-                    .await
-                    {
-                        Ok(requested) => {
-                            if requested {
-                                println!(
-                                    "✅ Balance was below {} SUI, requested tokens from {:?} faucet",
-                                    min_bal, faucet_network
-                                );
-                                println!("Tokens should arrive within 1 minute");
-                            } else {
-                                println!(
-                                    "✅ Balance is sufficient (above {} SUI), no faucet request needed",
-                                    min_bal
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to check/request faucet tokens: {}", e);
-                            return Err(anyhow::anyhow!(
-                                "Failed to check/request faucet tokens: {}",
-                                e
-                            )
-                            .into());
-                        }
-                    }
-                }
-
-                BalanceCommands::Split => {
-                    println!("Checking gas coin pool and splitting if needed...");
-
-                    match sui::coin_management::ensure_gas_coin_pool().await {
-                        Ok(()) => {
-                            println!("✅ Gas coin pool check complete");
-
-                            // Show updated balance info
-                            println!("\nUpdated balance:");
-                            sui::print_balance_info().await?;
-                        }
-                        Err(e) => {
-                            error!("Failed to manage gas coin pool: {}", e);
-                            return Err(
-                                anyhow::anyhow!("Failed to manage gas coin pool: {}", e).into()
-                            );
-                        }
-                    }
                 }
             }
 

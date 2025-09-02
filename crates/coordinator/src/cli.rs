@@ -110,13 +110,16 @@ pub enum Commands {
         tx_type: TransactionType,
     },
     
-    /// Check balance and manage faucet
+    /// Check balance
     Balance {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
-        #[command(subcommand)]
-        command: BalanceCommands,
+    },
+    
+    /// Split coins to maintain gas coin pool
+    Split {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: Option<String>,
     },
     
     /// Display network information
@@ -172,26 +175,3 @@ pub enum TransactionType {
     },
 }
 
-#[derive(Subcommand)]
-pub enum BalanceCommands {
-    /// Check the current balance
-    Check,
-    
-    /// Request tokens from faucet if balance is low
-    Faucet {
-        /// Minimum balance in SUI to maintain (default: 5.0 for devnet, 10.0 for testnet)
-        #[arg(long)]
-        min_balance: Option<f64>,
-        
-        /// Network to use (devnet or testnet)
-        #[arg(long, default_value = "devnet")]
-        network: String,
-        
-        /// Amount to request in SUI (only for testnet, max 10)
-        #[arg(long)]
-        amount: Option<f64>,
-    },
-    
-    /// Split coins to maintain gas coin pool
-    Split,
-}
