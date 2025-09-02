@@ -46,23 +46,18 @@ async fn main() -> Result<()> {
             log_level: _,
             grpc_socket_path,
         } => {
-            // Initialize logging (from monitoring crate - same as RPC)
-            monitoring::init_logging().await?;
-            info!("✅ Logging initialized");
-            
-            // Initialize New Relic for warn/error export
+            // Initialize logging with New Relic tracing layer
+            monitoring::init_logging_with_newrelic().await?;
+            info!("✅ Logging initialized with New Relic support");
+
+            // Initialize New Relic OpenTelemetry exporters
             if let Err(e) = monitoring::newrelic::init_newrelic().await {
-                warn!("⚠️  Failed to initialize New Relic: {}", e);
-                warn!("   Continuing without New Relic exports");
+                warn!("⚠️  Failed to initialize New Relic exporters: {}", e);
+                warn!("   Continuing without New Relic metrics/traces");
             } else {
-                info!("✅ New Relic initialized");
-                
-                // Test the integration
-                if let Err(e) = monitoring::newrelic::test_newrelic_integration().await {
-                    warn!("⚠️  New Relic integration test failed: {}", e);
-                }
+                info!("✅ New Relic exporters initialized");
             }
-            
+
             // Initialize monitoring system
             monitoring::init_monitoring()?;
 

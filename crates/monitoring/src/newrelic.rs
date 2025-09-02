@@ -8,8 +8,10 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::logs::LoggerProvider;
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, Severity};
-use opentelemetry::trace::{Tracer, Span};
-use opentelemetry_otlp::{LogExporter, MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry::trace::{Span, Tracer};
+use opentelemetry_otlp::{
+    LogExporter, MetricExporter, SpanExporter, WithExportConfig, WithHttpConfig,
+};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::{
     Resource,
@@ -18,9 +20,7 @@ use opentelemetry_sdk::{
 use std::env;
 use std::sync::OnceLock;
 use std::time::Duration;
-use tracing::{debug, info, warn};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, Layer};
 
 /// Configuration for New Relic OpenTelemetry integration
@@ -43,8 +43,7 @@ impl NewRelicConfig {
             .ok_or_else(|| anyhow!("OTEL_EXPORTER_OTLP_HEADERS must start with 'api-key='"))?
             .to_string();
 
-        let sui_address = env::var("SUI_ADDRESS")
-            .unwrap_or_else(|_| "unknown".to_string());
+        let sui_address = env::var("SUI_ADDRESS").unwrap_or_else(|_| "unknown".to_string());
 
         Ok(Self {
             endpoint,
@@ -95,7 +94,7 @@ pub async fn init_newrelic() -> Result<()> {
 
         // Initialize logs exporter
         init_logs_exporter(&config).await?;
-        
+
         // Initialize traces exporter for APM
         init_traces_exporter(&config).await?;
 
@@ -110,7 +109,7 @@ async fn init_metrics_exporter(config: &NewRelicConfig) -> Result<()> {
     // Build the OTLP HTTP metric exporter
     let mut headers = std::collections::HashMap::new();
     headers.insert("api-key".to_string(), config.api_key.clone());
-    
+
     let metric_exporter = MetricExporter::builder()
         .with_http()
         .with_endpoint(format!("{}/v1/metrics", config.endpoint))
@@ -135,13 +134,19 @@ async fn init_metrics_exporter(config: &NewRelicConfig) -> Result<()> {
             KeyValue::new("service.instance.id", config.sui_address.clone()),
             // Additional service attributes
             KeyValue::new("service.namespace", "silvana"),
-            KeyValue::new("deployment.environment", env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string())),
+            KeyValue::new(
+                "deployment.environment",
+                env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()),
+            ),
             // Host attributes
             KeyValue::new("host.name", config.sui_address.clone()),
             KeyValue::new("host.type", "coordinator"),
             // Custom attributes
             KeyValue::new("sui.address", config.sui_address.clone()),
-            KeyValue::new("sui.network", env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string())),
+            KeyValue::new(
+                "sui.network",
+                env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string()),
+            ),
         ])
         .build();
 
@@ -163,7 +168,7 @@ async fn init_traces_exporter(config: &NewRelicConfig) -> Result<()> {
     // Build the OTLP HTTP trace exporter
     let mut headers = std::collections::HashMap::new();
     headers.insert("api-key".to_string(), config.api_key.clone());
-    
+
     let trace_exporter = SpanExporter::builder()
         .with_http()
         .with_endpoint(format!("{}/v1/traces", config.endpoint))
@@ -182,13 +187,19 @@ async fn init_traces_exporter(config: &NewRelicConfig) -> Result<()> {
             KeyValue::new("service.instance.id", config.sui_address.clone()),
             // Additional service attributes
             KeyValue::new("service.namespace", "silvana"),
-            KeyValue::new("deployment.environment", env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string())),
+            KeyValue::new(
+                "deployment.environment",
+                env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()),
+            ),
             // Host attributes
             KeyValue::new("host.name", config.sui_address.clone()),
             KeyValue::new("host.type", "coordinator"),
             // Custom attributes
             KeyValue::new("sui.address", config.sui_address.clone()),
-            KeyValue::new("sui.network", env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string())),
+            KeyValue::new(
+                "sui.network",
+                env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string()),
+            ),
         ])
         .build();
 
@@ -211,7 +222,7 @@ async fn init_logs_exporter(config: &NewRelicConfig) -> Result<()> {
     // Build OTLP HTTP exporter
     let mut headers = std::collections::HashMap::new();
     headers.insert("api-key".to_string(), config.api_key.clone());
-    
+
     let log_exporter = LogExporter::builder()
         .with_http()
         .with_endpoint(format!("{}/v1/logs", config.endpoint))
@@ -230,13 +241,19 @@ async fn init_logs_exporter(config: &NewRelicConfig) -> Result<()> {
             KeyValue::new("service.instance.id", config.sui_address.clone()),
             // Additional service attributes
             KeyValue::new("service.namespace", "silvana"),
-            KeyValue::new("deployment.environment", env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string())),
+            KeyValue::new(
+                "deployment.environment",
+                env::var("ENVIRONMENT").unwrap_or_else(|_| "production".to_string()),
+            ),
             // Host attributes
             KeyValue::new("host.name", config.sui_address.clone()),
             KeyValue::new("host.type", "coordinator"),
             // Custom attributes
             KeyValue::new("sui.address", config.sui_address.clone()),
-            KeyValue::new("sui.network", env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string())),
+            KeyValue::new(
+                "sui.network",
+                env::var("SUI_CHAIN").unwrap_or_else(|_| "mainnet".to_string()),
+            ),
         ])
         .build();
 
@@ -278,7 +295,7 @@ pub async fn send_log_to_newrelic(level: &str, message: &str) -> Result<()> {
     let mut record = logger.create_log_record();
     record.set_severity_number(sev);
     record.set_body(AnyValue::from(message.to_string()));
-    
+
     let sev_text: &'static str = match level.to_lowercase().as_str() {
         "error" | "err" => "ERROR",
         "warn" | "warning" => "WARN",
@@ -299,70 +316,14 @@ pub async fn send_log_to_newrelic(level: &str, message: &str) -> Result<()> {
     Ok(())
 }
 
-/// Initialize logging with dual outputs: console/file and New Relic for warn/error
-pub async fn init_logging_with_newrelic() -> Result<()> {
-    // Initialize New Relic if configured
-    if NewRelicConfig::is_configured() {
-        init_newrelic().await?;
-    }
-
-    // Determine log destination from environment
-    let log_destination = env::var("LOG_DESTINATION").unwrap_or_else(|_| "console".to_string());
-    
-    // Base filter for all logs
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-
-    match log_destination.as_str() {
-        "file" => {
-            // File logging configuration
-            let file_appender = tracing_appender::rolling::daily("logs", "coordinator.log");
-            let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-            
-            let file_layer = tracing_subscriber::fmt::layer()
-                .with_writer(non_blocking)
-                .with_ansi(false)
-                .with_target(false)  // Don't show full module paths
-                .with_thread_ids(false)  // Don't show thread IDs
-                .with_thread_names(false);  // Don't show thread names
-
-            // Initialize subscriber with file layer
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(file_layer)
-                .with(NewRelicTracingLayer)
-                .init();
-            
-            info!("📝 Logging to file: logs/coordinator.log");
-        }
-        _ => {
-            // Console logging configuration - preserve original format
-            let console_layer = tracing_subscriber::fmt::layer()
-                .with_ansi(true)
-                .with_target(false)  // Don't show full module paths
-                .with_thread_ids(false)  // Don't show thread IDs
-                .with_thread_names(false);  // Don't show thread names
-
-            // Initialize subscriber with console layer
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(console_layer)
-                .with(NewRelicTracingLayer)
-                .init();
-            
-            info!("📝 Logging to console");
-        }
-    }
-
-    if NewRelicConfig::is_configured() {
-        info!("🚀 New Relic logging enabled for warn and error levels");
-    }
-
-    Ok(())
-}
-
 /// Custom tracing layer that sends warn and error logs to New Relic
 struct NewRelicTracingLayer;
+
+impl NewRelicTracingLayer {
+    fn new() -> Self {
+        NewRelicTracingLayer
+    }
+}
 
 impl<S> Layer<S> for NewRelicTracingLayer
 where
@@ -379,33 +340,62 @@ where
 
         let metadata = event.metadata();
         let level = metadata.level();
-        
+
         // Only send warn and error logs to New Relic
         if *level <= tracing::Level::WARN {
             // Format the message
             let mut visitor = MessageVisitor::default();
             event.record(&mut visitor);
-            
-            let message = format!(
-                "[{}] {} - {}",
-                metadata.target(),
-                metadata.name(),
-                visitor.message
-            );
-            
+
+            // Create a cleaner message without redundant metadata
+            let message = if visitor.message.is_empty() {
+                format!("[{}]", metadata.target())
+            } else {
+                visitor.message.clone()
+            };
+
             let level_str = match *level {
                 tracing::Level::ERROR => "error",
                 tracing::Level::WARN => "warn",
                 _ => return,
             };
-            
-            // Send to New Relic asynchronously
-            let message_clone = message.clone();
-            tokio::spawn(async move {
-                if let Err(e) = send_log_to_newrelic(level_str, &message_clone).await {
-                    eprintln!("Failed to send log to New Relic: {}", e);
+
+            // Get the logger provider if it's initialized
+            if let Some(provider) = NR_LOGGER_PROVIDER.get().and_then(|p| p.as_ref()) {
+                let logger = provider.logger("silvana-coordinator");
+
+                let sev = match level_str {
+                    "error" | "err" => Severity::Error,
+                    "warn" | "warning" => Severity::Warn,
+                    _ => return,
+                };
+
+                let mut record = logger.create_log_record();
+                record.set_severity_number(sev);
+                record.set_body(AnyValue::from(message.clone()));
+
+                let sev_text: &'static str = match level_str {
+                    "error" | "err" => "ERROR",
+                    "warn" | "warning" => "WARN",
+                    _ => return,
+                };
+                record.set_severity_text(sev_text);
+
+                // Add attributes
+                record.add_attribute("log.source", AnyValue::from(metadata.target().to_string()));
+                record.add_attribute(
+                    "log.module",
+                    AnyValue::from(metadata.module_path().unwrap_or("unknown").to_string()),
+                );
+
+                // Add SUI address as an attribute
+                if let Some(config) = NR_CONFIG.get().and_then(|c| c.as_ref()) {
+                    record.add_attribute("sui_address", AnyValue::from(config.sui_address.clone()));
                 }
-            });
+
+                // Emit the log record
+                logger.emit(record);
+            }
         }
     }
 }
@@ -423,7 +413,8 @@ impl tracing::field::Visit for MessageVisitor {
             if !self.message.is_empty() {
                 self.message.push_str(", ");
             }
-            self.message.push_str(&format!("{}={:?}", field.name(), value));
+            self.message
+                .push_str(&format!("{}={:?}", field.name(), value));
         }
     }
 
@@ -434,7 +425,8 @@ impl tracing::field::Visit for MessageVisitor {
             if !self.message.is_empty() {
                 self.message.push_str(", ");
             }
-            self.message.push_str(&format!("{}={}", field.name(), value));
+            self.message
+                .push_str(&format!("{}={}", field.name(), value));
         }
     }
 }
@@ -446,28 +438,142 @@ pub async fn send_apm_metrics() {
     }
 
     let meter = global::meter("silvana-coordinator");
-    
+
     // HTTP server metrics (required for APM)
     let request_counter = meter.u64_counter("http.server.request.count").build();
-    request_counter.add(1, &[
-        KeyValue::new("http.method", "POST"),
-        KeyValue::new("http.scheme", "grpc"),
-        KeyValue::new("http.status_code", 200),
-    ]);
-    
+    request_counter.add(
+        1,
+        &[
+            KeyValue::new("http.method", "POST"),
+            KeyValue::new("http.scheme", "grpc"),
+            KeyValue::new("http.status_code", 200),
+        ],
+    );
+
     // Process metrics
     let cpu_gauge = meter.f64_gauge("process.cpu.utilization").build();
     cpu_gauge.record(0.5, &[]);
-    
+
     let memory_gauge = meter.u64_gauge("process.memory.usage").build();
     memory_gauge.record(1024 * 1024 * 100, &[]); // 100MB
-    
+
     // Custom business metrics
     let jobs_counter = meter.u64_counter("silvana.jobs.processed").build();
-    jobs_counter.add(1, &[
-        KeyValue::new("job.type", "proof"),
-        KeyValue::new("job.status", "success"),
-    ]);
+    jobs_counter.add(
+        1,
+        &[
+            KeyValue::new("job.type", "proof"),
+            KeyValue::new("job.status", "success"),
+        ],
+    );
+}
+
+/// Force flush all OpenTelemetry data to New Relic
+pub async fn flush_telemetry() {
+    // Flush logs
+    if let Some(provider) = NR_LOGGER_PROVIDER.get().and_then(|p| p.as_ref()) {
+        if let Err(e) = provider.force_flush() {
+            debug!("Failed to flush logs: {:?}", e);
+        }
+    }
+
+    // Flush metrics (global meter provider handles this)
+    // Metrics are sent periodically every 60 seconds
+
+    // Note: Traces don't have a force_flush method in the current OpenTelemetry version
+    // They're flushed automatically when spans end
+}
+
+/// Initialize logging with New Relic tracing layer
+/// This function sets up the tracing subscriber with the NewRelicTracingLayer
+/// to capture warn/error logs and send them to New Relic
+pub async fn init_logging_with_newrelic() -> Result<()> {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+    let log_destination = std::env::var("LOG_DESTINATION").unwrap_or_else(|_| "file".to_string());
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        warn!("Failed to parse RUST_LOG environment variable, defaulting to 'info' level");
+        "info".into()
+    });
+
+    match log_destination.to_lowercase().as_str() {
+        "console" => {
+            // Console logging - output to stdout
+            let subscriber = tracing_subscriber::registry().with(env_filter).with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stdout)
+                    .with_ansi(true)
+                    .with_target(true)
+                    .compact()
+                    .with_line_number(false)
+                    .with_file(false)
+                    .with_thread_ids(false)
+                    .with_thread_names(false),
+            );
+
+            // Add New Relic layer if configured
+            if NewRelicConfig::is_configured() {
+                subscriber.with(NewRelicTracingLayer::new()).init();
+                info!("📺 Logging to console with New Relic export enabled");
+            } else {
+                subscriber.init();
+                info!("📺 Logging to console (stdout)");
+            }
+        }
+        _ => {
+            // File logging (default) - daily rotating files
+            let log_dir = std::env::var("LOG_DIR").unwrap_or_else(|_| "./logs".to_string());
+            let log_file_prefix =
+                std::env::var("LOG_FILE_PREFIX").unwrap_or_else(|_| "silvana".to_string());
+
+            // Create directory
+            std::fs::create_dir_all(&log_dir)?;
+
+            // Create file appender
+            let file_appender = tracing_appender::rolling::daily(&log_dir, &log_file_prefix);
+            let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+            let subscriber = tracing_subscriber::registry().with(env_filter).with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .with_target(true),
+            );
+
+            // Add New Relic layer if configured
+            if NewRelicConfig::is_configured() {
+                subscriber.with(NewRelicTracingLayer::new()).init();
+                info!("📝 Logging to files with New Relic export enabled");
+            } else {
+                subscriber.init();
+                info!("📝 Logging to daily rotating files in: {}/", log_dir);
+            }
+
+            // Keep the guard alive
+            std::mem::forget(_guard);
+        }
+    }
+
+    // Report New Relic configuration status
+    if NewRelicConfig::is_configured() {
+        match NewRelicConfig::from_env() {
+            Ok(config) => {
+                info!("🔗 New Relic: ✅ CONFIGURED");
+                info!("📡 Endpoint: {}", config.endpoint);
+                info!("🏷️  API Key: ***");
+                info!("📤 Logs will be sent to New Relic (WARN level and above)");
+            }
+            Err(e) => {
+                warn!("🔗 New Relic: ⚠️  CONFIGURATION ERROR - {}", e);
+            }
+        }
+    } else {
+        info!("🔗 New Relic: ❌ NOT CONFIGURED");
+        info!("   Set NEW_RELIC_API_KEY and NEW_RELIC_OTLP_ENDPOINT to enable");
+    }
+
+    Ok(())
 }
 
 /// Test function to verify New Relic integration
@@ -479,24 +585,34 @@ pub async fn test_newrelic_integration() -> Result<()> {
 
     info!("🧪 Testing New Relic OpenTelemetry integration...");
 
-    // Test sending logs
+    // Test sending logs directly
     send_log_to_newrelic("info", "New Relic integration test - info log").await?;
     send_log_to_newrelic("warn", "New Relic integration test - warning log").await?;
     send_log_to_newrelic("error", "New Relic integration test - error log").await?;
+
+    // Test sending logs through tracing
+    warn!("New Relic integration test - warning through tracing");
+    error!("New Relic integration test - error through tracing");
 
     // Test sending metrics
     let meter = global::meter("silvana-coordinator");
     let counter = meter.f64_counter("test_counter").build();
     counter.add(1.0, &[]);
-    
+
     // Send APM metrics
     send_apm_metrics().await;
-    
+
     // Test sending a trace span
     let tracer = global::tracer("silvana-coordinator");
     let mut span = tracer.start("test_span");
     span.set_attribute(KeyValue::new("test.attribute", "test_value"));
     span.end();
+
+    // Force flush to ensure test data is sent
+    flush_telemetry().await;
+
+    // Give it a moment to send
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     info!("🧪 New Relic integration test completed");
     Ok(())
