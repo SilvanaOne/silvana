@@ -455,7 +455,7 @@ mod tests {
         db.add_ready_job(agent_job).await;
 
         // Check stats
-        let (ready, pending) = db.get_stats().await;
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
         assert_eq!(ready, 1);
         assert_eq!(pending, 0);
 
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(retrieved.as_ref().unwrap().job_id, job_id);
 
         // Check stats after retrieval
-        let (ready, pending) = db.get_stats().await;
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
         assert_eq!(ready, 0);
         assert_eq!(pending, 1);
 
@@ -476,7 +476,7 @@ mod tests {
         assert!(completed.is_some());
 
         // Check final stats
-        let (ready, pending) = db.get_stats().await;
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
         assert_eq!(ready, 0);
         assert_eq!(pending, 0);
     }
@@ -501,7 +501,7 @@ mod tests {
         assert_eq!(jobs_to_fail.len(), 1);
 
         // Check stats after cleanup
-        let (ready, pending) = db.get_stats().await;
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
         assert_eq!(ready, 0);
         assert_eq!(pending, 0);
     }
@@ -524,7 +524,7 @@ mod tests {
         assert!(retrieved_job.is_some());
 
         // Check stats: should have 0 ready, 1 pending
-        let (ready, pending) = db.get_stats().await;
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
         assert_eq!(ready, 0);
         assert_eq!(pending, 1);
 
@@ -534,7 +534,7 @@ mod tests {
         db.add_ready_job(agent_job2).await;
 
         // Check stats: should have 1 ready, 1 pending
-        let (ready, pending) = db.get_stats().await;
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
         assert_eq!(ready, 1);
         assert_eq!(pending, 1);
 
@@ -545,7 +545,7 @@ mod tests {
         assert_eq!(jobs_to_fail.len(), 2); // Should cleanup both ready and pending
 
         // Check stats after cleanup
-        let (ready, pending) = db.get_stats().await;
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
         assert_eq!(ready, 0);
         assert_eq!(pending, 0);
     }

@@ -222,7 +222,8 @@ impl ProofStorageBackend for CacheStorage {
         proof_data: &str,
         metadata: Option<ProofMetadata>,
     ) -> Result<ProofDescriptor> {
-        info!("Storing proof to cache via gRPC ({})", self.network);
+        info!("Storing proof to cache via gRPC ({}) - data size: {} bytes", 
+            self.network, proof_data.len());
 
         let mut client = rpc_client::shared::get_shared_client()
             .await
@@ -256,7 +257,12 @@ impl ProofStorageBackend for CacheStorage {
                     Err(anyhow!("Failed to store proof to cache: {}", resp.message))
                 }
             }
-            Err(e) => Err(anyhow!("gRPC error storing proof: {}", e)),
+            Err(e) => {
+                // Log full error details
+                warn!("gRPC error storing proof - Status: {:?}, Message: {:?}, Details: {:?}", 
+                    e.code(), e.message(), e.details());
+                Err(anyhow!("gRPC error storing proof: {}", e))
+            }
         }
     }
 

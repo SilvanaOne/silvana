@@ -611,9 +611,10 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to submit proof: {}", e);
+                error!("Failed to submit proof to S3: {:?}", e);
                 record_grpc_request("submit_proof", "error", start_time.elapsed().as_secs_f64());
-                Err(Status::internal("Failed to submit proof"))
+                // Return more detailed error message
+                Err(Status::internal(format!("Failed to submit proof: {}", e)))
             }
         }
     }

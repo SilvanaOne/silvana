@@ -235,7 +235,7 @@ public fun add(
         transition_data_bytes,
         option::none(), // interval_ms - not periodic
         option::none(), // next_scheduled_at - not periodic
-        false, // is_settlement_job
+        option::none(), // settlement_chain - not settlement job
         clock,
         ctx,
     );
@@ -331,7 +331,7 @@ public fun multiply(
         transition_data_bytes,
         option::none(), // interval_ms - not periodic
         option::none(), // next_scheduled_at - not periodic
-        false, // is_settlement_job
+        option::none(), // settlement_chain - not settlement job
         clock,
         ctx,
     );
