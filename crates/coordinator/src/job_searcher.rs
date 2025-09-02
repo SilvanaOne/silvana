@@ -453,7 +453,7 @@ impl JobSearcher {
             match sui::fetch::fetch_app_instance(app_instance_id).await {
                 Ok(app_instance) => {
                     if can_remove_app_instance(&app_instance) {
-                        debug!(
+                        info!(
                             "App instance {} is fully caught up and can be removed",
                             app_instance_id
                         );
@@ -503,7 +503,7 @@ impl JobSearcher {
                 for job in pending_jobs {
                     // Skip if job is currently locked (being processed)
                     if lock_manager.is_locked(&job.app_instance, job.job_sequence) {
-                        debug!(
+                        info!(
                             "Skipping job {} from app_instance {} (currently locked)",
                             job.job_sequence, job.app_instance
                         );
@@ -516,7 +516,7 @@ impl JobSearcher {
                         .is_recently_failed(&job.app_instance, job.job_sequence)
                         .await
                     {
-                        debug!(
+                        warn!(
                             "Skipping job {} from app_instance {} (recently failed)",
                             job.job_sequence, job.app_instance
                         );
@@ -527,7 +527,7 @@ impl JobSearcher {
                 }
 
                 if viable_jobs.is_empty() {
-                    debug!("All {} pending jobs are in the failed cache", total_jobs);
+                    warn!("All {} pending jobs are in the failed cache", total_jobs);
                     return Ok(None);
                 }
 
@@ -535,7 +535,7 @@ impl JobSearcher {
                 // 1. Settlement jobs (highest priority - always picked if available)
                 // 2. Merge jobs (collect all, up to pool size)
                 // 3. Other jobs (fill remaining slots)
-                const JOB_POOL_SIZE: usize = 10;
+                const JOB_POOL_SIZE: usize = 50;
 
                 // Check for settlement jobs first
                 let settlement_jobs: Vec<Job> = viable_jobs
@@ -595,7 +595,7 @@ impl JobSearcher {
                 let selected_index = rand::thread_rng().gen_range(0..pool_size);
                 let selected_job = job_pool[selected_index].clone();
 
-                debug!(
+                info!(
                     "Randomly selected job {} from app_instance {} (index {}/{}, pool had {} merge jobs)",
                     selected_job.job_sequence,
                     selected_job.app_instance,

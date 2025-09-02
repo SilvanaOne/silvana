@@ -2,7 +2,7 @@ use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, 
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use std::collections::HashMap;
 use anyhow::{anyhow, Result};
-use tracing::{debug, warn, error};
+use tracing::{debug, info, warn, error};
 
 // Buffer time in milliseconds to account for clock drift between coordinator and blockchain
 // This prevents "ENotDueYet" errors when starting periodic jobs
@@ -607,7 +607,7 @@ pub async fn fetch_all_pending_jobs(
         result.extend(other_jobs);
         
         if !result.is_empty() {
-            debug!("Found {} pending jobs total, highest priority is job_sequence: {}", 
+            info!("Found {} pending jobs total, highest priority is job_sequence: {}", 
                    result.len(), result[0].job_sequence);
         }
         
