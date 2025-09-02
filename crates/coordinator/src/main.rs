@@ -66,6 +66,7 @@ async fn main() -> Result<()> {
             container_timeout,
             log_level: _,
             grpc_socket_path,
+            instance,
         } => {
             // Resolve the RPC URL using the helper from sui crate
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
@@ -93,6 +94,7 @@ async fn main() -> Result<()> {
                 use_tee,
                 container_timeout,
                 grpc_socket_path,
+                instance,
             )
             .await
         }

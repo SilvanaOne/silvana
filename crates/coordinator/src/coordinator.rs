@@ -17,10 +17,15 @@ pub async fn start_coordinator(
     use_tee: bool,
     container_timeout: u64,
     grpc_socket_path: String,
+    app_instance_filter: Option<String>,
 ) -> Result<()> {
     info!("🚀 Starting Silvana Coordinator");
     info!("🔗 Sui RPC URL: {}", rpc_url);
     info!("📦 Monitoring package: {}", package_id);
+    
+    if let Some(ref instance) = app_instance_filter {
+        info!("🎯 Filtering jobs for app instance: {}", instance);
+    }
 
     // Initialize the global SharedSuiState
     sui::SharedSuiState::initialize(&rpc_url).await?;
@@ -92,6 +97,11 @@ pub async fn start_coordinator(
 
     // Create shared state
     let state = SharedState::new();
+    
+    // Set the app instance filter if provided
+    if let Some(instance) = app_instance_filter {
+        state.set_app_instance_filter(Some(instance)).await;
+    }
 
     // Setup signal handlers for graceful shutdown (Ctrl-C and SIGTERM for system reboot)
     let shutdown_state = state.clone();

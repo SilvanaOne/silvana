@@ -78,6 +78,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Check if there's an app_instance filter configured
+        let app_instance_filter = self.state.get_app_instance_filter().await;
+        
         // First check if there's a ready job in the agent database
         if let Some(agent_job) = self
             .state
@@ -85,65 +88,82 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .get_ready_job(&req.developer, &req.agent, &req.agent_method)
             .await
         {
-            let elapsed = start_time.elapsed();
-            let tx_info = agent_job.start_tx_hash.as_ref()
-                .map(|tx| format!(", tx={}", tx))
-                .unwrap_or_default();
-            info!(
-                "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db{}, time={:?}",
-                agent_job.app_instance,
-                req.developer,
-                req.agent,
-                req.agent_method,
-                agent_job.job_sequence,
-                agent_job.pending_job.app_instance_method,
-                tx_info,
-                elapsed
-            );
-
-            // Check if this is a settlement job by looking at the app instance settlements
-            let chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
-                // Find which chain this job belongs to by checking settlement_job in each settlement
-                app_instance.settlements.iter()
-                    .find(|(_, settlement)| settlement.settlement_job == Some(agent_job.job_sequence))
-                    .map(|(chain_name, _)| chain_name.clone())
+            // Check if job matches the app_instance filter (if set)
+            let should_process = if let Some(ref filter) = app_instance_filter {
+                if agent_job.app_instance != *filter {
+                    debug!(
+                        "Job from app_instance {} does not match filter {}, skipping",
+                        agent_job.app_instance, filter
+                    );
+                    false
+                } else {
+                    true
+                }
             } else {
-                None
+                true
             };
 
-            // Convert AgentJob to protobuf Job
-            let job = Job {
-                job_sequence: agent_job.job_sequence,
-                description: agent_job.pending_job.description.clone(),
-                developer: agent_job.developer.clone(),
-                agent: agent_job.agent.clone(),
-                agent_method: agent_job.agent_method.clone(),
-                app: agent_job.pending_job.app.clone(),
-                app_instance: agent_job.app_instance.clone(),
-                app_instance_method: agent_job.pending_job.app_instance_method.clone(),
-                block_number: agent_job.pending_job.block_number,
-                sequences: agent_job.pending_job.sequences.clone().unwrap_or_default(),
-                sequences1: agent_job.pending_job.sequences1.clone().unwrap_or_default(),
-                sequences2: agent_job.pending_job.sequences2.clone().unwrap_or_default(),
-                data: agent_job.pending_job.data.clone(),
-                job_id: agent_job.job_id,
-                attempts: agent_job.pending_job.attempts as u32,
-                created_at: agent_job.pending_job.created_at,
-                updated_at: agent_job.pending_job.updated_at,
-                chain,
-            };
+            if should_process {
+                let elapsed = start_time.elapsed();
+                let tx_info = agent_job.start_tx_hash.as_ref()
+                    .map(|tx| format!(", tx={}", tx))
+                    .unwrap_or_default();
+                info!(
+                    "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db{}, time={:?}",
+                    agent_job.app_instance,
+                    req.developer,
+                    req.agent,
+                    req.agent_method,
+                    agent_job.job_sequence,
+                    agent_job.pending_job.app_instance_method,
+                    tx_info,
+                    elapsed
+                );
 
-            let elapsed = start_time.elapsed();
-            let elapsed_ms = elapsed.as_millis() as f64;
-            
-            // Record successful gRPC span for APM
-            coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
-            
-            return Ok(Response::new(GetJobResponse {
-                success: true,
-                message: format!("Job {} retrieved from database", agent_job.job_sequence),
-                job: Some(job),
-            }));
+                // Check if this is a settlement job by looking at the app instance settlements
+                let chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                    // Find which chain this job belongs to by checking settlement_job in each settlement
+                    app_instance.settlements.iter()
+                        .find(|(_, settlement)| settlement.settlement_job == Some(agent_job.job_sequence))
+                        .map(|(chain_name, _)| chain_name.clone())
+                } else {
+                    None
+                };
+
+                // Convert AgentJob to protobuf Job
+                let job = Job {
+                    job_sequence: agent_job.job_sequence,
+                    description: agent_job.pending_job.description.clone(),
+                    developer: agent_job.developer.clone(),
+                    agent: agent_job.agent.clone(),
+                    agent_method: agent_job.agent_method.clone(),
+                    app: agent_job.pending_job.app.clone(),
+                    app_instance: agent_job.app_instance.clone(),
+                    app_instance_method: agent_job.pending_job.app_instance_method.clone(),
+                    block_number: agent_job.pending_job.block_number,
+                    sequences: agent_job.pending_job.sequences.clone().unwrap_or_default(),
+                    sequences1: agent_job.pending_job.sequences1.clone().unwrap_or_default(),
+                    sequences2: agent_job.pending_job.sequences2.clone().unwrap_or_default(),
+                    data: agent_job.pending_job.data.clone(),
+                    job_id: agent_job.job_id,
+                    attempts: agent_job.pending_job.attempts as u32,
+                    created_at: agent_job.pending_job.created_at,
+                    updated_at: agent_job.pending_job.updated_at,
+                    chain,
+                };
+
+                let elapsed = start_time.elapsed();
+                let elapsed_ms = elapsed.as_millis() as f64;
+                
+                // Record successful gRPC span for APM
+                coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
+                
+                return Ok(Response::new(GetJobResponse {
+                    success: true,
+                    message: format!("Job {} retrieved from database", agent_job.job_sequence),
+                    job: Some(job),
+                }));
+            }
         }
 
         // If no ready job found, check if the requested job matches the current running agent for this session
@@ -155,7 +175,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 && current.agent_method == req.agent_method
             {
                 // Get current_app_instances for this agent session
-                let current_instances = self.state.get_current_app_instances(&req.session_id).await;
+                let mut current_instances = self.state.get_current_app_instances(&req.session_id).await;
+
+                // Filter instances based on app_instance_filter if set
+                if let Some(ref filter) = app_instance_filter {
+                    current_instances.retain(|instance| instance == filter);
+                    if current_instances.is_empty() {
+                        debug!(
+                            "No app_instances match the filter: {}",
+                            filter
+                        );
+                    }
+                }
 
                 if !current_instances.is_empty() {
                     debug!(

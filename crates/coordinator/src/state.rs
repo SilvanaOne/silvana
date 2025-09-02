@@ -30,6 +30,7 @@ pub struct SharedState {
     rpc_client: Arc<RwLock<Option<SilvanaEventsServiceClient<Channel>>>>, // Silvana RPC service client
     shutdown_flag: Arc<AtomicBool>, // Global shutdown flag for graceful shutdown
     force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
+    app_instance_filter: Arc<RwLock<Option<String>>>, // Optional filter to only process jobs from a specific app instance
 }
 
 impl SharedState {
@@ -58,6 +59,7 @@ impl SharedState {
             rpc_client,
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             force_shutdown_flag: Arc::new(AtomicBool::new(false)),
+            app_instance_filter: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -267,5 +269,22 @@ impl SharedState {
     pub async fn update_pending_jobs_flag(&self) {
         let count = self.jobs_tracker.app_instances_count().await;
         self.has_pending_jobs.store(count > 0, Ordering::Release);
+    }
+    
+    /// Set the app instance filter
+    pub async fn set_app_instance_filter(&self, filter: Option<String>) {
+        let mut lock = self.app_instance_filter.write().await;
+        if let Some(ref instance) = filter {
+            info!("Setting app instance filter to: {}", instance);
+        } else {
+            info!("Clearing app instance filter");
+        }
+        *lock = filter;
+    }
+    
+    /// Get the app instance filter
+    pub async fn get_app_instance_filter(&self) -> Option<String> {
+        let lock = self.app_instance_filter.read().await;
+        lock.clone()
     }
 }

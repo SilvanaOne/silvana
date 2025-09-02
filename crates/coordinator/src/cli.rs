@@ -33,6 +33,10 @@ pub enum Commands {
 
         #[arg(long, env = "GRPC_SOCKET_PATH", default_value = "/tmp/coordinator.sock")]
         grpc_socket_path: String,
+        
+        /// Filter to only process jobs from a specific app instance
+        #[arg(long, env = "APP_INSTANCE_FILTER")]
+        instance: Option<String>,
     },
     
     /// Fetch and display an app instance by ID
