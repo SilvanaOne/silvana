@@ -302,6 +302,34 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
+        Commands::Object { rpc_url, object } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("warn"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
+            sui::SharedSuiState::initialize(&rpc_url).await?;
+
+            // Fetch and display the raw object
+            match sui::fetch::fetch_object(&object).await {
+                Ok(json_value) => {
+                    // Pretty print the JSON
+                    let pretty_json = serde_json::to_string_pretty(&json_value)
+                        .map_err(|e| anyhow!(e))?;
+                    println!("{}", pretty_json);
+                }
+                Err(e) => {
+                    error!("Failed to fetch object {}: {}", object, e);
+                    return Err(anyhow!(e).into());
+                }
+            }
+            
+            Ok(())
+        }
+
         Commands::Block {
             rpc_url,
             instance,

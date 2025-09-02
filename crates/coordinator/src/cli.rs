@@ -48,6 +48,15 @@ pub enum Commands {
         instance: String,
     },
     
+    /// Fetch and display a raw Sui object by ID
+    Object {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: Option<String>,
+        
+        /// The object ID to fetch
+        object: String,
+    },
+    
     /// Fetch and display a block by number
     Block {
         #[arg(long, env = "SUI_RPC_URL")]
