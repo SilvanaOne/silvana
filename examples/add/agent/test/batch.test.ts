@@ -10,7 +10,7 @@ describe("Batch", async () => {
 
     while (true) {
       batchIteration++;
-      const maxDelay = Math.floor(Math.random() * 5 * 1000);
+      const maxDelay = Math.floor(Math.random() * 10 * 1000);
 
       // Calculate TPS
       const elapsedSeconds = (Date.now() - testStartTime) / 1000;
