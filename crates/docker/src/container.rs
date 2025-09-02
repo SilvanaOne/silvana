@@ -160,10 +160,14 @@ impl DockerManager {
         
         debug!("Creating container from image: {}", config.image_name);
         
+        // Generate a unique container name using timestamp in milliseconds and a random suffix
+        use rand::Rng;
+        let random_suffix: u32 = rand::thread_rng().gen_range(1000..9999);
         let container_name = format!(
-            "silvana-{}-{}",
+            "silvana-{}-{}-{}",
             config.image_name.replace(['/', ':'], "-"),
-            chrono::Utc::now().timestamp()
+            chrono::Utc::now().timestamp_millis(),
+            random_suffix
         );
 
         let container_config = self.build_container_config(config)?;
