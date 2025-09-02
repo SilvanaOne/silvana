@@ -423,30 +423,87 @@ async fn fetch_block_settlement_from_table(
 /// Fetch the BlockSettlement object from Sui
 async fn fetch_block_settlement_object(
     client: &mut sui_rpc::Client,
-    object_id: &str,
+    field_id: &str,
 ) -> Result<Option<BlockSettlement>> {
-    let request = GetObjectRequest {
-        object_id: Some(object_id.to_string()),
+    // First fetch the Field wrapper object to get the actual BlockSettlement object ID
+    debug!("Fetching Field wrapper object: {}", field_id);
+    
+    let field_request = GetObjectRequest {
+        object_id: Some(field_id.to_string()),
+        version: None,
+        read_mask: Some(prost_types::FieldMask {
+            paths: vec!["object_id".to_string(), "json".to_string()],
+        }),
+    };
+
+    let field_response = client
+        .ledger_client()
+        .get_object(field_request)
+        .await
+        .map_err(|e| {
+            SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                "Failed to fetch Field wrapper {}: {}",
+                field_id, e
+            ))
+        })?;
+
+    let field_data = field_response.into_inner();
+    
+    // Extract the actual BlockSettlement object ID from the Field wrapper
+    let block_settlement_id = if let Some(field_object) = field_data.object {
+        if let Some(json_value) = &field_object.json {
+            if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                // The Field wrapper has a "value" field containing the actual object ID
+                if let Some(value_field) = struct_value.fields.get("value") {
+                    if let Some(prost_types::value::Kind::StringValue(obj_id)) = &value_field.kind {
+                        debug!("Found BlockSettlement object ID in Field wrapper: {}", obj_id);
+                        obj_id.clone()
+                    } else {
+                        warn!("Field wrapper value is not a string");
+                        return Ok(None);
+                    }
+                } else {
+                    warn!("Field wrapper has no 'value' field");
+                    return Ok(None);
+                }
+            } else {
+                warn!("Field wrapper JSON is not a struct");
+                return Ok(None);
+            }
+        } else {
+            warn!("Field wrapper has no JSON");
+            return Ok(None);
+        }
+    } else {
+        warn!("Field wrapper response has no object");
+        return Ok(None);
+    };
+
+    // Now fetch the actual BlockSettlement object
+    debug!("Fetching BlockSettlement object: {}", block_settlement_id);
+    
+    let bs_request = GetObjectRequest {
+        object_id: Some(block_settlement_id.clone()),
         version: None,
         read_mask: Some(prost_types::FieldMask {
             paths: vec!["json".to_string()],
         }),
     };
 
-    let response = client
+    let bs_response = client
         .ledger_client()
-        .get_object(request)
+        .get_object(bs_request)
         .await
         .map_err(|e| {
             SilvanaSuiInterfaceError::RpcConnectionError(format!(
                 "Failed to fetch BlockSettlement object {}: {}",
-                object_id, e
+                block_settlement_id, e
             ))
         })?;
 
-    let object_data = response.into_inner();
+    let bs_data = bs_response.into_inner();
     
-    if let Some(proto_object) = object_data.object {
+    if let Some(proto_object) = bs_data.object {
         if let Some(json_value) = &proto_object.json {
             if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
                 // Parse the BlockSettlement struct
@@ -470,7 +527,7 @@ async fn fetch_block_settlement_object(
         }
     }
 
-    warn!("Failed to parse BlockSettlement from object {}", object_id);
+    warn!("Failed to parse BlockSettlement from object {}", block_settlement_id);
     Ok(None)
 }
 

@@ -58,38 +58,32 @@ impl AgentJob {
 /// Memory database for tracking jobs sent to agents
 #[derive(Clone)]
 pub struct AgentJobDatabase {
-    /// Jobs ready to be sent (start_job transaction completed)
-    ready_jobs: Arc<RwLock<HashMap<String, AgentJob>>>, // key: agent_key (dev/agent/method)
-
     /// Jobs sent to agents but not yet completed/failed
     pending_jobs: Arc<RwLock<HashMap<String, AgentJob>>>, // key: job_id
 
     /// Job lookup by job_id for quick access
     job_lookup: Arc<RwLock<HashMap<String, AgentJob>>>, // key: job_id
+    
+    /// Jobs reserved for specific Docker sessions
+    session_jobs: Arc<RwLock<HashMap<String, AgentJob>>>, // key: session_id
 }
 
 impl AgentJobDatabase {
     pub fn new() -> Self {
         Self {
-            ready_jobs: Arc::new(RwLock::new(HashMap::new())),
             pending_jobs: Arc::new(RwLock::new(HashMap::new())),
             job_lookup: Arc::new(RwLock::new(HashMap::new())),
+            session_jobs: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Add a job that has had its start_job transaction sent successfully
-    /// This job is ready to be returned by get_job
-    pub async fn add_ready_job(&self, mut agent_job: AgentJob) {
+    /// Add a job reserved for a specific Docker session
+    pub async fn add_session_job(&self, session_id: String, mut agent_job: AgentJob) {
         agent_job.start_tx_sent = true;
-        let agent_key = self.get_agent_key(
-            &agent_job.developer,
-            &agent_job.agent,
-            &agent_job.agent_method,
-        );
-
+        
         {
-            let mut ready = self.ready_jobs.write().await;
-            ready.insert(agent_key.clone(), agent_job.clone());
+            let mut session_jobs = self.session_jobs.write().await;
+            session_jobs.insert(session_id.clone(), agent_job.clone());
         }
 
         {
@@ -98,26 +92,38 @@ impl AgentJobDatabase {
         }
 
         debug!(
-            "Added ready job {} for agent {}/{}:{}",
-            agent_job.job_id, agent_job.developer, agent_job.agent, agent_job.agent_method
+            "Added session job {} for session {}, agent {}/{}:{}",
+            agent_job.job_id, session_id, agent_job.developer, agent_job.agent, agent_job.agent_method
         );
     }
 
-    /// Get and remove a ready job for the specified agent method
+    /// Get and remove a job for the specified session
     /// Moves the job to pending_jobs for tracking
+    /// Session_id is required since all execution is in Docker
     pub async fn get_ready_job(
         &self,
         developer: &str,
         agent: &str,
         agent_method: &str,
+        session_id: Option<&str>,
     ) -> Option<AgentJob> {
-        let agent_key = self.get_agent_key(developer, agent, agent_method);
-
-        let job = {
-            let mut ready = self.ready_jobs.write().await;
-            ready.remove(&agent_key)
+        // Session ID is required for Docker execution
+        let session_id = match session_id {
+            Some(id) => id,
+            None => {
+                debug!(
+                    "No session_id provided for agent {}/{}:{}",
+                    developer, agent, agent_method
+                );
+                return None;
+            }
         };
 
+        let job = {
+            let mut session_jobs = self.session_jobs.write().await;
+            session_jobs.remove(session_id)
+        };
+        
         if let Some(job) = job {
             // Move to pending jobs for tracking
             {
@@ -126,15 +132,14 @@ impl AgentJobDatabase {
             }
 
             debug!(
-                "Retrieved ready job {} for agent {}/{}:{}",
-                job.job_id, developer, agent, agent_method
+                "Retrieved session job {} for session {}, agent {}/{}:{}",
+                job.job_id, session_id, developer, agent, agent_method
             );
-
             Some(job)
         } else {
             debug!(
-                "No ready jobs for agent {}/{}:{}",
-                developer, agent, agent_method
+                "No session job found for session {} (agent {}/{}:{})",
+                session_id, developer, agent, agent_method
             );
             None
         }
@@ -233,19 +238,19 @@ impl AgentJobDatabase {
     }
 
     /// Get statistics about jobs in the database
-    /// Returns (total_jobs, ready_jobs, processing_jobs, completed_jobs, failed_jobs)
+    /// Returns (total_jobs, session_jobs, processing_jobs, completed_jobs, failed_jobs)
     pub async fn get_stats(&self) -> (usize, usize, usize, usize, usize) {
-        let ready = self.ready_jobs.read().await;
+        let session = self.session_jobs.read().await;
         let pending = self.pending_jobs.read().await;
         let lookup = self.job_lookup.read().await;
         
         let total_jobs = lookup.len();
-        let ready_jobs = ready.len();  // Jobs ready to be picked up by agents
+        let session_jobs_count = session.len();  // Jobs reserved for Docker sessions
         let processing_jobs = pending.len();  // Jobs currently being processed by agents
         let completed_jobs = 0; // We don't track completed jobs in memory
         let failed_jobs = 0; // We don't track failed jobs in memory
         
-        (total_jobs, ready_jobs, processing_jobs, completed_jobs, failed_jobs)
+        (total_jobs, session_jobs_count, processing_jobs, completed_jobs, failed_jobs)
     }
 
     /// Clean up both ready and pending jobs for a specific agent method
@@ -265,20 +270,9 @@ impl AgentJobDatabase {
             agent_key
         );
 
-        // Clean up ready jobs (jobs that had start_job called but were never retrieved by GetJob)
-        {
-            let mut ready = self.ready_jobs.write().await;
-            if let Some(ready_job) = ready.remove(&agent_key) {
-                debug!("Cleanup: Found ready job to fail: {}", ready_job.job_id);
-                jobs_to_fail.push(ready_job.clone());
-
-                // Also remove from lookup
-                let mut lookup = self.job_lookup.write().await;
-                lookup.remove(&ready_job.job_id);
-            } else {
-                debug!("Cleanup: No ready jobs found for agent key: {}", agent_key);
-            }
-        }
+        // Clean up session jobs for this agent
+        // Note: We would need to track session-to-agent mapping to clean these up properly
+        // For now, session jobs are cleaned up when Docker containers timeout
 
         // Clean up pending jobs (jobs that were retrieved by GetJob but not completed/failed)
         {
@@ -334,10 +328,10 @@ impl AgentJobDatabase {
     /// This includes both ready and pending jobs
     #[allow(dead_code)]
     pub async fn is_job_tracked(&self, app_instance: &str, job_sequence: u64) -> bool {
-        // Check ready jobs
+        // Check session jobs
         {
-            let ready = self.ready_jobs.read().await;
-            for job in ready.values() {
+            let session = self.session_jobs.read().await;
+            for job in session.values() {
                 if job.app_instance == app_instance && job.job_sequence == job_sequence {
                     return true;
                 }
@@ -478,8 +472,8 @@ mod tests {
         let agent_job = AgentJob::new(pending_job, &state);
         let job_id = agent_job.job_id.clone();
 
-        // Add ready job
-        db.add_ready_job(agent_job).await;
+        // Add session job for testing
+        db.add_session_job("test_session".to_string(), agent_job).await;
 
         // Check stats
         let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
@@ -488,7 +482,7 @@ mod tests {
 
         // Get ready job (moves to pending)
         let retrieved = db
-            .get_ready_job("TestDev", "TestAgent", "test_method")
+            .get_ready_job("TestDev", "TestAgent", "test_method", Some("test_session"))
             .await;
         assert!(retrieved.is_some());
         assert_eq!(retrieved.as_ref().unwrap().job_id, job_id);
@@ -517,8 +511,8 @@ mod tests {
         let agent_job = AgentJob::new(pending_job, &state);
 
         // Add and retrieve job to make it pending
-        db.add_ready_job(agent_job).await;
-        db.get_ready_job("TestDev", "TestAgent", "test_method")
+        db.add_session_job("test_session".to_string(), agent_job).await;
+        db.get_ready_job("TestDev", "TestAgent", "test_method", Some("test_session"))
             .await;
 
         // Cleanup pending jobs
@@ -534,6 +528,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_session_job() {
+        let db = AgentJobDatabase::new();
+        let state = create_test_state();
+        let pending_job = create_test_pending_job();
+
+        let agent_job = AgentJob::new(pending_job, &state);
+        let job_id = agent_job.job_id.clone();
+        let session_id = "test_session_123";
+
+        // Add job as session job
+        db.add_session_job(session_id.to_string(), agent_job).await;
+
+        // Check stats
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
+        assert_eq!(ready, 0);
+        assert_eq!(pending, 0);
+
+        // Try to get job without session_id - should return None
+        let no_job = db
+            .get_ready_job("TestDev", "TestAgent", "test_method", Some("test_session"))
+            .await;
+        assert!(no_job.is_none());
+
+        // Get job with correct session_id - should return the job
+        let retrieved = db
+            .get_ready_job("TestDev", "TestAgent", "test_method", Some(session_id))
+            .await;
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.as_ref().unwrap().job_id, job_id);
+
+        // Check stats after retrieval (job moved to pending)
+        let (_total, ready, pending, _completed, _failed) = db.get_stats().await;
+        assert_eq!(ready, 0);
+        assert_eq!(pending, 1);
+
+        // Complete job
+        let completed = db.complete_job(&job_id).await;
+        assert!(completed.is_some());
+    }
+
+    #[tokio::test]
     async fn test_cleanup_all_jobs() {
         let db = AgentJobDatabase::new();
         let state = create_test_state();
@@ -541,12 +576,12 @@ mod tests {
 
         let agent_job = AgentJob::new(pending_job, &state);
 
-        // Add job as ready
-        db.add_ready_job(agent_job).await;
+        // Add job as session job
+        db.add_session_job("test_session".to_string(), agent_job).await;
 
         // Retrieve job (becomes pending)
         let retrieved_job = db
-            .get_ready_job("TestDev", "TestAgent", "test_method")
+            .get_ready_job("TestDev", "TestAgent", "test_method", Some("test_session"))
             .await;
         assert!(retrieved_job.is_some());
 
@@ -558,7 +593,7 @@ mod tests {
         // Add another ready job (simulating a new job arriving)
         let pending_job2 = create_test_pending_job();
         let agent_job2 = AgentJob::new(pending_job2, &state);
-        db.add_ready_job(agent_job2).await;
+        db.add_session_job("test_session2".to_string(), agent_job2).await;
 
         // Check stats: should have 1 ready, 1 pending
         let (_total, ready, pending, _completed, _failed) = db.get_stats().await;

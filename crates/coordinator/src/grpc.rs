@@ -82,10 +82,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let app_instance_filter = self.state.get_app_instance_filter().await;
         
         // First check if there's a ready job in the agent database
+        // Pass session_id to get session-specific jobs for Docker containers
         if let Some(agent_job) = self
             .state
             .get_agent_job_db()
-            .get_ready_job(&req.developer, &req.agent, &req.agent_method)
+            .get_ready_job(&req.developer, &req.agent, &req.agent_method, Some(&req.session_id))
             .await
         {
             // Check if job matches the app_instance filter (if set)

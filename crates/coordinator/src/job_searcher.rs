@@ -969,16 +969,17 @@ async fn run_docker_container_task(
 
     let start_elapsed = start_time.elapsed();
 
-    // Add job to agent database as ready for gRPC retrieval
+    // Add job to agent database as a session-specific job for Docker retrieval
     let mut agent_job = AgentJob::new(job.clone(), &state);
     agent_job.start_tx_hash = Some(tx_digest.clone());
     agent_job.start_tx_sent = true;
     let job_id = agent_job.job_id.clone();
-    state.get_agent_job_db().add_ready_job(agent_job).await;
+    // Use add_session_job to link this job to the Docker session
+    state.get_agent_job_db().add_session_job(docker_session.session_id.clone(), agent_job).await;
 
     info!(
-        "✅ Job {} started and ready for agent, job_id: {}, tx: {}, start_time: {:?}",
-        job.job_sequence, job_id, tx_digest, start_elapsed
+        "✅ Job {} started and reserved for Docker session {}, job_id: {}, tx: {}, start_time: {:?}",
+        job.job_sequence, docker_session.session_id, job_id, tx_digest, start_elapsed
     );
 
     // Pull the Docker image if needed
