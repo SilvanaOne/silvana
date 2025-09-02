@@ -295,7 +295,7 @@ pub async fn ensure_sufficient_balance(min_balance_sui: f64) -> Result<bool> {
         // Determine chain from environment or default to devnet
         let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
         // Request 5 SUI from faucet (reasonable amount that faucet can provide)
-        let amount = if chain.to_lowercase() == "testnet" { Some(5) } else { None };
+        let amount = if chain.to_lowercase() == "testnet" { Some(5.0) } else { None };
         request_tokens_from_faucet(&chain, &address.to_string(), amount).await?;
         
         // Wait a bit for tokens to arrive
