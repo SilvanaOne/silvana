@@ -500,6 +500,8 @@ impl JobSearcher {
                 // Filter out jobs that are locked or in failed cache
                 let lock_manager = get_job_lock_manager();
                 let mut viable_jobs = Vec::new();
+                let mut locked_count = 0usize;
+                let mut failed_cached_count = 0usize;
                 for job in pending_jobs {
                     // Skip if job is currently locked (being processed)
                     if lock_manager.is_locked(&job.app_instance, job.job_sequence) {
@@ -507,6 +509,7 @@ impl JobSearcher {
                             "Skipping job {} from app_instance {} (currently locked)",
                             job.job_sequence, job.app_instance
                         );
+                        locked_count += 1;
                         continue;
                     }
 
@@ -520,6 +523,7 @@ impl JobSearcher {
                             "Skipping job {} from app_instance {} (recently failed)",
                             job.job_sequence, job.app_instance
                         );
+                        failed_cached_count += 1;
                         continue;
                     }
 
@@ -527,7 +531,10 @@ impl JobSearcher {
                 }
 
                 if viable_jobs.is_empty() {
-                    warn!("All {} pending jobs are in the failed cache", total_jobs);
+                    warn!(
+                        "No viable jobs after filtering (total={}, locked={}, failed_cached={})",
+                        total_jobs, locked_count, failed_cached_count
+                    );
                     return Ok(None);
                 }
 

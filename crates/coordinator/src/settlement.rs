@@ -1,4 +1,4 @@
-use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_pending_jobs_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
+use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use std::collections::HashMap;
 use anyhow::{anyhow, Result};
@@ -544,30 +544,53 @@ pub async fn fetch_all_pending_jobs(
             }
         }
         
-        // Fetch regular pending jobs
-        match fetch_pending_jobs_from_app_instance(&app_instance, only_check).await {
-            Ok(job_opt) => {
-                if !only_check {
-                    if let Some(job) = job_opt {
-                        // Check if job is ready to run (next_scheduled_at with buffer)
-                        if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
-                            debug!("Found pending job with job_sequence {} in app_instance {}", job.job_sequence, app_instance_id);
-                            // Check if it's a merge job or other
-                            let is_settlement = false; // We handled settlement jobs separately above
-                            all_pending_jobs.push((job, is_settlement));
-                        } else {
-                            debug!("Job {} not ready yet, scheduled for {}", 
-                                job.job_sequence, job.next_scheduled_at.unwrap());
+        // Fetch regular pending jobs (batch lowest N sequences per instance)
+        if !only_check {
+            if let Some(jobs_obj) = &app_instance.jobs {
+                // Sort and take a slice of the lowest job sequences for prioritization
+                let mut seqs = jobs_obj.pending_jobs.clone();
+                seqs.sort();
+                const MAX_PER_INSTANCE: usize = 100;
+
+                if !seqs.is_empty() {
+                    let take_n = std::cmp::min(seqs.len(), MAX_PER_INSTANCE);
+                    let seq_slice = &seqs[..take_n];
+
+                    match fetch_jobs_batch(&jobs_obj.jobs_table_id, seq_slice).await {
+                        Ok(map) => {
+                            // Exclude settlement job IDs which are handled above
+                            let settlement_ids: std::collections::HashSet<u64> =
+                                sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app_instance)
+                                    .await
+                                    .unwrap_or_default()
+                                    .into_values()
+                                    .collect();
+
+                            let mut added = 0usize;
+                            for (_seq, job) in map {
+                                if settlement_ids.contains(&job.job_sequence) {
+                                    continue;
+                                }
+                                // Ensure job is Pending and ready per schedule buffer
+                                if !matches!(job.status, sui::fetch::JobStatus::Pending) {
+                                    continue;
+                                }
+                                if job.next_scheduled_at.is_some()
+                                    && job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS > current_time_ms
+                                {
+                                    continue;
+                                }
+                                all_pending_jobs.push((job, false));
+                                added += 1;
+                            }
+                            if added > 0 {
+                                debug!("Added {} pending jobs from app_instance {} (batch)", added, app_instance_id);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to batch fetch jobs for {}: {}", app_instance_id, e);
                         }
                     }
-                }
-            }
-            Err(e) => {
-                // This can happen if a job was terminated between listing and fetching
-                if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                    debug!("Job was terminated/deleted before fetch from app_instance {}: {}", app_instance_id, e);
-                } else {
-                    error!("Failed to fetch pending job from app_instance {}: {}", app_instance_id, e);
                 }
             }
         }
