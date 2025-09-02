@@ -478,7 +478,7 @@ pub async fn start_proving_tx(
         // Special handling for expected errors
         let error_str = e.to_string();
         if error_str.contains("Transaction failed") {
-            warn!("start_proving transaction failed (proofs may be already reserved): {}", error_str);
+            info!("start_proving transaction failed (proofs may be already reserved): {}", error_str);
             anyhow!("Failed to reserve proofs - may be already reserved by another coordinator")
         } else {
             e
@@ -952,7 +952,7 @@ where
             
             // Log as warning for expected race conditions, error for unexpected issues
             if clean_error.contains("version conflict") || clean_error.contains("not available for consumption") {
-                warn!("Transaction {} failed (expected race condition): {}", function_name, clean_error);
+                info!("Transaction {} failed (expected race condition): {}", function_name, clean_error);
             } else {
                 error!("Transaction {} failed: {}", function_name, clean_error);
             }

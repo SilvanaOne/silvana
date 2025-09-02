@@ -949,7 +949,7 @@ async fn run_docker_container_task(
 
             // This can happen due to race conditions even with our random delay
             // Log as warning since it's expected in a multi-coordinator environment
-            warn!(
+            info!(
                 "Failed to start job {} on blockchain: {}",
                 job.job_sequence, e
             );

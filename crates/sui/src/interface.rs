@@ -21,7 +21,7 @@ impl SilvanaSuiInterface {
                 true
             }
             Err(e) => {
-                error!("Failed to start job {} on blockchain: {}", job_sequence, e);
+                info!("Failed to start job {} on blockchain: {}", job_sequence, e);
                 false
             }
         }
@@ -172,13 +172,13 @@ impl SilvanaSuiInterface {
             }
             
             if attempt < max_retries {
-                warn!("Failed to start job {} on attempt {}, retrying...", job_sequence, attempt);
+                info!("Failed to start job {} on attempt {}, retrying...", job_sequence, attempt);
                 // Small delay between retries to avoid overwhelming the network
                 tokio::time::sleep(tokio::time::Duration::from_millis(100 * attempt as u64)).await;
             }
         }
         
-        error!("Failed to start job {} after {} attempts", job_sequence, max_retries);
+        info!("Failed to start job {} after {} attempts", job_sequence, max_retries);
         false
     }
 

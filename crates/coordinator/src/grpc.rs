@@ -349,7 +349,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     }));
                                 }
                                 Err(e) => {
-                                    warn!(
+                                    info!(
                                         "Failed to start job {} on Sui: {}",
                                         pending_job.job_sequence, e
                                     );
