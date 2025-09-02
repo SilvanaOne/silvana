@@ -1,5 +1,5 @@
 use crate::agent::AgentJob;
-use crate::constants::{JOB_POOL_SIZE, MAX_CONCURRENT_AGENTS, MAX_JOB_START_DELAY_MS, MIN_SYSTEM_MEMORY_GB};
+use crate::constants::{CONTAINER_FORCE_STOP_TIMEOUT_SECS, JOB_POOL_SIZE, MAX_CONCURRENT_AGENTS, MAX_JOB_START_DELAY_MS, MIN_SYSTEM_MEMORY_GB};
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
 use crate::job_lock::{JobLockGuard, get_job_lock_manager};
@@ -203,11 +203,14 @@ impl JobSearcher {
                         // Force stop the container with a short timeout
                         if let Err(e) = self
                             .docker_manager
-                            .stop_container_with_timeout(&container_id, 5)
+                            .stop_container_with_timeout(&container_id, CONTAINER_FORCE_STOP_TIMEOUT_SECS)
                             .await
                         {
                             error!("Failed to stop container {}: {}", container_id, e);
                         }
+                        
+                        // Ensure the job is failed on blockchain
+                        ensure_job_failed_if_not_completed(&job, "force shutdown").await;
                     } else {
                         warn!(
                             "Waiting for Docker container {} (job {}) to complete before shutdown...",
@@ -242,6 +245,9 @@ impl JobSearcher {
                                 {
                                     error!("Failed to stop container {}: {}", container_id, e);
                                 }
+                                
+                                // Ensure the job is failed on blockchain
+                                ensure_job_failed_if_not_completed(&job, "force shutdown during wait").await;
                                 break;
                             }
 
@@ -795,6 +801,74 @@ async fn retrieve_secrets_for_job(
     Ok(secrets)
 }
 
+/// Ensure a job is failed on blockchain if it wasn't completed
+/// This is called after container termination (normal, timeout, or shutdown)
+async fn ensure_job_failed_if_not_completed(
+    job: &Job,
+    reason: &str,
+) {
+    // First check if the job is still in a running state on blockchain
+    match sui::fetch::fetch_job_by_id(&job.app_instance, job.job_sequence).await {
+        Ok(Some(current_job)) => {
+            match current_job.status {
+                sui::fetch::JobStatus::Running => {
+                    // Job is still running, we need to fail it
+                    info!(
+                        "Job {} is still in Running state after container terminated ({}), marking as failed",
+                        job.job_sequence, reason
+                    );
+                    
+                    // Try to fail the job on blockchain
+                    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                    let error_message = format!("Container terminated: {}", reason);
+                    match sui_interface.fail_job(&job.app_instance, job.job_sequence, &error_message).await {
+                        Some(tx_hash) => {
+                            info!(
+                                "✅ Successfully failed job {} on blockchain (tx: {}) - reason: {}",
+                                job.job_sequence, tx_hash, reason
+                            );
+                            
+                            // Note: Job will be cleaned up from agent database when retrieved or replaced
+                        }
+                        None => {
+                            error!(
+                                "❌ Failed to mark job {} as failed on blockchain after container terminated ({})",
+                                job.job_sequence, reason
+                            );
+                        }
+                    }
+                }
+                sui::fetch::JobStatus::Pending => {
+                    // Job somehow went back to pending - this is unexpected
+                    warn!(
+                        "Job {} is in Pending state after container terminated ({}), this is unexpected",
+                        job.job_sequence, reason
+                    );
+                }
+                sui::fetch::JobStatus::Failed(_) => {
+                    // Job already failed, nothing to do
+                    debug!(
+                        "Job {} already failed on blockchain",
+                        job.job_sequence
+                    );
+                }
+            }
+        }
+        Ok(None) => {
+            warn!(
+                "Job {} no longer exists on blockchain after container terminated ({})",
+                job.job_sequence, reason
+            );
+        }
+        Err(e) => {
+            error!(
+                "Failed to fetch job {} status after container terminated ({}): {}",
+                job.job_sequence, reason, e
+            );
+        }
+    }
+}
+
 /// Standalone function to run a Docker container for a job (for parallel execution)
 /// The job_lock is held for the duration of this task to prevent duplicate processing
 async fn run_docker_container_task(
@@ -1165,6 +1239,10 @@ async fn run_docker_container_task(
             );
         }
     }
+
+    // Ensure the job is failed on blockchain if it wasn't completed
+    // This handles the case where the container exits without the agent calling complete/fail
+    ensure_job_failed_if_not_completed(&job, "container terminated").await;
 
     // Clear the agent state after Docker completes
     state.clear_current_agent(&docker_session.session_id).await;

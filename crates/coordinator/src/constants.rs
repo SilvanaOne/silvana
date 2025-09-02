@@ -25,3 +25,7 @@ pub const MAX_MERGE_ATTEMPTS: usize = 10;
 
 // System requirements
 pub const MIN_SYSTEM_MEMORY_GB: u64 = 2;
+
+// Shutdown configuration
+pub const SHUTDOWN_TIMEOUT_SECS: u64 = 600; // 10 minutes - Time to wait for graceful shutdown before forcing
+pub const CONTAINER_FORCE_STOP_TIMEOUT_SECS: u64 = 5; // Timeout when force-stopping containers

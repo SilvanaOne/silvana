@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::constants::SHUTDOWN_TIMEOUT_SECS;
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
 use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
@@ -366,9 +367,9 @@ pub async fn start_coordinator(
     info!("  1️⃣ Stopping new job acceptance...");
 
     // Phase 2: Wait for current jobs to complete (with timeout)
-    info!("  2️⃣ Waiting for current jobs to complete (max 5 minutes)...");
+    info!("  2️⃣ Waiting for current jobs to complete (max {} minutes)...", SHUTDOWN_TIMEOUT_SECS / 60);
     let mut wait_time = 0;
-    let max_wait = 300; // 5 minutes in seconds
+    let max_wait = SHUTDOWN_TIMEOUT_SECS;
 
     while wait_time < max_wait {
         // Check for force shutdown
