@@ -132,12 +132,38 @@ async fn test_cache_storage() {
 
     let storage = ProofStorage::new();
 
-    // Test data
-    let proof_data = "Test proof data for cache storage";
+    // Test data - simulate real coordinator proof submission
+    let proof_data = "Test proof data for cache storage with realistic size";
     let mut metadata = ProofMetadata::default();
-    metadata
-        .data
-        .insert("test_key".to_string(), "test_value".to_string());
+    
+    // Add metadata similar to real submit_proof in grpc.rs
+    metadata.data.insert("job_id".to_string(), "test_job_123456789".to_string());
+    metadata.data.insert("session_id".to_string(), "0x1234567890abcdef".to_string());
+    metadata.data.insert("app_instance_id".to_string(), "0xabcdef1234567890".to_string());
+    metadata.data.insert("block_number".to_string(), "12345".to_string());
+    
+    // Test with a large sequences array that would exceed S3 limits if not truncated
+    let large_sequences = vec![1u64, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let sequences_str = format!("{:?}", large_sequences);
+    // Simulate the truncation logic from grpc.rs
+    let sequences_metadata = if sequences_str.len() > 200 {
+        format!("{}... ({} sequences)", &sequences_str[..200], large_sequences.len())
+    } else {
+        sequences_str
+    };
+    metadata.data.insert("sequences".to_string(), sequences_metadata);
+    
+    metadata.data.insert("project".to_string(), "silvana".to_string());
+    metadata.data.insert("sui_chain".to_string(), "testnet".to_string());
+    
+    // Test edge case: metadata value at exactly 256 chars (S3 limit)
+    let long_value = "a".repeat(256);
+    metadata.data.insert("edge_case_256".to_string(), long_value);
+    
+    // Test edge case: metadata key at exactly 128 chars (S3 limit)
+    let long_key = "test_key_".to_string() + &"x".repeat(119); // 9 + 119 = 128
+    metadata.data.insert(long_key, "test_value".to_string());
+    
     metadata.expires_at = Some(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -170,12 +196,29 @@ async fn test_cache_storage() {
             println!("Retrieved proof from cache");
             assert_eq!(retrieved_data, proof_data);
 
-            // Note: expires_at comes back as a metadata field from S3
-            // Check user metadata
+            // Verify key metadata fields are present
             assert_eq!(
-                retrieved_metadata.data.get("test_key"),
-                Some(&"test_value".to_string())
+                retrieved_metadata.data.get("job_id"),
+                Some(&"test_job_123456789".to_string())
             );
+            assert_eq!(
+                retrieved_metadata.data.get("app_instance_id"),
+                Some(&"0xabcdef1234567890".to_string())
+            );
+            assert_eq!(
+                retrieved_metadata.data.get("project"),
+                Some(&"silvana".to_string())
+            );
+            
+            // Verify the edge case with 256 char value was truncated to 256
+            let edge_value = retrieved_metadata.data.get("edge_case_256");
+            assert!(edge_value.is_some());
+            assert!(edge_value.unwrap().len() <= 256, "Value should be truncated to 256 chars");
+            
+            // Verify the long key exists (might be truncated to 128 chars)
+            let found_long_key = retrieved_metadata.data.keys()
+                .any(|k| k.starts_with("test_key_"));
+            assert!(found_long_key, "Long key should exist (possibly truncated)");
         }
         Err(e) => {
             panic!("Failed to retrieve proof from cache: {}", e);

@@ -770,7 +770,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
         metadata.data.insert("session_id".to_string(), req.session_id.clone());
         metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
         metadata.data.insert("block_number".to_string(), req.block_number.to_string());
-        metadata.data.insert("sequences".to_string(), format!("{:?}", sequences));
+        // Limit sequences metadata to avoid S3 tag value limit (256 chars)
+        let sequences_str = format!("{:?}", sequences);
+        let sequences_metadata = if sequences_str.len() > 200 {
+            format!("{}... ({} sequences)", &sequences_str[..200], sequences.len())
+        } else {
+            sequences_str
+        };
+        metadata.data.insert("sequences".to_string(), sequences_metadata);
         metadata.data.insert("project".to_string(), "silvana".to_string());
         metadata.data.insert("sui_chain".to_string(), 
             std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));

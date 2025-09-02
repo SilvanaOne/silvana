@@ -5,7 +5,7 @@ use aws_sdk_s3::types::{Tag, Tagging};
 use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 
 static AWS_S3_CLIENT: OnceCell<Arc<Client>> = OnceCell::new();
 
@@ -78,16 +78,58 @@ impl S3Client {
 
         if let Some(metadata) = metadata {
             for (key, value) in metadata.iter() {
+                // S3 tag limits: key max 128 chars, value max 256 chars
+                // Also, S3 tags can only contain: letters, numbers, spaces, and + - = . _ : / @
+                
+                let tag_key = if key.len() > 128 {
+                    warn!("S3 tag key '{}' exceeds 128 chars, truncating", key);
+                    &key[..128]
+                } else {
+                    key.as_str()
+                };
+                
+                // Sanitize tag value - replace invalid characters with underscores
+                let sanitized_value = value.chars()
+                    .map(|c| {
+                        if c.is_alphanumeric() || c == ' ' || c == '+' || c == '-' || c == '=' 
+                            || c == '.' || c == '_' || c == ':' || c == '/' || c == '@' {
+                            c
+                        } else {
+                            '_' // Replace invalid characters with underscore
+                        }
+                    })
+                    .collect::<String>();
+                
+                let tag_value = if sanitized_value.len() > 256 {
+                    warn!("S3 tag value for key '{}' exceeds 256 chars ({}), truncating", key, sanitized_value.len());
+                    sanitized_value[..256].to_string()
+                } else {
+                    sanitized_value
+                };
+                
+                // Log if we had to sanitize the value
+                if value != &tag_value {
+                    debug!("Sanitized S3 tag value for key '{}': '{}' -> '{}'", 
+                        key, 
+                        if value.len() > 50 { format!("{}...", &value[..50]) } else { value.clone() },
+                        if tag_value.len() > 50 { format!("{}...", &tag_value[..50]) } else { tag_value.clone() }
+                    );
+                }
+                
                 tags.push(
                     Tag::builder()
-                        .key(key.clone())
-                        .value(value.clone())
+                        .key(tag_key.to_string())
+                        .value(tag_value)
                         .build()?,
                 );
             }
         }
 
-        let tagging = Tagging::builder().set_tag_set(Some(tags)).build()?;
+        // Store data size and tags count before moving them
+        let data_size = data.len();
+        let tags_count = tags.len();
+        
+        let tagging = Tagging::builder().set_tag_set(Some(tags.clone())).build()?;
 
         let tagging_string = tagging
             .tag_set()
@@ -96,15 +138,42 @@ impl S3Client {
             .collect::<Vec<_>>()
             .join("&");
 
-        self.client
+        match self.client
             .put_object()
             .bucket(&self.bucket_name)
             .key(key)
             .body(data.into_bytes().into())
             .tagging(tagging_string)
             .send()
-            .await
-            .map_err(|e| anyhow!("Failed to write to S3: {}", e))?;
+            .await {
+            Ok(_) => {},
+            Err(e) => {
+                // Log detailed error information
+                error!("S3 PUT failed - Bucket: {}, Key: {}, Error: {:?}", 
+                    self.bucket_name, key, e);
+                
+                // Check for specific error types
+                if let Some(service_error) = e.as_service_error() {
+                    error!("S3 Service Error Details: {:?}", service_error);
+                    
+                    // Log additional context
+                    error!("S3 Request - Data size: {} bytes, Tags count: {}", 
+                        data_size, tags_count);
+                    
+                    // Log tag details if they might be the issue
+                    if !tags.is_empty() {
+                        error!("S3 Tags being sent:");
+                        for tag in &tags {
+                            error!("  Tag: {}={} (key_len={}, val_len={})", 
+                                tag.key(), tag.value(), 
+                                tag.key().len(), tag.value().len());
+                        }
+                    }
+                }
+                
+                return Err(anyhow!("Failed to write to S3: {}", e));
+            }
+        }
 
         info!(
             "Successfully wrote to S3 bucket {} with key: {}",
@@ -120,14 +189,23 @@ impl S3Client {
             self.bucket_name, key
         );
 
-        let get_object_output = self
+        let get_object_output = match self
             .client
             .get_object()
             .bucket(&self.bucket_name)
             .key(key)
             .send()
-            .await
-            .map_err(|e| anyhow!("Failed to read from S3: {}", e))?;
+            .await {
+            Ok(output) => output,
+            Err(e) => {
+                error!("S3 GET failed - Bucket: {}, Key: {}, Error: {:?}", 
+                    self.bucket_name, key, e);
+                if let Some(service_error) = e.as_service_error() {
+                    error!("S3 Service Error Details: {:?}", service_error);
+                }
+                return Err(anyhow!("Failed to read from S3: {}", e));
+            }
+        };
 
         let body = get_object_output
             .body

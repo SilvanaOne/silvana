@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use crate::s3::S3Client;
 
@@ -76,9 +76,25 @@ impl ProofsCache {
             expires_at
         );
 
-        self.s3_client
-            .write(&hash, proof_data, metadata, expires_at)
-            .await?;
+        match self.s3_client
+            .write(&hash, proof_data.clone(), metadata.clone(), expires_at)
+            .await {
+            Ok(_) => {},
+            Err(e) => {
+                error!("ProofsCache: Failed to submit proof - Hash: {}, Data size: {} bytes", 
+                    hash, proof_data.len());
+                if let Some(ref meta) = metadata {
+                    error!("ProofsCache: Metadata count: {}", meta.len());
+                    for (key, value) in meta.iter() {
+                        error!("  Metadata: {}={} (len={})", key, 
+                            if value.len() > 50 { format!("{}...", &value[..50]) } else { value.clone() },
+                            value.len());
+                    }
+                }
+                error!("ProofsCache: Expires at: {}", expires_at);
+                return Err(e);
+            }
+        }
 
         info!("Successfully submitted proof to cache with hash: {}", hash);
         Ok(hash)
@@ -94,7 +110,13 @@ impl ProofsCache {
     pub async fn read_proof(&self, proof_hash: &str) -> Result<ProofData> {
         debug!("Reading proof from cache with hash: {}", proof_hash);
 
-        let (data, metadata) = self.s3_client.read(proof_hash).await?;
+        let (data, metadata) = match self.s3_client.read(proof_hash).await {
+            Ok(result) => result,
+            Err(e) => {
+                error!("ProofsCache: Failed to read proof - Hash: {}", proof_hash);
+                return Err(e);
+            }
+        };
 
         info!(
             "Successfully read proof from cache with hash: {}",
