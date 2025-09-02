@@ -14,6 +14,9 @@ const DEFAULT_DEVNET_FAUCET_URL: &str = "https://faucet.devnet.sui.io/v2/gas";
 #[derive(Debug, Deserialize)]
 struct FaucetResponse {
     error: Option<String>,
+    task: Option<String>,
+    #[serde(rename = "txDigests")]
+    tx_digests: Option<Vec<String>>,
 }
 
 /// Response from the testnet faucet service (Silvana/StakeTab)
@@ -32,6 +35,38 @@ pub enum FaucetNetwork {
     Testnet,
 }
 
+impl FaucetNetwork {
+    /// Parse network from chain string
+    pub fn from_chain(chain: &str) -> Result<Self> {
+        match chain.to_lowercase().as_str() {
+            "devnet" => Ok(FaucetNetwork::Devnet),
+            "testnet" => Ok(FaucetNetwork::Testnet),
+            "mainnet" => Err(anyhow!("Faucet is not available for mainnet")),
+            _ => Err(anyhow!("Unknown chain: {}. Expected 'devnet' or 'testnet'", chain)),
+        }
+    }
+}
+
+/// Request tokens from the Sui faucet
+/// 
+/// # Arguments
+/// * `chain` - The chain name ("devnet" or "testnet")
+/// * `address` - The address to send tokens to
+/// * `amount` - Amount in SUI (only used for testnet, max 10 SUI)
+/// 
+/// # Returns
+/// Ok(transaction_digest) if successful, error otherwise
+pub async fn request_tokens_from_faucet(
+    chain: &str,
+    address: &str,
+    amount: Option<f64>,
+) -> Result<String> {
+    let network = FaucetNetwork::from_chain(chain)?;
+    let sui_address = address.parse::<sui::Address>()
+        .map_err(|e| anyhow!("Invalid address format: {}", e))?;
+    request_tokens_from_faucet_network(sui_address, network, amount).await
+}
+
 /// Request tokens from the Sui faucet (devnet or testnet)
 /// 
 /// # Arguments
@@ -40,12 +75,12 @@ pub enum FaucetNetwork {
 /// * `amount` - Amount in SUI (only used for testnet, max 10 SUI)
 /// 
 /// # Returns
-/// Ok(()) if successful, error otherwise
+/// Ok(transaction_digest) if successful, error otherwise
 pub async fn request_tokens_from_faucet_network(
     address: sui::Address,
     network: FaucetNetwork,
     amount: Option<f64>,
-) -> Result<()> {
+) -> Result<String> {
     match network {
         FaucetNetwork::Devnet => request_tokens_from_devnet(address).await,
         FaucetNetwork::Testnet => request_tokens_from_testnet(address, amount).await,
@@ -53,7 +88,7 @@ pub async fn request_tokens_from_faucet_network(
 }
 
 /// Request tokens from the Sui devnet faucet
-async fn request_tokens_from_devnet(address: sui::Address) -> Result<()> {
+async fn request_tokens_from_devnet(address: sui::Address) -> Result<String> {
     // Get faucet URL from environment or use default
     let url = env::var("SUI_FAUCET_DEVNET")
         .unwrap_or_else(|_| DEFAULT_DEVNET_FAUCET_URL.to_string());
@@ -85,10 +120,17 @@ async fn request_tokens_from_devnet(address: sui::Address) -> Result<()> {
             if let Some(err) = faucet_resp.error {
                 return Err(anyhow!("Devnet faucet request was unsuccessful: {}", err));
             } else {
+                // Extract transaction digest
+                let tx_digest = faucet_resp.tx_digests
+                    .and_then(|digests| digests.first().cloned())
+                    .or(faucet_resp.task)
+                    .unwrap_or_else(|| "unknown".to_string());
+                
                 info!(
-                    "✅ Devnet faucet request successful for {}. Tokens should arrive within 1 minute.",
-                    address
+                    "✅ Devnet faucet request successful for {}. Transaction: {}",
+                    address, tx_digest
                 );
+                return Ok(tx_digest);
             }
         }
         StatusCode::BAD_REQUEST => {
@@ -112,12 +154,10 @@ async fn request_tokens_from_devnet(address: sui::Address) -> Result<()> {
             return Err(anyhow!("Devnet faucet request was unsuccessful: {}", status_code));
         }
     }
-    
-    Ok(())
 }
 
 /// Request tokens from the Sui testnet faucet (Silvana/StakeTab)
-async fn request_tokens_from_testnet(address: sui::Address, amount: Option<f64>) -> Result<()> {
+async fn request_tokens_from_testnet(address: sui::Address, amount: Option<f64>) -> Result<String> {
     // Get faucet URL from environment
     let url = env::var("SUI_FAUCET_TESTNET")
         .or_else(|_| env::var("SILVANA_FAUCET_ENDPOINT"))
@@ -130,10 +170,13 @@ async fn request_tokens_from_testnet(address: sui::Address, amount: Option<f64>)
     
     let address_str = address.to_string();
     
-    // Testnet faucet uses a different payload format
+    // Convert SUI to MIST (1 SUI = 1,000,000,000 MIST)
+    let amount_mist = (amount_sui * 1_000_000_000.0) as u64;
+    
+    // Testnet faucet uses a different payload format - amount is in MIST
     let json_body = json!({
         "address": address_str,
-        "amount": amount_sui as u32,
+        "amount": amount_mist,
     });
 
     // Make the request to the testnet faucet API
@@ -157,17 +200,15 @@ async fn request_tokens_from_testnet(address: sui::Address, amount: Option<f64>)
             debug!("Testnet faucet response: {:?}", faucet_resp);
 
             if let Some(true) = faucet_resp.success {
-                if let Some(tx_hash) = faucet_resp.transaction_hash {
-                    info!(
-                        "✅ Testnet faucet request successful for {}. Transaction: {}",
-                        address, tx_hash
-                    );
-                } else {
-                    info!(
-                        "✅ Testnet faucet request successful for {}. {} SUI sent.",
-                        address, amount_sui
-                    );
-                }
+                let tx_digest = faucet_resp.transaction_hash
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                info!(
+                    "✅ Testnet faucet request successful for {}. Transaction: {}",
+                    address, tx_digest
+                );
+                return Ok(tx_digest);
             } else if let Some(err) = faucet_resp.error {
                 return Err(anyhow!("Testnet faucet request failed: {}", err));
             } else if let Some(msg) = faucet_resp.message {
@@ -195,36 +236,8 @@ async fn request_tokens_from_testnet(address: sui::Address, amount: Option<f64>)
             return Err(anyhow!("Testnet faucet request failed with status {}: {}", status_code, body));
         }
     }
-    
-    Ok(())
 }
 
-/// Request tokens from the Sui faucet (backward compatibility - uses devnet by default)
-/// 
-/// # Arguments
-/// * `address` - The address to send tokens to
-/// * `faucet_url` - Optional faucet URL, uses environment variable or default if None
-/// 
-/// # Returns
-/// Ok(()) if successful, error otherwise
-pub async fn request_tokens_from_faucet(
-    address: sui::Address,
-    faucet_url: Option<String>,
-) -> Result<()> {
-    // For backward compatibility, use devnet by default
-    if faucet_url.is_some() {
-        // If a custom URL is provided, try to determine which network based on the URL
-        let url = faucet_url.as_ref().unwrap();
-        if url.contains("testnet") || url.contains("staketab") || url.contains("silvana") {
-            request_tokens_from_testnet(address, None).await
-        } else {
-            request_tokens_from_devnet(address).await
-        }
-    } else {
-        // Default to devnet for backward compatibility
-        request_tokens_from_devnet(address).await
-    }
-}
 
 /// Request tokens from faucet using the default address from SharedSuiState
 pub async fn request_tokens_for_default_address() -> Result<()> {
@@ -233,7 +246,10 @@ pub async fn request_tokens_for_default_address() -> Result<()> {
     let shared_state = SharedSuiState::get_instance();
     let address = shared_state.get_sui_address();
     
-    request_tokens_from_faucet(address, None).await
+    // Determine chain from environment or default to devnet
+    let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
+    request_tokens_from_faucet(&chain, &address.to_string(), None).await?;
+    Ok(())
 }
 
 /// Request tokens from a specific network's faucet for the default address
@@ -246,7 +262,8 @@ pub async fn request_tokens_for_default_address_network(
     let shared_state = SharedSuiState::get_instance();
     let address = shared_state.get_sui_address();
     
-    request_tokens_from_faucet_network(address, network, amount).await
+    request_tokens_from_faucet_network(address, network, amount).await?;
+    Ok(())
 }
 
 /// Check if we need tokens and request from faucet if necessary
@@ -275,7 +292,9 @@ pub async fn ensure_sufficient_balance(min_balance_sui: f64) -> Result<bool> {
             total_balance_sui, min_balance_sui
         );
         
-        request_tokens_from_faucet(address, None).await?;
+        // Determine chain from environment or default to devnet
+        let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
+        request_tokens_from_faucet(&chain, &address.to_string(), None).await?;
         
         // Wait a bit for tokens to arrive
         info!("Waiting 5 seconds for faucet tokens to arrive...");

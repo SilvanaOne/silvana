@@ -1,17 +1,17 @@
 use crate::agent::AgentJob;
 use crate::error::{CoordinatorError, Result};
 use crate::failed_jobs_cache::FailedJobsCache;
-use crate::hardware::{get_available_memory_gb, get_total_memory_gb, get_hardware_info};
+use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
 use crate::metrics::CoordinatorMetrics;
 use crate::session_id::generate_docker_session;
-use crate::settlement::{fetch_all_pending_jobs, can_remove_app_instance};
+use crate::settlement::{can_remove_app_instance, fetch_all_pending_jobs};
 use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
 use secrets_client::SecretsClient;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use sui::fetch::{Job, AgentMethod};
+use sui::fetch::{AgentMethod, Job};
 use sui::fetch_agent_method;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, sleep};
@@ -33,7 +33,7 @@ async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Resul
 
     // Get hardware info
     let hardware = get_hardware_info();
-    
+
     // Check CPU cores
     if (hardware.cpu_cores as u16) < agent_method.min_cpu_cores {
         debug!(
@@ -56,23 +56,32 @@ async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Resul
     // Calculate total memory required by currently running agents
     let running_agents = state.get_all_current_agents().await;
     let mut total_memory_used_gb = 0u64;
-    
+
     for (_session_id, agent_info) in running_agents {
         // Fetch agent method to get memory requirements
-        if let Ok(method) = fetch_agent_method(&agent_info.developer, &agent_info.agent, &agent_info.agent_method).await {
+        if let Ok(method) = fetch_agent_method(
+            &agent_info.developer,
+            &agent_info.agent,
+            &agent_info.agent_method,
+        )
+        .await
+        {
             total_memory_used_gb += method.min_memory_gb as u64;
         }
     }
 
     // Add memory requirement for this new agent
     let total_memory_needed_gb = total_memory_used_gb + agent_method.min_memory_gb as u64;
-    
+
     // Check against total system memory minus reserved
     let total_memory_gb = get_total_memory_gb();
     if total_memory_needed_gb > total_memory_gb.saturating_sub(MIN_SYSTEM_MEMORY_GB) {
         debug!(
             "Insufficient total memory: need {} GB (including {} GB for new agent), have {} GB (minus {} GB reserved)",
-            total_memory_needed_gb, agent_method.min_memory_gb, total_memory_gb, MIN_SYSTEM_MEMORY_GB
+            total_memory_needed_gb,
+            agent_method.min_memory_gb,
+            total_memory_gb,
+            MIN_SYSTEM_MEMORY_GB
         );
         return Ok(false);
     }
@@ -132,7 +141,7 @@ impl JobSearcher {
         self.secrets_client = Some(secrets_client);
         self
     }
-    
+
     /// Set the metrics reporter
     pub fn set_metrics(&mut self, metrics: Arc<CoordinatorMetrics>) {
         self.metrics = Some(metrics);
@@ -155,7 +164,7 @@ impl JobSearcher {
                 if monitor_state.is_shutting_down() {
                     break;
                 }
-                
+
                 sleep(Duration::from_millis(100)).await;
                 let current_has_jobs = monitor_state.has_pending_jobs_available();
                 if current_has_jobs != last_has_jobs {
@@ -176,45 +185,70 @@ impl JobSearcher {
             // Check for shutdown request
             if self.state.is_shutting_down() {
                 info!("🛑 Job searcher received shutdown signal");
-                
+
                 // If we have a running container, handle it based on shutdown type
                 let job_info = self.current_job_info.read().await.clone();
                 if let Some((container_id, job)) = job_info {
                     if self.state.is_force_shutdown() {
-                        error!("Force shutdown - terminating Docker container {} for job {}", container_id, job.job_sequence);
-                        
+                        error!(
+                            "Force shutdown - terminating Docker container {} for job {}",
+                            container_id, job.job_sequence
+                        );
+
                         // Try to get logs before terminating
-                        if let Some(logs) = self.docker_manager.get_container_logs_safe(&container_id).await {
+                        if let Some(logs) = self
+                            .docker_manager
+                            .get_container_logs_safe(&container_id)
+                            .await
+                        {
                             info!("Container logs before force termination:\n{}", logs);
                         }
-                        
+
                         // Force stop the container with a short timeout
-                        if let Err(e) = self.docker_manager.stop_container_with_timeout(&container_id, 5).await {
+                        if let Err(e) = self
+                            .docker_manager
+                            .stop_container_with_timeout(&container_id, 5)
+                            .await
+                        {
                             error!("Failed to stop container {}: {}", container_id, e);
                         }
                     } else {
-                        warn!("Waiting for Docker container {} (job {}) to complete before shutdown...", container_id, job.job_sequence);
+                        warn!(
+                            "Waiting for Docker container {} (job {}) to complete before shutdown...",
+                            container_id, job.job_sequence
+                        );
                         warn!("Press Ctrl-C again to force terminate the container");
-                        
+
                         // Wait for container to finish or force shutdown
                         let mut check_interval = tokio::time::interval(Duration::from_secs(1));
                         loop {
                             check_interval.tick().await;
-                            
+
                             if self.state.is_force_shutdown() {
-                                error!("Force shutdown requested - terminating container {}", container_id);
-                                
+                                error!(
+                                    "Force shutdown requested - terminating container {}",
+                                    container_id
+                                );
+
                                 // Get logs and terminate
-                                if let Some(logs) = self.docker_manager.get_container_logs_safe(&container_id).await {
+                                if let Some(logs) = self
+                                    .docker_manager
+                                    .get_container_logs_safe(&container_id)
+                                    .await
+                                {
                                     info!("Container logs before force termination:\n{}", logs);
                                 }
-                                
-                                if let Err(e) = self.docker_manager.stop_container_with_timeout(&container_id, 5).await {
+
+                                if let Err(e) = self
+                                    .docker_manager
+                                    .stop_container_with_timeout(&container_id, 5)
+                                    .await
+                                {
                                     error!("Failed to stop container {}: {}", container_id, e);
                                 }
                                 break;
                             }
-                            
+
                             // Check if container is still running
                             let current_job = self.current_job_info.read().await.clone();
                             if current_job.is_none() {
@@ -224,7 +258,7 @@ impl JobSearcher {
                         }
                     }
                 }
-                
+
                 return Ok(());
             }
             let current_state = self.searcher_state.read().await.clone();
@@ -236,7 +270,7 @@ impl JobSearcher {
                         debug!("Shutdown requested during searching phase");
                         return Ok(());
                     }
-                    
+
                     // Fast check if there are any pending jobs
                     if !self.state.has_pending_jobs_available() {
                         // No pending jobs, wait for state change
@@ -253,7 +287,7 @@ impl JobSearcher {
 
                     // Periodically clean up expired entries from the failed jobs cache
                     self.failed_jobs_cache.cleanup_expired().await;
-                    
+
                     // Check for pending jobs and clean up app_instances without jobs
                     // This already filters out jobs in the failed cache
                     match self.check_and_clean_pending_jobs().await? {
@@ -267,19 +301,34 @@ impl JobSearcher {
                             // up to MAX_CONCURRENT_AGENTS limit
 
                             // Fetch agent method configuration first to check resource requirements
-                            let agent_method = match fetch_agent_method(&job.developer, &job.agent, &job.agent_method).await {
+                            let agent_method = match fetch_agent_method(
+                                &job.developer,
+                                &job.agent,
+                                &job.agent_method,
+                            )
+                            .await
+                            {
                                 Ok(method) => {
                                     debug!(
                                         "Agent method for {}/{}/{}: memory={}GB, cpu={}, tee={}",
-                                        job.developer, job.agent, job.agent_method,
-                                        method.min_memory_gb, method.min_cpu_cores, method.requires_tee
+                                        job.developer,
+                                        job.agent,
+                                        job.agent_method,
+                                        method.min_memory_gb,
+                                        method.min_cpu_cores,
+                                        method.requires_tee
                                     );
                                     method
                                 }
                                 Err(e) => {
-                                    error!("Failed to fetch agent method for job {}: {}", job.job_sequence, e);
+                                    error!(
+                                        "Failed to fetch agent method for job {}: {}",
+                                        job.job_sequence, e
+                                    );
                                     // Add to failed cache to avoid retrying immediately
-                                    self.failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+                                    self.failed_jobs_cache
+                                        .add_failed_job(job.app_instance.clone(), job.job_sequence)
+                                        .await;
                                     continue;
                                 }
                             };
@@ -306,17 +355,23 @@ impl JobSearcher {
                             }
 
                             // Log how many containers are already loading/running
-                            let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
-                            
+                            let (loading_count, running_count) =
+                                self.docker_manager.get_container_counts().await;
+
                             // Update metrics
                             if let Some(ref metrics) = self.metrics {
                                 metrics.set_docker_containers(loading_count, running_count);
                             }
-                            
+
                             debug!(
                                 "📋 Picked job for Docker (currently {} loading, {} running): dev={}, agent={}/{}, job_seq={}, app={}",
-                                loading_count, running_count,
-                                job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
+                                loading_count,
+                                running_count,
+                                job.developer,
+                                job.agent,
+                                job.agent_method,
+                                job.job_sequence,
+                                job.app_instance
                             );
 
                             // Clone necessary data for the spawned task
@@ -325,7 +380,7 @@ impl JobSearcher {
                             let failed_jobs_cache_clone = self.failed_jobs_cache.clone();
                             let container_timeout_secs = self.container_timeout_secs;
                             let secrets_client_clone = self.secrets_client.clone();
-                            
+
                             // Spawn a task to run the Docker container in parallel
                             tokio::spawn(async move {
                                 run_docker_container_task(
@@ -336,7 +391,8 @@ impl JobSearcher {
                                     failed_jobs_cache_clone,
                                     container_timeout_secs,
                                     secrets_client_clone,
-                                ).await;
+                                )
+                                .await;
                             });
 
                             // Continue immediately to check for more jobs
@@ -378,12 +434,18 @@ impl JobSearcher {
             match sui::fetch::fetch_app_instance(app_instance_id).await {
                 Ok(app_instance) => {
                     if can_remove_app_instance(&app_instance) {
-                        debug!("App instance {} is fully caught up and can be removed", app_instance_id);
+                        debug!(
+                            "App instance {} is fully caught up and can be removed",
+                            app_instance_id
+                        );
                         instances_to_remove.push(app_instance_id.clone());
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to fetch app_instance {} for removal check: {}", app_instance_id, e);
+                    warn!(
+                        "Failed to fetch app_instance {} for removal check: {}",
+                        app_instance_id, e
+                    );
                 }
             }
         }
@@ -413,83 +475,104 @@ impl JobSearcher {
                     debug!("No pending jobs found after detailed fetch");
                     return Ok(None);
                 }
-                
+
                 let total_jobs = pending_jobs.len();
-                
+
                 // Filter out jobs that are in the failed cache
                 let mut viable_jobs = Vec::new();
                 for job in pending_jobs {
-                    if !self.failed_jobs_cache.is_recently_failed(&job.app_instance, job.job_sequence).await {
+                    if !self
+                        .failed_jobs_cache
+                        .is_recently_failed(&job.app_instance, job.job_sequence)
+                        .await
+                    {
                         viable_jobs.push(job);
                     } else {
-                        debug!("Skipping job {} from app_instance {} (in failed cache)", job.job_sequence, job.app_instance);
+                        debug!(
+                            "Skipping job {} from app_instance {} (in failed cache)",
+                            job.job_sequence, job.app_instance
+                        );
                     }
                 }
-                
+
                 if viable_jobs.is_empty() {
                     debug!("All {} pending jobs are in the failed cache", total_jobs);
                     return Ok(None);
                 }
-                
+
                 // Build job pool based on priority:
                 // 1. Settlement jobs (highest priority - always picked if available)
                 // 2. Merge jobs (collect all, up to pool size)
                 // 3. Other jobs (fill remaining slots)
                 const JOB_POOL_SIZE: usize = 10;
-                
+
                 // Check for settlement jobs first
                 let settlement_jobs: Vec<Job> = viable_jobs
                     .iter()
                     .filter(|job| job.app_instance_method == "settle")
                     .cloned()
                     .collect();
-                
+
                 if !settlement_jobs.is_empty() {
                     // Always pick settlement job immediately (highest priority)
                     let job = settlement_jobs.into_iter().next().unwrap();
-                    debug!("Selected settlement job {} from app_instance {}", job.job_sequence, job.app_instance);
+                    debug!(
+                        "Selected settlement job {} from app_instance {}",
+                        job.job_sequence, job.app_instance
+                    );
                     return Ok(Some(job));
                 }
-                
+
                 // Collect merge jobs
                 let mut job_pool: Vec<Job> = viable_jobs
                     .iter()
                     .filter(|job| job.app_instance_method == "merge")
                     .cloned()
                     .collect();
-                
+
                 let merge_count = job_pool.len();
                 debug!("Found {} merge jobs", merge_count);
-                
+
                 // If we have less than pool size, add other jobs
                 if job_pool.len() < JOB_POOL_SIZE {
                     let mut other_jobs: Vec<Job> = viable_jobs
                         .iter()
-                        .filter(|job| job.app_instance_method != "merge" && job.app_instance_method != "settle")
+                        .filter(|job| {
+                            job.app_instance_method != "merge"
+                                && job.app_instance_method != "settle"
+                        })
                         .cloned()
                         .collect();
-                    
+
                     // Sort other jobs by sequence to get lowest ones
                     other_jobs.sort_by_key(|job| job.job_sequence);
-                    
+
                     // Take enough to fill the pool
                     let slots_remaining = JOB_POOL_SIZE - job_pool.len();
                     job_pool.extend(other_jobs.into_iter().take(slots_remaining));
-                    
-                    debug!("Added {} other jobs to pool (total pool size: {})", 
-                           job_pool.len() - merge_count, job_pool.len());
+
+                    debug!(
+                        "Added {} other jobs to pool (total pool size: {})",
+                        job_pool.len() - merge_count,
+                        job_pool.len()
+                    );
                 }
-                
+
                 // Select randomly from the pool
                 use rand::Rng;
                 let pool_size = job_pool.len();
                 let selected_index = rand::thread_rng().gen_range(0..pool_size);
                 let selected_job = job_pool[selected_index].clone();
-                
-                debug!("Randomly selected job {} from app_instance {} (index {}/{}, pool had {} merge jobs)", 
-                       selected_job.job_sequence, selected_job.app_instance, 
-                       selected_index, pool_size, merge_count);
-                
+
+                debug!(
+                    "Randomly selected job {} from app_instance {} (index {}/{}, pool had {} merge jobs)",
+                    selected_job.job_sequence,
+                    selected_job.app_instance,
+                    selected_index,
+                    pool_size,
+                    merge_count
+                );
+
                 Ok(Some(selected_job))
             }
             Err(e) => {
@@ -557,28 +640,41 @@ impl JobSearcher {
 
         Ok(secrets)
     }
-    
+
     /// Get the current container ID and job info for shutdown logging
     #[allow(dead_code)]
     pub async fn get_current_container_info(&self) -> Option<(String, Job)> {
         self.current_job_info.read().await.clone()
     }
-    
+
     /// Fetch logs from current container if any
     #[allow(dead_code)]
     pub async fn fetch_current_container_logs(&self) -> Option<String> {
         if let Some((container_id, job)) = self.get_current_container_info().await {
-            info!("Fetching logs for container {} (job {})", &container_id[..12.min(container_id.len())], job.job_sequence);
-            
+            info!(
+                "Fetching logs for container {} (job {})",
+                &container_id[..12.min(container_id.len())],
+                job.job_sequence
+            );
+
             // Use the safe method that returns Option
-            let logs = self.docker_manager.get_container_logs_safe(&container_id).await;
-            
+            let logs = self
+                .docker_manager
+                .get_container_logs_safe(&container_id)
+                .await;
+
             if let Some(ref log_content) = logs {
-                info!("Retrieved {} bytes of logs from container", log_content.len());
+                info!(
+                    "Retrieved {} bytes of logs from container",
+                    log_content.len()
+                );
             } else {
-                warn!("Failed to retrieve logs from container {}", &container_id[..12.min(container_id.len())]);
+                warn!(
+                    "Failed to retrieve logs from container {}",
+                    &container_id[..12.min(container_id.len())]
+                );
             }
-            
+
             logs
         } else {
             None
@@ -675,11 +771,13 @@ async fn run_docker_container_task(
     };
 
     // Track container as loading in docker state
-    docker_manager.track_container_loading(
-        docker_session.session_id.clone(),
-        job.job_sequence.to_string(),
-    ).await;
-    
+    docker_manager
+        .track_container_loading(
+            docker_session.session_id.clone(),
+            job.job_sequence.to_string(),
+        )
+        .await;
+
     // Set current agent in coordinator state (for job tracking)
     state
         .set_current_agent(
@@ -689,7 +787,7 @@ async fn run_docker_container_task(
             job.agent_method.clone(),
         )
         .await;
-    
+
     // Log how many containers are loading/running
     let (loading_count, running_count) = docker_manager.get_container_counts().await;
     debug!(
@@ -698,64 +796,112 @@ async fn run_docker_container_task(
     );
 
     // Start the job on Sui blockchain before processing
-    debug!("🔗 Preparing to start job {} on Sui blockchain", job.job_sequence);
+    debug!(
+        "🔗 Preparing to start job {} on Sui blockchain",
+        job.job_sequence
+    );
+
+    // Check if this job is already being tracked by this coordinator
+    // This prevents duplicate starts when the blockchain state is delayed
+    // Important: Do this check BEFORE any delay to avoid race conditions
+    if state
+        .get_agent_job_db()
+        .is_job_tracked(&job.app_instance, job.job_sequence)
+        .await
+    {
+        debug!(
+            "Job {} is already being tracked by this coordinator - skipping duplicate start",
+            job.job_sequence
+        );
+        // The job is already in progress with a different session, just clean up this attempt's tracking
+        docker_manager
+            .remove_container_tracking(&docker_session.session_id)
+            .await;
+        return;
+    }
+
+    debug!(
+        "Job {} not tracked locally, adding random delay before start",
+        job.job_sequence
+    );
 
     // Add random delay to avoid race conditions with other coordinators
     use rand::Rng;
     let delay_ms = rand::thread_rng().gen_range(0..MAX_JOB_START_DELAY_MS);
-    debug!("Adding random delay of {}ms before starting job {} to avoid race conditions", delay_ms, job.job_sequence);
+    debug!(
+        "Adding random delay of {}ms before starting job {} to avoid race conditions",
+        delay_ms, job.job_sequence
+    );
     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
-    // Check if job is still in pending_jobs list after the delay
-    let job_still_pending = if let Ok(app_inst) = sui::fetch::fetch_app_instance(&job.app_instance).await {
-        // Check if job is in the pending_jobs VecSet
-        if let Some(jobs) = &app_inst.jobs {
-            jobs.pending_jobs.contains(&job.job_sequence)
-        } else {
-            false
+    // Fetch fresh AppInstance data to ensure job is still pending
+    // This is critical to avoid EJobNotPending errors
+    debug!(
+        "Fetching fresh AppInstance data for job {} after delay",
+        job.job_sequence
+    );
+    let fresh_app_instance = match sui::fetch::fetch_app_instance(&job.app_instance).await {
+        Ok(app_inst) => app_inst,
+        Err(e) => {
+            warn!(
+                "Failed to fetch fresh AppInstance for job {}: {} - skipping",
+                job.job_sequence, e
+            );
+            // Don't add to failed cache - this is a network/fetch error, not a job failure
+            // We'll retry this job on the next iteration
+            state.clear_current_agent(&docker_session.session_id).await;
+            docker_manager
+                .remove_container_tracking(&docker_session.session_id)
+                .await;
+            return;
         }
+    };
+
+    // Check if job is still in pending_jobs list using fresh data
+    let job_still_pending = if let Some(jobs) = &fresh_app_instance.jobs {
+        jobs.pending_jobs.contains(&job.job_sequence)
     } else {
-        // If we can't fetch app instance, assume job might still be pending
-        true
+        false
     };
 
     if !job_still_pending {
-        debug!("Job {} is no longer in pending_jobs list after delay - already started by another coordinator", job.job_sequence);
-        // Add to failed jobs cache to prevent immediate retries
-        failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+        debug!(
+            "Job {} is no longer in pending_jobs list (fresh check) - already started by another coordinator",
+            job.job_sequence
+        );
+        // Don't add to failed cache - the job was successfully started by another coordinator
         state.clear_current_agent(&docker_session.session_id).await;
-        docker_manager.remove_container_tracking(&docker_session.session_id).await;
+        docker_manager
+            .remove_container_tracking(&docker_session.session_id)
+            .await;
         return;
     }
 
-    debug!("Job {} is still pending after delay, checking if already tracked locally", job.job_sequence);
-
-    // Check if this job is already being tracked by this coordinator
-    // This prevents duplicate starts when the blockchain state is delayed
-    if state.get_agent_job_db().is_job_tracked(&job.app_instance, job.job_sequence).await {
-        debug!("Job {} is already being tracked by this coordinator - skipping duplicate start", job.job_sequence);
-        // Add to failed jobs cache to prevent immediate retries
-        failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
-        state.clear_current_agent(&docker_session.session_id).await;
-        docker_manager.remove_container_tracking(&docker_session.session_id).await;
-        return;
-    }
-
-    debug!("Job {} not tracked locally, attempting to start", job.job_sequence);
+    debug!(
+        "Job {} confirmed still pending with fresh data, attempting to start",
+        job.job_sequence
+    );
 
     // Try to start the job on blockchain - NO RETRIES since other coordinators might be handling it
     let start_time = Instant::now();
-    
-    debug!("Attempting to start job {} (single attempt, no retries)", job.job_sequence);
-    
-    let tx_digest = match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await {
+
+    debug!(
+        "Attempting to start job {} (single attempt, no retries)",
+        job.job_sequence
+    );
+
+    let tx_digest = match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await
+    {
         Ok(tx_digest) => {
-            debug!("Successfully started job {} on blockchain, tx: {}", job.job_sequence, tx_digest);
+            debug!(
+                "Successfully started job {} on blockchain, tx: {}",
+                job.job_sequence, tx_digest
+            );
             tx_digest
         }
         Err(e) => {
             let error_str = e.to_string();
-            
+
             // Check if the error is because the job is not in pending state or not found
             // This can happen if another coordinator already started it
             if error_str.contains("Job is not in pending state") || 
@@ -763,30 +909,47 @@ async fn run_docker_container_task(
                error_str.contains("13906835325394878469") || // EJobNotPending abort code
                error_str.contains("Job not found") ||
                error_str.contains("EJobNotFound") ||
-               error_str.contains("13906835322940243973") { // EJobNotFound abort code
-                warn!("Job {} cannot be started - likely already handled by another coordinator: {}", job.job_sequence, error_str);
-                
+               error_str.contains("13906835322940243973")
+            {
+                // EJobNotFound abort code
+                warn!(
+                    "Job {} cannot be started - likely already handled by another coordinator: {}",
+                    job.job_sequence, error_str
+                );
+
                 // Add to failed jobs cache so we don't try again for 5 minutes
-                failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
-                
+                failed_jobs_cache
+                    .add_failed_job(job.app_instance.clone(), job.job_sequence)
+                    .await;
+
                 // Clear the agent state and return
                 state.clear_current_agent(&docker_session.session_id).await;
-                docker_manager.remove_container_tracking(&docker_session.session_id).await;
+                docker_manager
+                    .remove_container_tracking(&docker_session.session_id)
+                    .await;
                 return;
             }
-            
+
             // This can happen due to race conditions even with our random delay
             // Log as warning since it's expected in a multi-coordinator environment
-            warn!("Failed to start job {} on blockchain: {}", job.job_sequence, e);
-            
-            // No retries - add to failed cache and move on
-            failed_jobs_cache.add_failed_job(job.app_instance.clone(), job.job_sequence).await;
+            warn!(
+                "Failed to start job {} on blockchain: {}",
+                job.job_sequence, e
+            );
+
+            // For other blockchain errors, add to failed cache to avoid immediate retry
+            // This could be due to gas issues, network problems, etc.
+            failed_jobs_cache
+                .add_failed_job(job.app_instance.clone(), job.job_sequence)
+                .await;
             state.clear_current_agent(&docker_session.session_id).await;
-            docker_manager.remove_container_tracking(&docker_session.session_id).await;
+            docker_manager
+                .remove_container_tracking(&docker_session.session_id)
+                .await;
             return;
         }
     };
-    
+
     let start_elapsed = start_time.elapsed();
 
     // Add job to agent database as ready for gRPC retrieval
@@ -804,7 +967,10 @@ async fn run_docker_container_task(
     // Pull the Docker image if needed
     info!("Pulling Docker image: {}", agent_method.docker_image);
     let pull_start = Instant::now();
-    let _digest = match docker_manager.load_image(&agent_method.docker_image, false).await {
+    let _digest = match docker_manager
+        .load_image(&agent_method.docker_image, false)
+        .await
+    {
         Ok(digest) => {
             let pull_duration = pull_start.elapsed();
             info!(
@@ -821,10 +987,13 @@ async fn run_docker_container_task(
                         job.job_sequence, expected_sha, digest
                     );
                     state.clear_current_agent(&docker_session.session_id).await;
-                    docker_manager.remove_container_tracking(&docker_session.session_id).await;
-                    
+                    docker_manager
+                        .remove_container_tracking(&docker_session.session_id)
+                        .await;
+
                     // Log container count after clearing
-                    let (loading_count, running_count) = docker_manager.get_container_counts().await;
+                    let (loading_count, running_count) =
+                        docker_manager.get_container_counts().await;
                     info!(
                         "🏁 Docker container aborted (SHA mismatch): {} loading, {} running",
                         loading_count, running_count
@@ -837,8 +1006,10 @@ async fn run_docker_container_task(
         Err(e) => {
             error!("Failed to pull image for job {}: {}", job.job_sequence, e);
             state.clear_current_agent(&docker_session.session_id).await;
-            docker_manager.remove_container_tracking(&docker_session.session_id).await;
-            
+            docker_manager
+                .remove_container_tracking(&docker_session.session_id)
+                .await;
+
             // Log container count after clearing
             let (loading_count, running_count) = docker_manager.get_container_counts().await;
             info!(
@@ -852,13 +1023,19 @@ async fn run_docker_container_task(
     // Configure the Docker container with memory limits
     let mut env_vars = HashMap::new();
     env_vars.insert("CHAIN".to_string(), state.get_chain().clone());
-    env_vars.insert("COORDINATOR_ID".to_string(), state.get_coordinator_id().clone());
+    env_vars.insert(
+        "COORDINATOR_ID".to_string(),
+        state.get_coordinator_id().clone(),
+    );
     env_vars.insert("SESSION_ID".to_string(), docker_session.session_id.clone());
-    env_vars.insert("SESSION_PRIVATE_KEY".to_string(), docker_session.session_private_key);
+    env_vars.insert(
+        "SESSION_PRIVATE_KEY".to_string(),
+        docker_session.session_private_key,
+    );
     env_vars.insert("DEVELOPER".to_string(), job.developer.clone());
     env_vars.insert("AGENT".to_string(), job.agent.clone());
     env_vars.insert("AGENT_METHOD".to_string(), job.agent_method.clone());
-    
+
     // Retrieve secrets if secrets client is available
     if let Some(ref mut secrets_client) = secrets_client {
         match retrieve_secrets_for_job(secrets_client, &job).await {
@@ -881,7 +1058,7 @@ async fn run_docker_container_task(
             }
         }
     }
-    
+
     let config = ContainerConfig {
         image_name: agent_method.docker_image.clone(),
         image_source: agent_method.docker_image.clone(),
@@ -904,7 +1081,9 @@ async fn run_docker_container_task(
     };
 
     // Update state to Running and run the Docker container
-    docker_manager.mark_container_running(&docker_session.session_id).await;
+    docker_manager
+        .mark_container_running(&docker_session.session_id)
+        .await;
     let (loading_count, running_count) = docker_manager.get_container_counts().await;
     info!(
         "🐳 Starting Docker container for job {} ({} loading, {} running)",
@@ -915,7 +1094,7 @@ async fn run_docker_container_task(
         Ok(result) => {
             let docker_elapsed = docker_start.elapsed();
             let total_elapsed = job_start.elapsed();
-            
+
             if result.exit_code == 0 {
                 info!(
                     "✅ Docker container succeeded for job {} (docker: {:?}, total: {:?})",
@@ -930,7 +1109,10 @@ async fn run_docker_container_task(
 
             // Always display Docker logs after container exits
             if !result.logs.is_empty() {
-                info!("📋 Docker container logs for job {}:\n{}", job.job_sequence, result.logs);
+                info!(
+                    "📋 Docker container logs for job {}:\n{}",
+                    job.job_sequence, result.logs
+                );
             }
         }
         Err(e) => {
@@ -945,8 +1127,10 @@ async fn run_docker_container_task(
 
     // Clear the agent state after Docker completes
     state.clear_current_agent(&docker_session.session_id).await;
-    docker_manager.remove_container_tracking(&docker_session.session_id).await;
-    
+    docker_manager
+        .remove_container_tracking(&docker_session.session_id)
+        .await;
+
     // Log how many containers are still loading/running
     let (loading_count, running_count) = docker_manager.get_container_counts().await;
     info!(

@@ -4,6 +4,10 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use tracing::{debug, warn, error};
 
+// Buffer time in milliseconds to account for clock drift between coordinator and blockchain
+// This prevents "ENotDueYet" errors when starting periodic jobs
+const PERIODIC_JOB_BUFFER_MS: u64 = 10000; // 10 seconds
+
 // Helper function to get the minimum last settled block number across all chains
 fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
     if settlements.is_empty() {
@@ -261,6 +265,8 @@ pub async fn fetch_pending_job_from_instances(
     agent_method: &str,
 ) -> Result<Option<Job>> {
     // Get current time for checking next_scheduled_at
+    // Note: We add a PERIODIC_JOB_BUFFER_MS buffer when checking periodic jobs to account for
+    // clock drift between the coordinator and the blockchain
     let current_time_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -312,8 +318,8 @@ pub async fn fetch_pending_job_from_instances(
         let mut ready_settlement_jobs = Vec::new();
         for (chain, settle_id) in &settlement_job_ids {
             if let Some(job) = jobs_map.get(&settle_id) {
-                // Check if it's ready to run (next_scheduled_at)
-                if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+                // Check if it's ready to run (next_scheduled_at with buffer)
+                if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
                     // All jobs have updated_at
                     ready_settlement_jobs.push((
                         *settle_id,
@@ -352,8 +358,8 @@ pub async fn fetch_pending_job_from_instances(
                 continue;
             }
             
-            // Check if job is ready to run (next_scheduled_at)
-            if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+            // Check if job is ready to run (next_scheduled_at with buffer)
+            if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
                 all_jobs.push((
                     *job_sequence, 
                     app_instance_id.clone(), 
@@ -437,6 +443,8 @@ pub async fn fetch_all_pending_jobs(
     only_check: bool,
 ) -> Result<Vec<Job>> {
     // Get current time for checking next_scheduled_at
+    // Note: We add a PERIODIC_JOB_BUFFER_MS buffer when checking periodic jobs to account for
+    // clock drift between the coordinator and the blockchain
     let current_time_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -479,7 +487,7 @@ pub async fn fetch_all_pending_jobs(
                             Ok(Some(settle_job)) => {
                                 // Check if it's pending and ready to run
                                 if matches!(settle_job.status, sui::fetch::JobStatus::Pending) {
-                                    if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() <= current_time_ms {
+                                    if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
                                         let sort_time = settle_job.updated_at;
                                         debug!("Found pending settlement job {} for chain {} (updated_at: {})", 
                                             settle_job.job_sequence, chain, sort_time);
@@ -519,8 +527,8 @@ pub async fn fetch_all_pending_jobs(
             Ok(job_opt) => {
                 if !only_check {
                     if let Some(job) = job_opt {
-                        // Check if job is ready to run (next_scheduled_at)
-                        if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() <= current_time_ms {
+                        // Check if job is ready to run (next_scheduled_at with buffer)
+                        if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + PERIODIC_JOB_BUFFER_MS <= current_time_ms {
                             debug!("Found pending job with job_sequence {} in app_instance {}", job.job_sequence, app_instance_id);
                             // Check if it's a merge job or other
                             let is_settlement = false; // We handled settlement jobs separately above
