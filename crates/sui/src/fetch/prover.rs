@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sui_rpc::Client;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 // Constants matching Move definitions
 pub const PROOF_STATUS_STARTED: u8 = 1;

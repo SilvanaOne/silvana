@@ -1,4 +1,5 @@
 use crate::block::settle;
+use crate::constants::{MAX_MERGE_ATTEMPTS, STARTED_TIMEOUT_MS, TIMEOUT_MS};
 use anyhow::Result;
 use sui::fetch::fetch_proof_calculation;
 use sui::fetch::{Proof, ProofCalculation, ProofStatus};
@@ -183,7 +184,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     }
 
     // Try to find and create merge jobs, with up to 10 attempts
-    const MAX_MERGE_ATTEMPTS: usize = 10;
     let mut attempted_merges = Vec::new();
     let mut merge_created = false;
 
@@ -384,6 +384,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                         // Continue to next iteration to try another merge opportunity
                     } else if error_str.contains("already Started and not timed out") 
                         || error_str.contains("Cannot merge")
+                        || error_str.contains("Combined proof already exists")
                         || error_str.contains("Cannot reserve proofs - likely taken by another coordinator")
                         || error_str.contains("Proofs not in reservable state") {
                         // These are expected conditions in a concurrent environment, not errors
@@ -436,7 +437,6 @@ pub struct MergeRequest {
     pub block_proof: bool,
 }
 
-const TIMEOUT_MS: u64 = 2 * 60 * 1000; // 2 minutes
 
 fn find_proofs_to_merge_excluding(
     block_proofs: &ProofCalculation,
@@ -620,7 +620,6 @@ async fn create_merge_job(
                 // Only reject Started proofs if they've timed out (10+ minutes)
                 let current_time = chrono::Utc::now().timestamp() as u64 * 1000; // Convert to milliseconds
                 let time_since_start = current_time.saturating_sub(proof.timestamp);
-                const STARTED_TIMEOUT_MS: u64 = 10 * 60 * 1000; // 10 minutes for Started status
 
                 if time_since_start > STARTED_TIMEOUT_MS {
                     debug!(

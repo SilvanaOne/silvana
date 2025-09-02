@@ -21,6 +21,7 @@ mod session_id;
 mod settlement;
 mod state;
 mod stuck_jobs;
+mod constants;
 
 use chrono::{DateTime, Utc};
 use clap::Parser;

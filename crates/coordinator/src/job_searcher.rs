@@ -1,4 +1,5 @@
 use crate::agent::AgentJob;
+use crate::constants::{JOB_POOL_SIZE, MAX_CONCURRENT_AGENTS, MAX_JOB_START_DELAY_MS, MIN_SYSTEM_MEMORY_GB};
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
 use crate::job_lock::{JobLockGuard, get_job_lock_manager};
@@ -17,12 +18,6 @@ use sui::fetch_agent_method;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
-
-/// Maximum random delay in milliseconds before starting a job to avoid race conditions
-const MAX_JOB_START_DELAY_MS: u64 = 10000; // 10 seconds
-
-/// Minimum memory to keep reserved for the system (4GB by default)
-const MIN_SYSTEM_MEMORY_GB: u64 = 2;
 
 /// Check if system has sufficient resources to run an agent
 async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Result<bool> {
@@ -46,10 +41,10 @@ async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Resul
 
     // Check concurrent agent limit
     let current_agents = state.get_current_agent_count().await;
-    if current_agents >= crate::state::MAX_CONCURRENT_AGENTS {
+    if current_agents >= MAX_CONCURRENT_AGENTS {
         debug!(
             "Maximum concurrent agents ({}) reached",
-            crate::state::MAX_CONCURRENT_AGENTS
+            MAX_CONCURRENT_AGENTS
         );
         return Ok(false);
     }
@@ -542,7 +537,6 @@ impl JobSearcher {
                 // 1. Settlement jobs (highest priority - always picked if available)
                 // 2. Merge jobs (collect all, up to pool size)
                 // 3. Other jobs (fill remaining slots)
-                const JOB_POOL_SIZE: usize = 50;
 
                 // Check for settlement jobs first
                 let settlement_jobs: Vec<Job> = viable_jobs

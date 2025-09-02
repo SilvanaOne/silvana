@@ -8,10 +8,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
-// Maximum number of concurrent Docker containers/agents that can run simultaneously
-// This can be changed to allow more parallel agents (up to 10)
-pub const MAX_CONCURRENT_AGENTS: usize = 10;
-
 #[derive(Debug, Clone)]
 pub struct CurrentAgent {
     pub session_id: String,

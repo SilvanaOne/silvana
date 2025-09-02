@@ -1,3 +1,4 @@
+use crate::constants::MIN_TIME_BETWEEN_BLOCKS;
 use sui::interface::SilvanaSuiInterface;
 use anyhow::Result;
 use tracing::{info, debug, error};
@@ -129,8 +130,6 @@ pub async fn settle(
     Ok(())
 }
 
-/// Constants from the Move contract
-const MIN_TIME_BETWEEN_BLOCKS: u64 = 60000; // 60 seconds in milliseconds
 
 /// Try to create a new block for the app instance
 /// This function checks if the conditions are met to create a new block:

@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::constants::{INITIAL_RETRY_DELAY_SECS, MAX_RETRIES, MAX_RETRY_DELAY_SECS, STREAM_TIMEOUT_SECS};
 use crate::error::{CoordinatorError, Result};
 use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, CoordinationEvent};
 use crate::metrics::CoordinatorMetrics;
@@ -9,11 +10,6 @@ use sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsResponse;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tracing::{info, warn, error};
-
-const INITIAL_RETRY_DELAY_SECS: u64 = 5;
-const MAX_RETRY_DELAY_SECS: u64 = 300;  // Cap at 5 minutes
-const MAX_RETRIES: usize = 100;  // Increased from 5 to 100 for better resilience
-const STREAM_TIMEOUT_SECS: u64 = 30;
 
 pub struct EventProcessor {
     config: Config,

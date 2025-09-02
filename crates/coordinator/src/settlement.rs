@@ -1,12 +1,9 @@
+use crate::constants::{MAX_PER_INSTANCE, PERIODIC_JOB_BUFFER_MS};
 use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use tracing::{debug, info, warn, error};
-
-// Buffer time in milliseconds to account for clock drift between coordinator and blockchain
-// This prevents "ENotDueYet" errors when starting periodic jobs
-const PERIODIC_JOB_BUFFER_MS: u64 = 10000; // 10 seconds
 
 // Helper function to get the minimum last settled block number across all chains
 fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
@@ -550,7 +547,6 @@ pub async fn fetch_all_pending_jobs(
                 // Sort and take a slice of the lowest job sequences for prioritization
                 let mut seqs = jobs_obj.pending_jobs.clone();
                 seqs.sort();
-                const MAX_PER_INSTANCE: usize = 100;
 
                 if !seqs.is_empty() {
                     let take_n = std::cmp::min(seqs.len(), MAX_PER_INSTANCE);

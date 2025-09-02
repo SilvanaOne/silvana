@@ -429,33 +429,54 @@ impl JobsTracker {
                             let is_in_pending_jobs = pending_jobs_list.contains(&job.job_sequence);
                             
                             if !is_in_pending_jobs {
-                                // This job is orphaned - it has Pending status but is not in the pending_jobs array
-                                let is_settlement = settlement_job_id.map_or(false, |id| id == job.job_sequence);
+                                // Fetch fresh job status before logging error, as it might have changed
+                                let fresh_job = match sui::fetch::fetch_job_by_id(app_instance_id, job.job_sequence).await {
+                                    Ok(Some(fresh)) => fresh,
+                                    Ok(None) => {
+                                        debug!("Job {} no longer exists in app_instance {}", job.job_sequence, app_instance_id);
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        debug!("Failed to fetch fresh status for job {}: {}", job.job_sequence, e);
+                                        job.clone() // Use the original job if we can't fetch fresh
+                                    }
+                                };
                                 
-                                if is_settlement {
-                                    error!(
-                                        "ORPHANED SETTLEMENT job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
-                                        job.job_sequence, app_instance_id, job.attempts
+                                // Only log error if the fresh job is still Pending and orphaned
+                                if matches!(fresh_job.status, sui::fetch::JobStatus::Pending) {
+                                    // This job is orphaned - it has Pending status but is not in the pending_jobs array
+                                    let is_settlement = settlement_job_id.map_or(false, |id| id == job.job_sequence);
+                                    
+                                    if is_settlement {
+                                        error!(
+                                            "ORPHANED SETTLEMENT job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
+                                            fresh_job.job_sequence, app_instance_id, fresh_job.attempts
+                                        );
+                                    } else {
+                                        error!(
+                                            "ORPHANED job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
+                                            fresh_job.job_sequence, app_instance_id, fresh_job.attempts
+                                        );
+                                    }
+                                    
+                                    // Log additional details to help debug
+                                    info!(
+                                        "Orphaned job details: job_sequence={}, created_at={}, updated_at={}, next_scheduled_at={:?}",
+                                        fresh_job.job_sequence, fresh_job.created_at, fresh_job.updated_at, fresh_job.next_scheduled_at
                                     );
+                                    
+                                    // TODO: We could fix this by calling a new Move function that adds the job back to pending_jobs
+                                    // For now, just log it so operators know to manually intervene
+                                    // Options to fix:
+                                    // 1. Create a new Move function `fix_orphaned_job` that adds it back to pending_jobs
+                                    // 2. Delete the job and recreate it
+                                    // 3. Manually call start_job then fail_job to reset it
                                 } else {
-                                    error!(
-                                        "ORPHANED job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
-                                        job.job_sequence, app_instance_id, job.attempts
+                                    debug!(
+                                        "Job {} in app_instance {} is no longer Pending (now {:?}), skipping orphan check",
+                                        fresh_job.job_sequence, app_instance_id, fresh_job.status
                                     );
                                 }
-                                
-                                // Log additional details to help debug
-                                info!(
-                                    "Orphaned job details: job_sequence={}, created_at={}, updated_at={}, next_scheduled_at={:?}",
-                                    job.job_sequence, job.created_at, job.updated_at, job.next_scheduled_at
-                                );
-                                
-                                // TODO: We could fix this by calling a new Move function that adds the job back to pending_jobs
-                                // For now, just log it so operators know to manually intervene
-                                // Options to fix:
-                                // 1. Create a new Move function `fix_orphaned_job` that adds it back to pending_jobs
-                                // 2. Delete the job and recreate it
-                                // 3. Manually call start_job then fail_job to reset it
                             }
                         }
                     }
