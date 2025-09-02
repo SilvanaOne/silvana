@@ -274,8 +274,8 @@ pub async fn start_coordinator(
 
             info!("💰 Running periodic balance check...");
 
-            // Check balance and request from faucet if below 2 SUI
-            match sui::faucet::ensure_sufficient_balance(2.0).await {
+            // Check balance and request from faucet if below 5 SUI (topup early to avoid running out)
+            match sui::faucet::ensure_sufficient_balance(10.0).await {
                 Ok(requested) => {
                     if requested {
                         info!("✅ Balance was low, requested tokens from faucet");

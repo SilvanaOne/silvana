@@ -39,6 +39,8 @@ pub struct GasCoinsInfo {
     pub suitable_coins: usize,
     /// Coin that can be used for splitting (if any)
     pub faucet_coin: Option<CoinInfo>,
+    /// Number of coins that can be used for splitting (>= 2 SUI each)
+    pub splittable_coins: usize,
     /// Total number of coins
     pub total_coins: usize,
 }
@@ -58,6 +60,11 @@ pub async fn get_gas_coins_info(config: &CoinPoolConfig) -> Result<GasCoinsInfo>
         .filter(|c| c.balance >= config.min_coin_balance && c.balance <= config.target_coin_balance * 2)
         .count();
     
+    // Count coins that can be used for splitting (>= 2 SUI)
+    let splittable_coins = coins.iter()
+        .filter(|c| c.balance >= config.min_faucet_coin_balance)
+        .count();
+    
     // Find a coin suitable for splitting
     let faucet_coin = coins.into_iter()
         .filter(|c| c.balance >= config.min_faucet_coin_balance)
@@ -66,6 +73,7 @@ pub async fn get_gas_coins_info(config: &CoinPoolConfig) -> Result<GasCoinsInfo>
     Ok(GasCoinsInfo {
         suitable_coins,
         faucet_coin,
+        splittable_coins,
         total_coins,
     })
 }
@@ -246,12 +254,13 @@ pub async fn ensure_gas_coin_pool() -> Result<()> {
     let gas_info = get_gas_coins_info(&config).await?;
     
     info!(
-        "Gas coin status: {} suitable coins out of {} total (target: {})",
-        gas_info.suitable_coins, gas_info.total_coins, config.target_gas_coins
+        "Gas coin status: {} suitable coins, {} splittable coins out of {} total (target: {} suitable)",
+        gas_info.suitable_coins, gas_info.splittable_coins, gas_info.total_coins, config.target_gas_coins
     );
     
-    // Check if we need to split coins
-    if gas_info.suitable_coins >= config.target_gas_coins {
+    // Always ensure we have at least 2 coins that can be split (for emergency use)
+    // Check if we need to split coins for gas operations OR if we don't have enough splittable coins
+    if gas_info.suitable_coins >= config.target_gas_coins && gas_info.splittable_coins >= 2 {
         debug!("Sufficient gas coins available, no splitting needed");
         return Ok(());
     }
@@ -266,8 +275,9 @@ pub async fn ensure_gas_coin_pool() -> Result<()> {
             );
             
             // Try to get tokens from faucet if we don't have enough
-            info!("Attempting to request tokens from faucet...");
-            if let Err(e) = crate::faucet::ensure_sufficient_balance(5.0).await {
+            // Request more tokens to ensure we have splittable coins
+            info!("Attempting to request tokens from faucet for coin splitting...");
+            if let Err(e) = crate::faucet::ensure_sufficient_balance(10.0).await {
                 warn!("Failed to request faucet tokens: {}", e);
             }
             

@@ -294,7 +294,9 @@ pub async fn ensure_sufficient_balance(min_balance_sui: f64) -> Result<bool> {
         
         // Determine chain from environment or default to devnet
         let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
-        request_tokens_from_faucet(&chain, &address.to_string(), None).await?;
+        // Request 10 SUI from faucet (maximum allowed for testnet)
+        let amount = if chain.to_lowercase() == "testnet" { Some(10.0) } else { None };
+        request_tokens_from_faucet(&chain, &address.to_string(), amount).await?;
         
         // Wait a bit for tokens to arrive
         info!("Waiting 5 seconds for faucet tokens to arrive...");
@@ -347,7 +349,13 @@ pub async fn ensure_sufficient_balance_network(
             total_balance_sui, min_balance_sui, network
         );
         
-        request_tokens_from_faucet_network(address, network, amount).await?;
+        // For testnet, always request 10 SUI (maximum allowed)
+        let request_amount = if matches!(network, FaucetNetwork::Testnet) { 
+            Some(10.0) 
+        } else { 
+            amount 
+        };
+        request_tokens_from_faucet_network(address, network, request_amount).await?;
         
         // Wait a bit for tokens to arrive
         info!("Waiting 5 seconds for faucet tokens to arrive...");
@@ -410,10 +418,12 @@ pub async fn initialize_faucet() -> Result<()> {
         return Ok(());
     };
     
-    // Check if we need tokens (minimum 5 SUI for operations)
+    // Check if we need tokens (minimum 10 SUI for testnet, 5 for devnet)
     let min_balance = if matches!(network, FaucetNetwork::Testnet) { 10.0 } else { 5.0 };
+    // Request 10 SUI for testnet (maximum allowed)
+    let amount = if matches!(network, FaucetNetwork::Testnet) { Some(10.0) } else { None };
     
-    match ensure_sufficient_balance_network(min_balance, network, None).await {
+    match ensure_sufficient_balance_network(min_balance, network, amount).await {
         Ok(requested) => {
             if requested {
                 info!("✅ Faucet tokens requested successfully from {:?}", network);
