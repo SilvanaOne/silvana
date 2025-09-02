@@ -219,10 +219,9 @@ pub async fn start_coordinator(
                     } else {
                         debug!("Reconciliation complete - no pending jobs");
                     }
-                    // Update the pending jobs flag based on reconciliation result
-                    if !has_pending {
-                        reconciliation_state.update_pending_jobs_flag().await;
-                    }
+                    // Always refresh the has_pending_jobs flag so the job_searcher
+                    // is notified when pending jobs exist after reconciliation.
+                    reconciliation_state.update_pending_jobs_flag().await;
                 }
                 Err(e) => {
                     error!("Failed to reconcile with chain: {}", e);
