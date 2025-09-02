@@ -196,17 +196,19 @@ pub async fn check_settlement_opportunities_range(
 }
 
 
-/// Create a periodic settle job
+/// Create a periodic settle job for a specific settlement chain
 pub async fn create_periodic_settle_job(
     app_instance: &AppInstance,
+    settlement_chain: &str,
 ) -> Result<()> {
-    debug!("Creating periodic settle job for app instance {}", app_instance.silvana_app_name);
+    debug!("Creating periodic settle job for app instance {} on chain {}", 
+        app_instance.silvana_app_name, settlement_chain);
     
     // Create a periodic job with 1 minute interval
     let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
     
     // Create job description data
-    let job_description = "Periodic settlement check".to_string();
+    let job_description = format!("Periodic settlement check for {}", settlement_chain);
     
     // For periodic jobs, we need to encode the job data properly
     // The data should contain the interval and next run time
@@ -234,15 +236,18 @@ pub async fn create_periodic_settle_job(
         job_data,
         Some(interval_ms),
         Some(next_run_time),
-        Some("mina".to_string()), // Settlement job for mina chain
+        Some(settlement_chain.to_string()),
     ).await {
         Ok(tx_digest) => {
-            debug!("Successfully created periodic settle job - tx: {}", tx_digest);
+            debug!("Successfully created periodic settle job for chain {} - tx: {}", 
+                settlement_chain, tx_digest);
             Ok(())
         }
         Err(e) => {
-            error!("Failed to create periodic settle job: {}", e);
-            Err(anyhow!("Failed to create settle job: {}", e))
+            error!("Failed to create periodic settle job for chain {}: {}", 
+                settlement_chain, e);
+            Err(anyhow!("Failed to create settle job for chain {}: {}", 
+                settlement_chain, e))
         }
     }
 }

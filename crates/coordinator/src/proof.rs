@@ -4,7 +4,7 @@ use sui::fetch::{AppInstance, ProofCalculation, Settlement, fetch_blocks_range, 
 use tracing::{debug, info, warn};
 use crate::settlement;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Helper function to get the minimum last settled block number across all chains
 fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
@@ -18,26 +18,28 @@ fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) 
 }
 
 // Helper function to check if a block needs settlement on any chain
-fn block_needs_settlement(block_number: u64, settlements: &HashMap<String, Settlement>) -> (bool, Option<String>) {
+fn block_needs_settlement(block_number: u64, settlements: &HashMap<String, Settlement>) -> Vec<String> {
+    let mut chains_needing_settlement = Vec::new();
+    
     for (chain, settlement) in settlements.iter() {
         // Check if this block has settlement info
         if let Some(block_settlement) = settlement.block_settlements.get(&block_number) {
             // Check if it needs settlement
             if block_settlement.settlement_tx_hash.is_none() {
-                return (true, Some(chain.clone())); // No settlement tx yet
-            }
-            if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
-                return (true, Some(chain.clone())); // Tx exists but not included
+                chains_needing_settlement.push(chain.clone()); // No settlement tx yet
+            } else if block_settlement.settlement_tx_hash.is_some() && !block_settlement.settlement_tx_included_in_block {
+                chains_needing_settlement.push(chain.clone()); // Tx exists but not included
             }
         } else if block_number <= settlement.last_settled_block_number {
             // Block is already settled (before the last settled block)
             continue;
         } else {
             // No settlement record for this block on this chain - needs settlement
-            return (true, Some(chain.clone()));
+            chains_needing_settlement.push(chain.clone());
         }
     }
-    (false, None)
+    
+    chains_needing_settlement
 }
 
 // Helper function to analyze proof completion and determine next action
@@ -75,7 +77,7 @@ pub async fn analyze_proof_completion(
   let mut proofs_fetched = 0;
   
   // Check for settlement opportunities (skip block 0 as it cannot be settled)
-  let mut found_settlement_opportunity = false;
+  let mut chains_with_settlement_opportunities = HashSet::new();
   
   // Only check for settlement if there are proved blocks > 0 that haven't been settled
   // Block 0 is the genesis/initial state and cannot be settled
@@ -147,17 +149,15 @@ pub async fn analyze_proof_completion(
               let proof_available = block_details.proof_data_availability.is_some() || has_block_proof;
               
               if proof_available {
-                  // Check if this block needs settlement on any chain
-                  let (needs_settlement, chain) = block_needs_settlement(block_number, &app_instance.settlements);
+                  // Check which chains need settlement for this block
+                  let chains_needing_settlement = block_needs_settlement(block_number, &app_instance.settlements);
                   
-                  if needs_settlement {
-                      if let Some(chain_name) = chain {
+                  if !chains_needing_settlement.is_empty() {
+                      for chain_name in chains_needing_settlement {
                           debug!("Settlement opportunity found for block {} on chain {}", block_number, chain_name);
-                      } else {
-                          debug!("Settlement opportunity found for block {}", block_number);
+                          chains_with_settlement_opportunities.insert(chain_name);
                       }
-                      found_settlement_opportunity = true;
-                      break;
+                      // Continue checking all blocks to find all chains with opportunities
                   }
               }
           }
@@ -171,27 +171,27 @@ pub async fn analyze_proof_completion(
   let existing_settlement_jobs = sui::fetch::app_instance::get_settlement_job_ids_for_instance(app_instance).await
       .unwrap_or_default();
   
-  if found_settlement_opportunity {
-      // Create settlement job if it doesn't exist
-      if existing_settlement_jobs.is_empty() {
-          debug!("📝 Creating periodic settle job for app instance {} (will settle blocks 1 to {})", 
-              app_instance.silvana_app_name, last_proved_block_number);
-          if let Err(e) = settlement::create_periodic_settle_job(app_instance).await {
-              warn!("Failed to create settle job: {}", e);
+  if !chains_with_settlement_opportunities.is_empty() {
+      // Create settlement jobs only for chains that have settlement opportunities
+      debug!("📝 Found settlement opportunities for {} chains", chains_with_settlement_opportunities.len());
+      
+      for chain_name in &chains_with_settlement_opportunities {
+          // Check if a job already exists for this chain
+          if let Some(existing_job_id) = existing_settlement_jobs.get(chain_name.as_str()) {
+              debug!("  - Chain {}: job ID {} already exists", chain_name, existing_job_id);
           } else {
-              debug!("✅ Successfully created periodic settle job");
-          }
-      } else {
-          debug!("📋 Settlement jobs already exist for {} chains, will handle blocks 1 to {}", 
-              existing_settlement_jobs.len(), last_proved_block_number);
-          for (chain, job_id) in &existing_settlement_jobs {
-              debug!("  - Chain {}: job ID {}", chain, job_id);
+              debug!("  - Creating settle job for chain {} (blocks ready to settle)", chain_name);
+              if let Err(e) = settlement::create_periodic_settle_job(app_instance, chain_name).await {
+                  warn!("Failed to create settle job for chain {}: {}", chain_name, e);
+              } else {
+                  debug!("✅ Successfully created periodic settle job for chain {}", chain_name);
+              }
           }
       }
   } else {
-      // No settlement opportunities - terminate existing settlement job if it exists
+      // No settlement opportunities for any chain - terminate all existing settlement jobs
       if !existing_settlement_jobs.is_empty() {
-          debug!("🚫 No valid blocks to settle (only block 0 or no new proved blocks), terminating {} settlement jobs", 
+          debug!("🚫 No valid blocks to settle on any chain, terminating {} settlement jobs", 
               existing_settlement_jobs.len());
           let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
           for (chain, job_id) in &existing_settlement_jobs {
@@ -201,6 +201,19 @@ pub async fn analyze_proof_completion(
               } else {
                   debug!("✅ Successfully terminated settlement job {} for chain {}", job_id, chain);
               }
+          }
+      }
+  }
+  
+  // Also terminate jobs for chains that no longer have settlement opportunities
+  for (chain, job_id) in &existing_settlement_jobs {
+      if !chains_with_settlement_opportunities.contains(chain.as_str()) {
+          debug!("🚫 No more blocks to settle on chain {}, terminating job {}", chain, job_id);
+          let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+          if let Err(e) = sui_interface.terminate_app_job(&app_instance.id, *job_id).await {
+              warn!("Failed to terminate settlement job {} for chain {}: {}", job_id, chain, e);
+          } else {
+              debug!("✅ Successfully terminated settlement job {} for chain {}", job_id, chain);
           }
       }
   }
@@ -267,7 +280,7 @@ pub async fn analyze_proof_completion(
   let analysis_duration = analysis_start.elapsed();
   
   // Prepare comprehensive stats
-  let settlement_status = if found_settlement_opportunity {
+  let settlement_status = if !chains_with_settlement_opportunities.is_empty() {
       if !existing_settlement_jobs.is_empty() {
           format!("settle_jobs_exist(count={})", existing_settlement_jobs.len())
       } else {
