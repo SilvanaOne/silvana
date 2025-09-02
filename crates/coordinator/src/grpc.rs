@@ -89,7 +89,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             // Check if job matches the app_instance filter (if set)
-            let should_process = if let Some(ref filter) = app_instance_filter {
+            let mut should_process = if let Some(ref filter) = app_instance_filter {
                 if agent_job.app_instance != *filter {
                     debug!(
                         "Job from app_instance {} does not match filter {}, skipping",
@@ -104,22 +104,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
             };
 
             if should_process {
-                let elapsed = start_time.elapsed();
-                let tx_info = agent_job.start_tx_hash.as_ref()
-                    .map(|tx| format!(", tx={}", tx))
-                    .unwrap_or_default();
-                info!(
-                    "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db{}, time={:?}",
-                    agent_job.app_instance,
-                    req.developer,
-                    req.agent,
-                    req.agent_method,
-                    agent_job.job_sequence,
-                    agent_job.pending_job.app_instance_method,
-                    tx_info,
-                    elapsed
-                );
-
                 // Check if this is a settlement job by looking at the app instance settlements
                 let chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
                     // Find which chain this job belongs to by checking settlement_job in each settlement
@@ -129,47 +113,87 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 } else {
                     None
                 };
-
-                // Convert AgentJob to protobuf Job
-                let job = Job {
-                    job_sequence: agent_job.job_sequence,
-                    description: agent_job.pending_job.description.clone(),
-                    developer: agent_job.developer.clone(),
-                    agent: agent_job.agent.clone(),
-                    agent_method: agent_job.agent_method.clone(),
-                    app: agent_job.pending_job.app.clone(),
-                    app_instance: agent_job.app_instance.clone(),
-                    app_instance_method: agent_job.pending_job.app_instance_method.clone(),
-                    block_number: agent_job.pending_job.block_number,
-                    sequences: agent_job.pending_job.sequences.clone().unwrap_or_default(),
-                    sequences1: agent_job.pending_job.sequences1.clone().unwrap_or_default(),
-                    sequences2: agent_job.pending_job.sequences2.clone().unwrap_or_default(),
-                    data: agent_job.pending_job.data.clone(),
-                    job_id: agent_job.job_id,
-                    attempts: agent_job.pending_job.attempts as u32,
-                    created_at: agent_job.pending_job.created_at,
-                    updated_at: agent_job.pending_job.updated_at,
-                    chain,
-                };
-
-                let elapsed = start_time.elapsed();
-                let elapsed_ms = elapsed.as_millis() as f64;
                 
-                // Record successful gRPC span for APM
-                coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
+                // Get the current agent to check settlement chain
+                let current_agent = self.state.get_current_agent(&req.session_id).await;
                 
-                return Ok(Response::new(GetJobResponse {
-                    success: true,
-                    message: format!("Job {} retrieved from database", agent_job.job_sequence),
-                    job: Some(job),
-                }));
+                // Check if this is a settlement job and if agent has a different settlement chain
+                if let Some(ref settlement_chain) = chain {
+                    if let Some(ref agent) = current_agent {
+                        if let Some(ref agent_chain) = agent.settlement_chain {
+                            if agent_chain != settlement_chain {
+                                debug!(
+                                    "Settlement job for chain {} does not match agent's settlement chain {}, skipping",
+                                    settlement_chain, agent_chain
+                                );
+                                // Skip this job as it's for a different settlement chain
+                                should_process = false;
+                            }
+                        } else {
+                            // Agent doesn't have a settlement chain yet, set it now
+                            self.state.set_agent_settlement_chain(&req.session_id, settlement_chain.clone()).await;
+                        }
+                    }
+                }
+                
+                if should_process {
+                    let elapsed = start_time.elapsed();
+                    let tx_info = agent_job.start_tx_hash.as_ref()
+                        .map(|tx| format!(", tx={}", tx))
+                        .unwrap_or_default();
+                    info!(
+                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db{}, time={:?}",
+                        agent_job.app_instance,
+                        req.developer,
+                        req.agent,
+                        req.agent_method,
+                        agent_job.job_sequence,
+                        agent_job.pending_job.app_instance_method,
+                        tx_info,
+                        elapsed
+                    );
+
+                    // Convert AgentJob to protobuf Job
+                    let job = Job {
+                        job_sequence: agent_job.job_sequence,
+                        description: agent_job.pending_job.description.clone(),
+                        developer: agent_job.developer.clone(),
+                        agent: agent_job.agent.clone(),
+                        agent_method: agent_job.agent_method.clone(),
+                        app: agent_job.pending_job.app.clone(),
+                        app_instance: agent_job.app_instance.clone(),
+                        app_instance_method: agent_job.pending_job.app_instance_method.clone(),
+                        block_number: agent_job.pending_job.block_number,
+                        sequences: agent_job.pending_job.sequences.clone().unwrap_or_default(),
+                        sequences1: agent_job.pending_job.sequences1.clone().unwrap_or_default(),
+                        sequences2: agent_job.pending_job.sequences2.clone().unwrap_or_default(),
+                        data: agent_job.pending_job.data.clone(),
+                        job_id: agent_job.job_id,
+                        attempts: agent_job.pending_job.attempts as u32,
+                        created_at: agent_job.pending_job.created_at,
+                        updated_at: agent_job.pending_job.updated_at,
+                        chain,
+                    };
+
+                    let elapsed = start_time.elapsed();
+                    let elapsed_ms = elapsed.as_millis() as f64;
+                    
+                    // Record successful gRPC span for APM
+                    coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
+                    
+                    return Ok(Response::new(GetJobResponse {
+                        success: true,
+                        message: format!("Job {} retrieved from database", agent_job.job_sequence),
+                        job: Some(job),
+                    }));
+                }
             }
         }
 
         // If no ready job found, check if the requested job matches the current running agent for this session
         let current_agent = self.state.get_current_agent(&req.session_id).await;
 
-        if let Some(current) = current_agent {
+        if let Some(ref current) = current_agent {
             if current.developer == req.developer
                 && current.agent == req.agent
                 && current.agent_method == req.agent_method
@@ -205,15 +229,48 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     {
                         Ok(Some(pending_job)) => {
                             debug!("Found pending job {} using index", pending_job.job_sequence);
-
-                            // Execute start_job transaction on Sui before returning the job
-                            match start_job_tx(
-                                &pending_job.app_instance,
-                                pending_job.job_sequence,
-                            )
-                            .await
-                            {
-                                Ok(tx_digest) => {
+                            
+                            // Check if this is a settlement job and handle settlement chain filtering
+                            let settlement_chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&pending_job.app_instance).await {
+                                // Find which chain this job belongs to by checking settlement_job in each settlement
+                                app_instance.settlements.iter()
+                                    .find(|(_, settlement)| settlement.settlement_job == Some(pending_job.job_sequence))
+                                    .map(|(chain_name, _)| chain_name.clone())
+                            } else {
+                                None
+                            };
+                            
+                            // Check settlement chain compatibility
+                            let mut should_process_job = true;
+                            if let Some(ref chain) = settlement_chain {
+                                if let Some(ref current) = current_agent {
+                                    if let Some(ref agent_chain) = current.settlement_chain {
+                                        if agent_chain != chain {
+                                            debug!(
+                                                "Settlement job {} for chain {} does not match agent's settlement chain {}, skipping",
+                                                pending_job.job_sequence, chain, agent_chain
+                                            );
+                                            should_process_job = false;
+                                        }
+                                    } else {
+                                        // Agent doesn't have a settlement chain yet, set it now
+                                        self.state.set_agent_settlement_chain(&req.session_id, chain.clone()).await;
+                                    }
+                                }
+                            }
+                            
+                            if !should_process_job {
+                                // Skip this job and continue looking for others
+                                debug!("Skipping job {} due to settlement chain mismatch", pending_job.job_sequence);
+                            } else {
+                                // Execute start_job transaction on Sui before returning the job
+                                match start_job_tx(
+                                    &pending_job.app_instance,
+                                    pending_job.job_sequence,
+                                )
+                                .await
+                                {
+                                    Ok(tx_digest) => {
                                     debug!(
                                         "Successfully started job {} with tx: {}",
                                         pending_job.job_sequence, tx_digest
@@ -282,14 +339,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                         attempts: agent_job.pending_job.attempts as u32,
                                         created_at: agent_job.pending_job.created_at,
                                         updated_at: agent_job.pending_job.updated_at,
-                                        chain: None, // Will be populated for settlement jobs
+                                        chain: settlement_chain, // Set the settlement chain if this is a settlement job
                                     };
 
                                     return Ok(Response::new(GetJobResponse {
-                success: true,
-                message: format!("Job {} retrieved from database", agent_job.job_sequence),
-                job: Some(job),
-            }));
+                                        success: true,
+                                        message: format!("Job {} retrieved from Sui", agent_job.job_sequence),
+                                        job: Some(job),
+                                    }));
                                 }
                                 Err(e) => {
                                     warn!(
@@ -298,6 +355,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     );
                                     // Don't return the job if start_job transaction failed
                                     // Continue to check for other jobs or return None
+                                    }
                                 }
                             }
                         }

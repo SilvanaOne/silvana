@@ -18,6 +18,7 @@ pub struct CurrentAgent {
     pub developer: String,
     pub agent: String,
     pub agent_method: String,
+    pub settlement_chain: Option<String>,  // Track which chain this agent is settling for
 }
 
 #[derive(Clone)]
@@ -88,6 +89,7 @@ impl SharedState {
             developer,
             agent,
             agent_method,
+            settlement_chain: None,  // Initially no settlement chain is set
         };
         current_agents.insert(session_id, current_agent.clone());
         debug!(
@@ -112,6 +114,20 @@ impl SharedState {
     pub async fn get_current_agent(&self, session_id: &str) -> Option<CurrentAgent> {
         let current_agents = self.current_agents.read().await;
         current_agents.get(session_id).cloned()
+    }
+    
+    /// Update the settlement chain for a current agent
+    pub async fn set_agent_settlement_chain(&self, session_id: &str, chain: String) {
+        let mut current_agents = self.current_agents.write().await;
+        if let Some(agent) = current_agents.get_mut(session_id) {
+            if agent.settlement_chain.is_none() {
+                agent.settlement_chain = Some(chain.clone());
+                debug!(
+                    "Set settlement chain '{}' for agent {}/{}/{} (session: {})",
+                    chain, agent.developer, agent.agent, agent.agent_method, session_id
+                );
+            }
+        }
     }
 
     pub async fn get_current_agent_count(&self) -> usize {
