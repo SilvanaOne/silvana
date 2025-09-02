@@ -102,9 +102,6 @@ async fn compare_app_instance_bcs_and_json() -> Result<()> {
         cmp!(previous_block_timestamp);
         cmp!(previous_block_last_sequence);
         cmp!(last_proved_block_number);
-        cmp!(last_settled_block_number);
-        cmp!(settlement_chain);
-        cmp!(settlement_address);
         cmp!(is_paused);
         cmp!(created_at);
         cmp!(updated_at);

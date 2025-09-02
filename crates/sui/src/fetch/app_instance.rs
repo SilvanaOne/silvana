@@ -281,7 +281,8 @@ mod tests {
                     chain: "mina".to_string(),
                     last_settled_block_number: 8,
                     settlement_address: Some("0xsettlement".to_string()),
-                    block_settlements: HashMap::new(),
+                    settlement_job: None,
+                    block_settlements_table_id: None,
                 });
                 settlements
             },
