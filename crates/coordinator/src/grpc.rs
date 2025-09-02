@@ -108,9 +108,30 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 // Check if this is a settlement job by looking at the app instance settlements
                 let chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
                     // Find which chain this job belongs to by checking settlement_job in each settlement
-                    app_instance.settlements.iter()
+                    let chain_opt = app_instance.settlements.iter()
                         .find(|(_, settlement)| settlement.settlement_job == Some(agent_job.job_sequence))
-                        .map(|(chain_name, _)| chain_name.clone())
+                        .map(|(chain_name, _)| chain_name.clone());
+                    
+                    // If this is a settle job but not found in any settlement, it's obsolete and should be terminated
+                    if chain_opt.is_none() && agent_job.pending_job.app_instance_method == "settle" {
+                        error!("Found obsolete settle job {} that is not associated with any settlement, terminating it", agent_job.job_sequence);
+                        
+                        // Terminate the obsolete settle job
+                        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                        if let Err(e) = sui_interface.terminate_app_job(&agent_job.app_instance, agent_job.job_sequence).await {
+                            error!("Failed to terminate obsolete settle job {}: {}", agent_job.job_sequence, e);
+                        } else {
+                            info!("Successfully terminated obsolete settle job {}", agent_job.job_sequence);
+                        }
+                        
+                        // Remove from agent database
+                        self.state.get_agent_job_db().terminate_job(&agent_job.job_id).await;
+                        
+                        // Skip this job and continue looking for others
+                        should_process = false;
+                    }
+                    
+                    chain_opt
                 } else {
                     None
                 };
@@ -232,17 +253,36 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             debug!("Found pending job {} using index", pending_job.job_sequence);
                             
                             // Check if this is a settlement job and handle settlement chain filtering
+                            let mut skip_job = false;
                             let settlement_chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&pending_job.app_instance).await {
                                 // Find which chain this job belongs to by checking settlement_job in each settlement
-                                app_instance.settlements.iter()
+                                let chain_opt = app_instance.settlements.iter()
                                     .find(|(_, settlement)| settlement.settlement_job == Some(pending_job.job_sequence))
-                                    .map(|(chain_name, _)| chain_name.clone())
+                                    .map(|(chain_name, _)| chain_name.clone());
+                                
+                                // If this is a settle job but not found in any settlement, it's obsolete and should be terminated
+                                if chain_opt.is_none() && pending_job.app_instance_method == "settle" {
+                                    error!("Found obsolete settle job {} that is not associated with any settlement, terminating it", pending_job.job_sequence);
+                                    
+                                    // Terminate the obsolete settle job
+                                    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                                    if let Err(e) = sui_interface.terminate_app_job(&pending_job.app_instance, pending_job.job_sequence).await {
+                                        warn!("Failed to terminate obsolete settle job {}: {}", pending_job.job_sequence, e);
+                                    } else {
+                                        info!("Successfully terminated obsolete settle job {}", pending_job.job_sequence);
+                                    }
+                                    
+                                    // Mark to skip this job
+                                    skip_job = true;
+                                }
+                                
+                                chain_opt
                             } else {
                                 None
                             };
                             
                             // Check settlement chain compatibility
-                            let mut should_process_job = true;
+                            let mut should_process_job = !skip_job;
                             if let Some(ref chain) = settlement_chain {
                                 if let Some(ref current) = current_agent {
                                     if let Some(ref agent_chain) = current.settlement_chain {

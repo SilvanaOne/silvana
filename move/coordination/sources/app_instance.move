@@ -565,6 +565,8 @@ const ESettlementChainNotFound: vector<u8> = b"Settlement chain not found";
 #[error]
 const ESettlementVectorLengthMismatch: vector<u8> =
     b"Settlement chains and addresses vectors must have the same length";
+#[error]
+const ESettlementJobAlreadyExists: vector<u8> = b"Settlement job already exists for this chain";
 
 public fun update_block_settlement_tx_hash(
     app_instance: &mut AppInstance,
@@ -1000,6 +1002,14 @@ public fun create_app_job(
             ESettlementChainNotFound,
         );
         let settlement = vec_map::get_mut(&mut app_instance.settlements, &chain);
+        
+        // Assert that there's no existing settlement job for this chain
+        let existing_job = settlement::get_settlement_job(settlement);
+        assert!(
+            option::is_none(&existing_job),
+            ESettlementJobAlreadyExists,
+        );
+        
         settlement::set_settlement_job(settlement, option::some(job_id));
     };
 
