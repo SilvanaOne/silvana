@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use std::env;
 use std::str::FromStr;
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
@@ -6,6 +6,67 @@ use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
 use tracing::debug;
 use prost_types;
+
+/// Resolve the RPC URL based on the following priority:
+/// 1. If rpc_url is provided explicitly, use it
+/// 2. If SUI_RPC_URL env var is set, use it (allows custom endpoints)
+/// 3. Otherwise, determine chain and use chain-specific URL:
+///    - Use provided chain parameter if Some
+///    - Otherwise check SUI_CHAIN env var
+///    - Default to "devnet"
+///    - Check SUI_RPC_URL_<CHAIN> env var
+///    - Fall back to default https://fullnode.<chain>.sui.io:443
+pub fn resolve_rpc_url(rpc_url: Option<String>, chain_override: Option<String>) -> Result<String> {
+    // 1. Use explicit rpc_url if provided
+    if let Some(url) = rpc_url {
+        return Ok(url);
+    }
+    
+    // 2. Check for custom SUI_RPC_URL
+    if let Ok(custom_url) = env::var("SUI_RPC_URL") {
+        return Ok(custom_url);
+    }
+    
+    // 3. Determine chain
+    let chain = if let Some(chain) = chain_override {
+        // Use the provided chain override
+        chain.to_lowercase()
+    } else {
+        // Fall back to SUI_CHAIN env var or default to devnet
+        env::var("SUI_CHAIN")
+            .unwrap_or_else(|_| "devnet".to_string())
+            .to_lowercase()
+    };
+    
+    // Validate chain
+    match chain.as_str() {
+        "devnet" | "testnet" | "mainnet" => {
+            // Valid chain, continue
+        }
+        _ => {
+            return Err(anyhow!(
+                "Invalid chain '{}'. Must be one of: devnet, testnet, mainnet",
+                chain
+            ));
+        }
+    }
+    
+    // 4. Try chain-specific env var first
+    let chain_specific_var = format!("SUI_RPC_URL_{}", chain.to_uppercase());
+    if let Ok(chain_url) = env::var(&chain_specific_var) {
+        return Ok(chain_url);
+    }
+    
+    // 5. Fall back to default public endpoints
+    let url = match chain.as_str() {
+        "devnet" => "https://fullnode.devnet.sui.io:443".to_string(),
+        "testnet" => "https://fullnode.testnet.sui.io:443".to_string(),
+        "mainnet" => "https://fullnode.mainnet.sui.io:443".to_string(),
+        _ => unreachable!(), // We already validated the chain above
+    };
+    
+    Ok(url)
+}
 
 /// Derive Sui address from a 32-byte private key using the exact reference algorithm
 pub fn derive_address_from_secret_key(secret_key_bytes: &[u8; 32]) -> sui::Address {

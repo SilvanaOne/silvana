@@ -5,6 +5,7 @@ use serde_json::json;
 use sui_sdk_types as sui;
 use tracing::{info, warn, debug};
 use std::env;
+use crate::balance::get_total_balance_sui;
 
 /// Default faucet URL for devnet
 const DEFAULT_DEVNET_FAUCET_URL: &str = "https://faucet.devnet.sui.io/v2/gas";
@@ -355,15 +356,39 @@ pub async fn ensure_sufficient_balance_network(
 pub async fn initialize_faucet() -> Result<()> {
     info!("🚰 Checking balance and faucet availability...");
     
-    // Try to detect network from RPC URL if available
-    let network = if let Ok(rpc_url) = env::var("SUI_RPC_URL") {
-        if rpc_url.contains("testnet") {
-            FaucetNetwork::Testnet
-        } else {
-            FaucetNetwork::Devnet
+    // Detect network from SUI_CHAIN env var or default to devnet
+    let chain = env::var("SUI_CHAIN")
+        .unwrap_or_else(|_| "devnet".to_string())
+        .to_lowercase();
+    
+    let network = match chain.as_str() {
+        "testnet" => Some(FaucetNetwork::Testnet),
+        "devnet" => Some(FaucetNetwork::Devnet),
+        "mainnet" => None, // No faucet available for mainnet
+        _ => {
+            warn!("Unknown chain '{}', assuming no faucet available", chain);
+            None
         }
-    } else {
-        FaucetNetwork::Devnet
+    };
+    
+    // If no faucet is available (mainnet or unknown chain), just check balance
+    let Some(network) = network else {
+        info!("💰 No faucet available for chain '{}', checking balance only...", chain);
+        
+        // Just check and report the balance
+        match get_total_balance_sui().await {
+            Ok(balance) => {
+                if balance < 1.0 {
+                    warn!("⚠️ Low balance: {:.4} SUI. Please fund your account manually.", balance);
+                } else {
+                    info!("✅ Current balance: {:.4} SUI", balance);
+                }
+            }
+            Err(e) => {
+                warn!("⚠️ Failed to check balance: {}", e);
+            }
+        }
+        return Ok(());
     };
     
     // Check if we need tokens (minimum 5 SUI for operations)

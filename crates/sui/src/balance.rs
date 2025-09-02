@@ -49,6 +49,22 @@ pub async fn get_total_balance_sui() -> Result<f64> {
     Ok(total_balance as f64 / 1_000_000_000.0)
 }
 
+/// Get balance for a specific address in SUI
+pub async fn get_balance_in_sui(address_str: &str) -> Result<f64> {
+    use sui_sdk_types::Address;
+    use std::str::FromStr;
+    
+    let shared_state = SharedSuiState::get_instance();
+    let mut client = shared_state.get_sui_client();
+    
+    // Parse the address
+    let address = Address::from_str(address_str)?;
+    
+    let coins = list_coins(&mut client, address).await?;
+    let total_balance: u64 = coins.iter().map(|c| c.balance).sum();
+    Ok(total_balance as f64 / 1_000_000_000.0)
+}
+
 /// Get the current address
 pub fn get_current_address() -> String {
     let shared_state = SharedSuiState::get_instance();

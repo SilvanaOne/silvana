@@ -1242,6 +1242,7 @@ dependencies = [
  "prost-types",
  "proto",
  "rand 0.8.5",
+ "reqwest",
  "rpc-client",
  "rustls 0.23.31",
  "secrets-client",

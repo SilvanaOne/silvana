@@ -17,10 +17,10 @@ pub mod transactions;
 
 // Re-export commonly used types
 pub use balance::{
-    get_balance_info, get_total_balance_sui, get_current_address, get_network_name,
+    get_balance_info, get_total_balance_sui, get_balance_in_sui, get_current_address, get_network_name,
     print_balance_info, BalanceInfo,
 };
-pub use chain::{get_reference_gas_price, load_sender_from_env, pick_gas_object};
+pub use chain::{get_reference_gas_price, load_sender_from_env, pick_gas_object, resolve_rpc_url};
 pub use coin::{
     CoinInfo, CoinLockGuard, CoinLockManager, fetch_coin, get_coin_lock_manager, list_coins,
 };

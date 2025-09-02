@@ -29,6 +29,7 @@ use tracing_subscriber::prelude::*;
 
 use crate::cli::{BalanceCommands, Cli, Commands, TransactionType};
 use crate::error::Result;
+use anyhow::anyhow;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,6 +37,26 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     let cli = Cli::parse();
+    
+    // Capture the chain value for use in command handlers
+    let chain_override = cli.chain.clone();
+    
+    // Override chain if specified
+    if let Some(chain) = &cli.chain {
+        // Validate chain value
+        match chain.to_lowercase().as_str() {
+            "devnet" | "testnet" | "mainnet" => {
+                // SAFETY: We're setting an environment variable early in main before any threads are spawned
+                unsafe {
+                    std::env::set_var("SUI_CHAIN", chain.to_lowercase());
+                }
+            }
+            _ => {
+                eprintln!("Error: Invalid chain '{}'. Must be one of: devnet, testnet, mainnet", chain);
+                std::process::exit(1);
+            }
+        }
+    }
 
     match cli.command {
         Commands::Start {
@@ -46,6 +67,8 @@ async fn main() -> Result<()> {
             log_level: _,
             grpc_socket_path,
         } => {
+            // Resolve the RPC URL using the helper from sui crate
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             // Initialize logging with New Relic tracing layer
             monitoring::init_logging_with_newrelic().await?;
             info!("✅ Logging initialized with New Relic support");
@@ -81,7 +104,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
             // Fetch and display the app instance
@@ -286,7 +310,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
             // Fetch the app instance first
@@ -455,7 +480,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
             // Fetch the app instance first
@@ -500,7 +526,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
             // Fetch the app instance first
@@ -552,7 +579,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
             // Fetch the app instance first
@@ -682,7 +710,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection with optional private key (will use env var if not provided)
+            // Resolve RPC URL and initialize Sui connection with optional private key
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             match sui::SharedSuiState::initialize_with_optional_key(
                 &rpc_url,
                 private_key.as_deref(),
@@ -812,7 +841,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
             match command {
@@ -917,7 +947,8 @@ async fn main() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Initialize Sui connection
+            // Resolve and initialize Sui connection
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
             let network_name = sui::get_network_name();
@@ -937,5 +968,160 @@ async fn main() -> Result<()> {
 
             Ok(())
         }
+        
+        Commands::Faucet { address } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+            
+            // Get the chain from environment
+            let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()).to_lowercase();
+            
+            // Check if mainnet (no faucet available)
+            if chain == "mainnet" {
+                eprintln!("❌ Error: Faucet is not available for mainnet");
+                eprintln!("   Please acquire SUI tokens through an exchange or other means");
+                return Err(anyhow!("Faucet not available for mainnet").into());
+            }
+            
+            // Get the address to fund
+            let target_address = address.unwrap_or_else(|| {
+                std::env::var("SUI_ADDRESS").unwrap_or_else(|_| {
+                    eprintln!("❌ Error: No address provided and SUI_ADDRESS not set");
+                    std::process::exit(1);
+                })
+            });
+            
+            // Validate address format
+            if !target_address.starts_with("0x") || target_address.len() != 66 {
+                eprintln!("❌ Error: Invalid SUI address format: {}", target_address);
+                eprintln!("   Address should start with '0x' and be 66 characters long");
+                return Err(anyhow!("Invalid address format").into());
+            }
+            
+            println!("💧 Requesting tokens from {} faucet...", chain);
+            println!("📍 Target address: {}", target_address);
+            
+            // Get RPC URL based on chain using the resolver
+            let rpc_url = sui::resolve_rpc_url(None, Some(chain.clone()))?;
+            
+            // Initialize Sui connection to check balance
+            sui::SharedSuiState::initialize(&rpc_url).await?;
+            
+            // Check balance before faucet
+            println!("\n📊 Balance before faucet:");
+            let balance_before = sui::get_balance_in_sui(&target_address).await?;
+            println!("   {:.4} SUI", balance_before);
+            
+            // Call the faucet
+            println!("\n🚰 Calling faucet...");
+            let faucet_result = call_faucet(&chain, &target_address).await;
+            
+            match faucet_result {
+                Ok(tx_digest) => {
+                    println!("✅ Faucet successful!");
+                    println!("   Transaction: {}", tx_digest);
+                    
+                    // Wait for transaction to be processed
+                    println!("\n⏳ Waiting 5 seconds for transaction to be processed...");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    
+                    // Check balance after faucet
+                    println!("\n📊 Balance after faucet:");
+                    let balance_after = sui::get_balance_in_sui(&target_address).await?;
+                    println!("   {:.4} SUI", balance_after);
+                    
+                    let received = balance_after - balance_before;
+                    if received > 0.0 {
+                        println!("\n💰 Received: {:.4} SUI", received);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Faucet failed: {}", e);
+                    return Err(e.into());
+                }
+            }
+            
+            Ok(())
+        }
     }
+}
+
+/// Call the faucet for the specified chain and address
+async fn call_faucet(chain: &str, address: &str) -> anyhow::Result<String> {
+    use serde_json::json;
+    
+    let (faucet_url, amount) = match chain {
+        "devnet" => ("https://faucet.devnet.sui.io/v1/gas", None),
+        "testnet" => ("https://faucet.testnet.sui.io/v1/gas", Some(10_000_000_000u64)), // 10 SUI in MIST
+        _ => return Err(anyhow!("Invalid chain for faucet: {}", chain)),
+    };
+    
+    // Create HTTP client
+    let client = reqwest::Client::new();
+    
+    // Build request body
+    let mut body = json!({
+        "FixedAmountRequest": {
+            "recipient": address
+        }
+    });
+    
+    // For testnet, specify the amount
+    if let Some(amount) = amount {
+        body = json!({
+            "FixedAmountRequest": {
+                "recipient": address,
+                "amount": amount
+            }
+        });
+    }
+    
+    // Send the request
+    let response = client
+        .post(faucet_url)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow!("Failed to send faucet request: {}", e))?;
+    
+    // Check response status
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(anyhow!("Faucet request failed with status {}: {}", status, error_text));
+    }
+    
+    // Parse response
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| anyhow!("Failed to parse faucet response: {}", e))?;
+    
+    // Extract transaction digest
+    if let Some(transferred_gas_objects) = result.get("transferredGasObjects") {
+        if let Some(first_obj) = transferred_gas_objects.as_array().and_then(|arr| arr.first()) {
+            if let Some(transfer_tx) = first_obj.get("transferTxDigest") {
+                if let Some(tx_str) = transfer_tx.as_str() {
+                    return Ok(tx_str.to_string());
+                }
+            }
+        }
+    }
+    
+    // Try alternate response format
+    if let Some(task) = result.get("task") {
+        if let Some(tx_digest) = task.as_str() {
+            return Ok(tx_digest.to_string());
+        }
+    }
+    
+    if let Some(error) = result.get("error") {
+        return Err(anyhow!("Faucet error: {}", error));
+    }
+    
+    Err(anyhow!("Unexpected faucet response format: {}", result))
 }

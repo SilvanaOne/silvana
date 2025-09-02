@@ -18,8 +18,9 @@ async fn compare_app_instance_bcs_and_json() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let rpc_url = std::env::var("SUI_RPC_URL")
-        .expect("SUI_RPC_URL must be set (e.g., https://fullnode.devnet.sui.io:443)");
+    // Use the resolve_rpc_url function to get the appropriate RPC URL
+    let rpc_url = sui::chain::resolve_rpc_url(None, None)
+        .expect("Failed to resolve RPC URL");
     SharedSuiState::initialize(&rpc_url).await?;
 
     // devnet, needs redeployment every week and changing the id

@@ -4,6 +4,10 @@ use clap::{Parser, Subcommand};
 #[command(name = "coordinator")]
 #[command(about = "Silvana CLI", long_about = None)]
 pub struct Cli {
+    /// Override the blockchain network (devnet, testnet, or mainnet)
+    #[arg(long, global = true, env = "SUI_CHAIN")]
+    pub chain: Option<String>,
+    
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -13,7 +17,7 @@ pub enum Commands {
     /// Start the Silvana node
     Start {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
 
         #[arg(long, env = "SILVANA_REGISTRY_PACKAGE")]
         package_id: String,
@@ -34,7 +38,7 @@ pub enum Commands {
     /// Fetch and display an app instance by ID
     Instance {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
         
         /// The app instance ID to fetch
         instance: String,
@@ -43,7 +47,7 @@ pub enum Commands {
     /// Fetch and display a block by number
     Block {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
         
         /// The app instance ID to fetch from
         instance: String,
@@ -55,7 +59,7 @@ pub enum Commands {
     /// Fetch and display proof calculations for a block
     Proofs {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
         
         /// The app instance ID to fetch from
         instance: String,
@@ -67,7 +71,7 @@ pub enum Commands {
     /// Fetch and display a job by sequence number
     Job {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
         
         /// The app instance ID to fetch from
         instance: String,
@@ -83,7 +87,7 @@ pub enum Commands {
     /// Fetch and display all jobs from an app instance
     Jobs {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
         
         /// The app instance ID to fetch jobs from
         instance: String,
@@ -96,7 +100,7 @@ pub enum Commands {
     /// Execute blockchain transactions
     Transaction {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
         
         /// Private key for signing transactions (optional, defaults to SUI_SECRET_KEY env var)
         #[arg(long, env = "SUI_PRIVATE_KEY")]
@@ -109,7 +113,7 @@ pub enum Commands {
     /// Check balance and manage faucet
     Balance {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
         
         #[command(subcommand)]
         command: BalanceCommands,
@@ -118,7 +122,14 @@ pub enum Commands {
     /// Display network information
     Network {
         #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: String,
+        rpc_url: Option<String>,
+    },
+    
+    /// Request tokens from the faucet
+    Faucet {
+        /// Address to fund (defaults to SUI_ADDRESS env var)
+        #[arg(long, env = "SUI_ADDRESS")]
+        address: Option<String>,
     },
 }
 
