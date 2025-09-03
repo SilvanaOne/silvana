@@ -863,11 +863,26 @@ async fn ensure_job_failed_if_not_completed(
                     }
                 }
                 sui::fetch::JobStatus::Pending => {
-                    // Job somehow went back to pending - this is unexpected
-                    warn!(
-                        "Job {} is in Pending state after container terminated ({}), this is unexpected",
-                        job.job_sequence, reason
-                    );
+                    // For periodic jobs, this is expected - they go back to pending after completion
+                    // For failed jobs with retries, they also go back to pending
+                    // We can check if it's a periodic job by looking for interval_ms
+                    if current_job.interval_ms.is_some() {
+                        debug!(
+                            "Periodic job {} returned to Pending state after container terminated ({}), this is expected",
+                            job.job_sequence, reason
+                        );
+                    } else if current_job.attempts < 3 {  // DEFAULT_MAX_ATTEMPTS from Move contract
+                        debug!(
+                            "Job {} returned to Pending state for retry (attempt {}) after container terminated ({})",
+                            job.job_sequence, current_job.attempts, reason
+                        );
+                    } else {
+                        // This case shouldn't normally happen
+                        warn!(
+                            "Job {} is in Pending state after container terminated ({}), this is unexpected",
+                            job.job_sequence, reason
+                        );
+                    }
                 }
                 sui::fetch::JobStatus::Failed(_) => {
                     // Job already failed, nothing to do
