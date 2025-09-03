@@ -451,29 +451,32 @@ public fun restart_failed_jobs(
     } else {
         get_failed_jobs(jobs)
     };
-    
+
     let len = vector::length(&failed_jobs);
     let mut i = 0;
     let now = clock::timestamp_ms(clock);
-    
+
     while (i < len) {
         let job_sequence = *vector::borrow(&failed_jobs, i);
-        
+
         // Verify job is actually failed
         if (vec_set::contains(&jobs.failed_jobs_index, &job_sequence)) {
-            assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
-            
+            assert!(
+                object_table::contains(&jobs.jobs, job_sequence),
+                EJobNotFound,
+            );
+
             // Update failed job tracking
             jobs.failed_jobs_count = jobs.failed_jobs_count - 1;
             vec_set::remove(&mut jobs.failed_jobs_index, &job_sequence);
-            
+
             // Reset job to pending
             let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
             job.status = JobStatus::Pending;
             job.attempts = 0;
             job.next_scheduled_at = option::none();
             job.updated_at = now;
-            
+
             event::emit(JobUpdatedEvent {
                 job_sequence,
                 developer: job.developer,
@@ -489,13 +492,13 @@ public fun restart_failed_jobs(
                 app_instance: job.app_instance,
                 started_at: now,
             });
-            
+
             add_pending_job(jobs, job_sequence);
         };
-        
+
         i = i + 1;
     };
-    
+
     event::emit(JobsRestartedEvent {
         failed_jobs,
         num_failed_jobs: len,
@@ -513,35 +516,38 @@ public fun remove_failed_jobs(
     } else {
         get_failed_jobs(jobs)
     };
-    
+
     let len = vector::length(&failed_jobs);
     let mut i = 0;
     let now = clock::timestamp_ms(clock);
-    
+
     while (i < len) {
         let job_sequence = *vector::borrow(&failed_jobs, i);
-        
+
         // Verify job is actually failed
         if (vec_set::contains(&jobs.failed_jobs_index, &job_sequence)) {
-            assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
-            
+            assert!(
+                object_table::contains(&jobs.jobs, job_sequence),
+                EJobNotFound,
+            );
+
             // Update failed job tracking
             jobs.failed_jobs_count = jobs.failed_jobs_count - 1;
             vec_set::remove(&mut jobs.failed_jobs_index, &job_sequence);
-            
+
             // Remove job from storage completely
             let job = object_table::remove(&mut jobs.jobs, job_sequence);
-            
+
             event::emit(JobDeletedEvent {
                 job_sequence,
                 app_instance: job.app_instance,
                 deleted_at: now,
             });
-            
+
             let Job { id, .. } = job;
             object::delete(id);
         };
-        
+
         i = i + 1;
     }
 }
@@ -573,15 +579,15 @@ public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
 }
 
 fun add_pending_job(jobs: &mut Jobs, job_sequence: u64) {
+    // Always ensure the job is in the index (even if already in pending_jobs)
+    // This handles cases where pending_jobs and indexes might be out of sync
+    let job = object_table::borrow(&jobs.jobs, job_sequence);
+    assert!(job.status == JobStatus::Pending, EJobNotPending);
     // Add to pending set if not already present
     if (!vec_set::contains(&jobs.pending_jobs, &job_sequence)) {
         vec_set::insert(&mut jobs.pending_jobs, job_sequence);
         jobs.pending_jobs_count = jobs.pending_jobs_count + 1;
     };
-
-    // Always ensure the job is in the index (even if already in pending_jobs)
-    // This handles cases where pending_jobs and indexes might be out of sync
-    let job = object_table::borrow(&jobs.jobs, job_sequence);
     let developer = job.developer;
     let agent = job.agent;
     let agent_method = job.agent_method;
@@ -668,10 +674,7 @@ public fun update_max_attempts(jobs: &mut Jobs, max_attempts: u8) {
 
 // Getter functions
 public fun get_job(jobs: &Jobs, job_sequence: u64): &Job {
-    assert!(
-        object_table::contains(&jobs.jobs, job_sequence),
-        EJobNotFound,
-    );
+    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
     object_table::borrow(&jobs.jobs, job_sequence)
 }
 
