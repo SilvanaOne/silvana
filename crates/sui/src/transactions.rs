@@ -775,7 +775,7 @@ async fn execute_app_instance_function<F>(
     build_args: F,
 ) -> Result<String>
 where
-    F: FnOnce(
+    F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
         sui_sdk_types::Argument, // app_instance_arg
         sui_sdk_types::Argument, // clock_arg
@@ -787,6 +787,7 @@ where
 /// Common helper function to execute app instance transactions with custom gas budget
 /// This reduces code duplication while maintaining all error detection and features
 /// Returns the transaction digest and keeps the coin lock guard alive
+/// Includes retry logic for Object version conflicts (up to 3 retries)
 async fn execute_app_instance_function_with_gas<F>(
     app_instance_str: &str,
     function_name: &str,
@@ -794,19 +795,21 @@ async fn execute_app_instance_function_with_gas<F>(
     build_args: F,
 ) -> Result<String>
 where
-    F: FnOnce(
+    F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
         sui_sdk_types::Argument, // app_instance_arg
         sui_sdk_types::Argument, // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
+    const MAX_RETRIES: u32 = 3;
+    let mut retry_count = 0;
+    
     debug!("Creating {} transaction for app_instance: {}", function_name, app_instance_str);
     
     // Get shared state and client
     let shared_state = SharedSuiState::get_instance();
-    let mut client = shared_state.get_sui_client();
-    
-    // Parse IDs
+    let sender = shared_state.get_sui_address();
+    let sk = shared_state.get_sui_private_key().clone();
     let package_id = shared_state.get_coordination_package_id();
     let app_instance_id = get_app_instance_id(app_instance_str)
         .context("Failed to parse app instance ID")?;
@@ -814,46 +817,13 @@ where
     
     debug!("Package ID: {}", package_id);
     debug!("App instance ID: {}", app_instance_id);
-    
-    // Get sender and secret key from shared state
-    let sender = shared_state.get_sui_address();
-    let sk = shared_state.get_sui_private_key().clone();
     debug!("Sender: {}", sender);
-
-    // Build transaction using TransactionBuilder
-    let mut tb = sui_transaction_builder::TransactionBuilder::new();
-    tb.set_sender(sender);
     
     // Use custom gas budget or default to 0.1 SUI
     let gas_budget = custom_gas_budget.unwrap_or(100_000_000);
-    tb.set_gas_budget(gas_budget);
     debug!("Gas budget: {} MIST ({} SUI)", gas_budget, gas_budget as f64 / 1_000_000_000.0);
 
-    // Get gas price and gas coin
-    let gas_price = get_reference_gas_price(&mut client).await?;
-    tb.set_gas_price(gas_price);
-    debug!("Gas price: {}", gas_price);
-
-    // Select gas coin using parallel-safe coin management
-    // IMPORTANT: Keep the guard alive until after transaction is confirmed
-    let (gas_coin, gas_guard) = match fetch_coin(&mut client, sender, gas_budget).await? {
-        Some((coin, guard)) => (coin, guard),
-        None => {
-            error!("No available coins with sufficient balance for gas");
-            return Err(anyhow!("No available coins with sufficient balance for gas"));
-        }
-    };
-    
-    let gas_input = sui_transaction_builder::unresolved::Input::owned(
-        gas_coin.object_id(),
-        gas_coin.object_ref.version(),
-        *gas_coin.object_ref.digest(),
-    );
-    tb.add_gas_objects(vec![gas_input]);
-    debug!("Gas coin selected: id={} ver={} digest={} balance={}", 
-        gas_coin.object_id(), gas_coin.object_ref.version(), gas_coin.object_ref.digest(), gas_coin.balance);
-
-    // IMPORTANT: Lock the app_instance object BEFORE fetching its version
+    // Lock the app_instance object BEFORE fetching its version
     // This prevents race conditions where multiple threads fetch the same version
     let object_lock_manager = get_object_lock_manager();
     let app_instance_guard = object_lock_manager
@@ -861,134 +831,205 @@ where
         .await
         .context("Failed to lock app_instance object")?;
     debug!("Locked app_instance object: {}", app_instance_id);
-
-    // Now fetch the current version and ownership info of app_instance object
-    // The object is locked, so no other thread can use it
-    let (app_instance_ref, initial_shared_version) = get_object_details(app_instance_id).await
-        .context("Failed to get app instance details")?;
     
-    // Create input based on whether object is shared or owned
-    let app_instance_input = if let Some(shared_version) = initial_shared_version {
-        debug!("Using shared object input for app_instance ({}) with initial_shared_version={}", 
-            function_name, shared_version);
-        sui_transaction_builder::unresolved::Input::shared(
-            app_instance_id,
-            shared_version,
-            true // mutable
-        )
-    } else {
-        debug!("Using owned object input for app_instance ({})", function_name);
-        sui_transaction_builder::unresolved::Input::owned(
-            *app_instance_ref.object_id(),
-            app_instance_ref.version(),
-            *app_instance_ref.digest(),
-        )
-    };
-    let app_instance_arg = tb.input(app_instance_input);
+    // Variables that will be reused across retries
+    let mut gas_guard: Option<crate::coin::CoinLockGuard> = None;
+    
+    loop {
+        // Get a fresh client for each attempt
+        let mut client = shared_state.get_sui_client();
+        
+        // Build transaction using TransactionBuilder
+        let mut tb = sui_transaction_builder::TransactionBuilder::new();
+        tb.set_sender(sender);
+        tb.set_gas_budget(gas_budget);
 
-    // Clock object (shared)
-    let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
-    let clock_arg = tb.input(clock_input);
+        // Get gas price
+        let gas_price = get_reference_gas_price(&mut client).await?;
+        tb.set_gas_price(gas_price);
+        debug!("Gas price: {}", gas_price);
 
-    // Build function-specific arguments
-    let args = build_args(&mut tb, app_instance_arg, clock_arg);
+        // Release old coin if we're retrying
+        if retry_count > 0 {
+            if let Some(old_guard) = gas_guard.take() {
+                warn!("Retry {}/{}: Releasing old gas coin {} due to version conflict", 
+                    retry_count, MAX_RETRIES, old_guard.coin_id());
+                drop(old_guard);
+                // Small delay to allow the coin to be released
+                sleep(Duration::from_millis(100)).await;
+            }
+        }
 
-    // Function call
-    let func = sui_transaction_builder::Function::new(
-        package_id,
-        "app_instance".parse()
-            .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
-        function_name.parse()
-            .map_err(|e| anyhow!("Failed to parse function name '{}': {}", function_name, e))?,
-        vec![],
-    );
-    tb.move_call(func, args);
+        // Select new gas coin for this attempt
+        let (gas_coin, new_gas_guard) = match fetch_coin(&mut client, sender, gas_budget).await? {
+            Some((coin, guard)) => (coin, guard),
+            None => {
+                error!("No available coins with sufficient balance for gas");
+                return Err(anyhow!("No available coins with sufficient balance for gas"));
+            }
+        };
+        gas_guard = Some(new_gas_guard);
+        
+        let gas_input = sui_transaction_builder::unresolved::Input::owned(
+            gas_coin.object_id(),
+            gas_coin.object_ref.version(),
+            *gas_coin.object_ref.digest(),
+        );
+        tb.add_gas_objects(vec![gas_input]);
+        debug!("Gas coin selected: id={} ver={} digest={} balance={}", 
+            gas_coin.object_id(), gas_coin.object_ref.version(), gas_coin.object_ref.digest(), gas_coin.balance);
 
-    // Finalize and sign
-    let tx = tb.finish()?;
-    let sig = sk.sign_transaction(&tx)?;
+        // Fetch the current version and ownership info of app_instance object
+        // Do this fresh for each retry to get the latest version
+        let (app_instance_ref, initial_shared_version) = get_object_details(app_instance_id).await
+            .context("Failed to get app instance details")?;
+        
+        // Create input based on whether object is shared or owned
+        let app_instance_input = if let Some(shared_version) = initial_shared_version {
+            if retry_count > 0 {
+                warn!("Retry {}/{}: Using updated shared object version {} for app_instance", 
+                    retry_count, MAX_RETRIES, shared_version);
+            }
+            debug!("Using shared object input for app_instance ({}) with initial_shared_version={}", 
+                function_name, shared_version);
+            sui_transaction_builder::unresolved::Input::shared(
+                app_instance_id,
+                shared_version,
+                true // mutable
+            )
+        } else {
+            debug!("Using owned object input for app_instance ({})", function_name);
+            sui_transaction_builder::unresolved::Input::owned(
+                *app_instance_ref.object_id(),
+                app_instance_ref.version(),
+                *app_instance_ref.digest(),
+            )
+        };
+        let app_instance_arg = tb.input(app_instance_input);
 
-    // Execute transaction via gRPC
-    let mut exec = client.execution_client();
-    let req = proto::ExecuteTransactionRequest {
-        transaction: Some(tx.into()),
-        signatures: vec![sig.into()],
-        read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
-    };
+        // Clock object (shared)
+        let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
+        let clock_arg = tb.input(clock_input);
 
-    debug!("Sending {} transaction...", function_name);
-    let tx_start = std::time::Instant::now();
-    let exec_result = exec.execute_transaction(req).await;
-    let tx_elapsed_ms = tx_start.elapsed().as_millis();
+        // Build function-specific arguments
+        // The closure can be called multiple times since it's Fn, not FnOnce
+        let args = build_args(&mut tb, app_instance_arg, clock_arg);
 
-    let resp = match exec_result {
-        Ok(r) => r,
-        Err(e) => {
-            let error_str = e.to_string();
-            
-            // Clean up error message - remove binary details
-            let clean_error = if error_str.contains("Object ID") && error_str.contains("is not available for consumption") {
-                // Extract just the relevant object version conflict info
-                if let Some(obj_start) = error_str.find("Object ID") {
-                    if let Some(version_info) = error_str.find("current version:") {
-                        let end_idx = error_str[version_info..].find('.').unwrap_or(50) + version_info;
-                        format!("Object version conflict - {}", &error_str[obj_start..end_idx])
+        // Function call
+        let func = sui_transaction_builder::Function::new(
+            package_id,
+            "app_instance".parse()
+                .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+            function_name.parse()
+                .map_err(|e| anyhow!("Failed to parse function name '{}': {}", function_name, e))?,
+            vec![],
+        );
+        tb.move_call(func, args);
+
+        // Finalize and sign
+        let tx = tb.finish()?;
+        let sig = sk.sign_transaction(&tx)?;
+
+        // Execute transaction via gRPC
+        let mut exec = client.execution_client();
+        let req = proto::ExecuteTransactionRequest {
+            transaction: Some(tx.into()),
+            signatures: vec![sig.into()],
+            read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
+        };
+
+        debug!("Sending {} transaction (attempt {}/{})...", function_name, retry_count + 1, MAX_RETRIES + 1);
+        let tx_start = std::time::Instant::now();
+        let exec_result = exec.execute_transaction(req).await;
+        let tx_elapsed_ms = tx_start.elapsed().as_millis();
+
+        let resp = match exec_result {
+            Ok(r) => r,
+            Err(e) => {
+                let error_str = e.to_string();
+                
+                // Clean up error message - remove binary details
+                let clean_error = if error_str.contains("Object ID") && error_str.contains("is not available for consumption") {
+                    // Extract just the relevant object version conflict info
+                    if let Some(obj_start) = error_str.find("Object ID") {
+                        if let Some(version_info) = error_str.find("current version:") {
+                            let end_idx = error_str[version_info..].find('.').unwrap_or(50) + version_info;
+                            format!("Object version conflict - {}", &error_str[obj_start..end_idx])
+                        } else {
+                            "Object version conflict - transaction inputs are outdated".to_string()
+                        }
                     } else {
-                        "Object version conflict - transaction inputs are outdated".to_string()
+                        "Transaction failed due to outdated object versions".to_string()
+                    }
+                } else if error_str.contains("details: [") {
+                    // Remove binary details array
+                    if let Some(idx) = error_str.find(", details: [") {
+                        error_str[..idx].to_string()
+                    } else {
+                        error_str
                     }
                 } else {
-                    "Transaction failed due to outdated object versions".to_string()
-                }
-            } else if error_str.contains("details: [") {
-                // Remove binary details array
-                if let Some(idx) = error_str.find(", details: [") {
-                    error_str[..idx].to_string()
-                } else {
                     error_str
+                };
+                
+                // Check if this is a version conflict that we should retry
+                if (clean_error.contains("version conflict") || clean_error.contains("not available for consumption")) 
+                    && retry_count < MAX_RETRIES {
+                    retry_count += 1;
+                    warn!("Transaction {} failed with version conflict on attempt {}/{}. Retrying with fresh object version. Version conflict details: {}", 
+                        function_name, retry_count, MAX_RETRIES + 1, clean_error);
+                    
+                    // Add exponential backoff delay before retry
+                    let delay = Duration::from_millis(1000 * (2_u64.pow(retry_count - 1)));
+                    sleep(delay).await;
+                    
+                    continue; // Retry the transaction
                 }
-            } else {
-                error_str
-            };
-            
-            // Log as warning for expected race conditions, error for unexpected issues
-            if clean_error.contains("version conflict") || clean_error.contains("not available for consumption") {
-                info!("Transaction {} failed (expected race condition): {}", function_name, clean_error);
-            } else {
-                error!("Transaction {} failed: {}", function_name, clean_error);
+                
+                // Log as warning for expected race conditions, error for unexpected issues
+                if clean_error.contains("version conflict") || clean_error.contains("not available for consumption") {
+                    error!("Transaction {} failed after {} retries with version conflict: {}", 
+                        function_name, retry_count + 1, clean_error);
+                } else {
+                    error!("Transaction {} failed: {}", function_name, clean_error);
+                }
+                
+                return Err(anyhow!("Failed to execute {} transaction: {}", function_name, clean_error));
             }
-            
-            return Err(anyhow!("Failed to execute {} transaction: {}", function_name, clean_error));
+        };
+        let tx_resp = resp.into_inner();
+
+        // Check transaction effects for errors
+        check_transaction_effects(&tx_resp, function_name)?;
+
+        let tx_digest = tx_resp
+            .transaction
+            .as_ref()
+            .and_then(|t| t.digest.as_ref())
+            .context("Failed to get transaction digest")?
+            .to_string();
+
+        if retry_count > 0 {
+            warn!("{} transaction succeeded after {} retries: {} (took {}ms)",
+                function_name, retry_count, tx_digest, tx_elapsed_ms);
+        } else {
+            debug!("{} transaction executed successfully: {} (took {}ms)",
+                function_name, tx_digest, tx_elapsed_ms);
         }
-    };
-    let tx_resp = resp.into_inner();
 
-    // Check transaction effects for errors
-    check_transaction_effects(&tx_resp, function_name)?;
+        // Wait for the transaction to be available in the ledger
+        // Pass the gas_guard to keep the coin locked until transaction is confirmed
+        if let Err(e) = wait_for_transaction(&tx_digest, None, gas_guard).await {
+            warn!("Failed to wait for {} transaction to be available: {}", function_name, e);
+            // Continue anyway, the transaction was successful
+        }
+        
+        // Release the app_instance lock after transaction is confirmed
+        drop(app_instance_guard);
+        debug!("Released app_instance lock: {}", app_instance_id);
 
-    let tx_digest = tx_resp
-        .transaction
-        .as_ref()
-        .and_then(|t| t.digest.as_ref())
-        .context("Failed to get transaction digest")?
-        .to_string();
-
-    debug!(
-        "{} transaction executed successfully: {} (took {}ms)",
-        function_name, tx_digest, tx_elapsed_ms
-    );
-
-    // Wait for the transaction to be available in the ledger
-    // Pass the gas_guard to keep the coin locked until transaction is confirmed
-    if let Err(e) = wait_for_transaction(&tx_digest, None, Some(gas_guard)).await {
-        warn!("Failed to wait for {} transaction to be available: {}", function_name, e);
-        // Continue anyway, the transaction was successful
+        return Ok(tx_digest);
     }
-    
-    // Release the app_instance lock after transaction is confirmed
-    drop(app_instance_guard);
-    debug!("Released app_instance lock: {}", app_instance_id);
-
-    Ok(tx_digest)
 }
 
 /// Try to create a new block for the app instance
