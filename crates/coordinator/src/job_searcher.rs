@@ -807,8 +807,32 @@ async fn ensure_job_failed_if_not_completed(
     job: &Job,
     reason: &str,
 ) {
-    // First check if the job is still in a running state on blockchain
-    match sui::fetch::fetch_job_by_id(&job.app_instance, job.job_sequence).await {
+    // First fetch the app instance to get the jobs table ID
+    let app_instance = match sui::fetch::fetch_app_instance(&job.app_instance).await {
+        Ok(app_inst) => app_inst,
+        Err(e) => {
+            error!(
+                "Failed to fetch app instance for job {} status check: {}",
+                job.job_sequence, e
+            );
+            return;
+        }
+    };
+    
+    // Get the jobs table ID from the app instance
+    let jobs_table_id = match app_instance.jobs {
+        Some(jobs) => jobs.jobs_table_id,
+        None => {
+            error!(
+                "No jobs table found in app instance {} for job {}",
+                job.app_instance, job.job_sequence
+            );
+            return;
+        }
+    };
+    
+    // Now check if the job is still in a running state on blockchain
+    match sui::fetch::fetch_job_by_id(&jobs_table_id, job.job_sequence).await {
         Ok(Some(current_job)) => {
             match current_job.status {
                 sui::fetch::JobStatus::Running => {
