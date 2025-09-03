@@ -532,7 +532,7 @@ impl JobSearcher {
                 }
 
                 if viable_jobs.is_empty() {
-                    warn!(
+                    info!(
                         "No viable jobs after filtering (total={}, locked={}, failed_cached={})",
                         total_jobs, locked_count, failed_cached_count
                     );
