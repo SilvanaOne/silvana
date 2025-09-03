@@ -433,41 +433,71 @@ impl JobsTracker {
                             let is_in_pending_jobs = pending_jobs_list.contains(&job.job_sequence);
                             
                             if !is_in_pending_jobs {
-                                // Fetch fresh job status before logging error, as it might have changed
-                                let fresh_job = match sui::fetch::fetch_job_by_id(app_instance_id, job.job_sequence).await {
+                                // Fetch fresh job AND app_instance in parallel before logging error, as state might have changed
+                                let job_sequence = job.job_sequence;
+                                
+                                // Fetch both in parallel for efficiency
+                                let (fresh_job_result, fresh_app_result) = tokio::join!(
+                                    sui::fetch::fetch_job_by_id(app_instance_id, job_sequence),
+                                    sui::fetch::fetch_app_instance(app_instance_id)
+                                );
+                                
+                                // Process job fetch result
+                                let fresh_job = match fresh_job_result {
                                     Ok(Some(fresh)) => fresh,
                                     Ok(None) => {
-                                        debug!("Job {} no longer exists in app_instance {}", job.job_sequence, app_instance_id);
+                                        debug!("Job {} no longer exists in app_instance {}", job_sequence, app_instance_id);
                                         continue;
                                     }
                                     Err(e) => {
-                                        debug!("Failed to fetch fresh status for job {}: {}", job.job_sequence, e);
+                                        debug!("Failed to fetch fresh status for job {}: {}", job_sequence, e);
                                         job.clone() // Use the original job if we can't fetch fresh
                                     }
                                 };
                                 
-                                // Only log error if the fresh job is still Pending and orphaned
-                                if matches!(fresh_job.status, sui::fetch::JobStatus::Pending) {
-                                    // This job is orphaned - it has Pending status but is not in the pending_jobs array
+                                // Process app_instance fetch result
+                                let fresh_pending_jobs = match fresh_app_result {
+                                    Ok(fresh_app) => {
+                                        if let Some(ref jobs_obj) = fresh_app.jobs {
+                                            jobs_obj.pending_jobs.clone()
+                                        } else {
+                                            vec![]
+                                        }
+                                    }
+                                    Err(e) => {
+                                        debug!("Failed to fetch fresh app_instance for job {}: {}", job_sequence, e);
+                                        pending_jobs_list.clone() // Use the original pending_jobs if we can't fetch fresh
+                                    }
+                                };
+                                
+                                // Only log error if the fresh job is still Pending and still not in the fresh pending_jobs array
+                                if matches!(fresh_job.status, sui::fetch::JobStatus::Pending) && !fresh_pending_jobs.contains(&fresh_job.job_sequence) {
+                                    // Check if the job was very recently updated (within last 5 seconds), which might mean it's being processed
+                                    let job_age_ms = current_time_ms.saturating_sub(fresh_job.updated_at);
+                                    if job_age_ms < 5000 {
+                                        debug!("Job {} appears orphaned but was updated {}ms ago, might be transitioning states", 
+                                            fresh_job.job_sequence, job_age_ms);
+                                        continue;
+                                    }
+                                    
+                                    // This job is truly orphaned - it has Pending status but is not in the pending_jobs array
                                     let is_settlement = settlement_job_id.map_or(false, |id| id == job.job_sequence);
                                     
                                     if is_settlement {
                                         error!(
-                                            "ORPHANED SETTLEMENT job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
-                                            fresh_job.job_sequence, app_instance_id, fresh_job.attempts
+                                            "ORPHANED SETTLEMENT job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators. Details: created_at={}, updated_at={}, next_scheduled_at={:?}, original_pending_jobs={:?}, fresh_pending_jobs={:?}",
+                                            fresh_job.job_sequence, app_instance_id, fresh_job.attempts,
+                                            fresh_job.created_at, fresh_job.updated_at, fresh_job.next_scheduled_at, 
+                                            pending_jobs_list, fresh_pending_jobs
                                         );
                                     } else {
                                         error!(
-                                            "ORPHANED job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators.",
-                                            fresh_job.job_sequence, app_instance_id, fresh_job.attempts
+                                            "ORPHANED job {} in app_instance {}: status is Pending with {} attempts, but NOT in pending_jobs array! This job cannot be picked up by coordinators. Details: created_at={}, updated_at={}, next_scheduled_at={:?}, original_pending_jobs={:?}, fresh_pending_jobs={:?}",
+                                            fresh_job.job_sequence, app_instance_id, fresh_job.attempts,
+                                            fresh_job.created_at, fresh_job.updated_at, fresh_job.next_scheduled_at,
+                                            pending_jobs_list, fresh_pending_jobs
                                         );
                                     }
-                                    
-                                    // Log additional details to help debug
-                                    info!(
-                                        "Orphaned job details: job_sequence={}, created_at={}, updated_at={}, next_scheduled_at={:?}",
-                                        fresh_job.job_sequence, fresh_job.created_at, fresh_job.updated_at, fresh_job.next_scheduled_at
-                                    );
                                     
                                     // TODO: We could fix this by calling a new Move function that adds the job back to pending_jobs
                                     // For now, just log it so operators know to manually intervene
