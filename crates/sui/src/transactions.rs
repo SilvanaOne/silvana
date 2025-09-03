@@ -39,7 +39,13 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                             if let Some(start) = error_str.find("abort_code: Some(") {
                                 let code_start = start + "abort_code: Some(".len();
                                 if let Some(end) = error_str[code_start..].find(')') {
-                                    parts.push(format!("abort_code: {}", &error_str[code_start..code_start+end]));
+                                    let abort_code_str = &error_str[code_start..code_start+end];
+                                    // Try to parse the abort code as u64 and format as hex
+                                    if let Ok(abort_code) = abort_code_str.parse::<u64>() {
+                                        parts.push(format!("abort_code: 0x{:016X}", abort_code));
+                                    } else {
+                                        parts.push(format!("abort_code: {}", abort_code_str));
+                                    }
                                 }
                             }
                         }
