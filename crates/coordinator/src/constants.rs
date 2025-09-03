@@ -13,7 +13,7 @@ pub const MAX_CONCURRENT_AGENT_CONTAINERS: usize = 10;
 /// Size of the job selection pool buffer.
 /// The coordinator maintains a pool of jobs to choose from when scheduling work.
 /// Larger pool size allows better job prioritization but increases memory usage.
-pub const JOB_SELECTION_POOL_SIZE: usize = 50;
+pub const JOB_SELECTION_POOL_SIZE: usize = 30;
 
 /// Maximum number of jobs to process per app instance in a single batch.
 /// This prevents any single app instance from monopolizing processing resources.
