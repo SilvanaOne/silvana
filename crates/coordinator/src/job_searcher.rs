@@ -580,6 +580,21 @@ impl JobSearcher {
                         "Selected settlement job {} from app_instance {}",
                         job.job_sequence, job.app_instance
                     );
+                    
+                    // Report metrics for settlement job selection
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.set_job_selection_metrics(
+                            1, // pool_size (just the settlement job)
+                            0, // merge_count
+                            0, // other_count
+                            1, // settlement_count
+                            locked_count,
+                            failed_cached_count,
+                            job.job_sequence,
+                            job.app_instance.clone(),
+                        );
+                    }
+                    
                     return Ok(Some(job));
                 }
 
@@ -621,6 +636,7 @@ impl JobSearcher {
                 // Select randomly from the pool
                 use rand::Rng;
                 let pool_size = job_pool.len();
+                let other_count = pool_size - merge_count;
                 let selected_index = rand::thread_rng().gen_range(0..pool_size);
                 let selected_job = job_pool[selected_index].clone();
 
@@ -632,6 +648,20 @@ impl JobSearcher {
                     pool_size,
                     merge_count
                 );
+                
+                // Report metrics for job pool selection
+                if let Some(ref metrics) = self.metrics {
+                    metrics.set_job_selection_metrics(
+                        pool_size,
+                        merge_count,
+                        other_count,
+                        0, // settlement_count (none in this path)
+                        locked_count,
+                        failed_cached_count,
+                        selected_job.job_sequence,
+                        selected_job.app_instance.clone(),
+                    );
+                }
 
                 Ok(Some(selected_job))
             }

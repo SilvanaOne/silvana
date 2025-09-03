@@ -19,6 +19,15 @@ pub fn send_coordinator_metrics(
     failed_jobs: u64,
     shutdown: bool,
     force_shutdown: bool,
+    // Job selection metrics
+    job_pool_size: u64,
+    job_pool_merge_count: u64,
+    job_pool_other_count: u64,
+    job_pool_settlement_count: u64,
+    jobs_locked_count: u64,
+    jobs_failed_cached_count: u64,
+    last_selected_job_sequence: u64,
+    last_selected_job_instance: String,
 ) {
     let meter = global::meter("silvana-coordinator");
     
@@ -262,6 +271,85 @@ pub fn send_coordinator_metrics(
             KeyValue::new("service.name", "silvana-coordinator"),
         ],
     );
+    
+    // Job selection metrics
+    let job_selection_gauge = meter
+        .u64_gauge("silvana.job_selection.pool_size")
+        .with_description("Job pool size for selection")
+        .build();
+    
+    job_selection_gauge.record(
+        job_pool_size,
+        &[
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+    
+    let job_type_gauge = meter
+        .u64_gauge("silvana.job_selection.pool_by_type")
+        .with_description("Job pool composition by type")
+        .build();
+    
+    job_type_gauge.record(
+        job_pool_merge_count,
+        &[
+            KeyValue::new("job.type", "merge"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+    
+    job_type_gauge.record(
+        job_pool_other_count,
+        &[
+            KeyValue::new("job.type", "other"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+    
+    job_type_gauge.record(
+        job_pool_settlement_count,
+        &[
+            KeyValue::new("job.type", "settlement"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+    
+    let job_filtering_gauge = meter
+        .u64_gauge("silvana.job_selection.filtered")
+        .with_description("Jobs filtered during selection")
+        .build();
+    
+    job_filtering_gauge.record(
+        jobs_locked_count,
+        &[
+            KeyValue::new("filter.reason", "locked"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+    
+    job_filtering_gauge.record(
+        jobs_failed_cached_count,
+        &[
+            KeyValue::new("filter.reason", "failed_cache"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+    
+    // Track the last selected job
+    if last_selected_job_sequence > 0 {
+        let job_selected_gauge = meter
+            .u64_gauge("silvana.job_selection.last_selected")
+            .with_description("Last selected job sequence")
+            .build();
+        
+        job_selected_gauge.record(
+            last_selected_job_sequence,
+            &[
+                KeyValue::new("app_instance", last_selected_job_instance),
+                KeyValue::new("service.name", "silvana-coordinator"),
+            ],
+        );
+    }
     
     // Uptime metric
     let uptime_counter = meter

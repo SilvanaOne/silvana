@@ -16,6 +16,15 @@ pub struct CoordinatorMetrics {
     pub has_pending_jobs: Arc<AtomicBool>,
     pub shutdown_flag: Arc<AtomicBool>,
     pub force_shutdown_flag: Arc<AtomicBool>,
+    // Job selection metrics
+    pub job_pool_size: Arc<AtomicUsize>,
+    pub job_pool_merge_count: Arc<AtomicUsize>,
+    pub job_pool_other_count: Arc<AtomicUsize>,
+    pub job_pool_settlement_count: Arc<AtomicUsize>,
+    pub jobs_locked_count: Arc<AtomicUsize>,
+    pub jobs_failed_cached_count: Arc<AtomicUsize>,
+    pub last_selected_job_sequence: Arc<AtomicUsize>,
+    pub last_selected_job_instance: Arc<parking_lot::RwLock<String>>,
 }
 
 impl CoordinatorMetrics {
@@ -27,6 +36,14 @@ impl CoordinatorMetrics {
             has_pending_jobs: Arc::new(AtomicBool::new(false)),
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             force_shutdown_flag: Arc::new(AtomicBool::new(false)),
+            job_pool_size: Arc::new(AtomicUsize::new(0)),
+            job_pool_merge_count: Arc::new(AtomicUsize::new(0)),
+            job_pool_other_count: Arc::new(AtomicUsize::new(0)),
+            job_pool_settlement_count: Arc::new(AtomicUsize::new(0)),
+            jobs_locked_count: Arc::new(AtomicUsize::new(0)),
+            jobs_failed_cached_count: Arc::new(AtomicUsize::new(0)),
+            last_selected_job_sequence: Arc::new(AtomicUsize::new(0)),
+            last_selected_job_instance: Arc::new(parking_lot::RwLock::new(String::new())),
         }
     }
 
@@ -46,6 +63,27 @@ impl CoordinatorMetrics {
     pub fn set_shutdown_flags(&self, shutdown: bool, force_shutdown: bool) {
         self.shutdown_flag.store(shutdown, Ordering::Relaxed);
         self.force_shutdown_flag.store(force_shutdown, Ordering::Relaxed);
+    }
+    
+    pub fn set_job_selection_metrics(
+        &self,
+        pool_size: usize,
+        merge_count: usize,
+        other_count: usize,
+        settlement_count: usize,
+        locked_count: usize,
+        failed_cached_count: usize,
+        selected_job_sequence: u64,
+        selected_job_instance: String,
+    ) {
+        self.job_pool_size.store(pool_size, Ordering::Relaxed);
+        self.job_pool_merge_count.store(merge_count, Ordering::Relaxed);
+        self.job_pool_other_count.store(other_count, Ordering::Relaxed);
+        self.job_pool_settlement_count.store(settlement_count, Ordering::Relaxed);
+        self.jobs_locked_count.store(locked_count, Ordering::Relaxed);
+        self.jobs_failed_cached_count.store(failed_cached_count, Ordering::Relaxed);
+        self.last_selected_job_sequence.store(selected_job_sequence as usize, Ordering::Relaxed);
+        *self.last_selected_job_instance.write() = selected_job_instance;
     }
 }
 
@@ -80,6 +118,16 @@ async fn collect_coordinator_metrics(
     // Agent job database stats
     let (total_jobs, ready_jobs, processing_jobs, completed_jobs, failed_jobs) = state.get_agent_job_stats().await;
     
+    // Job selection metrics
+    let job_pool_size = metrics.job_pool_size.load(Ordering::Relaxed);
+    let job_pool_merge_count = metrics.job_pool_merge_count.load(Ordering::Relaxed);
+    let job_pool_other_count = metrics.job_pool_other_count.load(Ordering::Relaxed);
+    let job_pool_settlement_count = metrics.job_pool_settlement_count.load(Ordering::Relaxed);
+    let jobs_locked_count = metrics.jobs_locked_count.load(Ordering::Relaxed);
+    let jobs_failed_cached_count = metrics.jobs_failed_cached_count.load(Ordering::Relaxed);
+    let last_selected_job_sequence = metrics.last_selected_job_sequence.load(Ordering::Relaxed);
+    let last_selected_job_instance = metrics.last_selected_job_instance.read().clone();
+    
     // Coordinator info
     let coordinator_id = state.get_coordinator_id();
     let chain = state.get_chain();
@@ -98,6 +146,14 @@ async fn collect_coordinator_metrics(
         failed_jobs as u64,
         shutdown,
         force_shutdown,
+        job_pool_size as u64,
+        job_pool_merge_count as u64,
+        job_pool_other_count as u64,
+        job_pool_settlement_count as u64,
+        jobs_locked_count as u64,
+        jobs_failed_cached_count as u64,
+        last_selected_job_sequence as u64,
+        last_selected_job_instance,
     );
     
     // Log metrics at debug level (these will be sent to New Relic if warn/error occur)
@@ -105,10 +161,14 @@ async fn collect_coordinator_metrics(
         "📊 Coordinator metrics: containers_loading={}, containers_running={}, containers_total={}, \
         app_instances_tracked={}, has_pending_jobs={}, current_agents={}, \
         agent_jobs_total={}, agent_jobs_ready={}, agent_jobs_processing={}, agent_jobs_completed={}, agent_jobs_failed={}, \
+        job_pool_size={}, job_pool_merge={}, job_pool_other={}, job_pool_settlement={}, \
+        jobs_locked={}, jobs_failed_cached={}, last_job_seq={}, \
         shutdown={}, force_shutdown={}, coordinator_id={}, chain={}",
         containers_loading, containers_running, containers_total,
         app_instances_count, has_pending, current_agents,
         total_jobs, ready_jobs, processing_jobs, completed_jobs, failed_jobs,
+        job_pool_size, job_pool_merge_count, job_pool_other_count, job_pool_settlement_count,
+        jobs_locked_count, jobs_failed_cached_count, last_selected_job_sequence,
         shutdown, force_shutdown, coordinator_id, chain
     );
     
