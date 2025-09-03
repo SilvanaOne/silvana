@@ -879,7 +879,7 @@ async fn ensure_job_failed_if_not_completed(
             }
         }
         Ok(None) => {
-            warn!(
+            debug!(
                 "Job {} no longer exists on blockchain after container terminated ({})",
                 job.job_sequence, reason
             );
