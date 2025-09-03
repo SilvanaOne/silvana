@@ -2,6 +2,7 @@ mod agent;
 mod block;
 mod cli;
 mod config;
+mod constants;
 mod coordinator;
 mod error;
 mod events;
@@ -21,7 +22,6 @@ mod session_id;
 mod settlement;
 mod state;
 mod stuck_jobs;
-mod constants;
 
 use chrono::{DateTime, Utc};
 use clap::Parser;
@@ -1113,8 +1113,8 @@ async fn main() -> Result<()> {
                     println!("   Transaction: {}", tx_digest);
                     
                     // Wait for transaction to be processed
-                    println!("\n⏳ Waiting 5 seconds for transaction to be processed...");
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    println!("\n⏳ Waiting {} seconds for transaction to be processed...", constants::CLI_TRANSACTION_WAIT_SECS);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(constants::CLI_TRANSACTION_WAIT_SECS)).await;
                     
                     // Check balance after faucet
                     println!("\n📊 Balance after faucet:");

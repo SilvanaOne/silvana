@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::constants::{INITIAL_RETRY_DELAY_SECS, MAX_RETRIES, MAX_RETRY_DELAY_SECS, STREAM_TIMEOUT_SECS};
+use crate::constants::{RETRY_INITIAL_DELAY_SECS, RETRY_MAX_ATTEMPTS, RETRY_MAX_DELAY_SECS, GRPC_STREAM_TIMEOUT_SECS};
 use crate::error::{CoordinatorError, Result};
 use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, CoordinationEvent};
 use crate::metrics::CoordinatorMetrics;
@@ -47,17 +47,17 @@ impl EventProcessor {
                     retry_count += 1;
                     error!(
                         "Stream error (attempt {}/{}): {}",
-                        retry_count, MAX_RETRIES, e
+                        retry_count, RETRY_MAX_ATTEMPTS, e
                     );
 
-                    if retry_count >= MAX_RETRIES {
+                    if retry_count >= RETRY_MAX_ATTEMPTS {
                         error!("Max retries reached, exiting");
                         return Err(e);
                     }
 
-                    // Exponential backoff: double the delay each time, capped at MAX_RETRY_DELAY_SECS
-                    let delay_secs = (INITIAL_RETRY_DELAY_SECS * 2_u64.pow((retry_count - 1) as u32))
-                        .min(MAX_RETRY_DELAY_SECS);
+                    // Exponential backoff: double the delay each time, capped at RETRY_MAX_DELAY_SECS
+                    let delay_secs = (RETRY_INITIAL_DELAY_SECS * 2_u64.pow((retry_count - 1) as u32))
+                        .min(RETRY_MAX_DELAY_SECS);
                     let delay = Duration::from_secs(delay_secs);
                     warn!("Retrying in {}s...", delay_secs);
                     sleep(delay).await;
@@ -76,7 +76,7 @@ impl EventProcessor {
         let mut checkpoint_count = 0;
 
         while let Ok(Some(response)) =
-            timeout(Duration::from_secs(STREAM_TIMEOUT_SECS), stream.next()).await
+            timeout(Duration::from_secs(GRPC_STREAM_TIMEOUT_SECS), stream.next()).await
         {
             match response {
                 Ok(response) => {

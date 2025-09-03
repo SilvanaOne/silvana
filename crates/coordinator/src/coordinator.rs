@@ -1,5 +1,10 @@
 use crate::config::Config;
-use crate::constants::SHUTDOWN_TIMEOUT_SECS;
+use crate::constants::{
+    GRACEFUL_SHUTDOWN_TIMEOUT_SECS, RECONCILIATION_INTERVAL_SECS, 
+    PROOF_ANALYSIS_INTERVAL_SECS, BALANCE_CHECK_INTERVAL_SECS,
+    SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
+    JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS, SHUTDOWN_CLEANUP_DELAY_MS
+};
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
 use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
@@ -161,16 +166,15 @@ pub async fn start_coordinator(
         }
     });
 
-    // 2. Start reconciliation task in a separate thread (runs every 10 minutes)
+    // 2. Start reconciliation task in a separate thread
     let reconciliation_state = state.clone();
 
     let reconciliation_handle = task::spawn(async move {
-        // TODO: Change back to 10 minutes (600 seconds) after testing stuck job handling
-        info!("🔄 Starting reconciliation task (runs every 10 minutes for testing)...");
+        info!("🔄 Starting reconciliation task (runs every {} minutes)...", RECONCILIATION_INTERVAL_SECS / 60);
 
         // Run immediate reconciliation on startup to catch stuck jobs
         info!("🔍 Running immediate reconciliation check on startup...");
-        tokio::time::sleep(Duration::from_secs(60)).await; // Small delay to let the system initialize
+        tokio::time::sleep(Duration::from_secs(STARTUP_RECONCILIATION_DELAY_SECS)).await; // Small delay to let the system initialize
 
         match reconciliation_state
             .get_jobs_tracker()
@@ -189,7 +193,7 @@ pub async fn start_coordinator(
             }
         }
 
-        let mut interval = tokio::time::interval(Duration::from_secs(600)); // 10 minutes for testing
+        let mut interval = tokio::time::interval(Duration::from_secs(RECONCILIATION_INTERVAL_SECS));
 
         // Skip the immediate first tick since we just ran reconciliation
         interval.tick().await;
@@ -240,9 +244,9 @@ pub async fn start_coordinator(
             info!("✅ Reconciliation check complete");
         }
     });
-    info!("🔄 Started reconciliation task (runs every 1 minute for testing)"); // TODO: Change back to 10 minutes
+    info!("🔄 Started reconciliation task (runs every {} minutes)", RECONCILIATION_INTERVAL_SECS / 60);
 
-    // Note: Stuck job monitoring is handled by reconciliation task (every 10 minutes)
+    // Note: Stuck job monitoring is handled by reconciliation task
     // to avoid overloading Sui nodes with duplicate checks
 
     // 4. Start periodic block creation task (runs every minute)
@@ -252,12 +256,12 @@ pub async fn start_coordinator(
     });
     info!("📦 Started periodic block creation task (runs every minute)");
 
-    // 4.5 Start periodic proof analysis task (runs every 5 minutes)
+    // 4.5 Start periodic proof analysis task
     let proof_analysis_state = state.clone();
     let proof_analysis_handle = task::spawn(async move {
         start_periodic_proof_analysis(proof_analysis_state).await;
     });
-    info!("🔬 Started proof completion analysis task (runs every 5 minutes)");
+    info!("🔬 Started proof completion analysis task (runs every {} minutes)", PROOF_ANALYSIS_INTERVAL_SECS / 60);
 
     // 5. Start metrics reporter for New Relic
     let metrics = std::sync::Arc::new(CoordinatorMetrics::new());
@@ -272,7 +276,7 @@ pub async fn start_coordinator(
     // 6. Start periodic balance check task (runs every 30 minutes)
     let balance_check_handle = task::spawn(async move {
         info!("💰 Starting periodic balance check task (runs every 30 minutes)...");
-        let mut interval = tokio::time::interval(Duration::from_secs(1800)); // 30 minutes
+        let mut interval = tokio::time::interval(Duration::from_secs(BALANCE_CHECK_INTERVAL_SECS));
 
         // Skip the immediate first tick since we already checked on startup
         interval.tick().await;
@@ -358,7 +362,7 @@ pub async fn start_coordinator(
             break;
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(SHUTDOWN_CLEANUP_DELAY_MS)).await;
     }
 
     info!("🔄 Starting graceful shutdown sequence...");
@@ -367,9 +371,9 @@ pub async fn start_coordinator(
     info!("  1️⃣ Stopping new job acceptance...");
 
     // Phase 2: Wait for current jobs to complete (with timeout)
-    info!("  2️⃣ Waiting for current jobs to complete (max {} minutes)...", SHUTDOWN_TIMEOUT_SECS / 60);
+    info!("  2️⃣ Waiting for current jobs to complete (max {} minutes)...", GRACEFUL_SHUTDOWN_TIMEOUT_SECS / 60);
     let mut wait_time = 0;
-    let max_wait = SHUTDOWN_TIMEOUT_SECS;
+    let max_wait = GRACEFUL_SHUTDOWN_TIMEOUT_SECS;
 
     while wait_time < max_wait {
         // Check for force shutdown
@@ -384,8 +388,8 @@ pub async fn start_coordinator(
             break;
         }
 
-        // Show progress every 10 seconds
-        if wait_time % 10 == 0 {
+        // Show progress periodically
+        if wait_time % SHUTDOWN_PROGRESS_INTERVAL_SECS == 0 {
             if wait_time < 60 {
                 info!(
                     "  ⏳ {} agents still running, waiting... ({}/{}s)",
@@ -394,9 +398,10 @@ pub async fn start_coordinator(
             } else {
                 let minutes = wait_time / 60;
                 let seconds = wait_time % 60;
+                let max_minutes = GRACEFUL_SHUTDOWN_TIMEOUT_SECS / 60;
                 info!(
-                    "  ⏳ {} agents still running, waiting... ({}m {}s / 5m)",
-                    current_agents, minutes, seconds
+                    "  ⏳ {} agents still running, waiting... ({}m {}s / {}m)",
+                    current_agents, minutes, seconds, max_minutes
                 );
             }
         }
@@ -473,7 +478,7 @@ pub async fn start_coordinator(
     // Give job_searcher a chance to cleanup
     if !job_searcher_handle.is_finished() {
         // Wait a bit for job_searcher to finish gracefully
-        let _ = tokio::time::timeout(Duration::from_secs(5), job_searcher_handle).await;
+        let _ = tokio::time::timeout(Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS), job_searcher_handle).await;
     }
 
     info!("✅ Graceful shutdown complete");

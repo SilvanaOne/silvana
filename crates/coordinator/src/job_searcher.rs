@@ -1,5 +1,12 @@
 use crate::agent::AgentJob;
-use crate::constants::{CONTAINER_FORCE_STOP_TIMEOUT_SECS, JOB_POOL_SIZE, MAX_CONCURRENT_AGENTS, MAX_JOB_START_DELAY_MS, MIN_SYSTEM_MEMORY_GB};
+use crate::constants::{
+    DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS, JOB_SELECTION_POOL_SIZE, 
+    MAX_CONCURRENT_AGENT_CONTAINERS, JOB_START_JITTER_MAX_MS, 
+    AGENT_MIN_MEMORY_REQUIREMENT_GB, PENDING_JOBS_CHECK_DELAY_MS,
+    CONTAINER_STATUS_CHECK_INTERVAL_SECS, CONTAINER_HEALTH_CHECK_INTERVAL_SECS,
+    RESOURCE_WAIT_DELAY_SECS, RESOURCE_ERROR_RETRY_DELAY_SECS,
+    JOB_AVAILABILITY_CHECK_DELAY_SECS
+};
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
 use crate::job_lock::{JobLockGuard, get_job_lock_manager};
@@ -41,10 +48,10 @@ async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Resul
 
     // Check concurrent agent limit
     let current_agents = state.get_current_agent_count().await;
-    if current_agents >= MAX_CONCURRENT_AGENTS {
+    if current_agents >= MAX_CONCURRENT_AGENT_CONTAINERS {
         debug!(
             "Maximum concurrent agents ({}) reached",
-            MAX_CONCURRENT_AGENTS
+            MAX_CONCURRENT_AGENT_CONTAINERS
         );
         return Ok(false);
     }
@@ -71,13 +78,13 @@ async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Resul
 
     // Check against total system memory minus reserved
     let total_memory_gb = get_total_memory_gb();
-    if total_memory_needed_gb > total_memory_gb.saturating_sub(MIN_SYSTEM_MEMORY_GB) {
+    if total_memory_needed_gb > total_memory_gb.saturating_sub(AGENT_MIN_MEMORY_REQUIREMENT_GB) {
         debug!(
             "Insufficient total memory: need {} GB (including {} GB for new agent), have {} GB (minus {} GB reserved)",
             total_memory_needed_gb,
             agent_method.min_memory_gb,
             total_memory_gb,
-            MIN_SYSTEM_MEMORY_GB
+            AGENT_MIN_MEMORY_REQUIREMENT_GB
         );
         return Ok(false);
     }
@@ -161,7 +168,7 @@ impl JobSearcher {
                     break;
                 }
 
-                sleep(Duration::from_millis(1000)).await;
+                sleep(Duration::from_millis(PENDING_JOBS_CHECK_DELAY_MS)).await;
                 let current_has_jobs = monitor_state.has_pending_jobs_available();
                 if current_has_jobs != last_has_jobs {
                     debug!(
@@ -203,7 +210,7 @@ impl JobSearcher {
                         // Force stop the container with a short timeout
                         if let Err(e) = self
                             .docker_manager
-                            .stop_container_with_timeout(&container_id, CONTAINER_FORCE_STOP_TIMEOUT_SECS)
+                            .stop_container_with_timeout(&container_id, DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS)
                             .await
                         {
                             error!("Failed to stop container {}: {}", container_id, e);
@@ -219,7 +226,7 @@ impl JobSearcher {
                         warn!("Press Ctrl-C again to force terminate the container");
 
                         // Wait for container to finish or force shutdown
-                        let mut check_interval = tokio::time::interval(Duration::from_secs(1));
+                        let mut check_interval = tokio::time::interval(Duration::from_secs(CONTAINER_STATUS_CHECK_INTERVAL_SECS));
                         loop {
                             check_interval.tick().await;
 
@@ -280,8 +287,8 @@ impl JobSearcher {
                             _ = state_change_rx.recv() => {
                                 debug!("Pending jobs became available, checking for jobs");
                             }
-                            _ = sleep(Duration::from_secs(5)) => {
-                                // Periodic check every 5 seconds as a safety measure
+                            _ = sleep(Duration::from_secs(CONTAINER_HEALTH_CHECK_INTERVAL_SECS)) => {
+                                // Periodic health check as a safety measure
                             }
                         }
                         continue;
@@ -300,7 +307,7 @@ impl JobSearcher {
                             );
 
                             // Note: We allow multiple instances of the same agent to run in parallel
-                            // up to MAX_CONCURRENT_AGENTS limit
+                            // up to MAX_CONCURRENT_AGENT_CONTAINERS limit
 
                             // Fetch agent method configuration first to check resource requirements
                             let agent_method = match fetch_agent_method(
@@ -346,12 +353,12 @@ impl JobSearcher {
                                         job.developer, job.agent, job.agent_method
                                     );
                                     // Wait a bit before checking again
-                                    sleep(Duration::from_secs(2)).await;
+                                    sleep(Duration::from_secs(RESOURCE_WAIT_DELAY_SECS)).await;
                                     continue;
                                 }
                                 Err(e) => {
                                     error!("Error checking resources for agent: {}", e);
-                                    sleep(Duration::from_secs(1)).await;
+                                    sleep(Duration::from_secs(RESOURCE_ERROR_RETRY_DELAY_SECS)).await;
                                     continue;
                                 }
                             }
@@ -423,8 +430,8 @@ impl JobSearcher {
                             // No jobs found despite flag being set - update the flag
                             self.state.update_pending_jobs_flag().await;
 
-                            // Delay before next check (1 second to avoid too frequent checks)
-                            sleep(Duration::from_secs(1)).await;
+                            // Delay before next check to avoid too frequent checks
+                            sleep(Duration::from_secs(JOB_AVAILABILITY_CHECK_DELAY_SECS)).await;
                         }
                     }
                 }
@@ -609,7 +616,7 @@ impl JobSearcher {
                 debug!("Found {} merge jobs", merge_count);
 
                 // If we have less than pool size, add other jobs
-                if job_pool.len() < JOB_POOL_SIZE {
+                if job_pool.len() < JOB_SELECTION_POOL_SIZE {
                     let mut other_jobs: Vec<Job> = viable_jobs
                         .iter()
                         .filter(|job| {
@@ -623,7 +630,7 @@ impl JobSearcher {
                     other_jobs.sort_by_key(|job| job.job_sequence);
 
                     // Take enough to fill the pool
-                    let slots_remaining = JOB_POOL_SIZE - job_pool.len();
+                    let slots_remaining = JOB_SELECTION_POOL_SIZE - job_pool.len();
                     job_pool.extend(other_jobs.into_iter().take(slots_remaining));
 
                     debug!(
@@ -1010,7 +1017,7 @@ async fn run_docker_container_task(
 
     // Add random delay to avoid race conditions with other coordinators
     use rand::Rng;
-    let delay_ms = rand::thread_rng().gen_range(0..MAX_JOB_START_DELAY_MS);
+    let delay_ms = rand::thread_rng().gen_range(0..JOB_START_JITTER_MAX_MS);
     debug!(
         "Adding random delay of {}ms before starting job {} to avoid race conditions",
         delay_ms, job.job_sequence

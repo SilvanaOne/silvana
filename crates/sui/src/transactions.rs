@@ -852,7 +852,7 @@ where
         // Release old coin if we're retrying
         if retry_count > 0 {
             if let Some(old_guard) = gas_guard.take() {
-                warn!("Retry {}/{}: Releasing old gas coin {} due to version conflict", 
+                info!("Retry {}/{}: Releasing old gas coin {} due to version conflict", 
                     retry_count, MAX_RETRIES, old_guard.coin_id());
                 drop(old_guard);
                 // Small delay to allow the coin to be released
@@ -887,7 +887,7 @@ where
         // Create input based on whether object is shared or owned
         let app_instance_input = if let Some(shared_version) = initial_shared_version {
             if retry_count > 0 {
-                warn!("Retry {}/{}: Using updated shared object version {} for app_instance", 
+                info!("Retry {}/{}: Using updated shared object version {} for app_instance", 
                     retry_count, MAX_RETRIES, shared_version);
             }
             debug!("Using shared object input for app_instance ({}) with initial_shared_version={}", 
@@ -976,7 +976,7 @@ where
                 if (clean_error.contains("version conflict") || clean_error.contains("not available for consumption")) 
                     && retry_count < MAX_RETRIES {
                     retry_count += 1;
-                    warn!("Transaction {} failed with version conflict on attempt {}/{}. Retrying with fresh object version. Version conflict details: {}", 
+                    info!("Transaction {} failed with version conflict on attempt {}/{}. Retrying with fresh object version. Version conflict details: {}", 
                         function_name, retry_count, MAX_RETRIES + 1, clean_error);
                     
                     // Add exponential backoff delay before retry
@@ -1010,7 +1010,7 @@ where
             .to_string();
 
         if retry_count > 0 {
-            warn!("{} transaction succeeded after {} retries: {} (took {}ms)",
+            info!("{} transaction succeeded after {} retries: {} (took {}ms)",
                 function_name, retry_count, tx_digest, tx_elapsed_ms);
         } else {
             debug!("{} transaction executed successfully: {} (took {}ms)",

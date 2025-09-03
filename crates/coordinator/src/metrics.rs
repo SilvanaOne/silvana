@@ -7,6 +7,7 @@ use tracing::{info, debug};
 
 use crate::state::SharedState;
 use crate::jobs::JobsTracker;
+use crate::constants::METRICS_REPORTING_INTERVAL_SECS;
 
 /// Global metrics for coordinator
 pub struct CoordinatorMetrics {
@@ -200,10 +201,10 @@ pub async fn start_metrics_reporter(
     if !NewRelicConfig::is_configured() {
         info!("New Relic not configured, metrics reporter will only log locally");
     } else {
-        info!("📊 Starting metrics reporter (collects every 30 seconds)");
+        info!("📊 Starting metrics reporter (collects every {} seconds)", METRICS_REPORTING_INTERVAL_SECS);
     }
     
-    let mut ticker = interval(Duration::from_secs(30));
+    let mut ticker = interval(Duration::from_secs(METRICS_REPORTING_INTERVAL_SECS));
     
     loop {
         ticker.tick().await;

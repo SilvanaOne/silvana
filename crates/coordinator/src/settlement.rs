@@ -1,4 +1,4 @@
-use crate::constants::{MAX_PER_INSTANCE, PERIODIC_JOB_BUFFER_MS};
+use crate::constants::{MAX_JOBS_PER_INSTANCE_BATCH, PERIODIC_JOB_EXECUTION_BUFFER_MS};
 use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use std::collections::HashMap;
@@ -293,9 +293,9 @@ pub async fn fetch_pending_job_from_instances(
     // Buffer for periodic jobs to account for clock drift
     // Settlement nodes get priority with less buffer time
     let buffer_ms = if is_settle_only {
-        PERIODIC_JOB_BUFFER_MS // Settlement nodes: 10 seconds buffer
+        PERIODIC_JOB_EXECUTION_BUFFER_MS // Settlement nodes: 10 seconds buffer
     } else {
-        PERIODIC_JOB_BUFFER_MS * 2 // Regular nodes: 20 seconds buffer, giving settlement nodes priority
+        PERIODIC_JOB_EXECUTION_BUFFER_MS * 2 // Regular nodes: 20 seconds buffer, giving settlement nodes priority
     };
     
     // Collect all job IDs from all app_instances with their app_instance_method and next_scheduled_at
@@ -478,9 +478,9 @@ pub async fn fetch_all_pending_jobs(
     // Buffer for periodic jobs to account for clock drift
     // Settlement nodes get priority with less buffer time
     let buffer_ms = if is_settle_only {
-        PERIODIC_JOB_BUFFER_MS // Settlement nodes: 10 seconds buffer
+        PERIODIC_JOB_EXECUTION_BUFFER_MS // Settlement nodes: 10 seconds buffer
     } else {
-        PERIODIC_JOB_BUFFER_MS * 2 // Regular nodes: 20 seconds buffer, giving settlement nodes priority
+        PERIODIC_JOB_EXECUTION_BUFFER_MS * 2 // Regular nodes: 20 seconds buffer, giving settlement nodes priority
     };
     
     let mut all_pending_jobs = Vec::new();
@@ -563,7 +563,7 @@ pub async fn fetch_all_pending_jobs(
                 seqs.sort();
 
                 if !seqs.is_empty() {
-                    let take_n = std::cmp::min(seqs.len(), MAX_PER_INSTANCE);
+                    let take_n = std::cmp::min(seqs.len(), MAX_JOBS_PER_INSTANCE_BATCH);
                     let seq_slice = &seqs[..take_n];
 
                     match fetch_jobs_batch(&jobs_obj.jobs_table_id, seq_slice).await {

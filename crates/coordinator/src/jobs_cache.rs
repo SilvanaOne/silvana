@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+use crate::constants::RETRY_MAX_DELAY_SECS;
 use tracing::debug;
 
 /// Job status in cache
@@ -18,7 +19,7 @@ struct JobCacheEntry {
 }
 
 /// Cache for tracking failed jobs with automatic expiry
-/// - Failed jobs are cached for 5 minutes to prevent retry storms
+/// - Failed jobs are cached to prevent retry storms
 #[derive(Clone)]
 pub struct JobsCache {
     cache: Arc<RwLock<HashMap<(String, u64), JobCacheEntry>>>, // (app_instance, job_sequence) -> cache entry
@@ -27,11 +28,11 @@ pub struct JobsCache {
 
 impl JobsCache {
     /// Create a new jobs cache with default expiry time
-    /// - Failed jobs: 5 minutes
+    /// Failed jobs expire after RETRY_MAX_DELAY_SECS to prevent retry storms
     pub fn new() -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
-            failed_expiry: Duration::from_secs(300),  // 5 minutes for failed jobs
+            failed_expiry: Duration::from_secs(RETRY_MAX_DELAY_SECS),
         }
     }
 
@@ -44,7 +45,7 @@ impl JobsCache {
         }
     }
 
-    /// Add a failed job to the cache (will be cached for 5 minutes)
+    /// Add a failed job to the cache (will be cached to prevent retry storms)
     pub async fn add_failed_job(&self, app_instance: String, job_sequence: u64) {
         let mut cache = self.cache.write().await;
         let key = (app_instance.clone(), job_sequence);
@@ -59,7 +60,7 @@ impl JobsCache {
     }
 
 
-    /// Check if a job is recently failed (within 5 minutes)
+    /// Check if a job is recently failed (within the cache expiry time)
     #[allow(dead_code)]
     pub async fn is_recently_failed(&self, app_instance: &str, job_sequence: u64) -> bool {
         let cache = self.cache.read().await;

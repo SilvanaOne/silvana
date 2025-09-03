@@ -1,5 +1,9 @@
 use crate::block::settle;
-use crate::constants::{MAX_MERGE_ATTEMPTS, STARTED_TIMEOUT_MS, TIMEOUT_MS};
+use crate::constants::{
+    PROOF_MERGE_MAX_ATTEMPTS, PROOF_STARTED_TIMEOUT_MS, PROOF_RESERVED_TIMEOUT_MS,
+    MERGE_RETRY_DELAY_MS, BLOCKCHAIN_PROPAGATION_DELAY_MS, 
+    BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS
+};
 use anyhow::Result;
 use sui::fetch::fetch_proof_calculation;
 use sui::fetch::{Proof, ProofCalculation, ProofStatus};
@@ -187,7 +191,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     let mut attempted_merges = Vec::new();
     let mut merge_created = false;
 
-    for attempt in 1..=MAX_MERGE_ATTEMPTS {
+    for attempt in 1..=PROOF_MERGE_MAX_ATTEMPTS {
         // Refetch ProofCalculations on each attempt to get the latest state
         // This is important because other coordinators might have updated them
         let current_block_proofs =
@@ -315,7 +319,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             
             debug!(
                 "✨ Attempt {}/{}: Found merge opportunity - Sequences1: {:?} ({}), Sequences2: {:?} ({}), Is block proof: {}",
-                attempt, MAX_MERGE_ATTEMPTS, 
+                attempt, PROOF_MERGE_MAX_ATTEMPTS, 
                 merge_request.sequences1, proof1_details,
                 merge_request.sequences2, proof2_details,
                 merge_request.block_proof
@@ -366,7 +370,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     debug!(
                         "ℹ️ Attempt {}/{}: Could not create merge job for block {} (sequences {:?} + {:?}): {}",
                         attempt,
-                        MAX_MERGE_ATTEMPTS,
+                        PROOF_MERGE_MAX_ATTEMPTS,
                         proof_calc.block_number,
                         merge_request.sequences1,
                         merge_request.sequences2,
@@ -378,8 +382,8 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     if error_str.contains("already reserved") {
                         debug!("   → Looking for other merge opportunities...");
                         // Add a small delay before retrying to allow other coordinators to complete
-                        if attempt < MAX_MERGE_ATTEMPTS {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        if attempt < PROOF_MERGE_MAX_ATTEMPTS {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(MERGE_RETRY_DELAY_MS)).await;
                         }
                         // Continue to next iteration to try another merge opportunity
                     } else if error_str.contains("already Started and not timed out") 
@@ -562,7 +566,7 @@ fn is_proof_available(proof: &Proof, current_time: u64) -> bool {
         ProofStatus::Calculated => true,
         ProofStatus::Reserved => {
             // Check if timeout has expired (RESERVED proofs can be used if timed out)
-            current_time > proof.timestamp + TIMEOUT_MS
+            current_time > proof.timestamp + PROOF_RESERVED_TIMEOUT_MS
         }
         ProofStatus::Started => false, // Started proofs are still being calculated, not available for merging
         ProofStatus::Used => false,    // USED proofs are NOT available for merging
@@ -575,7 +579,7 @@ fn is_proof_active_or_completed(proof: &Proof, current_time: u64) -> bool {
         ProofStatus::Calculated | ProofStatus::Used | ProofStatus::Reserved => true,
         ProofStatus::Started => {
             // Check if it's still within timeout
-            current_time <= proof.timestamp + TIMEOUT_MS
+            current_time <= proof.timestamp + PROOF_RESERVED_TIMEOUT_MS
         }
         _ => false,
     }
@@ -621,16 +625,16 @@ async fn create_merge_job(
                 let current_time = chrono::Utc::now().timestamp() as u64 * 1000; // Convert to milliseconds
                 let time_since_start = current_time.saturating_sub(proof.timestamp);
 
-                if time_since_start > STARTED_TIMEOUT_MS {
+                if time_since_start > PROOF_STARTED_TIMEOUT_MS {
                     debug!(
                         "⏰ Started proof has timed out ({} ms > {} ms), will reject",
-                        time_since_start, STARTED_TIMEOUT_MS
+                        time_since_start, PROOF_STARTED_TIMEOUT_MS
                     );
                     true
                 } else {
                     debug!(
                         "⏳ Started proof is still active ({} ms < {} ms), skipping merge",
-                        time_since_start, STARTED_TIMEOUT_MS
+                        time_since_start, PROOF_STARTED_TIMEOUT_MS
                     );
                     // Return early - don't try to merge with an active Started proof
                     return Err(anyhow::anyhow!(
@@ -642,7 +646,7 @@ async fn create_merge_job(
             ProofStatus::Reserved => {
                 // Reserved proofs can be rejected if timed out (2 minutes)
                 let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
-                current_time > proof.timestamp + TIMEOUT_MS
+                current_time > proof.timestamp + PROOF_RESERVED_TIMEOUT_MS
             }
             ProofStatus::Rejected => true, // Already rejected, can try again
             ProofStatus::Calculated | ProofStatus::Used => false, // Don't reject completed proofs
@@ -664,7 +668,7 @@ async fn create_merge_job(
                         block_number, tx_digest
                     );
                     // Small delay to let the blockchain state propagate
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(BLOCKCHAIN_PROPAGATION_DELAY_MS)).await;
                 }
                 Err(e) => {
                     // Even though we found it in our data, it might have been modified by another coordinator
@@ -910,7 +914,7 @@ pub async fn start_periodic_block_creation(state: crate::state::SharedState) {
     info!("📦 Starting periodic block creation task (runs every minute)");
     
     let is_running = Arc::new(AtomicBool::new(false));
-    let mut check_interval = interval(Duration::from_secs(60)); // Every minute
+    let mut check_interval = interval(Duration::from_secs(BLOCK_CREATION_CHECK_INTERVAL_SECS));
     check_interval.tick().await; // Skip first immediate tick
     
     loop {
@@ -975,10 +979,10 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
     use std::time::Duration;
     use tokio::time::interval;
     
-    info!("🔬 Starting periodic proof analysis task (runs every 5 minutes)");
+    info!("🔬 Starting periodic proof analysis task (runs every {} minutes)", PROOF_ANALYSIS_INTERVAL_SECS / 60);
     
     let is_running = Arc::new(AtomicBool::new(false));
-    let mut check_interval = interval(Duration::from_secs(300)); // Every 5 minutes
+    let mut check_interval = interval(Duration::from_secs(PROOF_ANALYSIS_INTERVAL_SECS));
     check_interval.tick().await; // Skip first immediate tick
     
     loop {

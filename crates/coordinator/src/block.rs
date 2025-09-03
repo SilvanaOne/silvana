@@ -1,4 +1,4 @@
-use crate::constants::MIN_TIME_BETWEEN_BLOCKS;
+use crate::constants::BLOCK_CREATION_MIN_INTERVAL_MS;
 use sui::interface::SilvanaSuiInterface;
 use anyhow::Result;
 use tracing::{info, debug, error};
@@ -156,7 +156,7 @@ pub async fn try_create_block(
     // 2. Sufficient time has passed since last block
     let has_new_sequences = app_instance.sequence != app_instance.previous_block_last_sequence + 1;
     let time_since_last_block = current_time.saturating_sub(app_instance.previous_block_timestamp);
-    let sufficient_time_passed = time_since_last_block > MIN_TIME_BETWEEN_BLOCKS;
+    let sufficient_time_passed = time_since_last_block > BLOCK_CREATION_MIN_INTERVAL_MS;
     
     debug!(
         "Block creation check for {}: sequence={}, prev_block_last_seq={}, prev_block_timestamp={}, current_time={}, time_since_last={}, has_new_sequences={}, sufficient_time={}",

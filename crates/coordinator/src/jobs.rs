@@ -4,6 +4,9 @@ use std::time::{Instant, Duration};
 use tokio::sync::RwLock;
 use tracing::{debug, warn, info, error};
 use crate::error::Result;
+use crate::constants::{RETRY_MAX_DELAY_SECS, STUCK_JOB_TIMEOUT_SECS};
+#[cfg(test)]
+use crate::constants::JOB_PROCESSING_CHECK_DELAY_MS;
 
 /// Key for agent method lookup: (developer, agent, agent_method)
 type AgentMethodKey = (String, String, String);
@@ -149,9 +152,9 @@ impl JobsTracker {
     /// Only removes app_instances that haven't been updated during the reconciliation
     /// Returns true if there are still pending jobs after reconciliation
     pub async fn reconcile_with_chain(&self) -> Result<bool> {
-        // Add random delay between 0 and 5 minutes to prevent all coordinators from reconciling at the same time
+        // Add random delay to prevent all coordinators from reconciling at the same time
         use rand::Rng;
-        let delay_seconds = rand::thread_rng().gen_range(0..=300);
+        let delay_seconds = rand::thread_rng().gen_range(0..=RETRY_MAX_DELAY_SECS);
         info!("⏱️ Waiting {} seconds before starting reconciliation to prevent coordinator synchronization", delay_seconds);
         tokio::time::sleep(tokio::time::Duration::from_secs(delay_seconds)).await;
         
@@ -167,7 +170,7 @@ impl JobsTracker {
                 .collect()
         };
         
-        // First, check for stuck running jobs (running for more than 10 minutes)
+        // First, check for stuck running jobs
         self.fail_stuck_running_jobs(&instances_to_check).await;
         
         let mut removed_count = 0;
@@ -269,7 +272,7 @@ impl JobsTracker {
     /// Check for stuck running jobs and fail them if they've been running too long
     /// Also check for orphaned pending jobs (jobs with Pending status but not in pending_jobs array)
     async fn fail_stuck_running_jobs(&self, instances_to_check: &[(String, Instant)]) {
-        let max_running_duration = Duration::from_secs(600); // 10 minutes
+        let max_running_duration = Duration::from_secs(STUCK_JOB_TIMEOUT_SECS);
         
         if instances_to_check.is_empty() {
             debug!("No app_instances to check for stuck jobs");
@@ -334,7 +337,7 @@ impl JobsTracker {
                             job.job_sequence, job.status, job.updated_at, job.attempts);
                         
                         if matches!(job.status, sui::fetch::JobStatus::Running) {
-                            // Check if job has been running for more than 10 minutes
+                            // Check if job has been running for longer than the timeout
                             let running_duration_ms = current_time_ms.saturating_sub(job.updated_at);
                             let running_duration = Duration::from_millis(running_duration_ms);
                             
@@ -365,7 +368,8 @@ impl JobsTracker {
                                 
                                 // Add random delay to avoid race conditions with other coordinators
                                 use rand::Rng;
-                                let delay_ms = rand::thread_rng().gen_range(0..10000); // Up to 10 seconds
+                                use crate::constants::JOB_START_JITTER_MAX_MS;
+                                let delay_ms = rand::thread_rng().gen_range(0..JOB_START_JITTER_MAX_MS);
                                 debug!("Adding random delay of {}ms before failing stuck job {} to avoid race conditions", delay_ms, job.job_sequence);
                                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                                 
@@ -675,7 +679,7 @@ mod tests {
         };
         
         // Wait a bit
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(JOB_PROCESSING_CHECK_DELAY_MS)).await;
         
         // Add another job to the same instance
         tracker.add_job(
