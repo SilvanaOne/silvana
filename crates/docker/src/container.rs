@@ -96,7 +96,7 @@ impl DockerManager {
     }
 
     async fn pull_image_from_registry(&self, image_source: &str) -> Result<String> {
-        debug!("Pulling Docker image from registry: {}", image_source);
+        info!("Pulling Docker image from registry: {}", image_source);
 
         let options = Some(CreateImageOptions {
             from_image: Some(image_source.to_string()),
@@ -107,14 +107,38 @@ impl DockerManager {
 
         let mut pull_stream = self.docker.create_image(options, None, credentials);
 
-        while let Some(progress) = pull_stream.try_next().await? {
-            if let Some(status) = progress.status {
-                debug!("Pull progress: {}", status);
+        // Set a 5-minute timeout for the image pull operation
+        let pull_timeout = Duration::from_secs(5 * 60);
+        let start_time = Instant::now();
+
+        let pull_future = async {
+            while let Some(progress) = pull_stream.try_next().await? {
+                if let Some(status) = progress.status {
+                    debug!("Pull progress: {}", status);
+                }
+            }
+            Ok::<_, DockerError>(())
+        };
+
+        match timeout(pull_timeout, pull_future).await {
+            Ok(Ok(())) => {
+                let elapsed = start_time.elapsed();
+                info!("Image pulled successfully in {:.2}s", elapsed.as_secs_f64());
+                self.get_image_digest(image_source).await
+            }
+            Ok(Err(e)) => {
+                error!("Error pulling image '{}': {}", image_source, e);
+                Err(e)
+            }
+            Err(_) => {
+                error!(
+                    "Timeout pulling image '{}' after {} seconds",
+                    image_source,
+                    pull_timeout.as_secs()
+                );
+                Err(DockerError::Timeout(pull_timeout.as_secs()))
             }
         }
-
-        debug!("Image pulled successfully");
-        self.get_image_digest(image_source).await
     }
 
     fn get_docker_credentials(&self) -> Option<DockerCredentials> {
