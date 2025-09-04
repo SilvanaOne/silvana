@@ -2805,17 +2805,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         warn!("Creating quilt with {} block proofs for blocks {}-{}", 
                             quilt_data.len(), start_block, req.block_number);
                         
+                        // Clone the original quilt data for cache fallback (without test entries)
+                        let quilt_data_for_cache = quilt_data.clone();
+                        
                         // If WALRUS_TEST is enabled, add 580 test entries to simulate 600 proofs
                         // (Walrus has a maximum of 600 pieces per quilt)
+                        // We only add these to the Walrus version, not the cache version
                         if WALRUS_TEST {
-                            warn!("WALRUS_TEST mode enabled: Adding 580 test entries to reach 600 proofs (Walrus max)");
+                            warn!("WALRUS_TEST mode enabled: Adding test entries to reach 600 proofs (Walrus max)");
                             
-                            // Use the existing proof data as template (cycle through the available proofs)
                             let available_proofs = quilt_data.len();
-                            let test_start_index = quilt_data.len();
                             let test_entries_to_add = 600 - available_proofs; // Add enough to reach 600 total
                             
                             if test_entries_to_add > 0 {
+                                // Use full proof data for Walrus testing (clone existing proofs)
                                 for i in 1..=test_entries_to_add {
                                     // Use proof data from existing proofs in a round-robin fashion
                                     let source_index = (i - 1) % available_proofs;
@@ -2826,12 +2829,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     
                                     // Log progress every 100 entries
                                     if i % 100 == 0 {
-                                        debug!("Added {} test entries to quilt", i);
+                                        debug!("Added {} test entries to quilt for Walrus testing", i);
                                     }
                                 }
                                 
-                                warn!("Total quilt pieces after adding test data: {} (original: {}, test: {})", 
-                                    quilt_data.len(), test_start_index, test_entries_to_add);
+                                warn!("Total quilt pieces for Walrus: {} (original: {}, test: {})", 
+                                    quilt_data.len(), available_proofs, test_entries_to_add);
                             } else {
                                 warn!("Already have {} pieces, no test entries needed", available_proofs);
                             }
@@ -2868,12 +2871,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                 Ok(result)
                             }
                             Err(walrus_err) => {
-                                // Walrus failed, try cache as fallback
+                                // Walrus failed, try cache as fallback with smaller data (without test entries)
                                 warn!("Failed to store quilt to Walrus: {}, trying cache as fallback", walrus_err);
                                 
-                                match self.proof_storage.store_quilt("cache", "public", quilt_data, Some(metadata.clone())).await {
+                                match self.proof_storage.store_quilt("cache", "public", quilt_data_for_cache, Some(metadata.clone())).await {
                                     Ok(result) => {
-                                        warn!("✅ Quilt stored to cache successfully (fallback):");
+                                        warn!("✅ Quilt stored to cache successfully (fallback without test entries):");
                                         warn!("  Descriptor: {}", result.descriptor.to_string());
                                         warn!("  Blob ID: {}", result.blob_id);
                                         Ok(result)

@@ -417,10 +417,25 @@ impl WalrusClient {
                     );
                     return Ok(None);
                 } else {
+                    // Try to get error details from response body
+                    let error_body = response.text().await.unwrap_or_else(|e| {
+                        format!("Failed to read error body: {}", e)
+                    });
+                    
                     error!(
-                        "Walrus saveQuiltToDA failed with client error: {} {}. Not retrying.",
-                        status, status_text
+                        "Walrus saveQuiltToDA failed with client error: {} {} - Body: {}. Not retrying.",
+                        status, status_text, error_body
                     );
+                    
+                    // Log additional details with tracing
+                    tracing::error!(
+                        status_code = %status,
+                        status_text = %status_text,
+                        error_body = %error_body,
+                        quilt_pieces = quilt_data.len(),
+                        "Walrus saveQuiltToDA detailed error"
+                    );
+                    
                     return Ok(None);
                 }
             }
