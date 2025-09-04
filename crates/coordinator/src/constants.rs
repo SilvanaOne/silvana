@@ -28,6 +28,18 @@ pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 100;
 /// to prevent thundering herd problems when multiple coordinators start simultaneously.
 pub const JOB_START_JITTER_MAX_MS: u64 = 10000; // 10 seconds
 
+/// Base delay per running container for job acquisition (in milliseconds).
+/// Each running/loading container adds this delay to prioritize coordinators with fewer containers.
+/// For example, with 500ms per container:
+/// - 0 containers: 0ms delay
+/// - 5 containers: 2500ms delay  
+/// - 10 containers: 5000ms delay
+pub const JOB_ACQUISITION_DELAY_PER_CONTAINER_MS: u64 = 500; // 500ms per container
+
+/// Maximum delay for job acquisition regardless of container count (in milliseconds).
+/// This caps the delay to prevent excessive waiting even with many containers.
+pub const JOB_ACQUISITION_MAX_DELAY_MS: u64 = 10000; // 10 seconds max
+
 /// Minimum time that must pass between creating consecutive blocks (in milliseconds).
 /// Blocks will not be created more frequently than this interval, even if new
 /// sequences are available. This ensures blocks have a reasonable time window.

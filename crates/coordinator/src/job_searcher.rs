@@ -1,11 +1,11 @@
 use crate::agent::AgentJob;
 use crate::constants::{
     DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS, JOB_SELECTION_POOL_SIZE, 
-    MAX_CONCURRENT_AGENT_CONTAINERS, JOB_START_JITTER_MAX_MS, 
-    AGENT_MIN_MEMORY_REQUIREMENT_GB, PENDING_JOBS_CHECK_DELAY_MS,
-    CONTAINER_STATUS_CHECK_INTERVAL_SECS, CONTAINER_HEALTH_CHECK_INTERVAL_SECS,
-    RESOURCE_WAIT_DELAY_SECS, RESOURCE_ERROR_RETRY_DELAY_SECS,
-    JOB_AVAILABILITY_CHECK_DELAY_SECS
+    MAX_CONCURRENT_AGENT_CONTAINERS, AGENT_MIN_MEMORY_REQUIREMENT_GB, 
+    PENDING_JOBS_CHECK_DELAY_MS, CONTAINER_STATUS_CHECK_INTERVAL_SECS, 
+    CONTAINER_HEALTH_CHECK_INTERVAL_SECS, RESOURCE_WAIT_DELAY_SECS, 
+    RESOURCE_ERROR_RETRY_DELAY_SECS, JOB_AVAILABILITY_CHECK_DELAY_SECS, 
+    JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS
 };
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
@@ -1011,18 +1011,29 @@ async fn run_docker_container_task(
     );
 
     debug!(
-        "Job {} not tracked locally, adding random delay before start",
+        "Job {} not tracked locally, calculating proportional delay before start",
         job.job_sequence
     );
 
-    // Add random delay to avoid race conditions with other coordinators
-    use rand::Rng;
-    let delay_ms = rand::thread_rng().gen_range(0..JOB_START_JITTER_MAX_MS);
-    debug!(
-        "Adding random delay of {}ms before starting job {} to avoid race conditions",
-        delay_ms, job.job_sequence
+    // Calculate proportional delay based on number of running containers
+    // This helps balance load across coordinators - those with fewer containers get jobs first
+    let total_containers = (loading_count + running_count) as u64;
+    let proportional_delay = std::cmp::min(
+        total_containers * JOB_ACQUISITION_DELAY_PER_CONTAINER_MS,
+        JOB_ACQUISITION_MAX_DELAY_MS
     );
-    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+    
+    // Add small random jitter on top to prevent exact synchronization
+    use rand::Rng;
+    let jitter_ms = rand::thread_rng().gen_range(0..proportional_delay); 
+    let total_delay_ms = proportional_delay + jitter_ms;
+    
+    debug!(
+        "Adding delay of {}ms ({}ms proportional + {}ms jitter) before starting job {} \
+         based on {} running containers",
+        total_delay_ms, proportional_delay, jitter_ms, job.job_sequence, total_containers
+    );
+    tokio::time::sleep(Duration::from_millis(total_delay_ms)).await;
 
     // Fetch fresh AppInstance data to ensure job is still pending
     // This is critical to avoid EJobNotPending errors
