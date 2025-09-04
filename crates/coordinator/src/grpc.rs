@@ -1,5 +1,5 @@
 use crate::agent::AgentJob;
-use crate::constants::WALRUS_QUILT_BLOCK_INTERVAL;
+use crate::constants::{WALRUS_QUILT_BLOCK_INTERVAL, WALRUS_TEST};
 use crate::proof::analyze_proof_completion;
 use crate::proofs_storage::{ProofStorage, ProofMetadata};
 use crate::settlement::fetch_pending_job_from_instances;
@@ -2804,6 +2804,38 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     if !quilt_data.is_empty() {
                         warn!("Creating quilt with {} block proofs for blocks {}-{}", 
                             quilt_data.len(), start_block, req.block_number);
+                        
+                        // If WALRUS_TEST is enabled, add 580 test entries to simulate 600 proofs
+                        // (Walrus has a maximum of 600 pieces per quilt)
+                        if WALRUS_TEST {
+                            warn!("WALRUS_TEST mode enabled: Adding 580 test entries to reach 600 proofs (Walrus max)");
+                            
+                            // Use the existing proof data as template (cycle through the available proofs)
+                            let available_proofs = quilt_data.len();
+                            let test_start_index = quilt_data.len();
+                            let test_entries_to_add = 600 - available_proofs; // Add enough to reach 600 total
+                            
+                            if test_entries_to_add > 0 {
+                                for i in 1..=test_entries_to_add {
+                                    // Use proof data from existing proofs in a round-robin fashion
+                                    let source_index = (i - 1) % available_proofs;
+                                    let test_identifier = format!("test{}", i);
+                                    let test_data = quilt_data[source_index].1.clone();
+                                    
+                                    quilt_data.push((test_identifier, test_data));
+                                    
+                                    // Log progress every 100 entries
+                                    if i % 100 == 0 {
+                                        debug!("Added {} test entries to quilt", i);
+                                    }
+                                }
+                                
+                                warn!("Total quilt pieces after adding test data: {} (original: {}, test: {})", 
+                                    quilt_data.len(), test_start_index, test_entries_to_add);
+                            } else {
+                                warn!("Already have {} pieces, no test entries needed", available_proofs);
+                            }
+                        }
                         
                         // Determine Walrus network based on SUI chain
                         let walrus_network = if std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()) == "mainnet" {

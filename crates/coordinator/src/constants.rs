@@ -198,6 +198,11 @@ pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 /// When block_number % this value == 0, the last N block proofs are stored as a quilt.
 pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 20;
 
+/// Test mode for Walrus quilts - when true, adds 580 test entries to simulate 600 proofs
+/// This is used for testing Walrus's ability to handle large quilts with many pieces
+/// (Walrus has a maximum of 600 pieces per quilt)
+pub const WALRUS_TEST: bool = true;
+
 // =============================================================================
 // Testing and CLI
 // =============================================================================
