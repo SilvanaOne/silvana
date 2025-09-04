@@ -43,7 +43,7 @@ public struct BlockSettledEvent has copy, drop {
     settled_at: Option<u64>,
 }
 
-public struct BlockSettlementDeletedEvent has copy, drop {
+public struct BlockSettlementPurgedEvent has copy, drop {
     chain: String,
     block_number: u64,
     reason: String,
@@ -138,8 +138,8 @@ public fun set_block_settlement_tx(
                             last_settled_block_number,
                         );
 
-                        // Emit deletion event before deleting
-                        event::emit(BlockSettlementDeletedEvent {
+                        // Emit purge event before deleting
+                        event::emit(BlockSettlementPurgedEvent {
                             chain: settlement.chain,
                             block_number: last_settled_block_number,
                             reason: b"Block already settled and finalized".to_string(),

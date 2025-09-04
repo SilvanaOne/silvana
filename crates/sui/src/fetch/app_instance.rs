@@ -67,6 +67,8 @@ pub struct AppInstance {
     pub previous_block_actions_state: serde_json::Value,
     /// Last proved block number
     pub last_proved_block_number: u64,
+    /// Last settled block number (minimum across all chains)
+    pub last_settled_block_number: u64,
     /// Settlements map (chain -> Settlement)
     pub settlements: HashMap<String, Settlement>,
     /// Whether the app is paused
@@ -235,6 +237,7 @@ pub fn parse_app_instance_from_struct(
             .map(proto_to_json)
             .unwrap_or(serde_json::Value::Null),
         last_proved_block_number: get_u64(struct_value, "last_proved_block_number"),
+        last_settled_block_number: get_u64(struct_value, "last_settled_block_number"),
         settlements: parse_settlements(struct_value),
         is_paused: get_bool(struct_value, "isPaused"),
         created_at: get_u64(struct_value, "created_at"),
@@ -244,6 +247,7 @@ pub fn parse_app_instance_from_struct(
     debug!("Successfully parsed AppInstance: {}", app_instance.silvana_app_name);
     debug!("  Block number: {}", app_instance.block_number);
     debug!("  Last proved block: {}", app_instance.last_proved_block_number);
+    debug!("  Last settled block: {}", app_instance.last_settled_block_number);
     debug!("  Blocks table ID: {}", app_instance.blocks_table_id);
     debug!("  Proof calculations table ID: {}", app_instance.proof_calculations_table_id);
     
@@ -275,6 +279,7 @@ mod tests {
             previous_block_last_sequence: 99,
             previous_block_actions_state: serde_json::Value::Null,
             last_proved_block_number: 9,
+            last_settled_block_number: 7,
             settlements: {
                 let mut settlements = HashMap::new();
                 settlements.insert("mina".to_string(), Settlement {
@@ -294,6 +299,7 @@ mod tests {
         assert_eq!(app.silvana_app_name, "TestApp");
         assert_eq!(app.block_number, 10);
         assert_eq!(app.last_proved_block_number, 9);
+        assert_eq!(app.last_settled_block_number, 7);
         assert!(!app.is_paused);
     }
 }

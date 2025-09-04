@@ -1,20 +1,8 @@
 use crate::constants::{MAX_JOBS_PER_INSTANCE_BATCH, PERIODIC_JOB_EXECUTION_BUFFER_MS};
-use sui::fetch::{AppInstance, Settlement, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
+use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
-use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use tracing::{debug, warn, error};
-
-// Helper function to get the minimum last settled block number across all chains
-fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
-    if settlements.is_empty() {
-        return 0;
-    }
-    settlements.values()
-        .map(|s| s.last_settled_block_number)
-        .min()
-        .unwrap_or(0)
-}
 
 /// Check if an app_instance can be safely removed from tracking
 /// An app_instance can only be removed when:
@@ -24,7 +12,8 @@ fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) 
 /// 4. No pending jobs
 pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
     // Check if all conditions are met
-    let last_settled_block_number = get_min_last_settled_block_number(&app_instance.settlements);
+    // Use the AppInstance's last_settled_block_number which is already the minimum across all chains
+    let last_settled_block_number = app_instance.last_settled_block_number;
     let all_blocks_settled = last_settled_block_number == app_instance.last_proved_block_number;
     let at_block_start = app_instance.last_proved_block_number + 1 == app_instance.block_number;
     let no_sequences_in_current = app_instance.previous_block_last_sequence + 1 == app_instance.sequence;

@@ -2995,7 +2995,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                 }
                             }
                             Ok(None) => {
-                                warn!("Block {} not found", block_num);
+                                info!("Block {} not found", block_num);
                             }
                             Err(e) => {
                                 warn!("Failed to fetch block {}: {}", block_num, e);
@@ -3168,7 +3168,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         let final_descriptor_str = if let Some(quilt_desc) = quilt_descriptor_str {
             // For quilt checkpoint blocks, use the quilt descriptor
-            warn!(
+            info!(
                 "Using quilt descriptor for block {}: {}",
                 req.block_number, quilt_desc
             );

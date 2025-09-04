@@ -95,7 +95,7 @@ public struct MetadataAddedEvent has copy, drop {
     value: String,
 }
 
-public struct BlockDeletedEvent has copy, drop {
+public struct BlockPurgedEvent has copy, drop {
     app_instance_address: address,
     block_number: u64,
     reason: String,
@@ -613,6 +613,15 @@ public fun update_block_settlement_tx_hash(
     );
 }
 
+// Debug event for tracking block cleanup
+public struct BlockCleanupEvent has copy, drop {
+    app_instance_address: address,
+    previous_last_settled: u64,
+    new_min_settled: u64,
+    start_block: u64,
+    settlements_count: u64,
+}
+
 // Helper function to update AppInstance's last_settled_block_number
 // and clean up old blocks that have been settled across all chains
 fun update_app_last_settled_block_number(app_instance: &mut AppInstance) {
@@ -655,28 +664,44 @@ fun update_app_last_settled_block_number(app_instance: &mut AppInstance) {
 
     // Clean up blocks that are below the minimum settled block number
     // We keep block 0 (genesis) and blocks from min_settled_block onwards
-    // Start from the previous last_settled_block_number + 1 to avoid unnecessary iterations
-    let start_block = if (previous_last_settled == 0) { 1 } else {
-        previous_last_settled + 1
+    // Start from previous_last_settled (including it) to check for deletion
+    let start_block = if (previous_last_settled == 0) {
+        1 // Never try to delete block 0 (genesis)
+    } else {
+        previous_last_settled // Include the previous settled block in cleanup check
     };
-    let mut block_to_remove = start_block;
-    while (block_to_remove < min_settled_block) {
-        if (object_table::contains(&app_instance.blocks, block_to_remove)) {
-            let block = object_table::remove(
-                &mut app_instance.blocks,
-                block_to_remove,
-            );
-            // Delete the Block object using the delete function from block module
-            block::delete_block(block);
+    let end_block = min_settled_block; // Delete everything before this
 
-            // Emit event for block deletion
-            event::emit(BlockDeletedEvent {
-                app_instance_address: app_instance.id.to_address(),
-                block_number: block_to_remove,
-                reason: b"Block settled on all chains".to_string(),
-            });
+    // Emit debug event to track cleanup behavior
+    event::emit(BlockCleanupEvent {
+        app_instance_address: app_instance.id.to_address(),
+        previous_last_settled,
+        new_min_settled: min_settled_block,
+        start_block,
+        settlements_count: settlements_size,
+    });
+
+    // Only proceed if there's a change in settled block number
+    if (min_settled_block > previous_last_settled && min_settled_block > 0) {
+        let mut block_to_remove = start_block;
+        while (block_to_remove < end_block) {
+            if (object_table::contains(&app_instance.blocks, block_to_remove)) {
+                let block = object_table::remove(
+                    &mut app_instance.blocks,
+                    block_to_remove,
+                );
+                // Delete the Block object using the delete function from block module
+                block::delete_block(block);
+
+                // Emit event for block purging
+                event::emit(BlockPurgedEvent {
+                    app_instance_address: app_instance.id.to_address(),
+                    block_number: block_to_remove,
+                    reason: b"Block settled on all chains".to_string(),
+                });
+            };
+            block_to_remove = block_to_remove + 1;
         };
-        block_to_remove = block_to_remove + 1;
     };
 }
 

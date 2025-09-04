@@ -1,12 +1,15 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use std::collections::HashMap;
-use tracing::{info, warn, error};
 use sha2::Digest;
+use std::collections::HashMap;
+use tracing::{error, info, warn};
 
 // Re-export storage modules
-use storage::walrus::{GetWalrusUrlParams, ReadFromWalrusParams, SaveToWalrusParams, WalrusClient, WalrusData, QuiltPatch};
 use storage::s3::S3Client;
+use storage::walrus::{
+    GetWalrusUrlParams, QuiltPatch, ReadFromWalrusParams, SaveToWalrusParams, WalrusClient,
+    WalrusData,
+};
 
 // Import proto types for gRPC communication
 use proto::{GetProofRequest, SubmitProofRequest};
@@ -87,7 +90,7 @@ pub trait ProofStorageBackend: Send + Sync {
     /// Store multiple proofs as a quilt
     async fn store_quilt(
         &self,
-        quilt_data: Vec<(String, String)>,  // (identifier, data)
+        quilt_data: Vec<(String, String)>, // (identifier, data)
         metadata: Option<ProofMetadata>,
     ) -> Result<QuiltStorageResult>;
 
@@ -221,10 +224,17 @@ impl ProofStorageBackend for WalrusStorage {
                 "metadata": meta.data,
                 "created_at": chrono::Utc::now().to_rfc3339(),
             });
-            quilt_data.push(("metadata".to_string(), serde_json::to_string(&metadata_json)?));
+            quilt_data.push((
+                "metadata".to_string(),
+                serde_json::to_string(&metadata_json)?,
+            ));
         }
-        
-        warn!("Storing quilt to Walrus ({}) with {} pieces (including metadata)", self.network, quilt_data.len());
+
+        warn!(
+            "Storing quilt to Walrus ({}) with {} pieces (including metadata)",
+            self.network,
+            quilt_data.len()
+        );
 
         let params = SaveToWalrusParams {
             data: WalrusData::Quilt(quilt_data),
@@ -234,17 +244,17 @@ impl ProofStorageBackend for WalrusStorage {
 
         match self.client.save_to_walrus(params).await {
             Ok(Some(result)) => {
-                warn!("✅ Successfully stored quilt to Walrus:");
-                warn!("  BlobId: {}", result.blob_id);
+                info!("✅ Successfully stored quilt to Walrus:");
+                info!("  BlobId: {}", result.blob_id);
                 if let Some(tx) = &result.tx_digest {
-                    warn!("  TxDigest: {}", tx);
+                    info!("  TxDigest: {}", tx);
                 }
-                
+
                 let patches = result.quilt_patches.clone().unwrap_or_default();
                 if !patches.is_empty() {
-                    warn!("  Quilt patches ({} total):", patches.len());
+                    info!("  Quilt patches ({} total):", patches.len());
                     for patch in &patches {
-                        warn!("    - {}: {}", patch.identifier, patch.quilt_patch_id);
+                        info!("    - {}: {}", patch.identifier, patch.quilt_patch_id);
                     }
                 }
 
@@ -288,9 +298,7 @@ pub struct CacheStorage {
 
 impl CacheStorage {
     pub fn new(network: String) -> Self {
-        CacheStorage {
-            network,
-        }
+        CacheStorage { network }
     }
 }
 
@@ -301,8 +309,11 @@ impl ProofStorageBackend for CacheStorage {
         proof_data: &str,
         metadata: Option<ProofMetadata>,
     ) -> Result<ProofDescriptor> {
-        info!("Storing proof to cache via gRPC ({}) - data size: {} bytes", 
-            self.network, proof_data.len());
+        info!(
+            "Storing proof to cache via gRPC ({}) - data size: {} bytes",
+            self.network,
+            proof_data.len()
+        );
 
         let mut client = rpc_client::shared::get_shared_client()
             .await
@@ -317,7 +328,9 @@ impl ProofStorageBackend for CacheStorage {
         }
 
         let request = Request::new(SubmitProofRequest {
-            data: Some(proto::submit_proof_request::Data::ProofData(proof_data.to_string())),
+            data: Some(proto::submit_proof_request::Data::ProofData(
+                proof_data.to_string(),
+            )),
             metadata: grpc_metadata,
             expires_at,
         });
@@ -338,8 +351,12 @@ impl ProofStorageBackend for CacheStorage {
             }
             Err(e) => {
                 // Log full error details
-                warn!("gRPC error storing proof - Status: {:?}, Message: {:?}, Details: {:?}", 
-                    e.code(), e.message(), e.details());
+                warn!(
+                    "gRPC error storing proof - Status: {:?}, Message: {:?}, Details: {:?}",
+                    e.code(),
+                    e.message(),
+                    e.details()
+                );
                 Err(anyhow!("gRPC error storing proof: {}", e))
             }
         }
@@ -361,7 +378,7 @@ impl ProofStorageBackend for CacheStorage {
 
         let request = Request::new(GetProofRequest {
             proof_hash: descriptor.hash.clone(),
-            block_number: None,  // TODO: Support block_number for quilt piece retrieval
+            block_number: None, // TODO: Support block_number for quilt piece retrieval
         });
 
         match client.get_proof(request).await {
@@ -388,8 +405,11 @@ impl ProofStorageBackend for CacheStorage {
         quilt_data: Vec<(String, String)>,
         metadata: Option<ProofMetadata>,
     ) -> Result<QuiltStorageResult> {
-        warn!("Storing quilt to cache via gRPC ({}) with {} pieces", 
-            self.network, quilt_data.len());
+        warn!(
+            "Storing quilt to cache via gRPC ({}) with {} pieces",
+            self.network,
+            quilt_data.len()
+        );
 
         let mut client = rpc_client::shared::get_shared_client()
             .await
@@ -413,9 +433,11 @@ impl ProofStorageBackend for CacheStorage {
             .collect();
 
         let request = Request::new(SubmitProofRequest {
-            data: Some(proto::submit_proof_request::Data::QuiltData(proto::QuiltData {
-                pieces: quilt_pieces,
-            })),
+            data: Some(proto::submit_proof_request::Data::QuiltData(
+                proto::QuiltData {
+                    pieces: quilt_pieces,
+                },
+            )),
             metadata: grpc_metadata,
             expires_at,
         });
@@ -434,16 +456,16 @@ impl ProofStorageBackend for CacheStorage {
                             }
                         }
                     }
-                    
+
                     // Create QuiltPatch structures for compatibility
                     let patches: Vec<QuiltPatch> = quilt_data
                         .iter()
                         .enumerate()
                         .map(|(i, (identifier, _))| QuiltPatch {
                             identifier: identifier.clone(),
-                            quilt_patch_id: resp.quilt_piece_ids.get(i)
-                                .cloned()
-                                .unwrap_or_else(|| format!("cache:{}:{}", resp.proof_hash, identifier)),
+                            quilt_patch_id: resp.quilt_piece_ids.get(i).cloned().unwrap_or_else(
+                                || format!("cache:{}:{}", resp.proof_hash, identifier),
+                            ),
                         })
                         .collect();
 
@@ -454,7 +476,7 @@ impl ProofStorageBackend for CacheStorage {
                             hash: resp.proof_hash.clone(),
                         },
                         blob_id: resp.proof_hash,
-                        tx_digest: None,  // Cache doesn't have blockchain transactions
+                        tx_digest: None, // Cache doesn't have blockchain transactions
                         quilt_patches: patches,
                     })
                 } else {
@@ -462,8 +484,12 @@ impl ProofStorageBackend for CacheStorage {
                 }
             }
             Err(e) => {
-                error!("gRPC error storing quilt - Status: {:?}, Message: {:?}, Details: {:?}", 
-                    e.code(), e.message(), e.details());
+                error!(
+                    "gRPC error storing quilt - Status: {:?}, Message: {:?}, Details: {:?}",
+                    e.code(),
+                    e.message(),
+                    e.details()
+                );
                 Err(anyhow!("gRPC error storing quilt: {}", e))
             }
         }
@@ -491,12 +517,9 @@ pub struct S3Storage {
 impl S3Storage {
     #[allow(dead_code)]
     pub fn new(bucket: String, network: String) -> Self {
-        S3Storage {
-            bucket,
-            network,
-        }
+        S3Storage { bucket, network }
     }
-    
+
     async fn get_client(&self) -> Result<S3Client> {
         S3Client::new(self.bucket.clone()).await
     }
@@ -531,15 +554,20 @@ impl ProofStorageBackend for S3Storage {
 
         // Store to S3
         let client = self.get_client().await?;
-        let expires_at = metadata.as_ref().and_then(|m| m.expires_at).unwrap_or_else(|| {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_millis() as u64;
-            now + (2 * 24 * 60 * 60 * 1000)  // 2 days default
-        });
-        
-        client.write(&key, proof_data.to_string(), tags, expires_at).await
+        let expires_at = metadata
+            .as_ref()
+            .and_then(|m| m.expires_at)
+            .unwrap_or_else(|| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_millis() as u64;
+                now + (2 * 24 * 60 * 60 * 1000) // 2 days default
+            });
+
+        client
+            .write(&key, proof_data.to_string(), tags, expires_at)
+            .await
             .map_err(|e| anyhow!("Failed to store proof to S3: {}", e))?;
 
         info!("Successfully stored proof to S3: {}", key);
@@ -555,7 +583,12 @@ impl ProofStorageBackend for S3Storage {
         quilt_data: Vec<(String, String)>,
         metadata: Option<ProofMetadata>,
     ) -> Result<QuiltStorageResult> {
-        warn!("Storing quilt to S3 ({}/{}) with {} pieces", self.bucket, self.network, quilt_data.len());
+        warn!(
+            "Storing quilt to S3 ({}/{}) with {} pieces",
+            self.bucket,
+            self.network,
+            quilt_data.len()
+        );
 
         // Create a JSON representation of the quilt
         let quilt_json = serde_json::json!({
@@ -578,8 +611,8 @@ impl ProofStorageBackend for S3Storage {
         let mut tag_vec = Vec::new();
         tag_vec.push(("type".to_string(), "quilt".to_string()));
         tag_vec.push(("pieces_count".to_string(), quilt_data.len().to_string()));
-        tag_vec.push(("quilts".to_string(), "true".to_string()));  // Flag for quilt identification
-        
+        tag_vec.push(("quilts".to_string(), "true".to_string())); // Flag for quilt identification
+
         if let Some(ref meta) = metadata {
             for (k, v) in &meta.data {
                 tag_vec.push((k.clone(), v.clone()));
@@ -592,15 +625,20 @@ impl ProofStorageBackend for S3Storage {
 
         // Store to S3
         let client = self.get_client().await?;
-        let expires_at = metadata.as_ref().and_then(|m| m.expires_at).unwrap_or_else(|| {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_millis() as u64;
-            now + (7 * 24 * 60 * 60 * 1000)  // 7 days default for quilts
-        });
-        
-        client.write(&key, quilt_str, Some(tag_vec), expires_at).await
+        let expires_at = metadata
+            .as_ref()
+            .and_then(|m| m.expires_at)
+            .unwrap_or_else(|| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_millis() as u64;
+                now + (7 * 24 * 60 * 60 * 1000) // 7 days default for quilts
+            });
+
+        client
+            .write(&key, quilt_str, Some(tag_vec), expires_at)
+            .await
             .map_err(|e| anyhow!("Failed to store quilt to S3: {}", e))?;
 
         warn!("✅ Successfully stored quilt to S3:");
@@ -609,12 +647,13 @@ impl ProofStorageBackend for S3Storage {
         warn!("  Pieces: {}", identifiers.join(", "));
 
         // Create mock quilt patches for compatibility
-        let patches: Vec<QuiltPatch> = quilt_data.iter().map(|(id, _)| {
-            QuiltPatch {
+        let patches: Vec<QuiltPatch> = quilt_data
+            .iter()
+            .map(|(id, _)| QuiltPatch {
                 identifier: id.clone(),
                 quilt_patch_id: format!("s3:{}:{}", quilt_hash, id),
-            }
-        }).collect();
+            })
+            .collect();
 
         Ok(QuiltStorageResult {
             descriptor: ProofDescriptor {
@@ -623,14 +662,17 @@ impl ProofStorageBackend for S3Storage {
                 hash: quilt_hash.clone(),
             },
             blob_id: quilt_hash,
-            tx_digest: None,  // S3 doesn't have blockchain transactions
+            tx_digest: None, // S3 doesn't have blockchain transactions
             quilt_patches: patches,
         })
     }
 
     async fn get_proof(&self, descriptor: &ProofDescriptor) -> Result<(String, ProofMetadata)> {
         if descriptor.chain != "s3" {
-            return Err(anyhow!("Invalid chain for S3 backend: {}", descriptor.chain));
+            return Err(anyhow!(
+                "Invalid chain for S3 backend: {}",
+                descriptor.chain
+            ));
         }
 
         info!("Retrieving proof from S3: {}", descriptor.hash);
@@ -645,7 +687,9 @@ impl ProofStorageBackend for S3Storage {
             Err(_) => {
                 // Try quilt path (remove the network prefix for key)
                 let quilt_short_key = descriptor.hash.clone();
-                client.read(&quilt_short_key).await
+                client
+                    .read(&quilt_short_key)
+                    .await
                     .map_err(|e| anyhow!("Failed to retrieve from S3: {}", e))?
             }
         };
@@ -676,8 +720,7 @@ impl ProofStorageBackend for S3Storage {
 
         let client = self.get_client().await?;
         let quilt_key = format!("{}/quilts/{}", self.network, descriptor.hash);
-        Ok(client.exists(&proof_key).await? ||
-           client.exists(&quilt_key).await?)
+        Ok(client.exists(&proof_key).await? || client.exists(&quilt_key).await?)
     }
 }
 
@@ -705,7 +748,9 @@ impl ProofStorage {
         let walrus = Some(WalrusStorage::new(walrus_network));
 
         // Use shared gRPC client for cache storage if SILVANA_RPC_SERVER is configured
-        let cache = if std::env::var("SILVANA_RPC_SERVER").is_ok() || std::env::var("RPC_ENDPOINT").is_ok() {
+        let cache = if std::env::var("SILVANA_RPC_SERVER").is_ok()
+            || std::env::var("RPC_ENDPOINT").is_ok()
+        {
             info!("Cache storage enabled via shared gRPC client");
             Some(CacheStorage::new("public".to_string()))
         } else {
@@ -713,7 +758,11 @@ impl ProofStorage {
             None
         };
 
-        ProofStorage { walrus, cache, s3: None }
+        ProofStorage {
+            walrus,
+            cache,
+            s3: None,
+        }
     }
 
     /// Store a proof using the specified chain

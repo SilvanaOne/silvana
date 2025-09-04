@@ -245,6 +245,10 @@ async fn main() -> Result<()> {
                         "    last_proved_block_number: {},",
                         app_instance.last_proved_block_number
                     );
+                    println!(
+                        "    last_settled_block_number: {},",
+                        app_instance.last_settled_block_number
+                    );
                     // Print settlement data for every chain
                     println!("    settlements: {{");
                     for (chain, settlement) in &app_instance.settlements {

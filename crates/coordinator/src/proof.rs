@@ -6,17 +6,6 @@ use crate::settlement;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
 use std::collections::{HashMap, HashSet};
 
-// Helper function to get the minimum last settled block number across all chains
-fn get_min_last_settled_block_number(settlements: &HashMap<String, Settlement>) -> u64 {
-    if settlements.is_empty() {
-        return 0;
-    }
-    settlements.values()
-        .map(|s| s.last_settled_block_number)
-        .min()
-        .unwrap_or(0)
-}
-
 // Helper function to check if a block needs settlement on any chain
 async fn block_needs_settlement(block_number: u64, settlements: &HashMap<String, Settlement>) -> Vec<String> {
     let mut chains_needing_settlement = Vec::new();
@@ -58,8 +47,8 @@ pub async fn analyze_proof_completion(
   debug!("🔍 Starting proof completion analysis for app: {}", app_instance.silvana_app_name);
   
   let last_proved_block_number = app_instance.last_proved_block_number;
-  // Get the minimum last_settled_block_number across all chains (most conservative)
-  let last_settled_block_number = get_min_last_settled_block_number(&app_instance.settlements);
+  // Use the AppInstance's last_settled_block_number which is already the minimum across all chains
+  let last_settled_block_number = app_instance.last_settled_block_number;
   let current_block_number = app_instance.block_number;
   let previous_block_last_sequence = app_instance.previous_block_last_sequence;
   let current_sequence = app_instance.sequence;
