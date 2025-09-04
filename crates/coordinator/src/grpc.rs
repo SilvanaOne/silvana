@@ -1,12 +1,12 @@
 use crate::agent::AgentJob;
 use crate::constants::{WALRUS_QUILT_BLOCK_INTERVAL, WALRUS_TEST};
 use crate::proof::analyze_proof_completion;
-use crate::proofs_storage::{ProofStorage, ProofMetadata};
+use crate::proofs_storage::{ProofMetadata, ProofStorage};
 use crate::settlement::fetch_pending_job_from_instances;
 use crate::state::SharedState;
-use sui::fetch::block::fetch_block_info;
 use monitoring::coordinator_metrics;
 use std::path::Path;
+use sui::fetch::block::fetch_block_info;
 use sui::start_job_tx;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
@@ -18,15 +18,14 @@ pub mod coordinator {
 }
 
 use coordinator::{
-    AddMetadataRequest, AddMetadataResponse, Block, BlockSettlement, CompleteJobRequest, CompleteJobResponse,
-    CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest, DeleteKvResponse,
-    FailJobRequest, FailJobResponse, GetBlockProofRequest, GetBlockProofResponse,
+    AddMetadataRequest, AddMetadataResponse, Block, BlockSettlement, CompleteJobRequest,
+    CompleteJobResponse, CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest,
+    DeleteKvResponse, FailJobRequest, FailJobResponse, GetBlockProofRequest, GetBlockProofResponse,
     GetBlockRequest, GetBlockResponse, GetBlockSettlementRequest, GetBlockSettlementResponse,
     GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
     GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
-    GetSequenceStatesResponse, Job, Metadata,
-    ReadDataAvailabilityRequest, ReadDataAvailabilityResponse, RejectProofRequest,
-    RejectProofResponse, RetrieveSecretRequest,
+    GetSequenceStatesResponse, Job, Metadata, ReadDataAvailabilityRequest,
+    ReadDataAvailabilityResponse, RejectProofRequest, RejectProofResponse, RetrieveSecretRequest,
     RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
     SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
     TerminateJobResponse, TryCreateBlockRequest, TryCreateBlockResponse,
@@ -46,7 +45,7 @@ pub struct CoordinatorServiceImpl {
 
 impl CoordinatorServiceImpl {
     pub fn new(state: SharedState) -> Self {
-        Self { 
+        Self {
             state,
             proof_storage: std::sync::Arc::new(ProofStorage::new()),
         }
@@ -82,13 +81,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Check if there's an app_instance filter configured
         let app_instance_filter = self.state.get_app_instance_filter().await;
-        
+
         // First check if there's a ready job in the agent database
         // Pass session_id to get session-specific jobs for Docker containers
         if let Some(agent_job) = self
             .state
             .get_agent_job_db()
-            .get_ready_job(&req.developer, &req.agent, &req.agent_method, Some(&req.session_id))
+            .get_ready_job(
+                &req.developer,
+                &req.agent,
+                &req.agent_method,
+                Some(&req.session_id),
+            )
             .await
         {
             // Check if job matches the app_instance filter (if set)
@@ -108,39 +112,61 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
             if should_process {
                 // Check if this is a settlement job by looking at the app instance settlements
-                let chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                let chain = if let Ok(app_instance) =
+                    sui::fetch::fetch_app_instance(&agent_job.app_instance).await
+                {
                     // Find which chain this job belongs to by checking settlement_job in each settlement
-                    let chain_opt = app_instance.settlements.iter()
-                        .find(|(_, settlement)| settlement.settlement_job == Some(agent_job.job_sequence))
+                    let chain_opt = app_instance
+                        .settlements
+                        .iter()
+                        .find(|(_, settlement)| {
+                            settlement.settlement_job == Some(agent_job.job_sequence)
+                        })
                         .map(|(chain_name, _)| chain_name.clone());
-                    
+
                     // If this is a settle job but not found in any settlement, it's obsolete and should be terminated
-                    if chain_opt.is_none() && agent_job.pending_job.app_instance_method == "settle" {
-                        error!("Found obsolete settle job {} that is not associated with any settlement, terminating it", agent_job.job_sequence);
-                        
+                    if chain_opt.is_none() && agent_job.pending_job.app_instance_method == "settle"
+                    {
+                        error!(
+                            "Found obsolete settle job {} that is not associated with any settlement, terminating it",
+                            agent_job.job_sequence
+                        );
+
                         // Terminate the obsolete settle job
                         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-                        if let Err(e) = sui_interface.terminate_app_job(&agent_job.app_instance, agent_job.job_sequence).await {
-                            error!("Failed to terminate obsolete settle job {}: {}", agent_job.job_sequence, e);
+                        if let Err(e) = sui_interface
+                            .terminate_app_job(&agent_job.app_instance, agent_job.job_sequence)
+                            .await
+                        {
+                            error!(
+                                "Failed to terminate obsolete settle job {}: {}",
+                                agent_job.job_sequence, e
+                            );
                         } else {
-                            info!("Successfully terminated obsolete settle job {}", agent_job.job_sequence);
+                            info!(
+                                "Successfully terminated obsolete settle job {}",
+                                agent_job.job_sequence
+                            );
                         }
-                        
+
                         // Remove from agent database
-                        self.state.get_agent_job_db().terminate_job(&agent_job.job_id).await;
-                        
+                        self.state
+                            .get_agent_job_db()
+                            .terminate_job(&agent_job.job_id)
+                            .await;
+
                         // Skip this job and continue looking for others
                         should_process = false;
                     }
-                    
+
                     chain_opt
                 } else {
                     None
                 };
-                
+
                 // Get the current agent to check settlement chain
                 let current_agent = self.state.get_current_agent(&req.session_id).await;
-                
+
                 // Check if this is a settlement job and if agent has a different settlement chain
                 if let Some(ref settlement_chain) = chain {
                     if let Some(ref agent) = current_agent {
@@ -155,14 +181,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             }
                         } else {
                             // Agent doesn't have a settlement chain yet, set it now
-                            self.state.set_agent_settlement_chain(&req.session_id, settlement_chain.clone()).await;
+                            self.state
+                                .set_agent_settlement_chain(
+                                    &req.session_id,
+                                    settlement_chain.clone(),
+                                )
+                                .await;
                         }
                     }
                 }
-                
+
                 if should_process {
                     let elapsed = start_time.elapsed();
-                    let tx_info = agent_job.start_tx_hash.as_ref()
+                    let tx_info = agent_job
+                        .start_tx_hash
+                        .as_ref()
                         .map(|tx| format!(", tx={}", tx))
                         .unwrap_or_default();
                     info!(
@@ -201,10 +234,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                     let elapsed = start_time.elapsed();
                     let elapsed_ms = elapsed.as_millis() as f64;
-                    
+
                     // Record successful gRPC span for APM
                     coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
-                    
+
                     return Ok(Response::new(GetJobResponse {
                         success: true,
                         message: format!("Job {} retrieved from database", agent_job.job_sequence),
@@ -223,16 +256,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 && current.agent_method == req.agent_method
             {
                 // Get current_app_instances for this agent session
-                let mut current_instances = self.state.get_current_app_instances(&req.session_id).await;
+                let mut current_instances =
+                    self.state.get_current_app_instances(&req.session_id).await;
 
                 // Filter instances based on app_instance_filter if set
                 if let Some(ref filter) = app_instance_filter {
                     current_instances.retain(|instance| instance == filter);
                     if current_instances.is_empty() {
-                        debug!(
-                            "No app_instances match the filter: {}",
-                            filter
-                        );
+                        debug!("No app_instances match the filter: {}", filter);
                     }
                 }
 
@@ -254,36 +285,60 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     {
                         Ok(Some(pending_job)) => {
                             debug!("Found pending job {} using index", pending_job.job_sequence);
-                            
+
                             // Check if this is a settlement job and handle settlement chain filtering
                             let mut skip_job = false;
-                            let settlement_chain = if let Ok(app_instance) = sui::fetch::fetch_app_instance(&pending_job.app_instance).await {
+                            let settlement_chain = if let Ok(app_instance) =
+                                sui::fetch::fetch_app_instance(&pending_job.app_instance).await
+                            {
                                 // Find which chain this job belongs to by checking settlement_job in each settlement
-                                let chain_opt = app_instance.settlements.iter()
-                                    .find(|(_, settlement)| settlement.settlement_job == Some(pending_job.job_sequence))
+                                let chain_opt = app_instance
+                                    .settlements
+                                    .iter()
+                                    .find(|(_, settlement)| {
+                                        settlement.settlement_job == Some(pending_job.job_sequence)
+                                    })
                                     .map(|(chain_name, _)| chain_name.clone());
-                                
+
                                 // If this is a settle job but not found in any settlement, it's obsolete and should be terminated
-                                if chain_opt.is_none() && pending_job.app_instance_method == "settle" {
-                                    error!("Found obsolete settle job {} that is not associated with any settlement, terminating it", pending_job.job_sequence);
-                                    
+                                if chain_opt.is_none()
+                                    && pending_job.app_instance_method == "settle"
+                                {
+                                    error!(
+                                        "Found obsolete settle job {} that is not associated with any settlement, terminating it",
+                                        pending_job.job_sequence
+                                    );
+
                                     // Terminate the obsolete settle job
-                                    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-                                    if let Err(e) = sui_interface.terminate_app_job(&pending_job.app_instance, pending_job.job_sequence).await {
-                                        warn!("Failed to terminate obsolete settle job {}: {}", pending_job.job_sequence, e);
+                                    let mut sui_interface =
+                                        sui::interface::SilvanaSuiInterface::new();
+                                    if let Err(e) = sui_interface
+                                        .terminate_app_job(
+                                            &pending_job.app_instance,
+                                            pending_job.job_sequence,
+                                        )
+                                        .await
+                                    {
+                                        warn!(
+                                            "Failed to terminate obsolete settle job {}: {}",
+                                            pending_job.job_sequence, e
+                                        );
                                     } else {
-                                        info!("Successfully terminated obsolete settle job {}", pending_job.job_sequence);
+                                        info!(
+                                            "Successfully terminated obsolete settle job {}",
+                                            pending_job.job_sequence
+                                        );
                                     }
-                                    
+
                                     // Mark to skip this job
                                     skip_job = true;
                                 }
-                                
+
                                 chain_opt
                             } else {
                                 None
                             };
-                            
+
                             // Check settlement chain compatibility
                             let mut should_process_job = !skip_job;
                             if let Some(ref chain) = settlement_chain {
@@ -298,14 +353,22 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                         }
                                     } else {
                                         // Agent doesn't have a settlement chain yet, set it now
-                                        self.state.set_agent_settlement_chain(&req.session_id, chain.clone()).await;
+                                        self.state
+                                            .set_agent_settlement_chain(
+                                                &req.session_id,
+                                                chain.clone(),
+                                            )
+                                            .await;
                                     }
                                 }
                             }
-                            
+
                             if !should_process_job {
                                 // Skip this job and continue looking for others
-                                debug!("Skipping job {} due to settlement chain mismatch", pending_job.job_sequence);
+                                debug!(
+                                    "Skipping job {} due to settlement chain mismatch",
+                                    pending_job.job_sequence
+                                );
                             } else {
                                 // Execute start_job transaction on Sui before returning the job
                                 match start_job_tx(
@@ -315,90 +378,93 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                 .await
                                 {
                                     Ok(tx_digest) => {
-                                    debug!(
-                                        "Successfully started job {} with tx: {}",
-                                        pending_job.job_sequence, tx_digest
-                                    );
+                                        debug!(
+                                            "Successfully started job {} with tx: {}",
+                                            pending_job.job_sequence, tx_digest
+                                        );
 
-                                    // Create AgentJob and add it to agent database
-                                    let mut agent_job = AgentJob::new(pending_job, &self.state);
-                                    agent_job.start_tx_hash = Some(tx_digest.clone());
-                                    agent_job.start_tx_sent = true;
+                                        // Create AgentJob and add it to agent database
+                                        let mut agent_job = AgentJob::new(pending_job, &self.state);
+                                        agent_job.start_tx_hash = Some(tx_digest.clone());
+                                        agent_job.start_tx_sent = true;
 
-                                    // Add to pending jobs (job has been started and is being returned to agent)
-                                    self.state
-                                        .get_agent_job_db()
-                                        .add_to_pending(agent_job.clone())
-                                        .await;
+                                        // Add to pending jobs (job has been started and is being returned to agent)
+                                        self.state
+                                            .get_agent_job_db()
+                                            .add_to_pending(agent_job.clone())
+                                            .await;
 
-                                    debug!(
-                                        "Added job {} to agent database with job_id: {}",
-                                        agent_job.job_sequence, agent_job.job_id
-                                    );
+                                        debug!(
+                                            "Added job {} to agent database with job_id: {}",
+                                            agent_job.job_sequence, agent_job.job_id
+                                        );
 
-                                    let elapsed = start_time.elapsed();
-                                    info!(
-                                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, tx={}, source=sui, time={:?}",
-                                        agent_job.app_instance,
-                                        req.developer,
-                                        req.agent,
-                                        req.agent_method,
-                                        agent_job.job_sequence,
-                                        agent_job.pending_job.app_instance_method,
-                                        tx_digest,
-                                        elapsed
-                                    );
+                                        let elapsed = start_time.elapsed();
+                                        info!(
+                                            "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, tx={}, source=sui, time={:?}",
+                                            agent_job.app_instance,
+                                            req.developer,
+                                            req.agent,
+                                            req.agent_method,
+                                            agent_job.job_sequence,
+                                            agent_job.pending_job.app_instance_method,
+                                            tx_digest,
+                                            elapsed
+                                        );
 
-                                    // Convert AgentJob to protobuf Job
-                                    let job = Job {
-                                        job_sequence: agent_job.job_sequence,
-                                        description: agent_job.pending_job.description.clone(),
-                                        developer: agent_job.developer.clone(),
-                                        agent: agent_job.agent.clone(),
-                                        agent_method: agent_job.agent_method.clone(),
-                                        app: agent_job.pending_job.app.clone(),
-                                        app_instance: agent_job.app_instance.clone(),
-                                        app_instance_method: agent_job
-                                            .pending_job
-                                            .app_instance_method
-                                            .clone(),
-                                        block_number: agent_job.pending_job.block_number,
-                                        sequences: agent_job
-                                            .pending_job
-                                            .sequences
-                                            .clone()
-                                            .unwrap_or_default(),
-                                        sequences1: agent_job
-                                            .pending_job
-                                            .sequences1
-                                            .clone()
-                                            .unwrap_or_default(),
-                                        sequences2: agent_job
-                                            .pending_job
-                                            .sequences2
-                                            .clone()
-                                            .unwrap_or_default(),
-                                        data: agent_job.pending_job.data.clone(),
-                                        job_id: agent_job.job_id,
-                                        attempts: agent_job.pending_job.attempts as u32,
-                                        created_at: agent_job.pending_job.created_at,
-                                        updated_at: agent_job.pending_job.updated_at,
-                                        chain: settlement_chain, // Set the settlement chain if this is a settlement job
-                                    };
+                                        // Convert AgentJob to protobuf Job
+                                        let job = Job {
+                                            job_sequence: agent_job.job_sequence,
+                                            description: agent_job.pending_job.description.clone(),
+                                            developer: agent_job.developer.clone(),
+                                            agent: agent_job.agent.clone(),
+                                            agent_method: agent_job.agent_method.clone(),
+                                            app: agent_job.pending_job.app.clone(),
+                                            app_instance: agent_job.app_instance.clone(),
+                                            app_instance_method: agent_job
+                                                .pending_job
+                                                .app_instance_method
+                                                .clone(),
+                                            block_number: agent_job.pending_job.block_number,
+                                            sequences: agent_job
+                                                .pending_job
+                                                .sequences
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            sequences1: agent_job
+                                                .pending_job
+                                                .sequences1
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            sequences2: agent_job
+                                                .pending_job
+                                                .sequences2
+                                                .clone()
+                                                .unwrap_or_default(),
+                                            data: agent_job.pending_job.data.clone(),
+                                            job_id: agent_job.job_id,
+                                            attempts: agent_job.pending_job.attempts as u32,
+                                            created_at: agent_job.pending_job.created_at,
+                                            updated_at: agent_job.pending_job.updated_at,
+                                            chain: settlement_chain, // Set the settlement chain if this is a settlement job
+                                        };
 
-                                    return Ok(Response::new(GetJobResponse {
-                                        success: true,
-                                        message: format!("Job {} retrieved from Sui", agent_job.job_sequence),
-                                        job: Some(job),
-                                    }));
-                                }
-                                Err(e) => {
-                                    info!(
-                                        "Failed to start job {} on Sui: {}",
-                                        pending_job.job_sequence, e
-                                    );
-                                    // Don't return the job if start_job transaction failed
-                                    // Continue to check for other jobs or return None
+                                        return Ok(Response::new(GetJobResponse {
+                                            success: true,
+                                            message: format!(
+                                                "Job {} retrieved from Sui",
+                                                agent_job.job_sequence
+                                            ),
+                                            job: Some(job),
+                                        }));
+                                    }
+                                    Err(e) => {
+                                        info!(
+                                            "Failed to start job {} on Sui: {}",
+                                            pending_job.job_sequence, e
+                                        );
+                                        // Don't return the job if start_job transaction failed
+                                        // Continue to check for other jobs or return None
                                     }
                                 }
                             }
@@ -433,10 +499,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // No matching job found
         let elapsed = start_time.elapsed();
         let elapsed_ms = elapsed.as_millis() as f64;
-        
+
         // Record gRPC span for APM
         coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
-        
+
         info!(
             "⭕ GetJob: dev={}, agent={}/{}, no_job_found, time={:?}",
             req.developer, req.agent, req.agent_method, elapsed
@@ -697,22 +763,34 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match result {
             Ok(tx_hash) => {
-            // Remove job from agent database
-            self.state
-                .get_agent_job_db()
-                .terminate_job(&req.job_id)
-                .await;
+                // Remove job from agent database
+                self.state
+                    .get_agent_job_db()
+                    .terminate_job(&req.job_id)
+                    .await;
 
-                info!("Successfully terminated job {} (tx: {})", req.job_id, tx_hash);
+                info!(
+                    "Successfully terminated job {} (tx: {})",
+                    req.job_id, tx_hash
+                );
                 Ok(Response::new(TerminateJobResponse {
                     success: true,
-                    message: format!("Job {} terminated successfully (tx: {})", req.job_id, tx_hash),
+                    message: format!(
+                        "Job {} terminated successfully (tx: {})",
+                        req.job_id, tx_hash
+                    ),
                 }))
             }
             Err((error_msg, tx_digest)) => {
-                error!("Failed to terminate job {} on blockchain: {}", req.job_id, error_msg);
+                error!(
+                    "Failed to terminate job {} on blockchain: {}",
+                    req.job_id, error_msg
+                );
                 let message = if let Some(digest) = tx_digest {
-                    format!("Failed to terminate job {} (tx: {}): {}", req.job_id, digest, error_msg)
+                    format!(
+                        "Failed to terminate job {} (tx: {}): {}",
+                        req.job_id, digest, error_msg
+                    )
                 } else {
                     format!("Failed to terminate job {}: {}", req.job_id, error_msg)
                 };
@@ -807,32 +885,50 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Save proof to cache storage
         debug!("Saving proof to cache storage for job {}", req.job_id);
-        
+
         // Prepare metadata for the proof
         let mut metadata = ProofMetadata::default();
-        metadata.data.insert("job_id".to_string(), req.job_id.clone());
-        metadata.data.insert("session_id".to_string(), req.session_id.clone());
-        metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
-        metadata.data.insert("block_number".to_string(), req.block_number.to_string());
+        metadata
+            .data
+            .insert("job_id".to_string(), req.job_id.clone());
+        metadata
+            .data
+            .insert("session_id".to_string(), req.session_id.clone());
+        metadata.data.insert(
+            "app_instance_id".to_string(),
+            agent_job.app_instance.clone(),
+        );
+        metadata
+            .data
+            .insert("block_number".to_string(), req.block_number.to_string());
         // Limit sequences metadata to avoid S3 tag value limit (256 chars)
         let sequences_str = format!("{:?}", sequences);
         let sequences_metadata = if sequences_str.len() > 200 {
-            format!("{}... ({} sequences)", &sequences_str[..200], sequences.len())
+            format!(
+                "{}... ({} sequences)",
+                &sequences_str[..200],
+                sequences.len()
+            )
         } else {
             sequences_str
         };
-        metadata.data.insert("sequences".to_string(), sequences_metadata);
-        metadata.data.insert("project".to_string(), "silvana".to_string());
-        metadata.data.insert("sui_chain".to_string(), 
-            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
-        
+        metadata
+            .data
+            .insert("sequences".to_string(), sequences_metadata);
+        metadata
+            .data
+            .insert("project".to_string(), "silvana".to_string());
+        metadata.data.insert(
+            "sui_chain".to_string(),
+            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()),
+        );
+
         let storage_start = std::time::Instant::now();
-        let descriptor = match self.proof_storage.store_proof(
-            "cache",
-            "public", 
-            &req.proof,
-            Some(metadata)
-        ).await {
+        let descriptor = match self
+            .proof_storage
+            .store_proof("cache", "public", &req.proof, Some(metadata))
+            .await
+        {
             Ok(desc) => {
                 let storage_duration = storage_start.elapsed();
                 debug!(
@@ -844,9 +940,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
             Err(e) => {
                 error!("Error saving proof to cache storage: {}", e);
-                return Err(Status::internal(
-                    "Failed to save proof to storage",
-                ));
+                return Err(Status::internal("Failed to save proof to storage"));
             }
         };
 
@@ -878,7 +972,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 merged_sequences_1,
                 merged_sequences_2,
                 req.job_id.clone(),
-                descriptor.to_string(),  // Use full descriptor (chain:network:hash) instead of just hash
+                descriptor.to_string(), // Use full descriptor (chain:network:hash) instead of just hash
                 hardware_info.cpu_cores,
                 hardware_info.prover_architecture.clone(),
                 hardware_info.prover_memory,
@@ -940,11 +1034,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 });
 
                 // Return immediately without waiting for merge analysis
-                Ok(Response::new(SubmitProofResponse { 
+                Ok(Response::new(SubmitProofResponse {
                     success: true,
                     message: "Proof submitted successfully".to_string(),
-                    tx_hash, 
-                    da_hash: descriptor.to_string()
+                    tx_hash,
+                    da_hash: descriptor.to_string(),
                 }))
             }
             Err(e) => {
@@ -1069,11 +1163,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
 
         let tx_result = sui_interface
-            .reject_proof(
-                &agent_job.app_instance,
-                req.block_number,
-                sequences.clone(),
-            )
+            .reject_proof(&agent_job.app_instance, req.block_number, sequences.clone())
             .await;
 
         match tx_result {
@@ -1097,7 +1187,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     req.job_id, tx_hash
                 );
 
-                Ok(Response::new(RejectProofResponse { 
+                Ok(Response::new(RejectProofResponse {
                     success: true,
                     message: "Proof rejected successfully".to_string(),
                     tx_hash,
@@ -1181,26 +1271,43 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Save serialized state to cache storage if provided
         let da_descriptor = if let Some(serialized_state) = req.serialized_state {
-            debug!("Saving state to cache storage for sequence {}", req.sequence);
-            
+            debug!(
+                "Saving state to cache storage for sequence {}",
+                req.sequence
+            );
+
             // Prepare metadata for the state
             let mut metadata = ProofMetadata::default();
-            metadata.data.insert("job_id".to_string(), req.job_id.clone());
-            metadata.data.insert("session_id".to_string(), req.session_id.clone());
-            metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
-            metadata.data.insert("sequence".to_string(), req.sequence.to_string());
-            metadata.data.insert("type".to_string(), "sequence_state".to_string());
-            metadata.data.insert("project".to_string(), "silvana".to_string());
-            metadata.data.insert("sui_chain".to_string(), 
-                std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
-            
+            metadata
+                .data
+                .insert("job_id".to_string(), req.job_id.clone());
+            metadata
+                .data
+                .insert("session_id".to_string(), req.session_id.clone());
+            metadata.data.insert(
+                "app_instance_id".to_string(),
+                agent_job.app_instance.clone(),
+            );
+            metadata
+                .data
+                .insert("sequence".to_string(), req.sequence.to_string());
+            metadata
+                .data
+                .insert("type".to_string(), "sequence_state".to_string());
+            metadata
+                .data
+                .insert("project".to_string(), "silvana".to_string());
+            metadata.data.insert(
+                "sui_chain".to_string(),
+                std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()),
+            );
+
             let storage_start = std::time::Instant::now();
-            match self.proof_storage.store_proof(
-                "cache",
-                "public",
-                &serialized_state,
-                Some(metadata)
-            ).await {
+            match self
+                .proof_storage
+                .store_proof("cache", "public", &serialized_state, Some(metadata))
+                .await
+            {
                 Ok(desc) => {
                     let storage_duration = storage_start.elapsed();
                     debug!(
@@ -1248,11 +1355,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     elapsed
                 );
 
-                Ok(Response::new(SubmitStateResponse { 
+                Ok(Response::new(SubmitStateResponse {
                     success: true,
                     message: "State submitted successfully".to_string(),
-                    tx_hash, 
-                    da_hash: da_descriptor 
+                    tx_hash,
+                    da_hash: da_descriptor,
                 }))
             }
             Err(e) => {
@@ -1347,22 +1454,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 return Err(Status::internal(format!(
-                    "Failed to fetch AppInstance: {}", e
+                    "Failed to fetch AppInstance: {}",
+                    e
                 )));
             }
         };
-        
+
         // Query sequence states from the coordinator fetch module
         debug!(
             "🔍 Querying sequence states for app_instance={}, sequence={}",
             app_instance_id, req.sequence
         );
-        match sui::fetch::query_sequence_states(
-            &app_instance,
-            req.sequence,
-        )
-        .await
-        {
+        match sui::fetch::query_sequence_states(&app_instance, req.sequence).await {
             Ok(fetch_states) => {
                 debug!(
                     "📦 Retrieved {} sequence states from query",
@@ -1402,7 +1505,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                 Ok(Response::new(GetSequenceStatesResponse {
                     success: true,
-                    message: format!("Retrieved {} sequence states for sequence {}", proto_states.len(), req.sequence),
+                    message: format!(
+                        "Retrieved {} sequence states for sequence {}",
+                        proto_states.len(),
+                        req.sequence
+                    ),
                     states: proto_states,
                 }))
             }
@@ -1473,10 +1580,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!(
-                    "Failed to read data for descriptor {}: {}",
-                    req.da_hash, e
-                );
+                error!("Failed to read data for descriptor {}: {}", req.da_hash, e);
                 Ok(Response::new(ReadDataAvailabilityResponse {
                     data: None,
                     success: false,
@@ -1562,7 +1666,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Use the app_instance from the job
         let app_instance_id = agent_job.app_instance.clone();
-        
+
         // First fetch the AppInstance object
         let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
             Ok(app_inst) => app_inst,
@@ -1577,30 +1681,37 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Fetch the ProofCalculation using the existing function from sui::fetch::prover
-        let proof_calculation =
-            match sui::fetch::fetch_proof_calculation(&app_instance, req.block_number).await {
-                Ok(Some(proof_calc)) => proof_calc,
-                Ok(None) => {
-                    // ProofCalculation not found - expected for settled blocks as they are deleted after settlement
-                    debug!("No ProofCalculation found for block {} (may have been deleted after settlement)", req.block_number);
-                    return Ok(Response::new(GetProofResponse {
-                        success: false,
-                        proof: None,
-                        message: format!(
-                            "No ProofCalculation found for block {} (may have been deleted after settlement)",
-                            req.block_number
-                        ),
-                    }));
-                }
-                Err(e) => {
-                    error!("Failed to fetch ProofCalculation: {}", e);
-                    return Ok(Response::new(GetProofResponse {
-                        success: false,
-                        proof: None,
-                        message: format!("Failed to fetch ProofCalculation: {}", e),
-                    }));
-                }
-            };
+        let proof_calculation = match sui::fetch::fetch_proof_calculation(
+            &app_instance,
+            req.block_number,
+        )
+        .await
+        {
+            Ok(Some(proof_calc)) => proof_calc,
+            Ok(None) => {
+                // ProofCalculation not found - expected for settled blocks as they are deleted after settlement
+                debug!(
+                    "No ProofCalculation found for block {} (may have been deleted after settlement)",
+                    req.block_number
+                );
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: format!(
+                        "No ProofCalculation found for block {} (may have been deleted after settlement)",
+                        req.block_number
+                    ),
+                }));
+            }
+            Err(e) => {
+                error!("Failed to fetch ProofCalculation: {}", e);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: format!("Failed to fetch ProofCalculation: {}", e),
+                }));
+            }
+        };
 
         debug!(
             "Found ProofCalculation for block {} with {} proofs",
@@ -1749,7 +1860,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Use the app_instance from the job
         let app_instance_id = agent_job.app_instance.clone();
-        
+
         // First fetch the AppInstance object
         let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
             Ok(app_inst) => app_inst,
@@ -1764,11 +1875,19 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Use the fetch_proof_calculation function from prover module
-        let proof_calculation = match sui::fetch::fetch_proof_calculation(&app_instance, req.block_number).await {
+        let proof_calculation = match sui::fetch::fetch_proof_calculation(
+            &app_instance,
+            req.block_number,
+        )
+        .await
+        {
             Ok(Some(calc)) => calc,
             Ok(None) => {
                 // ProofCalculation not found - expected for settled blocks as they are deleted after settlement
-                debug!("No ProofCalculation found for block {} (may have been deleted after settlement)", req.block_number);
+                debug!(
+                    "No ProofCalculation found for block {} (may have been deleted after settlement)",
+                    req.block_number
+                );
                 return Ok(Response::new(GetBlockProofResponse {
                     success: false,
                     block_proof: None,
@@ -1788,7 +1907,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        debug!("Successfully fetched ProofCalculation for block {}", req.block_number);
+        debug!(
+            "Successfully fetched ProofCalculation for block {}",
+            req.block_number
+        );
         let block_proof = proof_calculation.block_proof;
 
         // If we found a block proof DA hash, fetch the actual proof from Walrus
@@ -1931,17 +2053,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Build the secret reference from the job information
         use rpc_client::SecretReference;
-        
+
         // Special handling for private key secrets (prefixed with sk_)
         // These are typically global secrets at the developer/agent level
         // rather than app-instance specific
         let secret_reference = if req.name.starts_with("sk_") {
-            debug!("Retrieving private key secret '{}' at developer/agent level", req.name);
+            debug!(
+                "Retrieving private key secret '{}' at developer/agent level",
+                req.name
+            );
             SecretReference {
                 developer: agent_job.developer.clone(),
                 agent: agent_job.agent.clone(),
-                app: None,  // No app context for private keys
-                app_instance: None,  // No app instance context for private keys
+                app: None,          // No app context for private keys
+                app_instance: None, // No app instance context for private keys
                 name: Some(req.name.clone()),
             }
         } else {
@@ -2061,13 +2186,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Execute the set_kv transaction
-        match sui::set_kv_tx(
-            &agent_job.app_instance,
-            req.key,
-            req.value,
-        )
-        .await
-        {
+        match sui::set_kv_tx(&agent_job.app_instance, req.key, req.value).await {
             Ok(tx_hash) => {
                 info!(
                     "✅ SetKV successful for job {}: tx_hash={}",
@@ -2165,10 +2284,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         value: Some(value.clone()),
                     }))
                 } else {
-                    info!(
-                        "GetKV for job {}: key '{}' not found",
-                        req.job_id, req.key
-                    );
+                    info!("GetKV for job {}: key '{}' not found", req.job_id, req.key);
                     Ok(Response::new(GetKvResponse {
                         success: true,
                         message: format!("Key '{}' not found", req.key),
@@ -2249,12 +2365,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Execute the delete_kv transaction
-        match sui::delete_kv_tx(
-            &agent_job.app_instance,
-            req.key,
-        )
-        .await
-        {
+        match sui::delete_kv_tx(&agent_job.app_instance, req.key).await {
             Ok(tx_hash) => {
                 info!(
                     "✅ DeleteKV successful for job {}: tx_hash={}",
@@ -2267,7 +2378,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to delete key-value pair for job {}: {}", req.job_id, e);
+                error!(
+                    "Failed to delete key-value pair for job {}: {}",
+                    req.job_id, e
+                );
                 Ok(Response::new(DeleteKvResponse {
                     success: false,
                     message: format!("Failed to delete key-value pair: {}", e),
@@ -2330,7 +2444,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }));
             }
         } else {
-            warn!("AddMetadata request from unknown session: {}", req.session_id);
+            warn!(
+                "AddMetadata request from unknown session: {}",
+                req.session_id
+            );
             return Ok(Response::new(AddMetadataResponse {
                 success: false,
                 message: "Invalid session ID".to_string(),
@@ -2339,13 +2456,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Execute the add_metadata transaction
-        match sui::add_metadata_tx(
-            &agent_job.app_instance,
-            req.key,
-            req.value,
-        )
-        .await
-        {
+        match sui::add_metadata_tx(&agent_job.app_instance, req.key, req.value).await {
             Ok(tx_hash) => {
                 info!(
                     "✅ AddMetadata successful for job {}: tx_hash={}",
@@ -2421,7 +2532,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }));
             }
         } else {
-            warn!("GetMetadata request from unknown session: {}", req.session_id);
+            warn!(
+                "GetMetadata request from unknown session: {}",
+                req.session_id
+            );
             return Ok(Response::new(GetMetadataResponse {
                 success: false,
                 message: "Invalid session ID".to_string(),
@@ -2455,7 +2569,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     );
                     None
                 };
-                
+
                 Ok(Response::new(GetMetadataResponse {
                     success: true,
                     message: if req.key.is_some() {
@@ -2482,14 +2596,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         created_at: app_instance.created_at,
                         updated_at: app_instance.updated_at,
                         // Populate the new settlements map
-                        settlements: app_instance.settlements.iter()
+                        settlements: app_instance
+                            .settlements
+                            .iter()
                             .map(|(chain, settlement)| {
-                                (chain.clone(), coordinator::SettlementInfo {
-                                    chain: chain.clone(),
-                                    last_settled_block_number: settlement.last_settled_block_number,
-                                    settlement_address: settlement.settlement_address.clone(),
-                                    settlement_job: settlement.settlement_job,
-                                })
+                                (
+                                    chain.clone(),
+                                    coordinator::SettlementInfo {
+                                        chain: chain.clone(),
+                                        last_settled_block_number: settlement
+                                            .last_settled_block_number,
+                                        settlement_address: settlement.settlement_address.clone(),
+                                        settlement_job: settlement.settlement_job,
+                                    },
+                                )
                             })
                             .collect(),
                     }),
@@ -2538,7 +2658,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Try to create block
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-        match sui_interface.try_create_block(&agent_job.app_instance).await {
+        match sui_interface
+            .try_create_block(&agent_job.app_instance)
+            .await
+        {
             Ok(tx_hash) => {
                 info!("✅ TryCreateBlock successful, tx: {}", tx_hash);
                 // TODO: Parse event to get block number if created
@@ -2582,7 +2705,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         {
             Some(job) => job,
             None => {
-                warn!("UpdateBlockStateDataAvailability request for unknown job_id: {}", req.job_id);
+                warn!(
+                    "UpdateBlockStateDataAvailability request for unknown job_id: {}",
+                    req.job_id
+                );
                 return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
                     success: false,
                     message: format!("Job not found: {}", req.job_id),
@@ -2593,25 +2719,47 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Prepare metadata for the block state
         let mut metadata = ProofMetadata::default();
-        metadata.data.insert("job_id".to_string(), req.job_id.clone());
-        metadata.data.insert("session_id".to_string(), req.session_id.clone());
-        metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
-        metadata.data.insert("block_number".to_string(), req.block_number.to_string());
-        metadata.data.insert("type".to_string(), "block_state".to_string());
-        metadata.data.insert("project".to_string(), "silvana".to_string());
-        metadata.data.insert("sui_chain".to_string(), 
-            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
-        
+        metadata
+            .data
+            .insert("job_id".to_string(), req.job_id.clone());
+        metadata
+            .data
+            .insert("session_id".to_string(), req.session_id.clone());
+        metadata.data.insert(
+            "app_instance_id".to_string(),
+            agent_job.app_instance.clone(),
+        );
+        metadata
+            .data
+            .insert("block_number".to_string(), req.block_number.to_string());
+        metadata
+            .data
+            .insert("type".to_string(), "block_state".to_string());
+        metadata
+            .data
+            .insert("project".to_string(), "silvana".to_string());
+        metadata.data.insert(
+            "sui_chain".to_string(),
+            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()),
+        );
+
         // Save to cache:public instead of walrus:testnet
-        debug!("Saving block state to cache DA for block {}", req.block_number);
+        debug!(
+            "Saving block state to cache DA for block {}",
+            req.block_number
+        );
         let storage_start = std::time::Instant::now();
-        
-        let descriptor = match self.proof_storage.store_proof(
-            "cache",
-            "public",
-            &req.state_data_availability,
-            Some(metadata)
-        ).await {
+
+        let descriptor = match self
+            .proof_storage
+            .store_proof(
+                "cache",
+                "public",
+                &req.state_data_availability,
+                Some(metadata),
+            )
+            .await
+        {
             Ok(desc) => {
                 let storage_duration = storage_start.elapsed();
                 info!(
@@ -2622,13 +2770,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 desc
             }
             Err(cache_err) => {
-                error!(
-                    "Failed to save block state to cache: {}",
-                    cache_err
-                );
+                error!("Failed to save block state to cache: {}", cache_err);
                 return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
                     success: false,
-                    message: format!("Failed to save state to data availability layer: {}", cache_err),
+                    message: format!(
+                        "Failed to save state to data availability layer: {}",
+                        cache_err
+                    ),
                     tx_hash: String::new(),
                 }));
             }
@@ -2646,11 +2794,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
-                info!("✅ UpdateBlockStateDataAvailability successful, block: {}, descriptor: {}, tx: {}", 
-                    req.block_number, descriptor_str, tx_hash);
+                info!(
+                    "✅ UpdateBlockStateDataAvailability successful, block: {}, descriptor: {}, tx: {}",
+                    req.block_number, descriptor_str, tx_hash
+                );
                 Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
                     success: true,
-                    message: format!("Block state DA updated successfully with descriptor: {}", descriptor_str),
+                    message: format!(
+                        "Block state DA updated successfully with descriptor: {}",
+                        descriptor_str
+                    ),
                     tx_hash,
                 }))
             }
@@ -2686,7 +2839,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         {
             Some(job) => job,
             None => {
-                warn!("UpdateBlockProofDataAvailability request for unknown job_id: {}", req.job_id);
+                warn!(
+                    "UpdateBlockProofDataAvailability request for unknown job_id: {}",
+                    req.job_id
+                );
                 return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: false,
                     message: format!("Job not found: {}", req.job_id),
@@ -2697,25 +2853,47 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Prepare metadata for the block proof
         let mut metadata = ProofMetadata::default();
-        metadata.data.insert("job_id".to_string(), req.job_id.clone());
-        metadata.data.insert("session_id".to_string(), req.session_id.clone());
-        metadata.data.insert("app_instance_id".to_string(), agent_job.app_instance.clone());
-        metadata.data.insert("block_number".to_string(), req.block_number.to_string());
-        metadata.data.insert("type".to_string(), "block_proof".to_string());
-        metadata.data.insert("project".to_string(), "silvana".to_string());
-        metadata.data.insert("sui_chain".to_string(), 
-            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
-        
+        metadata
+            .data
+            .insert("job_id".to_string(), req.job_id.clone());
+        metadata
+            .data
+            .insert("session_id".to_string(), req.session_id.clone());
+        metadata.data.insert(
+            "app_instance_id".to_string(),
+            agent_job.app_instance.clone(),
+        );
+        metadata
+            .data
+            .insert("block_number".to_string(), req.block_number.to_string());
+        metadata
+            .data
+            .insert("type".to_string(), "block_proof".to_string());
+        metadata
+            .data
+            .insert("project".to_string(), "silvana".to_string());
+        metadata.data.insert(
+            "sui_chain".to_string(),
+            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()),
+        );
+
         // Save current proof to cache:public
-        debug!("Saving block proof to cache DA for block {}", req.block_number);
+        debug!(
+            "Saving block proof to cache DA for block {}",
+            req.block_number
+        );
         let storage_start = std::time::Instant::now();
-        
-        let descriptor = match self.proof_storage.store_proof(
-            "cache",
-            "public",
-            &req.proof_data_availability,
-            Some(metadata.clone())
-        ).await {
+
+        let descriptor = match self
+            .proof_storage
+            .store_proof(
+                "cache",
+                "public",
+                &req.proof_data_availability,
+                Some(metadata.clone()),
+            )
+            .await
+        {
             Ok(desc) => {
                 let storage_duration = storage_start.elapsed();
                 info!(
@@ -2726,65 +2904,90 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 desc
             }
             Err(cache_err) => {
-                error!(
-                    "Failed to save block proof to cache: {}",
-                    cache_err
-                );
+                error!("Failed to save block proof to cache: {}", cache_err);
                 return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: false,
-                    message: format!("Failed to save proof to data availability layer: {}", cache_err),
+                    message: format!(
+                        "Failed to save proof to data availability layer: {}",
+                        cache_err
+                    ),
                     tx_hash: String::new(),
                 }));
             }
         };
 
         // Check if we should create a quilt for every N blocks
-        let quilt_descriptor_str = if req.block_number % WALRUS_QUILT_BLOCK_INTERVAL == 0 && req.block_number > 0 {
-            warn!("Block {} is a quilt checkpoint, fetching last {} blocks for quilt storage", 
-                req.block_number, WALRUS_QUILT_BLOCK_INTERVAL);
-            
+        let quilt_descriptor_str = if req.block_number % WALRUS_QUILT_BLOCK_INTERVAL == 0
+            && req.block_number > 0
+        {
+            info!(
+                "Block {} is a quilt checkpoint, fetching last {} blocks for quilt storage",
+                req.block_number, WALRUS_QUILT_BLOCK_INTERVAL
+            );
+
             // Fetch app_instance to get block data
             match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
                 Ok(app_instance) => {
                     // Fetch the last N blocks including current
-                    let start_block = req.block_number.saturating_sub(WALRUS_QUILT_BLOCK_INTERVAL - 1);
+                    let start_block = req
+                        .block_number
+                        .saturating_sub(WALRUS_QUILT_BLOCK_INTERVAL - 1);
                     let mut quilt_data = Vec::new();
-                    
+
                     for block_num in start_block..=req.block_number {
                         // Special handling for current block - use the proof we just stored
                         if block_num == req.block_number {
                             // Add the current block's proof that we just stored
-                            quilt_data.push((block_num.to_string(), req.proof_data_availability.clone()));
-                            info!("Added current block {} proof to quilt", block_num);
+                            quilt_data
+                                .push((block_num.to_string(), req.proof_data_availability.clone()));
+                            debug!("Added current block {} proof to quilt", block_num);
                             continue;
                         }
-                        
+
                         match fetch_block_info(&app_instance, block_num).await {
                             Ok(Some(block)) => {
                                 if let Some(proof_da) = block.proof_data_availability {
                                     if !proof_da.is_empty() {
                                         // For cache descriptors, we need to fetch the actual proof data
                                         if proof_da.starts_with("cache:") {
-                                            match crate::proofs_storage::ProofDescriptor::parse(&proof_da) {
+                                            match crate::proofs_storage::ProofDescriptor::parse(
+                                                &proof_da,
+                                            ) {
                                                 Ok(desc) => {
-                                                    match self.proof_storage.get_proof(&desc.to_string()).await {
+                                                    match self
+                                                        .proof_storage
+                                                        .get_proof(&desc.to_string())
+                                                        .await
+                                                    {
                                                         Ok((proof_data, _)) => {
-                                                            quilt_data.push((block_num.to_string(), proof_data));
-                                                            info!("Added block {} proof to quilt", block_num);
+                                                            quilt_data.push((
+                                                                block_num.to_string(),
+                                                                proof_data,
+                                                            ));
+                                                            debug!(
+                                                                "Added block {} proof to quilt",
+                                                                block_num
+                                                            );
                                                         }
                                                         Err(e) => {
-                                                            warn!("Failed to fetch proof for block {}: {}", block_num, e);
+                                                            warn!(
+                                                                "Failed to fetch proof for block {}: {}",
+                                                                block_num, e
+                                                            );
                                                         }
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    warn!("Failed to parse descriptor for block {}: {}", block_num, e);
+                                                    warn!(
+                                                        "Failed to parse descriptor for block {}: {}",
+                                                        block_num, e
+                                                    );
                                                 }
                                             }
                                         } else {
                                             // For other storage types, store the descriptor itself
                                             quilt_data.push((block_num.to_string(), proof_da));
-                                            info!("Added block {} descriptor to quilt", block_num);
+                                            debug!("Added block {} descriptor to quilt", block_num);
                                         }
                                     }
                                 } else {
@@ -2799,24 +3002,30 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             }
                         }
                     }
-                    
+
                     // Store the quilt if we have data
                     if !quilt_data.is_empty() {
-                        warn!("Creating quilt with {} block proofs for blocks {}-{}", 
-                            quilt_data.len(), start_block, req.block_number);
-                        
+                        info!(
+                            "Creating quilt with {} block proofs for blocks {}-{}",
+                            quilt_data.len(),
+                            start_block,
+                            req.block_number
+                        );
+
                         // Clone the original quilt data for cache fallback (without test entries)
                         let quilt_data_for_cache = quilt_data.clone();
-                        
+
                         // If WALRUS_TEST is enabled, add 580 test entries to simulate 600 proofs
                         // (Walrus has a maximum of 600 pieces per quilt)
                         // We only add these to the Walrus version, not the cache version
                         if WALRUS_TEST {
-                            warn!("WALRUS_TEST mode enabled: Adding test entries to reach 600 proofs (Walrus max)");
-                            
+                            warn!(
+                                "WALRUS_TEST mode enabled: Adding test entries to reach 600 proofs (Walrus max)"
+                            );
+
                             let available_proofs = quilt_data.len();
                             let test_entries_to_add = 600 - available_proofs; // Add enough to reach 600 total
-                            
+
                             if test_entries_to_add > 0 {
                                 // Use full proof data for Walrus testing (clone existing proofs)
                                 for i in 1..=test_entries_to_add {
@@ -2824,74 +3033,120 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                     let source_index = (i - 1) % available_proofs;
                                     let test_identifier = format!("test{}", i);
                                     let test_data = quilt_data[source_index].1.clone();
-                                    
+
                                     quilt_data.push((test_identifier, test_data));
-                                    
+
                                     // Log progress every 100 entries
                                     if i % 100 == 0 {
-                                        debug!("Added {} test entries to quilt for Walrus testing", i);
+                                        debug!(
+                                            "Added {} test entries to quilt for Walrus testing",
+                                            i
+                                        );
                                     }
                                 }
-                                
-                                warn!("Total quilt pieces for Walrus: {} (original: {}, test: {})", 
-                                    quilt_data.len(), available_proofs, test_entries_to_add);
+
+                                warn!(
+                                    "Total quilt pieces for Walrus: {} (original: {}, test: {})",
+                                    quilt_data.len(),
+                                    available_proofs,
+                                    test_entries_to_add
+                                );
                             } else {
-                                warn!("Already have {} pieces, no test entries needed", available_proofs);
+                                warn!(
+                                    "Already have {} pieces, no test entries needed",
+                                    available_proofs
+                                );
                             }
                         }
-                        
+
                         // Determine Walrus network based on SUI chain
-                        let walrus_network = if std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()) == "mainnet" {
+                        let walrus_network = if std::env::var("SUI_CHAIN")
+                            .unwrap_or_else(|_| "devnet".to_string())
+                            == "mainnet"
+                        {
                             "mainnet"
                         } else {
                             "testnet"
                         };
-                        
+
                         // Try to store quilt to Walrus first, fallback to cache if it fails
-                        let result = match self.proof_storage.store_quilt("walrus", walrus_network, quilt_data.clone(), Some(metadata.clone())).await {
+                        let result = match self
+                            .proof_storage
+                            .store_quilt(
+                                "walrus",
+                                walrus_network,
+                                quilt_data.clone(),
+                                Some(metadata.clone()),
+                            )
+                            .await
+                        {
                             Ok(result) => {
                                 // Success - quilt stored to Walrus
-                                warn!("✅ Quilt stored to Walrus successfully:");
-                                warn!("  Descriptor: {}", result.descriptor.to_string());
-                                warn!("  Blob ID: {}", result.blob_id);
+                                info!("✅ Quilt stored to Walrus successfully:");
+                                info!("  Descriptor: {}", result.descriptor.to_string());
+                                info!("  Blob ID: {}", result.blob_id);
                                 if let Some(tx) = &result.tx_digest {
-                                    warn!("  Tx Digest: {}", tx);
+                                    info!("  Tx Digest: {}", tx);
                                 }
                                 if !result.quilt_patches.is_empty() {
-                                    warn!("  Quilt patches: {}", result.quilt_patches.len());
+                                    info!("  Quilt patches: {}", result.quilt_patches.len());
                                     for (i, patch) in result.quilt_patches.iter().enumerate() {
-                                        if i < 5 {  // Show first 5 patches
-                                            warn!("    - {}: {}", patch.identifier, patch.quilt_patch_id);
+                                        if i < 5 {
+                                            // Show first 5 patches
+                                            info!(
+                                                "    - {}: {}",
+                                                patch.identifier, patch.quilt_patch_id
+                                            );
                                         }
                                     }
                                     if result.quilt_patches.len() > 5 {
-                                        warn!("    ... and {} more", result.quilt_patches.len() - 5);
+                                        info!(
+                                            "    ... and {} more",
+                                            result.quilt_patches.len() - 5
+                                        );
                                     }
                                 }
                                 Ok(result)
                             }
                             Err(walrus_err) => {
                                 // Walrus failed, try cache as fallback with smaller data (without test entries)
-                                warn!("Failed to store quilt to Walrus: {}, trying cache as fallback", walrus_err);
-                                
-                                match self.proof_storage.store_quilt("cache", "public", quilt_data_for_cache, Some(metadata.clone())).await {
+                                warn!(
+                                    "Failed to store quilt to Walrus: {}, trying cache as fallback",
+                                    walrus_err
+                                );
+
+                                match self
+                                    .proof_storage
+                                    .store_quilt(
+                                        "cache",
+                                        "public",
+                                        quilt_data_for_cache,
+                                        Some(metadata.clone()),
+                                    )
+                                    .await
+                                {
                                     Ok(result) => {
-                                        warn!("✅ Quilt stored to cache successfully (fallback without test entries):");
-                                        warn!("  Descriptor: {}", result.descriptor.to_string());
-                                        warn!("  Blob ID: {}", result.blob_id);
+                                        info!(
+                                            "✅ Quilt stored to cache successfully (fallback without test entries):"
+                                        );
+                                        info!("  Descriptor: {}", result.descriptor.to_string());
+                                        info!("  Blob ID: {}", result.blob_id);
                                         Ok(result)
                                     }
                                     Err(cache_err) => {
-                                        error!("Failed to store quilt to both Walrus and cache: walrus_err={}, cache_err={}", walrus_err, cache_err);
+                                        error!(
+                                            "Failed to store quilt to both Walrus and cache: walrus_err={}, cache_err={}",
+                                            walrus_err, cache_err
+                                        );
                                         Err(cache_err)
                                     }
                                 }
                             }
                         };
-                        
+
                         match result {
                             Ok(res) => Some(res.descriptor.to_string()),
-                            Err(_) => None
+                            Err(_) => None,
                         }
                     } else {
                         warn!("No valid proof data found for quilt creation");
@@ -2913,12 +3168,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
         let final_descriptor_str = if let Some(quilt_desc) = quilt_descriptor_str {
             // For quilt checkpoint blocks, use the quilt descriptor
-            warn!("Using quilt descriptor for block {}: {}", req.block_number, quilt_desc);
+            warn!(
+                "Using quilt descriptor for block {}: {}",
+                req.block_number, quilt_desc
+            );
             quilt_desc
         } else {
             descriptor.to_string()
         };
-        
+
         match sui_interface
             .update_block_proof_data_availability(
                 &agent_job.app_instance,
@@ -2928,11 +3186,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
-                info!("✅ UpdateBlockProofDataAvailability successful, block: {}, descriptor: {}, tx: {}", 
-                    req.block_number, final_descriptor_str, tx_hash);
+                info!(
+                    "✅ UpdateBlockProofDataAvailability successful, block: {}, descriptor: {}, tx: {}",
+                    req.block_number, final_descriptor_str, tx_hash
+                );
                 Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: true,
-                    message: format!("Block proof DA updated successfully with descriptor: {}", final_descriptor_str),
+                    message: format!(
+                        "Block proof DA updated successfully with descriptor: {}",
+                        final_descriptor_str
+                    ),
                     tx_hash,
                 }))
             }
@@ -2968,7 +3231,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         {
             Some(job) => job,
             None => {
-                warn!("UpdateBlockSettlementTxHash request for unknown job_id: {}", req.job_id);
+                warn!(
+                    "UpdateBlockSettlementTxHash request for unknown job_id: {}",
+                    req.job_id
+                );
                 return Ok(Response::new(UpdateBlockSettlementTxHashResponse {
                     success: false,
                     message: format!("Job not found: {}", req.job_id),
@@ -3029,12 +3295,17 @@ impl CoordinatorService for CoordinatorServiceImpl {
         {
             Some(job) => job,
             None => {
-                warn!("UpdateBlockSettlementTxIncludedInBlock request for unknown job_id: {}", req.job_id);
-                return Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
-                    success: false,
-                    message: format!("Job not found: {}", req.job_id),
-                    tx_hash: String::new(),
-                }));
+                warn!(
+                    "UpdateBlockSettlementTxIncludedInBlock request for unknown job_id: {}",
+                    req.job_id
+                );
+                return Ok(Response::new(
+                    UpdateBlockSettlementTxIncludedInBlockResponse {
+                        success: false,
+                        message: format!("Job not found: {}", req.job_id),
+                        tx_hash: String::new(),
+                    },
+                ));
             }
         };
 
@@ -3050,20 +3321,28 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
-                info!("✅ UpdateBlockSettlementTxIncludedInBlock successful, tx: {}", tx_hash);
-                Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
-                    success: true,
-                    message: "Block settlement included in block updated successfully".to_string(),
-                    tx_hash,
-                }))
+                info!(
+                    "✅ UpdateBlockSettlementTxIncludedInBlock successful, tx: {}",
+                    tx_hash
+                );
+                Ok(Response::new(
+                    UpdateBlockSettlementTxIncludedInBlockResponse {
+                        success: true,
+                        message: "Block settlement included in block updated successfully"
+                            .to_string(),
+                        tx_hash,
+                    },
+                ))
             }
             Err(e) => {
                 error!("Failed to update block settlement included in block: {}", e);
-                Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
-                    success: false,
-                    message: format!("Failed to update block settlement included: {}", e),
-                    tx_hash: String::new(),
-                }))
+                Ok(Response::new(
+                    UpdateBlockSettlementTxIncludedInBlockResponse {
+                        success: false,
+                        message: format!("Failed to update block settlement included: {}", e),
+                        tx_hash: String::new(),
+                    },
+                ))
             }
         }
     }
@@ -3169,22 +3448,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Fetch app instance
-        let app_instance = match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
-            Ok(ai) => ai,
-            Err(e) => {
-                return Ok(Response::new(GetBlockResponse {
-                    success: false,
-                    message: format!("Failed to fetch app instance: {}", e),
-                    block: None,
-                }));
-            }
-        };
+        let app_instance =
+            match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+                Ok(ai) => ai,
+                Err(e) => {
+                    return Ok(Response::new(GetBlockResponse {
+                        success: false,
+                        message: format!("Failed to fetch app instance: {}", e),
+                        block: None,
+                    }));
+                }
+            };
 
         // Fetch block info
         match sui::fetch::block::fetch_block_info(&app_instance, req.block_number).await {
             Ok(Some(block_info)) => {
                 info!("✅ GetBlock successful for block {}", req.block_number);
-                
+
                 // Commitments are already Vec<u8> from the fetch function
                 let block = Block {
                     id: format!("block_{}", req.block_number), // Generate ID from block number
@@ -3205,7 +3485,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     state_calculated_at: block_info.state_calculated_at,
                     proved_at: block_info.proved_at,
                 };
-                
+
                 Ok(Response::new(GetBlockResponse {
                     success: true,
                     message: format!("Block {} retrieved successfully", req.block_number),
@@ -3253,7 +3533,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         {
             Some(job) => job,
             None => {
-                warn!("GetBlockSettlement request for unknown job_id: {}", req.job_id);
+                warn!(
+                    "GetBlockSettlement request for unknown job_id: {}",
+                    req.job_id
+                );
                 return Ok(Response::new(GetBlockSettlementResponse {
                     success: false,
                     message: format!("Job not found: {}", req.job_id),
@@ -3274,26 +3557,31 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             let response_settlement = BlockSettlement {
                                 block_number: block_settlement.block_number,
                                 settlement_tx_hash: block_settlement.settlement_tx_hash.clone(),
-                                settlement_tx_included_in_block: block_settlement.settlement_tx_included_in_block,
+                                settlement_tx_included_in_block: block_settlement
+                                    .settlement_tx_included_in_block,
                                 sent_to_settlement_at: block_settlement.sent_to_settlement_at,
                                 settled_at: block_settlement.settled_at,
                             };
-                            
+
                             Ok(Response::new(GetBlockSettlementResponse {
                                 success: true,
-                                message: format!("Block settlement {} for chain {} retrieved successfully", req.block_number, req.chain),
+                                message: format!(
+                                    "Block settlement {} for chain {} retrieved successfully",
+                                    req.block_number, req.chain
+                                ),
                                 block_settlement: Some(response_settlement),
                                 chain: req.chain.clone(),
                             }))
                         }
-                        Ok(None) => {
-                            Ok(Response::new(GetBlockSettlementResponse {
-                                success: false,
-                                message: format!("Block settlement {} not found for chain {}", req.block_number, req.chain),
-                                block_settlement: None,
-                                chain: req.chain.clone(),
-                            }))
-                        }
+                        Ok(None) => Ok(Response::new(GetBlockSettlementResponse {
+                            success: false,
+                            message: format!(
+                                "Block settlement {} not found for chain {}",
+                                req.block_number, req.chain
+                            ),
+                            block_settlement: None,
+                            chain: req.chain.clone(),
+                        })),
                         Err(e) => {
                             error!("Failed to fetch block settlement: {}", e);
                             Ok(Response::new(GetBlockSettlementResponse {
@@ -3342,7 +3630,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // In the future, this would update the settlement status on the blockchain
         Ok(Response::new(UpdateBlockSettlementResponse {
             success: true,
-            message: format!("Block settlement update for block {} on chain {} acknowledged", req.block_number, req.chain),
+            message: format!(
+                "Block settlement update for block {} on chain {} acknowledged",
+                req.block_number, req.chain
+            ),
             tx_hash: String::new(), // Placeholder for now
         }))
     }
