@@ -196,7 +196,7 @@ pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 
 /// Number of blocks to store as a quilt in Walrus for proof data availability.
 /// When block_number % this value == 0, the last N block proofs are stored as a quilt.
-pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 10;
+pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 20;
 
 // =============================================================================
 // Testing and CLI

@@ -4,7 +4,7 @@ use crate::proof::analyze_proof_completion;
 use crate::proofs_storage::{ProofStorage, ProofMetadata};
 use crate::settlement::fetch_pending_job_from_instances;
 use crate::state::SharedState;
-use sui::fetch::{block::fetch_block_info, AppInstance};
+use sui::fetch::block::fetch_block_info;
 use monitoring::coordinator_metrics;
 use std::path::Path;
 use sui::start_job_tx;
@@ -2743,14 +2743,22 @@ impl CoordinatorService for CoordinatorServiceImpl {
             warn!("Block {} is a quilt checkpoint, fetching last {} blocks for quilt storage", 
                 req.block_number, WALRUS_QUILT_BLOCK_INTERVAL);
             
-            // Parse app_instance to fetch blocks
-            match serde_json::from_str::<AppInstance>(&agent_job.app_instance) {
+            // Fetch app_instance to get block data
+            match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
                 Ok(app_instance) => {
                     // Fetch the last N blocks including current
                     let start_block = req.block_number.saturating_sub(WALRUS_QUILT_BLOCK_INTERVAL - 1);
                     let mut quilt_data = Vec::new();
                     
                     for block_num in start_block..=req.block_number {
+                        // Special handling for current block - use the proof we just stored
+                        if block_num == req.block_number {
+                            // Add the current block's proof that we just stored
+                            quilt_data.push((block_num.to_string(), req.proof_data_availability.clone()));
+                            info!("Added current block {} proof to quilt", block_num);
+                            continue;
+                        }
+                        
                         match fetch_block_info(&app_instance, block_num).await {
                             Ok(Some(block)) => {
                                 if let Some(proof_da) = block.proof_data_availability {
@@ -2797,11 +2805,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         warn!("Creating quilt with {} block proofs for blocks {}-{}", 
                             quilt_data.len(), start_block, req.block_number);
                         
-                        // Use ProofStorage to store the quilt (with automatic Walrus->S3 fallback)
-                        match self.proof_storage.store_quilt("cache", "public", quilt_data, Some(metadata.clone())).await {
+                        // Determine Walrus network based on SUI chain
+                        let walrus_network = if std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()) == "mainnet" {
+                            "mainnet"
+                        } else {
+                            "testnet"
+                        };
+                        
+                        // Try to store quilt to Walrus first, fallback to cache if it fails
+                        let result = match self.proof_storage.store_quilt("walrus", walrus_network, quilt_data.clone(), Some(metadata.clone())).await {
                             Ok(result) => {
-                                // Log the quilt storage details
-                                warn!("✅ Quilt stored successfully:");
+                                // Success - quilt stored to Walrus
+                                warn!("✅ Quilt stored to Walrus successfully:");
                                 warn!("  Descriptor: {}", result.descriptor.to_string());
                                 warn!("  Blob ID: {}", result.blob_id);
                                 if let Some(tx) = &result.tx_digest {
@@ -2809,13 +2824,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
                                 }
                                 if !result.quilt_patches.is_empty() {
                                     warn!("  Quilt patches: {}", result.quilt_patches.len());
+                                    for (i, patch) in result.quilt_patches.iter().enumerate() {
+                                        if i < 5 {  // Show first 5 patches
+                                            warn!("    - {}: {}", patch.identifier, patch.quilt_patch_id);
+                                        }
+                                    }
+                                    if result.quilt_patches.len() > 5 {
+                                        warn!("    ... and {} more", result.quilt_patches.len() - 5);
+                                    }
                                 }
-                                Some(result.descriptor.to_string())
+                                Ok(result)
                             }
-                            Err(e) => {
-                                error!("Failed to store quilt: {}", e);
-                                None
+                            Err(walrus_err) => {
+                                // Walrus failed, try cache as fallback
+                                warn!("Failed to store quilt to Walrus: {}, trying cache as fallback", walrus_err);
+                                
+                                match self.proof_storage.store_quilt("cache", "public", quilt_data, Some(metadata.clone())).await {
+                                    Ok(result) => {
+                                        warn!("✅ Quilt stored to cache successfully (fallback):");
+                                        warn!("  Descriptor: {}", result.descriptor.to_string());
+                                        warn!("  Blob ID: {}", result.blob_id);
+                                        Ok(result)
+                                    }
+                                    Err(cache_err) => {
+                                        error!("Failed to store quilt to both Walrus and cache: walrus_err={}, cache_err={}", walrus_err, cache_err);
+                                        Err(cache_err)
+                                    }
+                                }
                             }
+                        };
+                        
+                        match result {
+                            Ok(res) => Some(res.descriptor.to_string()),
+                            Err(_) => None
                         }
                     } else {
                         warn!("No valid proof data found for quilt creation");
