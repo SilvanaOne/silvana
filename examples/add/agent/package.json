@@ -19,6 +19,7 @@
     "rollup": "npm run test test/rollup.test.ts",
     "commitment": "npm run test test/commitment.test.ts",
     "transition": "npm run test test/transition.test.ts",
+    "graphql": "npm run test test/graphql.test.ts",
     "deploy": "MINA_CHAIN=mina:devnet npm run test test/deploy.test.ts",
     "send": "npm run test test/send.test.ts",
     "compile": "npm run test test/compile.test.ts",
