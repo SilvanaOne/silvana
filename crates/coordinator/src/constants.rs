@@ -34,7 +34,7 @@ pub const JOB_START_JITTER_MAX_MS: u64 = 10000; // 10 seconds
 /// - 0 containers: 0ms delay
 /// - 5 containers: 2500ms delay  
 /// - 10 containers: 5000ms delay
-pub const JOB_ACQUISITION_DELAY_PER_CONTAINER_MS: u64 = 500; // 500ms per container
+pub const JOB_ACQUISITION_DELAY_PER_CONTAINER_MS: u64 = 1000; // 1000ms per container
 
 /// Maximum delay for job acquisition regardless of container count (in milliseconds).
 /// This caps the delay to prevent excessive waiting even with many containers.
@@ -208,12 +208,12 @@ pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 
 /// Number of blocks to store as a quilt in Walrus for proof data availability.
 /// When block_number % this value == 0, the last N block proofs are stored as a quilt.
-pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 20;
+pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 10;
 
 /// Test mode for Walrus quilts - when true, adds 580 test entries to simulate 600 proofs
 /// This is used for testing Walrus's ability to handle large quilts with many pieces
 /// (Walrus has a maximum of 600 pieces per quilt)
-pub const WALRUS_TEST: bool = true;
+pub const WALRUS_TEST: bool = false;
 
 // =============================================================================
 // Testing and CLI
