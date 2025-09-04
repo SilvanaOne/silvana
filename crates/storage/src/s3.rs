@@ -55,6 +55,10 @@ impl S3Client {
     /// * `data` - The data to store
     /// * `metadata` - Optional metadata as key-value pairs
     /// * `expires_at` - Unix timestamp in milliseconds for expiration
+    /// 
+    /// # Note
+    /// S3 has a limit of 10 tags per object. This method ensures we don't exceed that limit
+    /// by prioritizing tags and truncating if necessary.
     pub async fn write(
         &self,
         key: &str,
@@ -67,8 +71,10 @@ impl S3Client {
             self.bucket_name, key
         );
 
+        const MAX_S3_TAGS: usize = 10;
         let mut tags = Vec::new();
 
+        // Always add expires_at as the first tag (high priority)
         tags.push(
             Tag::builder()
                 .key("expires_at")
@@ -77,7 +83,17 @@ impl S3Client {
         );
 
         if let Some(metadata) = metadata {
-            for (key, value) in metadata.iter() {
+            // We can add up to (MAX_S3_TAGS - 1) more tags since expires_at takes one slot
+            let max_additional_tags = MAX_S3_TAGS - 1;
+            
+            if metadata.len() > max_additional_tags {
+                warn!(
+                    "S3 tag limit exceeded: {} tags provided, but S3 allows max {}. Truncating to {} metadata tags.",
+                    metadata.len() + 1, MAX_S3_TAGS, max_additional_tags
+                );
+            }
+            
+            for (key, value) in metadata.iter().take(max_additional_tags) {
                 // S3 tag limits: key max 128 chars, value max 256 chars
                 // Also, S3 tags can only contain: letters, numbers, spaces, and + - = . _ : / @
                 

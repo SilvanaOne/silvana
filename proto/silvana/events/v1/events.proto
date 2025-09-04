@@ -253,20 +253,36 @@ message SearchCoordinatorMessageEventsResponse {
 }
 
 // Proof cache messages
+
+// Quilt piece for bundling multiple proofs
+message QuiltPiece {
+  string identifier = 1;
+  string data = 2;
+}
+
 message SubmitProofRequest {
-  string proof_data = 1;
+  oneof data {
+    string proof_data = 1;           // Single proof data
+    QuiltData quilt_data = 4;        // Multiple proofs as a quilt
+  }
   map<string, string> metadata = 2;
   optional uint64 expires_at = 3;  // Unix timestamp in milliseconds
+}
+
+message QuiltData {
+  repeated QuiltPiece pieces = 1;
 }
 
 message SubmitProofResponse {
   bool success = 1;
   string message = 2;
-  string proof_hash = 3;  // The hash of the submitted proof
+  string proof_hash = 3;  // The hash of the submitted proof or quilt
+  repeated string quilt_piece_ids = 4;  // Optional: IDs of individual quilt pieces
 }
 
 message GetProofRequest {
   string proof_hash = 1;
+  optional string block_number = 2;  // Optional: for quilts, get specific block's proof
 }
 
 message GetProofResponse {
@@ -274,6 +290,8 @@ message GetProofResponse {
   string message = 2;
   string proof_data = 3;
   map<string, string> metadata = 4;
+  bool is_quilt = 5;  // Indicates if this is a quilt
+  repeated QuiltPiece quilt_pieces = 6;  // If is_quilt=true, contains the pieces
 }
 
 // Secrets storage messages

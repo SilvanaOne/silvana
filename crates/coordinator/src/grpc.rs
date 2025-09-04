@@ -1,8 +1,10 @@
 use crate::agent::AgentJob;
+use crate::constants::WALRUS_QUILT_BLOCK_INTERVAL;
 use crate::proof::analyze_proof_completion;
 use crate::proofs_storage::{ProofStorage, ProofMetadata};
 use crate::settlement::fetch_pending_job_from_instances;
 use crate::state::SharedState;
+use sui::fetch::{block::fetch_block_info, AppInstance};
 use monitoring::coordinator_metrics;
 use std::path::Path;
 use sui::start_job_tx;
@@ -2600,56 +2602,35 @@ impl CoordinatorService for CoordinatorServiceImpl {
         metadata.data.insert("sui_chain".to_string(), 
             std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
         
-        // Try to save to Walrus first
-        debug!("Saving block state to Walrus DA for block {}", req.block_number);
+        // Save to cache:public instead of walrus:testnet
+        debug!("Saving block state to cache DA for block {}", req.block_number);
         let storage_start = std::time::Instant::now();
         
         let descriptor = match self.proof_storage.store_proof(
-            "walrus",
-            "testnet",
+            "cache",
+            "public",
             &req.state_data_availability,
-            Some(metadata.clone())
+            Some(metadata)
         ).await {
             Ok(desc) => {
                 let storage_duration = storage_start.elapsed();
                 info!(
-                    "Successfully saved block state to Walrus with descriptor: {} (took {}ms)",
+                    "Successfully saved block state to cache with descriptor: {} (took {}ms)",
                     desc.to_string(),
                     storage_duration.as_millis()
                 );
                 desc
             }
-            Err(walrus_err) => {
-                // Log the Walrus error and try cache as fallback
-                error!("Failed to save block state to Walrus: {}, falling back to cache storage", walrus_err);
-                
-                match self.proof_storage.store_proof(
-                    "cache",
-                    "public",
-                    &req.state_data_availability,
-                    Some(metadata)
-                ).await {
-                    Ok(desc) => {
-                        let storage_duration = storage_start.elapsed();
-                        warn!(
-                            "Successfully saved block state to cache (fallback) with descriptor: {} (took {}ms)",
-                            desc.to_string(),
-                            storage_duration.as_millis()
-                        );
-                        desc
-                    }
-                    Err(cache_err) => {
-                        error!(
-                            "Failed to save block state to both Walrus and cache: walrus_err={}, cache_err={}",
-                            walrus_err, cache_err
-                        );
-                        return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
-                            success: false,
-                            message: format!("Failed to save state to data availability layer: {}", cache_err),
-                            tx_hash: String::new(),
-                        }));
-                    }
-                }
+            Err(cache_err) => {
+                error!(
+                    "Failed to save block state to cache: {}",
+                    cache_err
+                );
+                return Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Failed to save state to data availability layer: {}", cache_err),
+                    tx_hash: String::new(),
+                }));
             }
         };
 
@@ -2725,76 +2706,157 @@ impl CoordinatorService for CoordinatorServiceImpl {
         metadata.data.insert("sui_chain".to_string(), 
             std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()));
         
-        // Try to save to Walrus first
-        debug!("Saving block proof to Walrus DA for block {}", req.block_number);
+        // Save current proof to cache:public
+        debug!("Saving block proof to cache DA for block {}", req.block_number);
         let storage_start = std::time::Instant::now();
         
         let descriptor = match self.proof_storage.store_proof(
-            "walrus",
-            "testnet",
+            "cache",
+            "public",
             &req.proof_data_availability,
             Some(metadata.clone())
         ).await {
             Ok(desc) => {
                 let storage_duration = storage_start.elapsed();
                 info!(
-                    "Successfully saved block proof to Walrus with descriptor: {} (took {}ms)",
+                    "Successfully saved block proof to cache with descriptor: {} (took {}ms)",
                     desc.to_string(),
                     storage_duration.as_millis()
                 );
                 desc
             }
-            Err(walrus_err) => {
-                // Log the Walrus error and try cache as fallback
-                error!("Failed to save block proof to Walrus: {}, falling back to cache storage", walrus_err);
-                
-                match self.proof_storage.store_proof(
-                    "cache",
-                    "public",
-                    &req.proof_data_availability,
-                    Some(metadata)
-                ).await {
-                    Ok(desc) => {
-                        let storage_duration = storage_start.elapsed();
-                        warn!(
-                            "Successfully saved block proof to cache (fallback) with descriptor: {} (took {}ms)",
-                            desc.to_string(),
-                            storage_duration.as_millis()
-                        );
-                        desc
-                    }
-                    Err(cache_err) => {
-                        error!(
-                            "Failed to save block proof to both Walrus and cache: walrus_err={}, cache_err={}",
-                            walrus_err, cache_err
-                        );
-                        return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
-                            success: false,
-                            message: format!("Failed to save proof to data availability layer: {}", cache_err),
-                            tx_hash: String::new(),
-                        }));
-                    }
-                }
+            Err(cache_err) => {
+                error!(
+                    "Failed to save block proof to cache: {}",
+                    cache_err
+                );
+                return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                    success: false,
+                    message: format!("Failed to save proof to data availability layer: {}", cache_err),
+                    tx_hash: String::new(),
+                }));
             }
         };
 
+        // Check if we should create a quilt for every N blocks
+        let quilt_descriptor_str = if req.block_number % WALRUS_QUILT_BLOCK_INTERVAL == 0 && req.block_number > 0 {
+            warn!("Block {} is a quilt checkpoint, fetching last {} blocks for quilt storage", 
+                req.block_number, WALRUS_QUILT_BLOCK_INTERVAL);
+            
+            // Parse app_instance to fetch blocks
+            match serde_json::from_str::<AppInstance>(&agent_job.app_instance) {
+                Ok(app_instance) => {
+                    // Fetch the last N blocks including current
+                    let start_block = req.block_number.saturating_sub(WALRUS_QUILT_BLOCK_INTERVAL - 1);
+                    let mut quilt_data = Vec::new();
+                    
+                    for block_num in start_block..=req.block_number {
+                        match fetch_block_info(&app_instance, block_num).await {
+                            Ok(Some(block)) => {
+                                if let Some(proof_da) = block.proof_data_availability {
+                                    if !proof_da.is_empty() {
+                                        // For cache descriptors, we need to fetch the actual proof data
+                                        if proof_da.starts_with("cache:") {
+                                            match crate::proofs_storage::ProofDescriptor::parse(&proof_da) {
+                                                Ok(desc) => {
+                                                    match self.proof_storage.get_proof(&desc.to_string()).await {
+                                                        Ok((proof_data, _)) => {
+                                                            quilt_data.push((block_num.to_string(), proof_data));
+                                                            info!("Added block {} proof to quilt", block_num);
+                                                        }
+                                                        Err(e) => {
+                                                            warn!("Failed to fetch proof for block {}: {}", block_num, e);
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    warn!("Failed to parse descriptor for block {}: {}", block_num, e);
+                                                }
+                                            }
+                                        } else {
+                                            // For other storage types, store the descriptor itself
+                                            quilt_data.push((block_num.to_string(), proof_da));
+                                            info!("Added block {} descriptor to quilt", block_num);
+                                        }
+                                    }
+                                } else {
+                                    warn!("Block {} has no proof_data_availability", block_num);
+                                }
+                            }
+                            Ok(None) => {
+                                warn!("Block {} not found", block_num);
+                            }
+                            Err(e) => {
+                                warn!("Failed to fetch block {}: {}", block_num, e);
+                            }
+                        }
+                    }
+                    
+                    // Store the quilt if we have data
+                    if !quilt_data.is_empty() {
+                        warn!("Creating quilt with {} block proofs for blocks {}-{}", 
+                            quilt_data.len(), start_block, req.block_number);
+                        
+                        // Use ProofStorage to store the quilt (with automatic Walrus->S3 fallback)
+                        match self.proof_storage.store_quilt("cache", "public", quilt_data, Some(metadata.clone())).await {
+                            Ok(result) => {
+                                // Log the quilt storage details
+                                warn!("✅ Quilt stored successfully:");
+                                warn!("  Descriptor: {}", result.descriptor.to_string());
+                                warn!("  Blob ID: {}", result.blob_id);
+                                if let Some(tx) = &result.tx_digest {
+                                    warn!("  Tx Digest: {}", tx);
+                                }
+                                if !result.quilt_patches.is_empty() {
+                                    warn!("  Quilt patches: {}", result.quilt_patches.len());
+                                }
+                                Some(result.descriptor.to_string())
+                            }
+                            Err(e) => {
+                                error!("Failed to store quilt: {}", e);
+                                None
+                            }
+                        }
+                    } else {
+                        warn!("No valid proof data found for quilt creation");
+                        None
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to parse app_instance: {}", e);
+                    warn!("Continuing without quilt storage due to parse error");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Update block proof data availability with the descriptor string
+        // Use quilt descriptor for blocks where block_number % 10 == 0
         let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-        let descriptor_str = descriptor.to_string();
+        let final_descriptor_str = if let Some(quilt_desc) = quilt_descriptor_str {
+            // For quilt checkpoint blocks, use the quilt descriptor
+            warn!("Using quilt descriptor for block {}: {}", req.block_number, quilt_desc);
+            quilt_desc
+        } else {
+            descriptor.to_string()
+        };
+        
         match sui_interface
             .update_block_proof_data_availability(
                 &agent_job.app_instance,
                 req.block_number,
-                descriptor_str.clone(),
+                final_descriptor_str.clone(),
             )
             .await
         {
             Ok(tx_hash) => {
                 info!("✅ UpdateBlockProofDataAvailability successful, block: {}, descriptor: {}, tx: {}", 
-                    req.block_number, descriptor_str, tx_hash);
+                    req.block_number, final_descriptor_str, tx_hash);
                 Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: true,
-                    message: format!("Block proof DA updated successfully with descriptor: {}", descriptor_str),
+                    message: format!("Block proof DA updated successfully with descriptor: {}", final_descriptor_str),
                     tx_hash,
                 }))
             }

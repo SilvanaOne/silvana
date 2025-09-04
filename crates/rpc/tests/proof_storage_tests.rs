@@ -77,7 +77,7 @@ async fn test_submit_and_get_proof() {
     let expires_at = get_current_timestamp_ms() + (24 * 60 * 60 * 1000); // 24 hours from now
     
     let submit_request = Request::new(SubmitProofRequest {
-        proof_data: TEST_PROOF_DATA.to_string(),
+        data: Some(proto::submit_proof_request::Data::ProofData(TEST_PROOF_DATA.to_string())),
         metadata: metadata.clone(),
         expires_at: Some(expires_at),
     });
@@ -105,6 +105,7 @@ async fn test_submit_and_get_proof() {
     
     let get_request = Request::new(GetProofRequest {
         proof_hash: proof_hash.clone(),
+        block_number: None,
     });
     
     match client.get_proof(get_request).await {
@@ -160,7 +161,7 @@ async fn test_submit_and_get_proof() {
     println!("\n📝 Test 3: Submit proof without metadata");
     
     let submit_request = Request::new(SubmitProofRequest {
-        proof_data: "minimal_proof_data".to_string(),
+        data: Some(proto::submit_proof_request::Data::ProofData("minimal_proof_data".to_string())),
         metadata: HashMap::new(),
         expires_at: None, // Use default expiration
     });
@@ -182,6 +183,7 @@ async fn test_submit_and_get_proof() {
     
     let get_request = Request::new(GetProofRequest {
         proof_hash: minimal_proof_hash,
+        block_number: None,
     });
     
     match client.get_proof(get_request).await {
@@ -206,6 +208,7 @@ async fn test_submit_and_get_proof() {
     
     let get_request = Request::new(GetProofRequest {
         proof_hash: "non_existent_hash_12345".to_string(),
+        block_number: None,
     });
     
     match client.get_proof(get_request).await {
@@ -266,7 +269,7 @@ async fn test_proof_storage_concurrent() {
             metadata.insert("test".to_string(), "concurrent".to_string());
             
             let submit_request = Request::new(SubmitProofRequest {
-                proof_data: proof_data.clone(),
+                data: Some(proto::submit_proof_request::Data::ProofData(proof_data.clone())),
                 metadata: metadata.clone(),
                 expires_at: None,
             });
@@ -320,6 +323,7 @@ async fn test_proof_storage_concurrent() {
         let handle = tokio::spawn(async move {
             let get_request = Request::new(GetProofRequest {
                 proof_hash: proof_hash.clone(),
+                block_number: None,
             });
             
             match client_clone.get_proof(get_request).await {
@@ -411,7 +415,7 @@ async fn test_proof_storage_large_data() {
     metadata.insert("type".to_string(), "large_test".to_string());
     
     let submit_request = Request::new(SubmitProofRequest {
-        proof_data: large_proof_data.clone(),
+        data: Some(proto::submit_proof_request::Data::ProofData(large_proof_data.clone())),
         metadata: metadata.clone(),
         expires_at: None,
     });
@@ -437,6 +441,7 @@ async fn test_proof_storage_large_data() {
     
     let get_request = Request::new(GetProofRequest {
         proof_hash: proof_hash.clone(),
+        block_number: None,
     });
     
     match client.get_proof(get_request).await {
@@ -514,7 +519,7 @@ async fn test_proof_with_special_characters() {
     metadata.insert("test_note".to_string(), "proof_with_special_chars_in_data".to_string());
     
     let submit_request = Request::new(SubmitProofRequest {
-        proof_data: special_proof_data.to_string(),
+        data: Some(proto::submit_proof_request::Data::ProofData(special_proof_data.to_string())),
         metadata: metadata.clone(),
         expires_at: None,
     });
@@ -540,6 +545,7 @@ async fn test_proof_with_special_characters() {
     
     let get_request = Request::new(GetProofRequest {
         proof_hash,
+        block_number: None,
     });
     
     match client.get_proof(get_request).await {

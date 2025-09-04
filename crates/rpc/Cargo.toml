@@ -45,6 +45,7 @@ chrono.workspace = true
 dotenvy.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
+serde_json.workspace = true
 
 # NATS (placeholder for future implementation)
 async-nats.workspace = true

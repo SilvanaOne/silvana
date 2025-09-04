@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
+use serde_json;
 use tracing::{debug, error, warn};
 
 use crate::database::EventDatabase;
@@ -571,11 +572,6 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
         let start_time = Instant::now();
         let req = request.into_inner();
 
-        debug!(
-            "Received submit proof request with {} bytes of data",
-            req.proof_data.len()
-        );
-
         let proofs_cache = match &self.proofs_cache {
             Some(cache) => cache,
             None => {
@@ -594,11 +590,36 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
         // Use provided expiration or None for default
         let expires_at = req.expires_at;
 
-        match proofs_cache
-            .submit_proof(req.proof_data, metadata, expires_at)
-            .await
-        {
-            Ok(proof_hash) => {
+        // Handle both single proof and quilt submissions
+        let result = match req.data {
+            Some(proto::submit_proof_request::Data::ProofData(proof_data)) => {
+                debug!("Submitting single proof with {} bytes of data", proof_data.len());
+                
+                proofs_cache
+                    .submit_proof(proof_data, metadata, expires_at)
+                    .await
+                    .map(|hash| (hash, vec![]))
+            }
+            Some(proto::submit_proof_request::Data::QuiltData(quilt_data)) => {
+                let pieces: Vec<(String, String)> = quilt_data
+                    .pieces
+                    .into_iter()
+                    .map(|piece| (piece.identifier, piece.data))
+                    .collect();
+                
+                debug!("Submitting quilt with {} pieces", pieces.len());
+                
+                proofs_cache
+                    .submit_quilt(pieces, metadata, expires_at)
+                    .await
+            }
+            None => {
+                return Err(Status::invalid_argument("No proof data provided"));
+            }
+        };
+
+        match result {
+            Ok((proof_hash, quilt_piece_ids)) => {
                 record_grpc_request(
                     "submit_proof",
                     "success",
@@ -606,12 +627,17 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                 );
                 Ok(Response::new(SubmitProofResponse {
                     success: true,
-                    message: "Proof submitted successfully".to_string(),
+                    message: if quilt_piece_ids.is_empty() {
+                        "Proof submitted successfully".to_string()
+                    } else {
+                        format!("Quilt submitted successfully with {} pieces", quilt_piece_ids.len())
+                    },
                     proof_hash,
+                    quilt_piece_ids,
                 }))
             }
             Err(e) => {
-                error!("Failed to submit proof to S3: {:?}", e);
+                error!("Failed to submit proof to cache: {:?}", e);
                 record_grpc_request("submit_proof", "error", start_time.elapsed().as_secs_f64());
                 // Return more detailed error message
                 Err(Status::internal(format!("Failed to submit proof: {}", e)))
@@ -640,14 +666,76 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
             return Err(Status::invalid_argument("Proof hash is required"));
         }
 
-        match proofs_cache.read_proof(&req.proof_hash).await {
+        // First try to read as a regular proof
+        let result = match proofs_cache.read_proof(&req.proof_hash).await {
+            Ok(proof_data) => {
+                // Check if this is a quilt
+                let is_quilt = proof_data.metadata.get("quilts")
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                
+                if is_quilt && req.block_number.is_some() {
+                    // If it's a quilt and a specific block is requested, read the quilt
+                    match proofs_cache.read_quilt(&req.proof_hash, req.block_number.as_deref()).await {
+                        Ok(quilt_data) => Ok(quilt_data),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    // Return the proof data (which might be the full quilt JSON)
+                    Ok(proof_data)
+                }
+            }
+            Err(e) => {
+                // If regular proof read fails and block_number is provided, try reading as quilt
+                if req.block_number.is_some() {
+                    proofs_cache.read_quilt(&req.proof_hash, req.block_number.as_deref()).await
+                } else {
+                    Err(e)
+                }
+            }
+        };
+
+        match result {
             Ok(proof_data) => {
                 record_grpc_request("get_proof", "success", start_time.elapsed().as_secs_f64());
+                
+                // Check if this is a quilt to build proper response
+                let is_quilt = proof_data.metadata.get("quilts")
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                
+                // Parse quilt pieces if this is a quilt
+                let quilt_pieces = if is_quilt && req.block_number.is_none() {
+                    // Parse the full quilt data to extract pieces
+                    if let Ok(quilt_data) = serde_json::from_str::<storage::proofs_cache::QuiltData>(&proof_data.data) {
+                        quilt_data.pieces.into_iter()
+                            .map(|p| proto::QuiltPiece {
+                                identifier: p.identifier,
+                                data: p.data,
+                            })
+                            .collect()
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+                
                 Ok(Response::new(GetProofResponse {
                     success: true,
-                    message: "Proof retrieved successfully".to_string(),
+                    message: if is_quilt {
+                        if req.block_number.is_some() {
+                            format!("Quilt piece retrieved successfully")
+                        } else {
+                            format!("Quilt retrieved successfully")
+                        }
+                    } else {
+                        "Proof retrieved successfully".to_string()
+                    },
                     proof_data: proof_data.data,
                     metadata: proof_data.metadata,
+                    is_quilt,
+                    quilt_pieces,
                 }))
             }
             Err(e) => {
@@ -664,6 +752,8 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                         message: "Proof not found".to_string(),
                         proof_data: String::new(),
                         metadata: std::collections::HashMap::new(),
+                        is_quilt: false,
+                        quilt_pieces: vec![],
                     }))
                 } else {
                     error!("Failed to retrieve proof: {}", e);

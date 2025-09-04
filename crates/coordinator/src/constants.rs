@@ -191,6 +191,14 @@ pub const JOB_AVAILABILITY_CHECK_DELAY_SECS: u64 = 1;
 pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 
 // =============================================================================
+// Data Availability Configuration
+// =============================================================================
+
+/// Number of blocks to store as a quilt in Walrus for proof data availability.
+/// When block_number % this value == 0, the last N block proofs are stored as a quilt.
+pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 10;
+
+// =============================================================================
 // Testing and CLI
 // =============================================================================
 
