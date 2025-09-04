@@ -41,8 +41,8 @@ services:
         docker buildx inspect builder >/dev/null 2>&1 || docker buildx create --name builder &&
         echo "${DOCKER_PASSWORD}" | docker login --username ${DOCKER_USERNAME} --password-stdin &&
         docker buildx use builder &&
-        #docker buildx build --no-cache --platform linux/amd64,linux/arm64 --push -t ${DOCKER_USERNAME}/${IMAGE_NAME}:latest . &&
-        docker buildx build --no-cache --platform linux/arm64 --push -t ${DOCKER_USERNAME}/${IMAGE_NAME}:latest . &&
+        #docker buildx build --no-cache --platform linux/amd64,linux/arm64 --push -t ${DOCKER_USERNAME}/${IMAGE_NAME}:latest --network=host . &&
+        docker buildx build --no-cache --platform linux/arm64 --push -t ${DOCKER_USERNAME}/${IMAGE_NAME}:latest --network=host . &&
         echo 'Image pushed to Docker Hub successfully' &&
         echo 'Note: Please ensure the repository is set to public in Docker Hub web interface if needed'
 
