@@ -38,6 +38,7 @@ public struct AppInstance has key, store {
     previous_block_last_sequence: u64,
     previous_block_actions_state: Element<Scalar>,
     last_proved_block_number: u64,
+    last_settled_block_number: u64,
     isPaused: bool,
     created_at: u64,
     updated_at: u64,
@@ -92,6 +93,12 @@ public struct MetadataAddedEvent has copy, drop {
     app_instance_address: address,
     key: String,
     value: String,
+}
+
+public struct BlockDeletedEvent has copy, drop {
+    app_instance_address: address,
+    block_number: u64,
+    reason: String,
 }
 
 public struct APP_INSTANCE has drop {}
@@ -193,6 +200,7 @@ public fun create_app_instance(
         previous_block_last_sequence: 0u64,
         previous_block_actions_state: scalar_zero(),
         last_proved_block_number: 0u64,
+        last_settled_block_number: 0u64,
         isPaused: false,
         created_at: timestamp,
         updated_at: timestamp,
@@ -566,7 +574,8 @@ const ESettlementChainNotFound: vector<u8> = b"Settlement chain not found";
 const ESettlementVectorLengthMismatch: vector<u8> =
     b"Settlement chains and addresses vectors must have the same length";
 #[error]
-const ESettlementJobAlreadyExists: vector<u8> = b"Settlement job already exists for this chain";
+const ESettlementJobAlreadyExists: vector<u8> =
+    b"Settlement job already exists for this chain";
 
 public fun update_block_settlement_tx_hash(
     app_instance: &mut AppInstance,
@@ -602,6 +611,73 @@ public fun update_block_settlement_tx_hash(
         option::none(),
         ctx,
     );
+}
+
+// Helper function to update AppInstance's last_settled_block_number
+// and clean up old blocks that have been settled across all chains
+fun update_app_last_settled_block_number(app_instance: &mut AppInstance) {
+    // Find the minimum last_settled_block_number across all settlements
+    let settlements_size = vec_map::size(&app_instance.settlements);
+    if (settlements_size == 0) {
+        return
+    };
+
+    // Initialize with the first settlement's last_settled_block_number
+    let (_, first_settlement) = vec_map::get_entry_by_idx(
+        &app_instance.settlements,
+        0,
+    );
+    let mut min_settled_block = settlement::get_last_settled_block_number(
+        first_settlement,
+    );
+
+    // Find the minimum across all settlements
+    let mut idx = 1;
+    while (idx < settlements_size) {
+        let (_, settlement) = vec_map::get_entry_by_idx(
+            &app_instance.settlements,
+            idx,
+        );
+        let last_settled = settlement::get_last_settled_block_number(
+            settlement,
+        );
+        if (last_settled < min_settled_block) {
+            min_settled_block = last_settled;
+        };
+        idx = idx + 1;
+    };
+
+    // Store the previous last_settled_block_number before updating
+    let previous_last_settled = app_instance.last_settled_block_number;
+
+    // Update AppInstance's last_settled_block_number
+    app_instance.last_settled_block_number = min_settled_block;
+
+    // Clean up blocks that are below the minimum settled block number
+    // We keep block 0 (genesis) and blocks from min_settled_block onwards
+    // Start from the previous last_settled_block_number + 1 to avoid unnecessary iterations
+    let start_block = if (previous_last_settled == 0) { 1 } else {
+        previous_last_settled + 1
+    };
+    let mut block_to_remove = start_block;
+    while (block_to_remove < min_settled_block) {
+        if (object_table::contains(&app_instance.blocks, block_to_remove)) {
+            let block = object_table::remove(
+                &mut app_instance.blocks,
+                block_to_remove,
+            );
+            // Delete the Block object using the delete function from block module
+            block::delete_block(block);
+
+            // Emit event for block deletion
+            event::emit(BlockDeletedEvent {
+                app_instance_address: app_instance.id.to_address(),
+                block_number: block_to_remove,
+                reason: b"Block settled on all chains".to_string(),
+            });
+        };
+        block_to_remove = block_to_remove + 1;
+    };
 }
 
 // #[error]
@@ -696,16 +772,24 @@ public fun update_block_settlement_tx_included_in_block(
         };
     };
 
+    // Update the AppInstance's last_settled_block_number to be the minimum across all chains
+    update_app_last_settled_block_number(app_instance);
+
     // Check if ALL chains have settled this block before deleting ProofCalculation and purging
     // We need to ensure all chains have last_settled_block_number >= block_number
     let mut all_chains_settled = true;
     let mut min_settled_block = block_number;
-    
+
     let settlements_size = vec_map::size(&app_instance.settlements);
     let mut idx = 0;
     while (idx < settlements_size) {
-        let (_, other_settlement) = vec_map::get_entry_by_idx(&app_instance.settlements, idx);
-        let other_last_settled = settlement::get_last_settled_block_number(other_settlement);
+        let (_, other_settlement) = vec_map::get_entry_by_idx(
+            &app_instance.settlements,
+            idx,
+        );
+        let other_last_settled = settlement::get_last_settled_block_number(
+            other_settlement,
+        );
         if (other_last_settled < block_number) {
             all_chains_settled = false;
             // Track the minimum settled block across all chains
@@ -730,7 +814,7 @@ public fun update_block_settlement_tx_included_in_block(
             );
             prover::delete_proof_calculation(proof_calculation, clock);
         };
-        
+
         // Use the block's end_sequence for purging
         let block_to_purge = app_instance.blocks.borrow(block_number);
         let proved_sequence = block::get_end_sequence(block_to_purge);
@@ -1001,15 +1085,15 @@ public fun create_app_job(
             vec_map::contains(&app_instance.settlements, &chain),
             ESettlementChainNotFound,
         );
-        let settlement = vec_map::get_mut(&mut app_instance.settlements, &chain);
-        
+        let settlement = vec_map::get_mut(
+            &mut app_instance.settlements,
+            &chain,
+        );
+
         // Assert that there's no existing settlement job for this chain
         let existing_job = settlement::get_settlement_job(settlement);
-        assert!(
-            option::is_none(&existing_job),
-            ESettlementJobAlreadyExists,
-        );
-        
+        assert!(option::is_none(&existing_job), ESettlementJobAlreadyExists);
+
         settlement::set_settlement_job(settlement, option::some(job_id));
     };
 
@@ -1054,12 +1138,14 @@ public fun terminate_app_job(
         let chain = vector::borrow(&keys, i);
         let settlement = vec_map::get_mut(&mut app_instance.settlements, chain);
         let settlement_job_id = settlement::get_settlement_job(settlement);
-        if (option::is_some(&settlement_job_id) && *option::borrow(&settlement_job_id) == job_id) {
+        if (
+            option::is_some(&settlement_job_id) && *option::borrow(&settlement_job_id) == job_id
+        ) {
             settlement::set_settlement_job(settlement, option::none());
         };
         i = i + 1;
     };
-    
+
     jobs::terminate_job(&mut app_instance.jobs, job_id, clock)
 }
 

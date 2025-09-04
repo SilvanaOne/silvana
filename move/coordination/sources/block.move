@@ -179,3 +179,26 @@ public fun get_state_calculated_at(block: &Block): Option<u64> {
 public fun get_proved_at(block: &Block): Option<u64> {
     block.proved_at
 }
+
+// Delete function to clean up a Block object
+public fun delete_block(block: Block) {
+    let Block {
+        id,
+        name: _,
+        block_number: _,
+        start_sequence: _,
+        end_sequence: _,
+        actions_commitment: _,
+        state_commitment: _,
+        time_since_last_block: _,
+        number_of_transactions: _,
+        start_actions_commitment: _,
+        end_actions_commitment: _,
+        state_data_availability: _,
+        proof_data_availability: _,
+        created_at: _,
+        state_calculated_at: _,
+        proved_at: _,
+    } = block;
+    object::delete(id);
+}

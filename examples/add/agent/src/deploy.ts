@@ -11,12 +11,14 @@ import {
   initBlockchain,
   accountBalanceMina,
   sendTx,
+  CanonicalBlockchain,
 } from "@silvana-one/mina-utils";
 import { compile } from "./compile.js";
 
 const expectedTxStatus = "pending";
 
 export async function deployAddContract(): Promise<{
+  chain: CanonicalBlockchain;
   contractAddress: string;
   adminAddress: string;
   txHash: string;
@@ -26,8 +28,14 @@ export async function deployAddContract(): Promise<{
   console.time("AddContract deployment");
   console.log("🚀 Starting AddContract deployment...");
   // Get chain from environment
-  const chain = process.env.MINA_CHAIN as "devnet" | "zeko" | "mainnet";
-  if (!chain || !["devnet", "zeko", "mainnet"].includes(chain)) {
+  const chain: CanonicalBlockchain = process.env.MINA_CHAIN as
+    | "mina:devnet"
+    | "zeko:testnet"
+    | "mina:mainnet";
+  if (
+    !chain ||
+    !["mina:devnet", "zeko:testnet", "mina:mainnet"].includes(chain)
+  ) {
     console.error(`Invalid or missing MINA_CHAIN: ${chain}`);
   }
 
@@ -137,6 +145,7 @@ export async function deployAddContract(): Promise<{
   const nonce = currentNonce + 1;
 
   return {
+    chain,
     contractAddress: contractPublicKey.toBase58(),
     adminAddress: adminPublicKey.toBase58(),
     txHash,

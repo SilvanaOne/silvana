@@ -93,7 +93,7 @@ describe("Deploy App for Coordinator", async () => {
       `SUI_SECRET_KEY=${process.env.SUI_SECRET_KEY}`,
       ``,
       `# Mina Contract Configuration`,
-      `MINA_CHAIN=${process.env.MINA_CHAIN || "devnet"}`,
+      `MINA_CHAIN=${process.env.MINA_CHAIN || "mina:devnet"}`,
       process.env.ADD_CONTRACT_ADDRESS
         ? `ADD_CONTRACT_ADDRESS=${process.env.ADD_CONTRACT_ADDRESS}`
         : `# ADD_CONTRACT_ADDRESS=<not deployed>`,
