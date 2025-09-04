@@ -414,12 +414,11 @@ async fn fetch_block_from_table(
     all_found_blocks.dedup();
 
     info!(
-        "lock {} not found in table {} after searching {} pages. 📊 Total unique blocks found: {}. 📊 All block numbers found in the blocks table: {:?}",
+        "lock {} not found in table {} after searching {} pages. 📊 Total unique blocks found: {}.",
         block_number,
         table_id,
         pages_searched,
         all_found_blocks.len(),
-        all_found_blocks
     );
 
     Ok(None)

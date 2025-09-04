@@ -8,6 +8,7 @@ import {
   fetchMinaAccount,
   accountBalanceMina,
   sendTx,
+  CanonicalBlockchain,
 } from "@silvana-one/mina-utils";
 import {
   getBlock,
@@ -52,7 +53,16 @@ export async function settle(params: SettleParams): Promise<void> {
   let settlementAdminAddress = metadataResponse.metadata.value;
 
   // Use the required settlement chain
-  const settlementChain = params.settlementChain;
+  if (
+    params.settlementChain !== "mina:devnet" &&
+    params.settlementChain !== "zeko:testnet" &&
+    params.settlementChain !== "mina:mainnet"
+  ) {
+    throw new Error(
+      `Unsupported settlement chain: ${params.settlementChain}, supported chains are: mina:devnet, zeko:testnet, mina:mainnet`
+    );
+  }
+  const settlementChain: CanonicalBlockchain = params.settlementChain;
   console.log(`🔗 Settling for chain: ${settlementChain}`);
 
   // Verify the chain exists in settlements
@@ -116,8 +126,8 @@ export async function settle(params: SettleParams): Promise<void> {
     }
   }
 
-  // Initialize blockchain for devnet
-  await initBlockchain("devnet");
+  // Initialize blockchain
+  await initBlockchain(settlementChain);
 
   // Check that the contract is deployed
   console.log("🔍 Checking contract deployment...");
