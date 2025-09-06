@@ -3,15 +3,13 @@ module coordination::app_instance;
 use commitment::state::{AppState, get_state_commitment, create_app_state};
 use coordination::app_method::{Self, AppMethod};
 use coordination::block::{Self, Block};
-use coordination::jobs::{
-    Self, 
-    Jobs, 
-};
+use coordination::jobs::{Self, Jobs};
+use coordination::multicall;
 use coordination::prover::{Self, ProofCalculation};
 use coordination::sequence_state::{Self, SequenceState, SequenceStateManager};
 use coordination::settlement::{Self, Settlement};
 use coordination::silvana_app::{Self, SilvanaApp};
-use std::string::String;
+use std::string::{Self, String};
 use sui::bls12381::{Scalar, scalar_zero};
 use sui::clock::{timestamp_ms, Clock};
 use sui::display;
@@ -114,6 +112,7 @@ public struct BlockCleanupEvent has copy, drop {
     settlements_count: u64,
 }
 
+
 public struct APP_INSTANCE has drop {}
 
 // Constants
@@ -127,7 +126,8 @@ const ENotAuthorized: vector<u8> = b"Not authorized";
 const EAppInstancePaused: vector<u8> = b"App instance is paused";
 
 #[error]
-const EMinTimeBetweenBlocksTooLow: vector<u8> = b"Min time between blocks must be at least 60000ms";
+const EMinTimeBetweenBlocksTooLow: vector<u8> =
+    b"Min time between blocks must be at least 60000ms";
 
 #[error]
 const EBlockNotProved: vector<u8> = b"Block not proved";
@@ -304,13 +304,13 @@ public fun update_min_time_between_blocks(
 ) {
     // Only admin can update this setting
     assert!(ctx.sender() == app_instance.admin, ENotAuthorized);
-    
+
     // Enforce minimum value
     assert!(
         new_min_time >= MIN_TIME_BETWEEN_BLOCKS,
         EMinTimeBetweenBlocksTooLow,
     );
-    
+
     app_instance.min_time_between_blocks = new_min_time;
 }
 
@@ -437,10 +437,9 @@ public fun start_proving(
     sequences: vector<u64>, // should be sorted
     merged_sequences_1: Option<vector<u64>>,
     merged_sequences_2: Option<vector<u64>>,
-    job_id: String,
     clock: &Clock,
     ctx: &mut TxContext,
-) {
+): bool {
     let proof_calculation = borrow_mut(
         &mut app_instance.proof_calculations,
         block_number,
@@ -450,10 +449,9 @@ public fun start_proving(
         sequences,
         merged_sequences_1,
         merged_sequences_2,
-        job_id,
         clock,
         ctx,
-    );
+    )
 }
 
 public fun submit_proof(
@@ -1116,15 +1114,23 @@ public fun create_app_job(
     settlement_chain: Option<String>, // None for regular jobs, Some(chain) for settlement jobs
     clock: &Clock,
     ctx: &mut TxContext,
-): u64 {
+): Option<u64> {
     // Get method from app instance methods
-    assert!(
-        vec_map::contains(&app_instance.methods, &method_name),
-        EMethodNotFound,
-    );
+    if (!vec_map::contains(&app_instance.methods, &method_name)) {
+        multicall::emit_operation_failed(
+            string::utf8(b"create_job"),
+            string::utf8(b"app_instance"),
+            0, // Using 0 as entity_id since we don't have a job sequence yet
+            string::utf8(EMethodNotFound),
+            ctx.sender(),
+            timestamp_ms(clock),
+            option::some(method_name.into_bytes()),
+        );
+        return option::none()
+    };
     let method = vec_map::get(&app_instance.methods, &method_name);
 
-    let job_id = jobs::create_job(
+    let (success, job_id) = jobs::create_job(
         &mut app_instance.jobs,
         job_description,
         *app_method::developer(method),
@@ -1144,26 +1150,109 @@ public fun create_app_job(
         ctx,
     );
 
+    if (!success) {
+        return option::none()
+    };
+
     // If this is a settlement job, update the settlement_job field in the Settlement struct
     if (option::is_some(&settlement_chain)) {
         let chain = *option::borrow(&settlement_chain);
-        assert!(
-            vec_map::contains(&app_instance.settlements, &chain),
-            ESettlementChainNotFound,
-        );
+        if (!vec_map::contains(&app_instance.settlements, &chain)) {
+            multicall::emit_operation_failed(
+                string::utf8(b"create_job"),
+                string::utf8(b"app_instance"),
+                0, // Using 0 as entity_id since we don't have a job sequence yet
+                string::utf8(ESettlementChainNotFound),
+                ctx.sender(),
+                timestamp_ms(clock),
+                option::some(method_name.into_bytes()),
+            );
+            // Note: Job was created but settlement chain not found
+            // We should probably fail the job here, but keeping it for now
+            return option::none()
+        };
         let settlement = vec_map::get_mut(
             &mut app_instance.settlements,
             &chain,
         );
 
-        // Assert that there's no existing settlement job for this chain
+        // Check that there's no existing settlement job for this chain
         let existing_job = settlement::get_settlement_job(settlement);
-        assert!(option::is_none(&existing_job), ESettlementJobAlreadyExists);
+        if (option::is_some(&existing_job)) {
+            multicall::emit_operation_failed(
+                string::utf8(b"create_job"),
+                string::utf8(b"app_instance"),
+                0, // Using 0 as entity_id since we don't have a job sequence yet
+                string::utf8(ESettlementJobAlreadyExists),
+                ctx.sender(),
+                timestamp_ms(clock),
+                option::some(method_name.into_bytes()),
+            );
+            // Note: Job was created but settlement job already exists
+            return option::none()
+        };
 
         settlement::set_settlement_job(settlement, option::some(job_id));
     };
 
-    job_id
+    option::some(job_id)
+}
+
+// Create a merge job after first reserving the proofs
+// Returns Option<u64> with job_id if successful, None if start_proving fails or job creation fails
+public fun create_merge_job(
+    app_instance: &mut AppInstance,
+    block_number: u64,
+    sequences: vector<u64>, // Combined sequences to merge
+    merged_sequences_1: vector<u64>, // First proof sequences
+    merged_sequences_2: vector<u64>, // Second proof sequences
+    job_description: Option<String>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Option<u64> {
+    // Step 1: Try to reserve the proofs with start_proving
+    let proving_success = start_proving(
+        app_instance,
+        block_number,
+        sequences,
+        option::some(merged_sequences_1),
+        option::some(merged_sequences_2),
+        clock,
+        ctx,
+    );
+
+    // Step 2: Only create the merge job if proof reservation succeeded
+    if (!proving_success) {
+        multicall::emit_operation_failed(
+            string::utf8(b"create_merge_job"),
+            string::utf8(b"app_instance"),
+            0, // Using 0 as entity_id since we don't have a job sequence yet
+            string::utf8(b"Failed to reserve proofs for merge"),
+            ctx.sender(),
+            timestamp_ms(clock),
+            option::none(),
+        );
+        return option::none()
+    };
+
+    // Step 3: Create the merge job
+    // Note: We pass the individual sequences as sequences1 and sequences2
+    // The 'sequences' parameter holds the combined sequences
+    create_app_job(
+        app_instance,
+        string::utf8(b"merge"),
+        job_description,
+        option::some(block_number),
+        option::some(sequences), // Combined sequences
+        option::some(merged_sequences_1), // First proof sequences
+        option::some(merged_sequences_2), // Second proof sequences
+        vector::empty<u8>(), // No additional data needed
+        option::none(), // Not a periodic job
+        option::none(), // No scheduled time
+        option::none(), // Not a settlement job
+        clock,
+        ctx,
+    )
 }
 
 public fun start_app_job(
@@ -1314,14 +1403,16 @@ public fun update_state_for_sequence(
     new_state_data: Option<vector<u8>>,
     new_data_availability_hash: Option<String>,
     clock: &Clock,
-) {
+    ctx: &TxContext,
+): bool {
     sequence_state::update_state_for_sequence(
         &mut app_instance.sequence_state_manager,
         sequence,
         new_state_data,
         new_data_availability_hash,
         clock,
-    );
+        ctx,
+    )
 }
 
 // Getter functions

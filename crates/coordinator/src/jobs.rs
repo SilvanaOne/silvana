@@ -151,7 +151,10 @@ impl JobsTracker {
     /// Also checks for stuck running jobs and fails them if they've been running too long
     /// Only removes app_instances that haven't been updated during the reconciliation
     /// Returns true if there are still pending jobs after reconciliation
-    pub async fn reconcile_with_chain(&self) -> Result<bool> {
+    pub async fn reconcile_with_chain<F>(&self, add_fail_request: F) -> Result<bool> 
+    where 
+        F: Fn(String, u64, String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+    {
         // Add random delay to prevent all coordinators from reconciling at the same time
         use rand::Rng;
         let delay_seconds = rand::thread_rng().gen_range(0..=RETRY_MAX_DELAY_SECS);
@@ -171,7 +174,7 @@ impl JobsTracker {
         };
         
         // First, check for stuck running jobs
-        self.fail_stuck_running_jobs(&instances_to_check).await;
+        self.fail_stuck_running_jobs(&instances_to_check, &add_fail_request).await;
         
         let mut removed_count = 0;
         let mut instances_with_jobs = 0;
@@ -271,7 +274,10 @@ impl JobsTracker {
 
     /// Check for stuck running jobs and fail them if they've been running too long
     /// Also check for orphaned pending jobs (jobs with Pending status but not in pending_jobs array)
-    async fn fail_stuck_running_jobs(&self, instances_to_check: &[(String, Instant)]) {
+    async fn fail_stuck_running_jobs<F>(&self, instances_to_check: &[(String, Instant)], add_fail_request: F) 
+    where 
+        F: Fn(String, u64, String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+    {
         let max_running_duration = Duration::from_secs(STUCK_JOB_TIMEOUT_SECS);
         
         if instances_to_check.is_empty() {
@@ -407,24 +413,15 @@ impl JobsTracker {
                                 // Fail the job
                                 // Note: Settlement jobs are periodic, so they'll go back to Pending with a 1-minute delay after max attempts
                                 // Regular jobs will either retry (if attempts < max) or be deleted
-                                let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
                                 let error_msg = format!("Job timed out after running for {} minutes", running_duration.as_secs() / 60);
                                 
-                                match sui_interface.fail_job(app_instance_id, job.job_sequence, &error_msg).await {
-                                    Some(tx_hash) => {
-                                        if is_settlement {
-                                            info!("Successfully failed stuck SETTLEMENT job {} in app_instance {}, tx: {}", job.job_sequence, app_instance_id, tx_hash);
-                                        } else {
-                                            info!("Successfully failed stuck job {} in app_instance {}, tx: {}", job.job_sequence, app_instance_id, tx_hash);
-                                        }
-                                    }
-                                    None => {
-                                        if is_settlement {
-                                            error!("Failed to mark stuck SETTLEMENT job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
-                                        } else {
-                                            error!("Failed to mark stuck job {} as failed in app_instance {}", job.job_sequence, app_instance_id);
-                                        }
-                                    }
+                                // Add fail job request to multicall batch
+                                add_fail_request(app_instance_id.clone(), job.job_sequence, error_msg.clone()).await;
+                                
+                                if is_settlement {
+                                    info!("Added fail request for stuck SETTLEMENT job {} in app_instance {} to multicall batch", job.job_sequence, app_instance_id);
+                                } else {
+                                    info!("Added fail request for stuck job {} in app_instance {} to multicall batch", job.job_sequence, app_instance_id);
                                 }
                             }
                         }

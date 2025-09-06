@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sui_sdk_types as sui;
 use tracing::debug;
+use crate::constants::OBJECT_LOCK_TIMEOUT_SECS;
 
 /// RAII-style guard for object locking.
 /// When this guard is dropped, the object lock is automatically released.
@@ -134,8 +135,8 @@ static OBJECT_LOCK_MANAGER: std::sync::OnceLock<ObjectLockManager> = std::sync::
 
 pub fn get_object_lock_manager() -> &'static ObjectLockManager {
     OBJECT_LOCK_MANAGER.get_or_init(|| {
-        debug!("Initializing global object lock manager");
-        ObjectLockManager::new(120) // 2 minutes timeout for object locks
+        debug!("Initializing global object lock manager with {}s timeout", OBJECT_LOCK_TIMEOUT_SECS);
+        ObjectLockManager::new(OBJECT_LOCK_TIMEOUT_SECS)
     })
 }
 

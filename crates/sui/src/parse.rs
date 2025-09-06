@@ -230,6 +230,31 @@ pub fn proto_to_json(value: &prost_types::Value) -> serde_json::Value {
     }
 }
 
+/// Convert proto value to boolean
+/// Handles various encodings: BoolValue, StringValue ("true"/"false"), NumberValue (0/1)
+pub fn proto_to_bool(value: &prost_types::Value) -> Option<bool> {
+    match &value.kind {
+        Some(prost_types::value::Kind::BoolValue(b)) => Some(*b),
+        Some(prost_types::value::Kind::StringValue(s)) => {
+            match s.to_lowercase().as_str() {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            }
+        }
+        Some(prost_types::value::Kind::NumberValue(n)) => {
+            if *n == 0.0 {
+                Some(false)
+            } else if *n == 1.0 {
+                Some(true)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Helper function to parse VecMap<String, String> into HashMap
 pub fn parse_string_vecmap(struct_value: &prost_types::Struct, field_name: &str) -> HashMap<String, String> {
     if let Some(field) = struct_value.fields.get(field_name) {

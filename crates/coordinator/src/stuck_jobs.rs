@@ -6,7 +6,6 @@
 use crate::state::SharedState;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sui::fetch::{fetch_all_jobs_from_app_instance, fetch_app_instance, JobStatus};
-use sui::interface::SilvanaSuiInterface;
 use tracing::{debug, error, info, warn};
 
 /// Monitor for stuck jobs that runs periodically
@@ -135,25 +134,16 @@ impl StuckJobMonitor {
 
     /// Fail a stuck job
     async fn fail_stuck_job(&self, app_instance_id: &str, job_sequence: u64, running_duration: Duration) {
-        let mut sui_interface = SilvanaSuiInterface::new();
         let error_msg = format!(
             "Job timed out after running for {} minutes",
             running_duration.as_secs() / 60
         );
         
-        match sui_interface.fail_job(app_instance_id, job_sequence, &error_msg).await {
-            Some(tx_hash) => {
-                info!(
-                    "Successfully failed stuck job {} in app_instance {}, tx: {}",
-                    job_sequence, app_instance_id, tx_hash
-                );
-            }
-            None => {
-                error!(
-                    "Failed to mark stuck job {} as failed in app_instance {}",
-                    job_sequence, app_instance_id
-                );
-            }
-        }
+        // Add fail job request to multicall batch instead of direct call
+        self.state.add_fail_job_request(app_instance_id.to_string(), job_sequence, error_msg).await;
+        info!(
+            "Added fail request for stuck job {} in app_instance {} to multicall batch",
+            job_sequence, app_instance_id
+        );
     }
 }

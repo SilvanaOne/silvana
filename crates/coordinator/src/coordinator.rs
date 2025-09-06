@@ -1,9 +1,9 @@
 use crate::config::Config;
 use crate::constants::{
-    GRACEFUL_SHUTDOWN_TIMEOUT_SECS, RECONCILIATION_INTERVAL_SECS, 
-    PROOF_ANALYSIS_INTERVAL_SECS, BALANCE_CHECK_INTERVAL_SECS,
-    SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
-    JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS, SHUTDOWN_CLEANUP_DELAY_MS
+    BALANCE_CHECK_INTERVAL_SECS, GRACEFUL_SHUTDOWN_TIMEOUT_SECS,
+    JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS, PROOF_ANALYSIS_INTERVAL_SECS,
+    RECONCILIATION_INTERVAL_SECS, SHUTDOWN_CLEANUP_DELAY_MS, SHUTDOWN_PROGRESS_INTERVAL_SECS,
+    STARTUP_RECONCILIATION_DELAY_SECS,
 };
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
@@ -29,11 +29,11 @@ pub async fn start_coordinator(
     info!("🚀 Starting Silvana Coordinator");
     info!("🔗 Sui RPC URL: {}", rpc_url);
     info!("📦 Monitoring package: {}", package_id);
-    
+
     if let Some(ref instance) = app_instance_filter {
         info!("🎯 Filtering jobs for app instance: {}", instance);
     }
-    
+
     if settle_only {
         info!("⚖️ Running as dedicated settlement node");
     }
@@ -108,10 +108,10 @@ pub async fn start_coordinator(
 
     // Create shared state
     let state = SharedState::new();
-    
+
     // Set the settle_only flag
     state.set_settle_only(settle_only);
-    
+
     // Set the app instance filter if provided
     if let Some(instance) = app_instance_filter {
         state.set_app_instance_filter(Some(instance)).await;
@@ -170,7 +170,10 @@ pub async fn start_coordinator(
     let reconciliation_state = state.clone();
 
     let reconciliation_handle = task::spawn(async move {
-        info!("🔄 Starting reconciliation task (runs every {} minutes)...", RECONCILIATION_INTERVAL_SECS / 60);
+        info!(
+            "🔄 Starting reconciliation task (runs every {} minutes)...",
+            RECONCILIATION_INTERVAL_SECS / 60
+        );
 
         // Run immediate reconciliation on startup to catch stuck jobs
         info!("🔍 Running immediate reconciliation check on startup...");
@@ -178,7 +181,14 @@ pub async fn start_coordinator(
 
         match reconciliation_state
             .get_jobs_tracker()
-            .reconcile_with_chain()
+            .reconcile_with_chain(|app_instance: String, job_sequence: u64, error: String| {
+                let state = reconciliation_state.clone();
+                Box::pin(async move {
+                    state
+                        .add_fail_job_request(app_instance, job_sequence, error)
+                        .await;
+                })
+            })
             .await
         {
             Ok(has_pending) => {
@@ -223,7 +233,14 @@ pub async fn start_coordinator(
             // Run reconciliation with chain
             match reconciliation_state
                 .get_jobs_tracker()
-                .reconcile_with_chain()
+                .reconcile_with_chain(|app_instance: String, job_sequence: u64, error: String| {
+                    let state = reconciliation_state.clone();
+                    Box::pin(async move {
+                        state
+                            .add_fail_job_request(app_instance, job_sequence, error)
+                            .await;
+                    })
+                })
                 .await
             {
                 Ok(has_pending) => {
@@ -244,7 +261,10 @@ pub async fn start_coordinator(
             info!("✅ Reconciliation check complete");
         }
     });
-    info!("🔄 Started reconciliation task (runs every {} minutes)", RECONCILIATION_INTERVAL_SECS / 60);
+    info!(
+        "🔄 Started reconciliation task (runs every {} minutes)",
+        RECONCILIATION_INTERVAL_SECS / 60
+    );
 
     // Note: Stuck job monitoring is handled by reconciliation task
     // to avoid overloading Sui nodes with duplicate checks
@@ -261,7 +281,10 @@ pub async fn start_coordinator(
     let proof_analysis_handle = task::spawn(async move {
         start_periodic_proof_analysis(proof_analysis_state).await;
     });
-    info!("🔬 Started proof completion analysis task (runs every {} minutes)", PROOF_ANALYSIS_INTERVAL_SECS / 60);
+    info!(
+        "🔬 Started proof completion analysis task (runs every {} minutes)",
+        PROOF_ANALYSIS_INTERVAL_SECS / 60
+    );
 
     // 5. Start metrics reporter for New Relic
     let metrics = std::sync::Arc::new(CoordinatorMetrics::new());
@@ -320,9 +343,14 @@ pub async fn start_coordinator(
                     return;
                 }
             };
-        
+
         // Set metrics reference
         job_searcher.set_metrics(job_searcher_metrics);
+
+        // Delay job searcher startup by 10 seconds to allow system initialization
+        info!("Job searcher waiting 10 seconds before starting...");
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        info!("Job searcher starting now");
 
         if let Err(e) = job_searcher.run().await {
             error!("Job searcher error: {}", e);
@@ -371,7 +399,10 @@ pub async fn start_coordinator(
     info!("  1️⃣ Stopping new job acceptance...");
 
     // Phase 2: Wait for current jobs to complete (with timeout)
-    info!("  2️⃣ Waiting for current jobs to complete (max {} minutes)...", GRACEFUL_SHUTDOWN_TIMEOUT_SECS / 60);
+    info!(
+        "  2️⃣ Waiting for current jobs to complete (max {} minutes)...",
+        GRACEFUL_SHUTDOWN_TIMEOUT_SECS / 60
+    );
     let mut wait_time = 0;
     let max_wait = GRACEFUL_SHUTDOWN_TIMEOUT_SECS;
 
@@ -478,7 +509,11 @@ pub async fn start_coordinator(
     // Give job_searcher a chance to cleanup
     if !job_searcher_handle.is_finished() {
         // Wait a bit for job_searcher to finish gracefully
-        let _ = tokio::time::timeout(Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS), job_searcher_handle).await;
+        let _ = tokio::time::timeout(
+            Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
+            job_searcher_handle,
+        )
+        .await;
     }
 
     info!("✅ Graceful shutdown complete");

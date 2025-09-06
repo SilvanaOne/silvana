@@ -1,6 +1,7 @@
 module coordination::sequence_state;
 
-use std::string::String;
+use coordination::multicall;
+use std::string::{Self, String};
 use sui::clock::Clock;
 use sui::event;
 use sui::object_table::{Self, ObjectTable};
@@ -48,13 +49,7 @@ public struct SequenceStatesPurgedEvent has copy, drop {
     timestamp: u64,
 }
 
-// Error constants
-#[error]
-const ESequenceStateNotFound: vector<u8> = b"Sequence state not found";
-
-#[error]
-const ESequenceTooLow: vector<u8> = b"Sequence is lower than lowest sequence";
-
+// Error constant (keeping only the one still used in add_state_for_sequence)
 #[error]
 const ESequenceTooHigh: vector<u8> = b"Sequence is higher than highest sequence";
 
@@ -177,22 +172,66 @@ public(package) fun update_state_for_sequence(
     new_state_data: Option<vector<u8>>,
     new_data_availability_hash: Option<String>,
     clock: &Clock,
-) {
+    ctx: &TxContext,
+): bool {
+    let timestamp = clock.timestamp_ms();
+    
     // Validate sequence bounds - for updates, sequence must exist within bounds
     if (manager.lowest_sequence.is_none() || manager.highest_sequence.is_none()) {
         // If no bounds exist, sequence must be 0
-        assert!(sequence == 0, ESequenceTooHigh);
+        if (sequence != 0) {
+            multicall::emit_operation_failed(
+                string::utf8(b"update_state_for_sequence"),
+                string::utf8(b"sequence_state"),
+                sequence,
+                string::utf8(b"sequence_too_high"),
+                ctx.sender(),
+                timestamp,
+                option::none(),
+            );
+            return false
+        };
     } else {
         // For updates, sequence must be within existing bounds
-        assert!(sequence >= *manager.lowest_sequence.borrow(), ESequenceTooLow);
-        assert!(sequence <= *manager.highest_sequence.borrow(), ESequenceTooHigh);
+        if (sequence < *manager.lowest_sequence.borrow()) {
+            multicall::emit_operation_failed(
+                string::utf8(b"update_state_for_sequence"),
+                string::utf8(b"sequence_state"),
+                sequence,
+                string::utf8(b"sequence_too_low"),
+                ctx.sender(),
+                timestamp,
+                option::none(),
+            );
+            return false
+        };
+        if (sequence > *manager.highest_sequence.borrow()) {
+            multicall::emit_operation_failed(
+                string::utf8(b"update_state_for_sequence"),
+                string::utf8(b"sequence_state"),
+                sequence,
+                string::utf8(b"sequence_too_high"),
+                ctx.sender(),
+                timestamp,
+                option::none(),
+            );
+            return false
+        };
     };
     
-    let timestamp = clock.timestamp_ms();
-    assert!(
-        object_table::contains(&manager.sequence_states, sequence),
-        ESequenceStateNotFound,
-    );
+    if (!object_table::contains(&manager.sequence_states, sequence)) {
+        multicall::emit_operation_failed(
+            string::utf8(b"update_state_for_sequence"),
+            string::utf8(b"sequence_state"),
+            sequence,
+            string::utf8(b"sequence_state_not_found"),
+            ctx.sender(),
+            timestamp,
+            option::none(),
+        );
+        return false
+    };
+    
     let sequence_state = object_table::borrow_mut(&mut manager.sequence_states, sequence);
     // Only update state and data_availability, not optimistic_state and transition_data
     set_state(sequence_state, new_state_data);
@@ -205,6 +244,8 @@ public(package) fun update_state_for_sequence(
         new_data_availability_hash,
         timestamp,
     });
+    
+    true
 }
 
 public(package) fun purge(

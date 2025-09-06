@@ -1,7 +1,7 @@
 use crate::block::settle;
 use crate::constants::{
     PROOF_MERGE_MAX_ATTEMPTS, PROOF_STARTED_TIMEOUT_MS, PROOF_RESERVED_TIMEOUT_MS,
-    MERGE_RETRY_DELAY_MS, BLOCKCHAIN_PROPAGATION_DELAY_MS, 
+    MERGE_RETRY_DELAY_MS, 
     BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS
 };
 use anyhow::Result;
@@ -13,6 +13,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     proof_calc: &ProofCalculation,
     app_instance: &str,
     da_hash: &str,
+    state: &crate::state::SharedState,
 ) -> Result<()> {
     debug!(
         "🔍 Analyzing proof calculation for block {} with sequences: {:?}",
@@ -355,6 +356,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 proof1_status,
                 proof2_status,
                 &current_block_proofs,
+                state,
             )
             .await
             {
@@ -429,8 +431,9 @@ pub async fn analyze_and_create_merge_jobs(
     proof_calc: &ProofCalculation,
     app_instance: &str,
     da_hash: &str,
+    state: &crate::state::SharedState,
 ) -> Result<()> {
-    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, da_hash)
+    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, da_hash, state)
         .await
 }
 
@@ -593,14 +596,12 @@ async fn create_merge_job(
     _proof1_status: &ProofStatus, // Currently unused, but kept for future use
     _proof2_status: &ProofStatus, // Currently unused, but kept for future use
     block_proofs: &ProofCalculation, // Add this to check if combined proof exists
+    state: &crate::state::SharedState, // Add state parameter for multicall queue
 ) -> Result<()> {
     debug!(
         "Attempting to create merge job for block {} with sequences1: {:?}, sequences2: {:?}",
         block_number, sequences1, sequences2
     );
-
-    // Create SilvanaSuiInterface following the same pattern as submit_proof in grpc.rs
-    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
 
     // Generate a unique job ID for this merge operation
     let job_id = format!("merge_{}_{}_{}", block_number, sequences1[0], sequences2[0]);
@@ -654,36 +655,10 @@ async fn create_merge_job(
 
         if should_reject {
             debug!(
-                "📝 Found existing combined proof for block {} sequences {:?} with status {:?}, attempting to reject",
+                "📝 Found existing combined proof for block {} sequences {:?} with status {:?}, will be handled by Move contract",
                 block_number, combined_sequences, proof.status
             );
-
-            match sui_interface
-                .reject_proof(app_instance, block_number, combined_sequences.clone())
-                .await
-            {
-                Ok(tx_digest) => {
-                    debug!(
-                        "✅ Successfully rejected combined proof for block {}, tx: {}",
-                        block_number, tx_digest
-                    );
-                    // Small delay to let the blockchain state propagate
-                    tokio::time::sleep(tokio::time::Duration::from_millis(BLOCKCHAIN_PROPAGATION_DELAY_MS)).await;
-                }
-                Err(e) => {
-                    // Even though we found it in our data, it might have been modified by another coordinator
-                    if e.to_string().contains("not available for consumption") {
-                        debug!(
-                            "ℹ️ Combined proof already modified by another coordinator - continuing anyway"
-                        );
-                    } else {
-                        warn!(
-                            "⚠️ Failed to reject existing combined proof for block {}: {}",
-                            block_number, e
-                        );
-                    }
-                }
-            }
+            // The Move contract will handle rejection automatically when creating the merge job
         } else {
             debug!(
                 "ℹ️ Combined proof exists with status {:?} but doesn't need rejection",
@@ -772,78 +747,33 @@ async fn create_merge_job(
         return Err(anyhow::anyhow!("Proofs not in reservable state for sequences {:?} and {:?}", sequences1, sequences2));
     }
     
-    // Step 3: Try to reserve the proofs with start_proving
-    debug!("🔒 Proofs are reservable, attempting to reserve for merge job: {}", job_id);
-    match sui_interface
-        .start_proving(
-            app_instance,
+    // Step 3: Add the merge job creation request to the shared state for multicall processing
+    debug!("🔒 Proofs are reservable, adding merge job creation request to multicall queue: {}", job_id);
+    
+    let job_description = Some(format!(
+        "Merge proof job for block {} - merging sequences {:?} with {:?}",
+        block_number, sequences1, sequences2
+    ));
+
+    // Add the request to the shared state for batch processing
+    state.add_create_merge_job_request(
+        app_instance.to_string(),
+        crate::state::CreateMergeJobRequest {
             block_number,
-            combined_sequences.clone(),
-            Some(sequences1.clone()),
-            Some(sequences2.clone()),
-            job_id.clone(),
-        )
-        .await
-    {
-        Ok(tx_digest) => {
-            debug!(
-                "✅ Successfully reserved proofs for block {}, tx: {}",
-                block_number, tx_digest
-            );
+            sequences: combined_sequences.clone(),
+            sequences1: sequences1.clone(),
+            sequences2: sequences2.clone(),
+            job_description,
+            _timestamp: tokio::time::Instant::now(),
+        },
+    ).await;
 
-            // The start_proving_tx function now waits for the transaction to be available in the ledger
-            // before returning, so we can proceed immediately to create the merge job
-
-            // Step 3: Create the merge job only if reservation succeeded
-            let job_description = Some(format!(
-                "Merge proof job for block {} - merging sequences {:?} with {:?}",
-                block_number, sequences1, sequences2
-            ));
-
-            match sui_interface
-                .create_merge_job(
-                    app_instance,
-                    block_number,
-                    sequences1.clone(),
-                    sequences2.clone(),
-                    job_description,
-                )
-                .await
-            {
-                Ok(tx_digest) => {
-                    info!(
-                        "✅ Merge job: block={}, sequences={:?}+{:?}, tx={}",
-                        block_number, sequences1, sequences2, tx_digest
-                    );
-                    Ok(())
-                }
-                Err(e) => {
-                    error!(
-                        "❌ Failed to create merge job for block {} after successful reservation: {}",
-                        block_number, e
-                    );
-                    Err(anyhow::anyhow!("Failed to create merge job: {}", e))
-                }
-            }
-        }
-        Err(e) => {
-            // This is expected when multiple coordinators are running
-            let error_str = e.to_string();
-            if error_str.contains("already reserved") || error_str.contains("MoveAbort") || error_str.contains("version conflict") {
-                debug!(
-                    "Proofs for block {} already reserved by another coordinator (expected race condition)",
-                    block_number
-                );
-            } else {
-                warn!(
-                    "⚠️ Failed to reserve proofs for block {}: {}",
-                    block_number, e
-                );
-            }
-            // Don't create merge job if we couldn't reserve the proofs
-            Err(anyhow::anyhow!("Cannot reserve proofs - likely taken by another coordinator"))
-        }
-    }
+    info!(
+        "✅ Merge job creation request added to multicall queue: block={}, sequences={:?}+{:?}",
+        block_number, sequences1, sequences2
+    );
+    
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1025,7 +955,7 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
                 match sui::fetch::fetch_app_instance(&app_instance_id).await {
                     Ok(app_instance) => {
                         // Analyze proof completion for this app instance
-                        match crate::proof::analyze_proof_completion(&app_instance).await {
+                        match crate::proof::analyze_proof_completion(&app_instance, &state).await {
                             Ok(()) => {
                                 analyzed_count += 1;
                                 debug!("Completed proof analysis for app instance {}", app_instance_id);

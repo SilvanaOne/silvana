@@ -5,7 +5,8 @@ use tonic::transport::Channel;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Mutex};
+use tokio::time::{Duration, Instant};
 use tracing::{debug, error, info};
 
 #[derive(Debug, Clone)]
@@ -15,6 +16,125 @@ pub struct CurrentAgent {
     pub agent: String,
     pub agent_method: String,
     pub settlement_chain: Option<String>,  // Track which chain this agent is settling for
+}
+
+/// Request to create a new job
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct CreateJobRequest {
+    pub job_sequence: Option<u64>,
+    pub developer: String,
+    pub agent: String,
+    pub agent_method: String,
+    pub app: String,
+    pub app_instance: String,
+    pub app_instance_method: String,
+    pub initial_input_hash: Option<String>,
+    pub merkle_root: Option<String>,
+    pub merkle_paths: Option<Vec<Vec<u8>>>,
+    pub periodic_run_time: Option<u64>,
+    pub input_data: Vec<u8>,
+    pub creation_block: Option<u64>,
+    pub state_sequence: Option<u64>,
+    pub _timestamp: Instant,
+}
+
+/// Request to start a job with memory requirements
+#[derive(Debug, Clone)]
+pub struct StartJobRequest {
+    pub job_sequence: u64,
+    pub memory_requirement: u64,
+    pub _timestamp: Instant,
+}
+
+/// Request to complete a job
+#[derive(Debug, Clone)]
+pub struct CompleteJobRequest {
+    pub job_sequence: u64,
+    pub _timestamp: Instant,
+}
+
+/// Request to fail a job with error message
+#[derive(Debug, Clone)]
+pub struct FailJobRequest {
+    pub job_sequence: u64,
+    pub error: String,
+    pub _timestamp: Instant,
+}
+
+/// Request to terminate a job
+#[derive(Debug, Clone)]
+pub struct TerminateJobRequest {
+    pub job_sequence: u64,
+    pub _timestamp: Instant,
+}
+
+/// Request to update state for a sequence
+#[derive(Debug, Clone)]
+pub struct UpdateStateForSequenceRequest {
+    pub sequence: u64,
+    pub new_state_data: Option<Vec<u8>>,
+    pub new_data_availability_hash: Option<String>,
+    pub _timestamp: Instant,
+}
+
+/// Request to submit a proof
+#[derive(Debug, Clone)]
+pub struct SubmitProofRequest {
+    pub block_number: u64,
+    pub sequences: Vec<u64>,
+    pub merged_sequences_1: Option<Vec<u64>>,
+    pub merged_sequences_2: Option<Vec<u64>>,
+    pub job_id: String,
+    pub da_hash: String,
+    pub cpu_cores: u8,
+    pub prover_architecture: String,
+    pub prover_memory: u64,
+    pub cpu_time: u64,
+    pub _timestamp: Instant,
+}
+
+/// Request to create an app job (e.g., settlement job) through multicall
+#[derive(Debug, Clone)]
+pub struct CreateAppJobRequest {
+    pub method_name: String,
+    pub job_description: Option<String>,
+    pub block_number: Option<u64>,
+    pub sequences: Option<Vec<u64>>,
+    pub sequences1: Option<Vec<u64>>,
+    pub sequences2: Option<Vec<u64>>,
+    pub data: Vec<u8>,
+    pub interval_ms: Option<u64>,
+    pub next_scheduled_at: Option<u64>,
+    pub settlement_chain: Option<String>,
+    pub _timestamp: Instant,
+}
+
+/// Request to create a merge job with proof reservation
+#[derive(Debug, Clone)]
+pub struct CreateMergeJobRequest {
+    pub block_number: u64,
+    pub sequences: Vec<u64>,       // Combined sequences
+    pub sequences1: Vec<u64>,       // First proof sequences
+    pub sequences2: Vec<u64>,       // Second proof sequences
+    pub job_description: Option<String>,
+    pub _timestamp: Instant,
+}
+
+/// Batched job operation requests for multicall
+#[derive(Debug, Clone)]
+pub struct MulticallRequests {
+    pub _app_instance: String,
+    pub create_jobs: Vec<CreateJobRequest>,
+    pub start_jobs: Vec<StartJobRequest>,
+    pub complete_jobs: Vec<CompleteJobRequest>,
+    pub fail_jobs: Vec<FailJobRequest>,
+    pub terminate_jobs: Vec<TerminateJobRequest>,
+    pub update_state_for_sequences: Vec<UpdateStateForSequenceRequest>,
+    pub submit_proofs: Vec<SubmitProofRequest>,
+    pub create_app_jobs: Vec<CreateAppJobRequest>,
+    pub create_merge_jobs: Vec<CreateMergeJobRequest>,
+    pub last_execution: Instant,
 }
 
 #[derive(Clone)]
@@ -29,6 +149,7 @@ pub struct SharedState {
     force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
     app_instance_filter: Arc<RwLock<Option<String>>>, // Optional filter to only process jobs from a specific app instance
     settle_only: Arc<AtomicBool>, // Flag to run as a dedicated settlement node
+    multicall_requests: Arc<Mutex<HashMap<String, MulticallRequests>>>, // Batched job operation requests per app instance
 }
 
 impl SharedState {
@@ -59,6 +180,7 @@ impl SharedState {
             force_shutdown_flag: Arc::new(AtomicBool::new(false)),
             app_instance_filter: Arc::new(RwLock::new(None)),
             settle_only: Arc::new(AtomicBool::new(false)),
+            multicall_requests: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -313,5 +435,298 @@ impl SharedState {
     /// Check if running in settle_only mode
     pub fn is_settle_only(&self) -> bool {
         self.settle_only.load(Ordering::Acquire)
+    }
+
+    /// Add a create job request to the batch
+    #[allow(dead_code)]
+    pub async fn add_create_job_request(&self, app_instance: String, request: CreateJobRequest) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.create_jobs.push(request);
+        
+        debug!("Added create job request for app_instance {}", app_instance);
+    }
+
+    /// Add a start job request to the batch
+    #[allow(dead_code)]
+    pub async fn add_start_job_request(&self, app_instance: String, job_sequence: u64, memory_requirement: u64) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.start_jobs.push(StartJobRequest {
+            job_sequence,
+            memory_requirement,
+            _timestamp: Instant::now(),
+        });
+        
+        debug!("Added start job request for job {} in app_instance {} (memory: {:.2} GB)", 
+               job_sequence, app_instance, memory_requirement as f64 / (1024.0 * 1024.0 * 1024.0));
+    }
+
+    /// Add a complete job request to the batch
+    pub async fn add_complete_job_request(&self, app_instance: String, job_sequence: u64) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.complete_jobs.push(CompleteJobRequest {
+            job_sequence,
+            _timestamp: Instant::now(),
+        });
+        
+        debug!("Added complete job request for job {} in app_instance {}", job_sequence, app_instance);
+    }
+
+    /// Add a fail job request to the batch
+    pub async fn add_fail_job_request(&self, app_instance: String, job_sequence: u64, error: String) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.fail_jobs.push(FailJobRequest {
+            job_sequence,
+            error,
+            _timestamp: Instant::now(),
+        });
+        
+        debug!("Added fail job request for job {} in app_instance {}", job_sequence, app_instance);
+    }
+
+    /// Check if a specific job has pending complete or fail requests in multicall queue
+    pub async fn has_pending_job_request(&self, app_instance: &str, job_sequence: u64) -> bool {
+        let requests = self.multicall_requests.lock().await;
+        
+        if let Some(app_requests) = requests.get(app_instance) {
+            // Check for complete job requests
+            let has_complete = app_requests.complete_jobs.iter()
+                .any(|req| req.job_sequence == job_sequence);
+            
+            // Check for fail job requests
+            let has_fail = app_requests.fail_jobs.iter()
+                .any(|req| req.job_sequence == job_sequence);
+            
+            has_complete || has_fail
+        } else {
+            false
+        }
+    }
+
+    /// Add a terminate job request to the batch
+    pub async fn add_terminate_job_request(&self, app_instance: String, job_sequence: u64) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.terminate_jobs.push(TerminateJobRequest {
+            job_sequence,
+            _timestamp: Instant::now(),
+        });
+        
+        debug!("Added terminate job request for job {} in app_instance {}", job_sequence, app_instance);
+    }
+
+    /// Add an update state for sequence request to the batch
+    pub async fn add_update_state_for_sequence_request(&self, app_instance: String, request: UpdateStateForSequenceRequest) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.update_state_for_sequences.push(request);
+        
+        debug!("Added update state for sequence request for app_instance {}", app_instance);
+    }
+    
+    /// Add a submit proof request to the batch
+    pub async fn add_submit_proof_request(&self, app_instance: String, request: SubmitProofRequest) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.submit_proofs.push(request);
+        
+        debug!("Added submit proof request for app_instance {}", app_instance);
+    }
+
+    /// Add a create app job request to the batch (for settlement and other app jobs)
+    pub async fn add_create_app_job_request(&self, app_instance: String, request: CreateAppJobRequest) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.create_app_jobs.push(request);
+        
+        debug!("Added create app job request for app_instance {}", app_instance);
+    }
+    
+    /// Add a create merge job request to the batch
+    pub async fn add_create_merge_job_request(&self, app_instance: String, request: CreateMergeJobRequest) {
+        let mut requests = self.multicall_requests.lock().await;
+        let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
+            _app_instance: app_instance.clone(),
+            create_jobs: Vec::new(),
+            start_jobs: Vec::new(),
+            complete_jobs: Vec::new(),
+            fail_jobs: Vec::new(),
+            terminate_jobs: Vec::new(),
+            update_state_for_sequences: Vec::new(),
+            submit_proofs: Vec::new(),
+            create_app_jobs: Vec::new(),
+            create_merge_jobs: Vec::new(),
+            last_execution: Instant::now(),
+        });
+        
+        entry.create_merge_jobs.push(request);
+        
+        debug!("Added create merge job request for app_instance {}", app_instance);
+    }
+
+    /// Get and clear all pending multicall requests for an app instance
+    pub async fn take_multicall_requests(&self, app_instance: &str) -> Option<MulticallRequests> {
+        let mut requests = self.multicall_requests.lock().await;
+        requests.remove(app_instance)
+    }
+
+    /// Check if any app instance has pending requests ready for execution
+    pub async fn has_pending_multicall_requests(&self, interval: Duration) -> Vec<String> {
+        let requests = self.multicall_requests.lock().await;
+        let now = Instant::now();
+        
+        requests
+            .iter()
+            .filter(|(_, req)| {
+                // Check if enough time has passed since last execution
+                now.duration_since(req.last_execution) >= interval &&
+                // Check if there are any pending operations
+                (!req.create_jobs.is_empty() ||
+                 !req.start_jobs.is_empty() || 
+                 !req.complete_jobs.is_empty() || 
+                 !req.fail_jobs.is_empty() || 
+                 !req.terminate_jobs.is_empty() ||
+                 !req.submit_proofs.is_empty() ||
+                 !req.create_merge_jobs.is_empty())
+            })
+            .map(|(app_instance, _)| app_instance.clone())
+            .collect()
+    }
+
+    /// Get all app instances with pending multicall requests (no interval check)
+    pub async fn get_all_pending_multicall_app_instances(&self) -> Vec<String> {
+        let requests = self.multicall_requests.lock().await;
+        
+        requests
+            .iter()
+            .filter(|(_, req)| {
+                // Check if there are any pending operations
+                !req.create_jobs.is_empty() ||
+                !req.start_jobs.is_empty() || 
+                !req.complete_jobs.is_empty() || 
+                !req.fail_jobs.is_empty() || 
+                !req.terminate_jobs.is_empty() ||
+                !req.update_state_for_sequences.is_empty() ||
+                !req.submit_proofs.is_empty() ||
+                !req.create_app_jobs.is_empty() ||
+                !req.create_merge_jobs.is_empty()
+            })
+            .map(|(app_instance, _)| app_instance.clone())
+            .collect()
+    }
+
+    /// Update last execution time for an app instance
+    pub async fn update_multicall_execution_time(&self, app_instance: &str) {
+        let mut requests = self.multicall_requests.lock().await;
+        if let Some(entry) = requests.get_mut(app_instance) {
+            entry.last_execution = Instant::now();
+        }
     }
 }

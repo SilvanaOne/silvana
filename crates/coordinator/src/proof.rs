@@ -42,6 +42,7 @@ async fn block_needs_settlement(block_number: u64, settlements: &HashMap<String,
 // Helper function to analyze proof completion and determine next action
 pub async fn analyze_proof_completion(
   app_instance: &AppInstance,
+  state: &crate::state::SharedState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
   let analysis_start = std::time::Instant::now();
   debug!("🔍 Starting proof completion analysis for app: {}", app_instance.silvana_app_name);
@@ -178,7 +179,7 @@ pub async fn analyze_proof_completion(
               debug!("  - Chain {}: job ID {} already exists", chain_name, existing_job_id);
           } else {
               debug!("  - Creating settle job for chain {} (blocks ready to settle)", chain_name);
-              if let Err(e) = settlement::create_periodic_settle_job(app_instance, chain_name).await {
+              if let Err(e) = settlement::create_periodic_settle_job(app_instance, chain_name, state).await {
                   warn!("Failed to create settle job for chain {}: {}", chain_name, e);
               } else {
                   debug!("✅ Successfully created periodic settle job for chain {}", chain_name);
@@ -190,9 +191,9 @@ pub async fn analyze_proof_completion(
       if !existing_settlement_jobs.is_empty() {
           debug!("🚫 No valid blocks to settle on any chain, terminating {} settlement jobs", 
               existing_settlement_jobs.len());
-          let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
           for (chain, job_id) in &existing_settlement_jobs {
               debug!("  - Terminating job {} for chain {}", job_id, chain);
+              let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
               if let Err(e) = sui_interface.terminate_app_job(&app_instance.id, *job_id).await {
                   warn!("Failed to terminate settlement job {} for chain {}: {}", job_id, chain, e);
               } else {
@@ -262,6 +263,7 @@ pub async fn analyze_proof_completion(
           &proof_calc,
           app_instance_id,
           "", // No specific da_hash for general analysis
+          state,
       ).await {
           let block_duration = block_start.elapsed();
           warn!("Failed to analyze block {} for merges in {:.2}s: {}", 

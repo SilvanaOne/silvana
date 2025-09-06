@@ -1,27 +1,32 @@
-use anyhow::{Result, Context, anyhow};
+use anyhow::{Context, Result, anyhow};
 use std::str::FromStr;
+use sui_crypto::SuiSigner;
 use sui_rpc::field::FieldMask;
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::proto::sui::rpc::v2beta2::{SimulateTransactionRequest, simulate_transaction_request};
 use sui_sdk_types as sui;
-use sui_crypto::SuiSigner;
-use tracing::{debug, warn, error, info};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
+use tracing::{debug, error, info, warn};
 
 use crate::chain::get_reference_gas_price;
 use crate::coin::fetch_coin;
+use crate::error::SilvanaSuiInterfaceError;
 use crate::object_lock::get_object_lock_manager;
 use crate::state::SharedSuiState;
-use crate::error::SilvanaSuiInterfaceError;
 
 /// Helper function to check transaction effects for errors
-fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operation: &str) -> Result<()> {
+fn check_transaction_effects(
+    tx_resp: &proto::ExecuteTransactionResponse,
+    operation: &str,
+) -> Result<()> {
     // Get transaction digest first (available even for failed transactions)
-    let tx_digest = tx_resp.transaction
+    let tx_digest = tx_resp
+        .transaction
         .as_ref()
         .and_then(|t| t.digest.as_ref())
         .map(|d| d.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    
+
     // Check for errors in transaction effects
     if let Some(ref transaction) = tx_resp.transaction {
         if let Some(ref effects) = transaction.effects {
@@ -30,7 +35,7 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                 if status.error.is_some() {
                     let error_msg = status.error.as_ref().unwrap();
                     let error_str = format!("{:?}", error_msg);
-                    
+
                     // Clean up common error messages for better readability
                     let clean_error = if error_str.contains("MoveAbort") {
                         // Extract abort code and location for Move aborts
@@ -39,7 +44,7 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                             if let Some(start) = error_str.find("abort_code: Some(") {
                                 let code_start = start + "abort_code: Some(".len();
                                 if let Some(end) = error_str[code_start..].find(')') {
-                                    let abort_code_str = &error_str[code_start..code_start+end];
+                                    let abort_code_str = &error_str[code_start..code_start + end];
                                     // Try to parse the abort code as u64 and format as hex
                                     if let Ok(abort_code) = abort_code_str.parse::<u64>() {
                                         parts.push(format!("abort_code: 0x{:016X}", abort_code));
@@ -53,7 +58,10 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                             if let Some(start) = error_str.find("function_name: Some(\"") {
                                 let name_start = start + "function_name: Some(\"".len();
                                 if let Some(end) = error_str[name_start..].find("\"") {
-                                    parts.push(format!("function: {}", &error_str[name_start..name_start+end]));
+                                    parts.push(format!(
+                                        "function: {}",
+                                        &error_str[name_start..name_start + end]
+                                    ));
                                 }
                             }
                         }
@@ -65,47 +73,63 @@ fn check_transaction_effects(tx_resp: &proto::ExecuteTransactionResponse, operat
                     } else {
                         error_str
                     };
-                    
+
                     // Log as info for expected race conditions (multiple coordinators competing)
-                    if clean_error.contains("reserve_proof") || 
-                       clean_error.contains("start_job") || 
-                       clean_error.contains("start_proving") {
-                        info!("{} transaction failed (normal for multiple coordinators): {} (tx: {})", operation, clean_error, tx_digest);
+                    if clean_error.contains("reserve_proof")
+                        || clean_error.contains("start_job")
+                        || clean_error.contains("start_proving")
+                    {
+                        info!(
+                            "{} transaction failed (normal for multiple coordinators): {} (tx: {})",
+                            operation, clean_error, tx_digest
+                        );
                     } else {
-                        error!("{} transaction failed: {} (tx: {})", operation, clean_error, tx_digest);
+                        error!(
+                            "{} transaction failed: {} (tx: {})",
+                            operation, clean_error, tx_digest
+                        );
                     }
-                    
+
                     return Err(SilvanaSuiInterfaceError::TransactionError {
                         message: format!("{} transaction failed: {}", operation, clean_error),
                         tx_digest: Some(tx_digest.clone()),
-                    }.into());
+                    }
+                    .into());
                 }
             }
         }
     }
-    
+
     // Check transaction was successful
     if tx_resp.finality.is_none() {
-        error!("{} transaction did not achieve finality (tx: {})", operation, tx_digest);
+        error!(
+            "{} transaction did not achieve finality (tx: {})",
+            operation, tx_digest
+        );
         return Err(SilvanaSuiInterfaceError::TransactionError {
             message: format!("{} transaction did not achieve finality", operation),
             tx_digest: Some(tx_digest),
-        }.into());
+        }
+        .into());
     }
-    
+
     // Check for transaction success in effects
-    let tx_successful = tx_resp.transaction
+    let tx_successful = tx_resp
+        .transaction
         .as_ref()
         .and_then(|t| t.effects.as_ref())
         .and_then(|e| e.status.as_ref())
         .map(|s| s.error.is_none())
         .unwrap_or(false);
-        
+
     if !tx_successful {
         error!("{} transaction failed despite being executed", operation);
-        return Err(anyhow!("{} transaction failed despite being executed", operation));
+        return Err(anyhow!(
+            "{} transaction failed despite being executed",
+            operation
+        ));
     }
-    
+
     Ok(())
 }
 
@@ -121,28 +145,38 @@ async fn wait_for_transaction(
     let start = std::time::Instant::now();
     let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut ledger = client.ledger_client();
-    
-    debug!("Waiting for transaction {} to be available in ledger (max {}ms)", tx_digest, timeout);
-    
+
+    debug!(
+        "Waiting for transaction {} to be available in ledger (max {}ms)",
+        tx_digest, timeout
+    );
+
     loop {
         // Check if we've exceeded the maximum wait time
         if start.elapsed().as_millis() > timeout as u128 {
-            return Err(anyhow!("Timeout waiting for transaction {} after {}ms", tx_digest, timeout));
+            return Err(anyhow!(
+                "Timeout waiting for transaction {} after {}ms",
+                tx_digest,
+                timeout
+            ));
         }
-        
+
         // Try to get the transaction - just check if it exists
         let req = proto::GetTransactionRequest {
             digest: Some(tx_digest.to_string()),
-            read_mask: Some(FieldMask { 
-                paths: vec!["digest".into()] // Just request minimal data to check existence
+            read_mask: Some(FieldMask {
+                paths: vec!["digest".into()], // Just request minimal data to check existence
             }),
         };
-        
+
         match ledger.get_transaction(req).await {
             Ok(_) => {
                 // Transaction found! It's available in the ledger
-                debug!("Transaction {} is now available in ledger (took {}ms)", 
-                    tx_digest, start.elapsed().as_millis());
+                debug!(
+                    "Transaction {} is now available in ledger (took {}ms)",
+                    tx_digest,
+                    start.elapsed().as_millis()
+                );
                 return Ok(());
             }
             Err(e) => {
@@ -150,7 +184,7 @@ async fn wait_for_transaction(
                 debug!("Transaction {} not yet available: {}", tx_digest, e);
             }
         }
-        
+
         // Wait before polling again
         sleep(Duration::from_millis(200)).await;
     }
@@ -172,14 +206,13 @@ fn get_clock_object_id() -> sui::Address {
         .expect("Valid clock object ID")
 }
 
-
 /// Create and submit a transaction to start a job
-pub async fn start_job_tx(
-    app_instance_str: &str,
-    job_sequence: u64,
-) -> Result<String> {
-    debug!("Creating start_app_job transaction for job_sequence: {}", job_sequence);
-    
+pub(crate) async fn start_job_tx(app_instance_str: &str, job_sequence: u64) -> Result<String> {
+    debug!(
+        "Creating start_app_job transaction for job_sequence: {}",
+        job_sequence
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "start_app_job",
@@ -187,16 +220,17 @@ pub async fn start_job_tx(
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to complete a job
-pub async fn complete_job_tx(
-    app_instance_str: &str,
-    job_sequence: u64,
-) -> Result<String> {
-    debug!("Creating complete_app_job transaction for job_sequence: {}", job_sequence);
-    
+pub(crate) async fn complete_job_tx(app_instance_str: &str, job_sequence: u64) -> Result<String> {
+    debug!(
+        "Creating complete_app_job transaction for job_sequence: {}",
+        job_sequence
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "complete_app_job",
@@ -204,29 +238,39 @@ pub async fn complete_job_tx(
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to fail a job
-pub async fn fail_job_tx(
+pub(crate) async fn fail_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
     error_message: &str,
 ) -> Result<String> {
-    debug!("Creating fail_app_job transaction for job_sequence: {} with error: {}", job_sequence, error_message);
-    
+    debug!(
+        "Creating fail_app_job transaction for job_sequence: {} with error: {}",
+        job_sequence, error_message
+    );
+
     // Debug: Query current job state before attempting to fail it
     let app_instance_id = get_app_instance_id(app_instance_str)
         .context("Failed to parse app instance ID for debug query")?;
     match query_job_status(app_instance_id, job_sequence).await {
         Ok(status) => {
-            debug!("Current job {} status before fail attempt: {:?}", job_sequence, status);
+            debug!(
+                "Current job {} status before fail attempt: {:?}",
+                job_sequence, status
+            );
         }
         Err(e) => {
-            warn!("Failed to query job {} status before fail: {}", job_sequence, e);
+            warn!(
+                "Failed to query job {} status before fail: {}",
+                job_sequence, e
+            );
         }
     }
-    
+
     let error_msg = error_message.to_string();
     execute_app_instance_function(
         app_instance_str,
@@ -236,17 +280,21 @@ pub async fn fail_job_tx(
             let error_arg = tb.input(sui_transaction_builder::Serialized(&error_msg));
             vec![app_instance_arg, job_sequence_arg, error_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to terminate a job
-pub async fn terminate_job_tx(
+pub(crate) async fn terminate_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
     gas_budget: Option<u64>,
 ) -> Result<String> {
-    debug!("Creating terminate_app_job transaction for job_sequence: {}", job_sequence);
-    
+    debug!(
+        "Creating terminate_app_job transaction for job_sequence: {}",
+        job_sequence
+    );
+
     execute_app_instance_function_with_gas(
         app_instance_str,
         "terminate_app_job",
@@ -255,12 +303,14 @@ pub async fn terminate_job_tx(
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a multicall transaction for batch job operations
-/// Executes operations in order: complete, fail, terminate, then start
-pub async fn multicall_job_operations_tx(
+/// Executes operations in order: complete, fail, terminate, start, update_state_for_sequences, submit_proofs, create_jobs and create_merge_jobs
+/// update_state_for_sequences, submit_proofs, create_jobs and create_merge_jobs are executed as separate move calls (one per operation)
+pub(crate) async fn multicall_job_operations_tx(
     app_instance_str: &str,
     complete_job_sequences: Vec<u64>,
     fail_job_sequences: Vec<u64>,
@@ -269,6 +319,10 @@ pub async fn multicall_job_operations_tx(
     start_job_sequences: Vec<u64>,
     start_job_memory_requirements: Vec<u64>,
     available_memory: u64,
+    update_state_for_sequences: Vec<(u64, Option<Vec<u8>>, Option<String>)>, // (sequence, new_state_data, new_data_availability_hash)
+    submit_proofs: Vec<(u64, Vec<u64>, Option<Vec<u64>>, Option<Vec<u64>>, String, String, u8, String, u64, u64)>, // (block_number, sequences, merged_sequences_1, merged_sequences_2, job_id, da_hash, cpu_cores, prover_architecture, prover_memory, cpu_time)
+    create_jobs: Vec<(String, Option<String>, Option<u64>, Option<Vec<u64>>, Option<Vec<u64>>, Option<Vec<u64>>, Vec<u8>, Option<u64>, Option<u64>, Option<String>)>, // (method_name, job_description, block_number, sequences, sequences1, sequences2, data, interval_ms, next_scheduled_at, settlement_chain)
+    create_merge_jobs: Vec<(u64, Vec<u64>, Vec<u64>, Vec<u64>, Option<String>)>, // (block_number, sequences, sequences1, sequences2, job_description)
     gas_budget: Option<u64>,
 ) -> Result<String> {
     // Validate that fail arrays have same length
@@ -279,7 +333,7 @@ pub async fn multicall_job_operations_tx(
             fail_errors.len()
         ));
     }
-    
+
     // Validate that start job arrays have same length
     if start_job_sequences.len() != start_job_memory_requirements.len() {
         return Err(anyhow!(
@@ -288,43 +342,220 @@ pub async fn multicall_job_operations_tx(
             start_job_memory_requirements.len()
         ));
     }
-    
+
     debug!(
-        "Creating multicall_app_job_operations transaction: {} complete, {} fail, {} terminate, {} start (available memory: {})",
+        "Creating multicall_app_job_operations transaction: {} complete, {} fail, {} terminate, {} start, {} update_state, {} submit_proof, {} create_job, {} create_merge (available memory: {:.2} GB)",
         complete_job_sequences.len(),
         fail_job_sequences.len(),
         terminate_job_sequences.len(),
         start_job_sequences.len(),
-        available_memory
+        update_state_for_sequences.len(),
+        submit_proofs.len(),
+        create_jobs.len(),
+        create_merge_jobs.len(),
+        available_memory as f64 / (1024.0 * 1024.0 * 1024.0)
     );
+
+    // Build operations list: one for multicall_app_job_operations, then one for each create_merge_job
+    let mut operations: Vec<(String, Box<dyn Fn(&mut sui_transaction_builder::TransactionBuilder, sui_sdk_types::Argument, sui_sdk_types::Argument) -> Vec<sui_sdk_types::Argument> + Send>)> = Vec::new();
     
-    execute_app_instance_function_with_gas(
+    // Only add multicall operation if there are any job operations
+    let has_job_operations = !complete_job_sequences.is_empty() ||
+                             !fail_job_sequences.is_empty() ||
+                             !terminate_job_sequences.is_empty() ||
+                             !start_job_sequences.is_empty();
+    
+    if has_job_operations {
+        let complete = complete_job_sequences.clone();
+        let fail_seqs = fail_job_sequences.clone();
+        let fail_errs = fail_errors.clone();
+        let terminate = terminate_job_sequences.clone();
+        let start = start_job_sequences.clone();
+        let start_mem = start_job_memory_requirements.clone();
+        let avail_mem = available_memory;
+        
+        operations.push((
+            "multicall_app_job_operations".to_string(),
+            Box::new(move |tb, app_instance_arg, clock_arg| {
+                // Create vector arguments for each operation type
+                let complete_arg = tb.input(sui_transaction_builder::Serialized(&complete));
+                let fail_sequences_arg = tb.input(sui_transaction_builder::Serialized(&fail_seqs));
+                let fail_errors_arg = tb.input(sui_transaction_builder::Serialized(&fail_errs));
+                let terminate_arg = tb.input(sui_transaction_builder::Serialized(&terminate));
+                let start_arg = tb.input(sui_transaction_builder::Serialized(&start));
+                let start_memory_arg = tb.input(sui_transaction_builder::Serialized(&start_mem));
+                let available_memory_arg = tb.input(sui_transaction_builder::Serialized(&avail_mem));
+
+                vec![
+                    app_instance_arg,
+                    complete_arg,
+                    fail_sequences_arg,
+                    fail_errors_arg,
+                    terminate_arg,
+                    start_arg,
+                    start_memory_arg,
+                    available_memory_arg,
+                    clock_arg,
+                ]
+            }),
+        ));
+    }
+    
+    // Add one operation for each update_state_for_sequence
+    for (sequence, new_state_data, new_data_availability_hash) in update_state_for_sequences {
+        let seq = sequence;
+        let state_data = new_state_data.clone();
+        let da_hash = new_data_availability_hash.clone();
+        
+        operations.push((
+            "update_state_for_sequence".to_string(),
+            Box::new(move |tb, app_instance_arg, clock_arg| {
+                let sequence_arg = tb.input(sui_transaction_builder::Serialized(&seq));
+                let state_data_arg = tb.input(sui_transaction_builder::Serialized(&state_data));
+                let da_hash_arg = tb.input(sui_transaction_builder::Serialized(&da_hash));
+                
+                vec![
+                    app_instance_arg,
+                    sequence_arg,
+                    state_data_arg,
+                    da_hash_arg,
+                    clock_arg,
+                ]
+            }),
+        ));
+    }
+    
+    // Add one operation for each submit_proof
+    for (block_number, sequences, merged_sequences_1, merged_sequences_2, job_id, da_hash, cpu_cores, prover_architecture, prover_memory, cpu_time) in submit_proofs {
+        let block = block_number;
+        let seqs = sequences.clone();
+        let merged_seqs_1 = merged_sequences_1.clone();
+        let merged_seqs_2 = merged_sequences_2.clone();
+        let job = job_id.clone();
+        let hash = da_hash.clone();
+        let cores = cpu_cores;
+        let arch = prover_architecture.clone();
+        let memory = prover_memory;
+        let time = cpu_time;
+        
+        operations.push((
+            "submit_proof".to_string(),
+            Box::new(move |tb, app_instance_arg, clock_arg| {
+                let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
+                let sequences_arg = tb.input(sui_transaction_builder::Serialized(&seqs));
+                let merged_seqs_1_arg = tb.input(sui_transaction_builder::Serialized(&merged_seqs_1));
+                let merged_seqs_2_arg = tb.input(sui_transaction_builder::Serialized(&merged_seqs_2));
+                let job_arg = tb.input(sui_transaction_builder::Serialized(&job));
+                let hash_arg = tb.input(sui_transaction_builder::Serialized(&hash));
+                let cores_arg = tb.input(sui_transaction_builder::Serialized(&cores));
+                let arch_arg = tb.input(sui_transaction_builder::Serialized(&arch));
+                let memory_arg = tb.input(sui_transaction_builder::Serialized(&memory));
+                let time_arg = tb.input(sui_transaction_builder::Serialized(&time));
+                
+                vec![
+                    app_instance_arg,
+                    block_arg,
+                    sequences_arg,
+                    merged_seqs_1_arg,
+                    merged_seqs_2_arg,
+                    job_arg,
+                    hash_arg,
+                    cores_arg,
+                    arch_arg,
+                    memory_arg,
+                    time_arg,
+                    clock_arg,
+                ]
+            }),
+        ));
+    }
+    
+    // Add one operation for each create_job (e.g., settlement jobs)
+    for (method_name, job_description, block_number, sequences, sequences1, sequences2, data, interval_ms, next_scheduled_at, settlement_chain) in create_jobs {
+        let method = method_name.clone();
+        let desc = job_description.clone();
+        let block = block_number;
+        let seqs = sequences.clone();
+        let seqs1 = sequences1.clone();
+        let seqs2 = sequences2.clone();
+        let job_data = data.clone();
+        let interval = interval_ms;
+        let scheduled = next_scheduled_at;
+        let chain = settlement_chain.clone();
+        
+        operations.push((
+            "create_app_job".to_string(),
+            Box::new(move |tb, app_instance_arg, clock_arg| {
+                let method_arg = tb.input(sui_transaction_builder::Serialized(&method));
+                let description_arg = tb.input(sui_transaction_builder::Serialized(&desc));
+                let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
+                let sequences_arg = tb.input(sui_transaction_builder::Serialized(&seqs));
+                let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&seqs1));
+                let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&seqs2));
+                let data_arg = tb.input(sui_transaction_builder::Serialized(&job_data));
+                let interval_arg = tb.input(sui_transaction_builder::Serialized(&interval));
+                let scheduled_arg = tb.input(sui_transaction_builder::Serialized(&scheduled));
+                let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
+                
+                vec![
+                    app_instance_arg,
+                    method_arg,
+                    description_arg,
+                    block_arg,
+                    sequences_arg,
+                    sequences1_arg,
+                    sequences2_arg,
+                    data_arg,
+                    interval_arg,
+                    scheduled_arg,
+                    chain_arg,
+                    clock_arg,
+                ]
+            }),
+        ));
+    }
+    
+    // Add one operation for each create_merge_job
+    for (block_number, sequences, sequences1, sequences2, job_description) in create_merge_jobs {
+        let block = block_number;
+        let seqs = sequences.clone();
+        let seqs1 = sequences1.clone();
+        let seqs2 = sequences2.clone();
+        let desc = job_description.clone();
+        
+        operations.push((
+            "create_merge_job".to_string(),
+            Box::new(move |tb, app_instance_arg, clock_arg| {
+                let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
+                let sequences_arg = tb.input(sui_transaction_builder::Serialized(&seqs));
+                let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&seqs1));
+                let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&seqs2));
+                let description_arg = tb.input(sui_transaction_builder::Serialized(&desc));
+                
+                vec![
+                    app_instance_arg,
+                    block_arg,
+                    sequences_arg,
+                    sequences1_arg,
+                    sequences2_arg,
+                    description_arg,
+                    clock_arg,
+                ]
+            }),
+        ));
+    }
+    
+    if operations.is_empty() {
+        return Err(anyhow!("No operations to execute in multicall"));
+    }
+    
+    // Use the existing execute_app_instance_functions_with_gas for multiple move calls
+    execute_app_instance_functions_with_gas(
         app_instance_str,
-        "multicall_app_job_operations",
+        operations,
         gas_budget,
-        move |tb, app_instance_arg, clock_arg| {
-            // Create vector arguments for each operation type
-            let complete_arg = tb.input(sui_transaction_builder::Serialized(&complete_job_sequences));
-            let fail_sequences_arg = tb.input(sui_transaction_builder::Serialized(&fail_job_sequences));
-            let fail_errors_arg = tb.input(sui_transaction_builder::Serialized(&fail_errors));
-            let terminate_arg = tb.input(sui_transaction_builder::Serialized(&terminate_job_sequences));
-            let start_arg = tb.input(sui_transaction_builder::Serialized(&start_job_sequences));
-            let start_memory_arg = tb.input(sui_transaction_builder::Serialized(&start_job_memory_requirements));
-            let available_memory_arg = tb.input(sui_transaction_builder::Serialized(&available_memory));
-            
-            vec![
-                app_instance_arg,
-                complete_arg,
-                fail_sequences_arg,
-                fail_errors_arg,
-                terminate_arg,
-                start_arg,
-                start_memory_arg,
-                available_memory_arg,
-                clock_arg,
-            ]
-        },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to restart failed jobs (with optional specific job sequences)
@@ -333,11 +564,14 @@ pub async fn restart_failed_jobs_with_sequences_tx(
     job_sequences: Option<Vec<u64>>,
     gas_budget: Option<u64>,
 ) -> Result<String> {
-    debug!("Creating restart_failed_app_jobs transaction with job_sequences: {:?}", job_sequences);
-    
+    debug!(
+        "Creating restart_failed_app_jobs transaction with job_sequences: {:?}",
+        job_sequences
+    );
+
     // Default to 1 SUI for this potentially heavy operation if not specified
     let gas = gas_budget.or(Some(1_000_000_000));
-    
+
     execute_app_instance_function_with_gas(
         app_instance_str,
         "restart_failed_app_jobs",
@@ -346,7 +580,8 @@ pub async fn restart_failed_jobs_with_sequences_tx(
             let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
             vec![app_instance_arg, job_sequences_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to remove failed jobs (with optional specific job sequences)
@@ -355,8 +590,11 @@ pub async fn remove_failed_jobs_tx(
     job_sequences: Option<Vec<u64>>,
     gas_budget: Option<u64>,
 ) -> Result<String> {
-    debug!("Creating remove_failed_app_jobs transaction with job_sequences: {:?}", job_sequences);
-    
+    debug!(
+        "Creating remove_failed_app_jobs transaction with job_sequences: {:?}",
+        job_sequences
+    );
+
     execute_app_instance_function_with_gas(
         app_instance_str,
         "remove_failed_app_jobs",
@@ -365,11 +603,12 @@ pub async fn remove_failed_jobs_tx(
             let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
             vec![app_instance_arg, job_sequences_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to submit a proof
-pub async fn submit_proof_tx(
+pub(crate) async fn submit_proof_tx(
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,
@@ -382,23 +621,29 @@ pub async fn submit_proof_tx(
     prover_memory: u64,
     cpu_time: u64,
 ) -> Result<String> {
-    debug!("Creating submit_proof transaction for block_number: {}, job_id: {}", block_number, job_id);
-    
+    debug!(
+        "Creating submit_proof transaction for block_number: {}, job_id: {}",
+        block_number, job_id
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "submit_proof",
         move |tb, app_instance_arg, clock_arg| {
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
-            let merged_sequences_1_arg = tb.input(sui_transaction_builder::Serialized(&merged_sequences_1));
-            let merged_sequences_2_arg = tb.input(sui_transaction_builder::Serialized(&merged_sequences_2));
+            let merged_sequences_1_arg =
+                tb.input(sui_transaction_builder::Serialized(&merged_sequences_1));
+            let merged_sequences_2_arg =
+                tb.input(sui_transaction_builder::Serialized(&merged_sequences_2));
             let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
             let da_hash_arg = tb.input(sui_transaction_builder::Serialized(&da_hash));
             let cpu_cores_arg = tb.input(sui_transaction_builder::Serialized(&cpu_cores));
-            let prover_architecture_arg = tb.input(sui_transaction_builder::Serialized(&prover_architecture));
+            let prover_architecture_arg =
+                tb.input(sui_transaction_builder::Serialized(&prover_architecture));
             let prover_memory_arg = tb.input(sui_transaction_builder::Serialized(&prover_memory));
             let cpu_time_arg = tb.input(sui_transaction_builder::Serialized(&cpu_time));
-            
+
             vec![
                 app_instance_arg,
                 block_number_arg,
@@ -414,26 +659,32 @@ pub async fn submit_proof_tx(
                 clock_arg,
             ]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to update state for a sequence
-pub async fn update_state_for_sequence_tx(
+pub(crate) async fn update_state_for_sequence_tx(
     app_instance_str: &str,
     sequence: u64,
     new_state_data: Option<Vec<u8>>,
     new_data_availability_hash: Option<String>,
 ) -> Result<String> {
-    debug!("Creating update_state_for_sequence transaction for sequence: {}", sequence);
-    
+    debug!(
+        "Creating update_state_for_sequence transaction for sequence: {}",
+        sequence
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "update_state_for_sequence",
         move |tb, app_instance_arg, clock_arg| {
             let sequence_arg = tb.input(sui_transaction_builder::Serialized(&sequence));
             let new_state_data_arg = tb.input(sui_transaction_builder::Serialized(&new_state_data));
-            let new_data_availability_hash_arg = tb.input(sui_transaction_builder::Serialized(&new_data_availability_hash));
-            
+            let new_data_availability_hash_arg = tb.input(sui_transaction_builder::Serialized(
+                &new_data_availability_hash,
+            ));
+
             vec![
                 app_instance_arg,
                 sequence_arg,
@@ -442,7 +693,8 @@ pub async fn update_state_for_sequence_tx(
                 clock_arg,
             ]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to create an app job
@@ -460,16 +712,20 @@ pub async fn create_app_job_tx(
     next_scheduled_at: Option<u64>,
     settlement_chain: Option<String>,
 ) -> Result<String> {
-    debug!("Creating app job transaction for method: {}, data size: {} bytes", 
-        method_name, data.len());
-    
+    debug!(
+        "Creating app job transaction for method: {}, data size: {} bytes",
+        method_name,
+        data.len()
+    );
+
     let method_name_clone = method_name.clone();
     execute_app_instance_function(
         app_instance_str,
         "create_app_job",
         move |tb, app_instance_arg, clock_arg| {
             let method_name_arg = tb.input(sui_transaction_builder::Serialized(&method_name));
-            let job_description_arg = tb.input(sui_transaction_builder::Serialized(&job_description));
+            let job_description_arg =
+                tb.input(sui_transaction_builder::Serialized(&job_description));
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
             let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&sequences1));
@@ -477,9 +733,11 @@ pub async fn create_app_job_tx(
             let data_arg = tb.input(sui_transaction_builder::Serialized(&data));
             // Add the periodic job parameters and settlement_chain
             let interval_ms_arg = tb.input(sui_transaction_builder::Serialized(&interval_ms));
-            let next_scheduled_at_arg = tb.input(sui_transaction_builder::Serialized(&next_scheduled_at));
-            let settlement_chain_arg = tb.input(sui_transaction_builder::Serialized(&settlement_chain));
-            
+            let next_scheduled_at_arg =
+                tb.input(sui_transaction_builder::Serialized(&next_scheduled_at));
+            let settlement_chain_arg =
+                tb.input(sui_transaction_builder::Serialized(&settlement_chain));
+
             vec![
                 app_instance_arg,
                 method_name_arg,
@@ -495,7 +753,15 @@ pub async fn create_app_job_tx(
                 clock_arg,
             ]
         },
-    ).await.map_err(|e| anyhow!("Failed to create app job for method '{}': {}", method_name_clone, e))
+    )
+    .await
+    .map_err(|e| {
+        anyhow!(
+            "Failed to create app job for method '{}': {}",
+            method_name_clone,
+            e
+        )
+    })
 }
 
 /// Create and submit a transaction to reject a proof
@@ -504,8 +770,11 @@ pub async fn reject_proof_tx(
     block_number: u64,
     sequences: Vec<u64>,
 ) -> Result<String> {
-    debug!("Creating reject_proof transaction for block_number: {}, sequences: {:?}", block_number, sequences);
-    
+    debug!(
+        "Creating reject_proof transaction for block_number: {}, sequences: {:?}",
+        block_number, sequences
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "reject_proof",
@@ -514,20 +783,24 @@ pub async fn reject_proof_tx(
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
             vec![app_instance_arg, block_number_arg, sequences_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to start proving (reserve proofs)
-pub async fn start_proving_tx(
+/// DEPRECATED: Use create_merge_job_with_proving_tx instead
+pub(crate) async fn start_proving_tx(
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,
     merged_sequences_1: Option<Vec<u64>>,
     merged_sequences_2: Option<Vec<u64>>,
-    job_id: String,
 ) -> Result<String> {
-    debug!("Creating start_proving transaction for block_number: {}, sequences: {:?}", block_number, sequences);
-    
+    debug!(
+        "Creating start_proving transaction for block_number: {}, sequences: {:?}",
+        block_number, sequences
+    );
+
     // Use the helper but handle expected errors specially
     execute_app_instance_function(
         app_instance_str,
@@ -535,25 +808,30 @@ pub async fn start_proving_tx(
         move |tb, app_instance_arg, clock_arg| {
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
-            let merged_sequences_1_arg = tb.input(sui_transaction_builder::Serialized(&merged_sequences_1));
-            let merged_sequences_2_arg = tb.input(sui_transaction_builder::Serialized(&merged_sequences_2));
-            let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
-            
+            let merged_sequences_1_arg =
+                tb.input(sui_transaction_builder::Serialized(&merged_sequences_1));
+            let merged_sequences_2_arg =
+                tb.input(sui_transaction_builder::Serialized(&merged_sequences_2));
+
             vec![
-                app_instance_arg, 
-                block_number_arg, 
-                sequences_arg, 
+                app_instance_arg,
+                block_number_arg,
+                sequences_arg,
                 merged_sequences_1_arg,
                 merged_sequences_2_arg,
-                job_id_arg,
-                clock_arg
+                clock_arg,
             ]
         },
-    ).await.map_err(|e| {
+    )
+    .await
+    .map_err(|e| {
         // Special handling for expected errors
         let error_str = e.to_string();
         if error_str.contains("Transaction failed") {
-            info!("start_proving transaction failed (proofs may be already reserved): {}", error_str);
+            info!(
+                "start_proving transaction failed (proofs may be already reserved): {}",
+                error_str
+            );
             anyhow!("Failed to reserve proofs - may be already reserved by another coordinator")
         } else {
             e
@@ -561,8 +839,9 @@ pub async fn start_proving_tx(
     })
 }
 
-/// Convenience function to create a merge job
-pub async fn create_merge_job_tx(
+/// Convenience function to create a merge job (old version - just creates the job)
+/// Use create_merge_job_with_proving_tx for the new version that reserves proofs first
+pub(crate) async fn create_merge_job_tx(
     app_instance_str: &str,
     block_number: u64,
     sequences1: Vec<u64>,
@@ -574,24 +853,68 @@ pub async fn create_merge_job_tx(
     combined_sequences.extend(sequences2.clone());
     combined_sequences.sort();
     combined_sequences.dedup(); // Remove any duplicates
-    
+
     debug!("Combined sequences for merge job: {:?}", combined_sequences);
-    debug!("Block number: {}, sequences1: {:?}, sequences2: {:?}", block_number, sequences1, sequences2);
+    debug!(
+        "Block number: {}, sequences1: {:?}, sequences2: {:?}",
+        block_number, sequences1, sequences2
+    );
 
     // Call the general create_app_job_tx function with the new fields
     create_app_job_tx(
         app_instance_str,
         "merge".to_string(),
         job_description,
-        Some(block_number),         // Pass block_number
-        Some(combined_sequences),   // Pass the combined sequences
-        Some(sequences1),           // Pass sequences1
-        Some(sequences2),           // Pass sequences2
-        vec![],                     // Empty data since we're using the Job fields now
-        None,                       // No interval for merge jobs
-        None,                       // No scheduled time for merge jobs
-        None,                       // Not a settlement job
-    ).await
+        Some(block_number),       // Pass block_number
+        Some(combined_sequences), // Pass the combined sequences
+        Some(sequences1),         // Pass sequences1
+        Some(sequences2),         // Pass sequences2
+        vec![],                   // Empty data since we're using the Job fields now
+        None,                     // No interval for merge jobs
+        None,                     // No scheduled time for merge jobs
+        None,                     // Not a settlement job
+    )
+    .await
+}
+
+/// Create a merge job with proof reservation
+/// This function first calls start_proving to reserve the proofs, then creates the job
+/// Returns the transaction digest on success
+pub(crate) async fn create_merge_job_with_proving_tx(
+    app_instance_str: &str,
+    block_number: u64,
+    sequences: Vec<u64>,       // Combined sequences
+    sequences1: Vec<u64>,       // First proof sequences
+    sequences2: Vec<u64>,       // Second proof sequences
+    job_description: Option<String>,
+) -> Result<String> {
+    debug!(
+        "Creating merge job with proving for block {}, combined sequences: {:?}, sequences1: {:?}, sequences2: {:?}",
+        block_number, sequences, sequences1, sequences2
+    );
+
+    execute_app_instance_function(
+        app_instance_str,
+        "create_merge_job",
+        move |tb, app_instance_arg, clock_arg| {
+            let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
+            let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
+            let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&sequences1));
+            let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&sequences2));
+            let job_description_arg = tb.input(sui_transaction_builder::Serialized(&job_description));
+            
+            vec![
+                app_instance_arg,
+                block_number_arg,
+                sequences_arg,
+                sequences1_arg,
+                sequences2_arg,
+                job_description_arg,
+                clock_arg,
+            ]
+        },
+    )
+    .await
 }
 
 /// Update block proof data availability
@@ -600,18 +923,24 @@ pub async fn update_block_proof_data_availability_tx(
     block_number: u64,
     proof_data_availability: String,
 ) -> Result<String> {
-    debug!("Creating update_block_proof_data_availability transaction for block_number: {}", block_number);
-    
+    debug!(
+        "Creating update_block_proof_data_availability transaction for block_number: {}",
+        block_number
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "update_block_proof_data_availability",
         move |tb, app_instance_arg, clock_arg| {
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
-            let proof_da_arg = tb.input(sui_transaction_builder::Serialized(&proof_data_availability));
-            
+            let proof_da_arg = tb.input(sui_transaction_builder::Serialized(
+                &proof_data_availability,
+            ));
+
             vec![app_instance_arg, block_number_arg, proof_da_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Update block state data availability
@@ -620,18 +949,24 @@ pub async fn update_block_state_data_availability_tx(
     block_number: u64,
     state_data_availability: String,
 ) -> Result<String> {
-    debug!("Creating update_block_state_data_availability transaction for block_number: {}", block_number);
-    
+    debug!(
+        "Creating update_block_state_data_availability transaction for block_number: {}",
+        block_number
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "update_block_state_data_availability",
         move |tb, app_instance_arg, clock_arg| {
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
-            let state_da_arg = tb.input(sui_transaction_builder::Serialized(&state_data_availability));
-            
+            let state_da_arg = tb.input(sui_transaction_builder::Serialized(
+                &state_data_availability,
+            ));
+
             vec![app_instance_arg, block_number_arg, state_da_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Create and submit a transaction to increase sequence (add new action)
@@ -640,19 +975,30 @@ pub async fn increase_sequence_tx(
     optimistic_state: Vec<u8>,
     transition_data: Vec<u8>,
 ) -> Result<String> {
-    debug!("Creating increase_sequence transaction with optimistic_state size: {} bytes, transition_data size: {} bytes", 
-        optimistic_state.len(), transition_data.len());
-    
+    debug!(
+        "Creating increase_sequence transaction with optimistic_state size: {} bytes, transition_data size: {} bytes",
+        optimistic_state.len(),
+        transition_data.len()
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "increase_sequence",
         move |tb, app_instance_arg, clock_arg| {
-            let optimistic_state_arg = tb.input(sui_transaction_builder::Serialized(&optimistic_state));
-            let transition_data_arg = tb.input(sui_transaction_builder::Serialized(&transition_data));
-            
-            vec![app_instance_arg, optimistic_state_arg, transition_data_arg, clock_arg]
+            let optimistic_state_arg =
+                tb.input(sui_transaction_builder::Serialized(&optimistic_state));
+            let transition_data_arg =
+                tb.input(sui_transaction_builder::Serialized(&transition_data));
+
+            vec![
+                app_instance_arg,
+                optimistic_state_arg,
+                transition_data_arg,
+                clock_arg,
+            ]
         },
-    ).await
+    )
+    .await
 }
 
 /// Convenience function to create a settle job
@@ -669,42 +1015,40 @@ pub async fn create_settle_job_tx(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
-    
+
     create_app_job_tx(
         app_instance_str,
         "settle".to_string(),
         job_description,
-        Some(block_number),         // Pass block_number
-        None,                       // No sequences for settle
-        None,                       // No sequences1 for settle
-        None,                       // No sequences2 for settle
-        vec![],                     // Empty data
-        Some(interval_ms),          // 1 minute interval for periodic settle jobs
-        Some(next_scheduled_at),    // Start now
-        Some(chain),                // This is a settlement job for the specified chain
-    ).await
+        Some(block_number),      // Pass block_number
+        None,                    // No sequences for settle
+        None,                    // No sequences1 for settle
+        None,                    // No sequences2 for settle
+        vec![],                  // Empty data
+        Some(interval_ms),       // 1 minute interval for periodic settle jobs
+        Some(next_scheduled_at), // Start now
+        Some(chain),             // This is a settlement job for the specified chain
+    )
+    .await
 }
 
 /// Terminate an app job
-pub async fn terminate_app_job_tx(
-    app_instance_str: &str,
-    job_id: u64,
-) -> Result<String> {
-    debug!("Creating terminate_app_job transaction for job_id: {}", job_id);
-    
+pub async fn terminate_app_job_tx(app_instance_str: &str, job_id: u64) -> Result<String> {
+    debug!(
+        "Creating terminate_app_job transaction for job_id: {}",
+        job_id
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "terminate_app_job",
         move |tb, app_instance_arg, clock_arg| {
             let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
-            
-            vec![
-                app_instance_arg,
-                job_id_arg,
-                clock_arg,
-            ]
+
+            vec![app_instance_arg, job_id_arg, clock_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Update block settlement transaction hash
@@ -714,8 +1058,11 @@ pub async fn update_block_settlement_tx_hash_tx(
     chain: String,
     settlement_tx_hash: String,
 ) -> Result<String> {
-    debug!("Creating update_block_settlement_tx_hash transaction for block_number: {} on chain: {}", block_number, chain);
-    
+    debug!(
+        "Creating update_block_settlement_tx_hash transaction for block_number: {} on chain: {}",
+        block_number, chain
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_hash",
@@ -723,11 +1070,19 @@ pub async fn update_block_settlement_tx_hash_tx(
             // Order must match Move function signature: chain, block_number, settlement_tx_hash
             let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
-            let settlement_tx_hash_arg = tb.input(sui_transaction_builder::Serialized(&settlement_tx_hash));
-            
-            vec![app_instance_arg, chain_arg, block_number_arg, settlement_tx_hash_arg, clock_arg]
+            let settlement_tx_hash_arg =
+                tb.input(sui_transaction_builder::Serialized(&settlement_tx_hash));
+
+            vec![
+                app_instance_arg,
+                chain_arg,
+                block_number_arg,
+                settlement_tx_hash_arg,
+                clock_arg,
+            ]
         },
-    ).await
+    )
+    .await
 }
 
 /// Update block settlement transaction included in block
@@ -737,8 +1092,11 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
     chain: String,
     settled_at: u64,
 ) -> Result<String> {
-    debug!("Creating update_block_settlement_tx_included_in_block transaction for block_number: {} on chain: {}", block_number, chain);
-    
+    debug!(
+        "Creating update_block_settlement_tx_included_in_block transaction for block_number: {} on chain: {}",
+        block_number, chain
+    );
+
     execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_included_in_block",
@@ -747,19 +1105,23 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
             let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let settled_at_arg = tb.input(sui_transaction_builder::Serialized(&settled_at));
-            
-            vec![app_instance_arg, chain_arg, block_number_arg, settled_at_arg, clock_arg]
+
+            vec![
+                app_instance_arg,
+                chain_arg,
+                block_number_arg,
+                settled_at_arg,
+                clock_arg,
+            ]
         },
-    ).await
+    )
+    .await
 }
 
 /// Debug function to query job status from the blockchain
-async fn query_job_status(
-    app_instance_id: sui::Address,
-    job_sequence: u64,
-) -> Result<String> {
+async fn query_job_status(app_instance_id: sui::Address, job_sequence: u64) -> Result<String> {
     use crate::fetch::app_instance::fetch_app_instance;
-    
+
     // Use the existing fetch_app_instance function which handles formatting correctly
     match fetch_app_instance(&app_instance_id.to_string()).await {
         Ok(app_instance) => {
@@ -767,18 +1129,27 @@ async fn query_job_status(
             for (chain, settlement) in &app_instance.settlements {
                 if let Some(settlement_job) = settlement.settlement_job {
                     if settlement_job == job_sequence {
-                        debug!("Job {} is the settlement job for chain {}", job_sequence, chain);
-                        return Ok(format!("Job {} is settlement job for chain {}", job_sequence, chain));
+                        debug!(
+                            "Job {} is the settlement job for chain {}",
+                            job_sequence, chain
+                        );
+                        return Ok(format!(
+                            "Job {} is settlement job for chain {}",
+                            job_sequence, chain
+                        ));
                     }
                 }
             }
-            
+
             debug!("Found app_instance for job {} check", job_sequence);
             return Ok(format!("Job {} status check completed", job_sequence));
         }
         Err(e) => {
             // Don't warn for fetch errors as they're expected for some job types
-            debug!("Could not fetch app_instance for job {} status check: {}", job_sequence, e);
+            debug!(
+                "Could not fetch app_instance for job {} status check: {}",
+                job_sequence, e
+            );
             return Ok(format!("Job {} status check skipped", job_sequence));
         }
     }
@@ -790,15 +1161,15 @@ async fn get_object_details(
 ) -> Result<(sui::ObjectReference, Option<u64>)> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut ledger = client.ledger_client();
-    
+
     let response = ledger
         .get_object(proto::GetObjectRequest {
             object_id: Some(object_id.to_string()),
             version: None,
             read_mask: Some(prost_types::FieldMask {
                 paths: vec![
-                    "object_id".to_string(), 
-                    "version".to_string(), 
+                    "object_id".to_string(),
+                    "version".to_string(),
                     "digest".to_string(),
                     "owner".to_string(),
                 ],
@@ -809,32 +1180,32 @@ async fn get_object_details(
         .into_inner();
 
     if let Some(object) = response.object {
-        let id = object.object_id
+        let id = object
+            .object_id
             .context("Missing object_id")?
             .parse()
             .context("Failed to parse object_id")?;
-        let version = object.version
-            .context("Missing version")?;
-        let digest = object.digest
+        let version = object.version.context("Missing version")?;
+        let digest = object
+            .digest
             .context("Missing digest")?
             .parse()
             .context("Failed to parse digest")?;
 
         let obj_ref = sui::ObjectReference::new(id, version, digest);
-        
+
         // Extract initial_shared_version from owner information
-        let initial_shared_version = object.owner
-            .and_then(|owner| {
-                // For shared objects, the owner.version contains the initial_shared_version
-                // and address should be empty/None
-                if owner.address.is_none() || owner.address == Some("".to_string()) {
-                    // This is likely a shared object, return the version as initial_shared_version
-                    owner.version
-                } else {
-                    // This is an owned object
-                    None
-                }
-            });
+        let initial_shared_version = object.owner.and_then(|owner| {
+            // For shared objects, the owner.version contains the initial_shared_version
+            // and address should be empty/None
+            if owner.address.is_none() || owner.address == Some("".to_string()) {
+                // This is likely a shared object, return the version as initial_shared_version
+                owner.version
+            } else {
+                // This is an owned object
+                None
+            }
+        });
         Ok((obj_ref, initial_shared_version))
     } else {
         Err(anyhow!("Object not found: {}", object_id))
@@ -876,27 +1247,67 @@ where
         sui_sdk_types::Argument, // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
+    // Call the batch version with a single operation
+    execute_app_instance_functions_with_gas(
+        app_instance_str,
+        vec![(function_name.to_string(), build_args)],
+        custom_gas_budget,
+    )
+    .await
+}
+
+/// Execute multiple app instance transactions in a single transaction block
+/// Each operation is a tuple of (function_name, args_builder)
+/// All operations share the same app_instance and clock objects
+async fn execute_app_instance_functions_with_gas<F>(
+    app_instance_str: &str,
+    operations: Vec<(String, F)>,
+    custom_gas_budget: Option<u64>,
+) -> Result<String>
+where
+    F: Fn(
+        &mut sui_transaction_builder::TransactionBuilder,
+        sui_sdk_types::Argument, // app_instance_arg
+        sui_sdk_types::Argument, // clock_arg
+    ) -> Vec<sui_sdk_types::Argument>,
+{
     const MAX_RETRIES: u32 = 3;
     let mut retry_count = 0;
-    
-    debug!("Creating {} transaction for app_instance: {}", function_name, app_instance_str);
-    
+
+    if operations.is_empty() {
+        return Err(anyhow!("No operations provided"));
+    }
+
+    let function_names: Vec<String> = operations.iter().map(|(name, _)| name.clone()).collect();
+    debug!(
+        "Creating batch transaction for app_instance: {} with functions: {:?}",
+        app_instance_str, function_names
+    );
+
     // Get shared state and client
     let shared_state = SharedSuiState::get_instance();
     let sender = shared_state.get_sui_address();
     let sk = shared_state.get_sui_private_key().clone();
     let package_id = shared_state.get_coordination_package_id();
-    let app_instance_id = get_app_instance_id(app_instance_str)
-        .context("Failed to parse app instance ID")?;
+    let app_instance_id =
+        get_app_instance_id(app_instance_str).context("Failed to parse app instance ID")?;
     let clock_object_id = get_clock_object_id();
-    
+
     debug!("Package ID: {}", package_id);
     debug!("App instance ID: {}", app_instance_id);
     debug!("Sender: {}", sender);
-    
-    // Use custom gas budget or default to 0.1 SUI
-    let gas_budget = custom_gas_budget.unwrap_or(100_000_000);
-    debug!("Gas budget: {} MIST ({} SUI)", gas_budget, gas_budget as f64 / 1_000_000_000.0);
+
+    // Determine if we need to estimate gas
+    let needs_gas_estimation = custom_gas_budget.is_none();
+
+    // Use custom gas budget or default to 5 SUI for simulation
+    let mut gas_budget = custom_gas_budget.unwrap_or(5_000_000_000);
+    debug!(
+        "Initial gas budget: {} MIST ({} SUI), needs estimation: {}",
+        gas_budget,
+        gas_budget as f64 / 1_000_000_000.0,
+        needs_gas_estimation
+    );
 
     // Lock the app_instance object BEFORE fetching its version
     // This prevents race conditions where multiple threads fetch the same version
@@ -906,14 +1317,14 @@ where
         .await
         .context("Failed to lock app_instance object")?;
     debug!("Locked app_instance object: {}", app_instance_id);
-    
+
     // Variables that will be reused across retries
     let mut gas_guard: Option<crate::coin::CoinLockGuard> = None;
-    
+
     loop {
         // Get a fresh client for each attempt
         let mut client = shared_state.get_sui_client();
-        
+
         // Build transaction using TransactionBuilder
         let mut tb = sui_transaction_builder::TransactionBuilder::new();
         tb.set_sender(sender);
@@ -927,8 +1338,12 @@ where
         // Release old coin if we're retrying
         if retry_count > 0 {
             if let Some(old_guard) = gas_guard.take() {
-                info!("Retry {}/{}: Releasing old gas coin {} due to version conflict", 
-                    retry_count, MAX_RETRIES, old_guard.coin_id());
+                info!(
+                    "Retry {}/{}: Releasing old gas coin {} due to version conflict",
+                    retry_count,
+                    MAX_RETRIES,
+                    old_guard.coin_id()
+                );
                 drop(old_guard);
                 // Small delay to allow the coin to be released
                 sleep(Duration::from_millis(100)).await;
@@ -940,40 +1355,52 @@ where
             Some((coin, guard)) => (coin, guard),
             None => {
                 error!("No available coins with sufficient balance for gas");
-                return Err(anyhow!("No available coins with sufficient balance for gas"));
+                return Err(anyhow!(
+                    "No available coins with sufficient balance for gas"
+                ));
             }
         };
         gas_guard = Some(new_gas_guard);
-        
+
         let gas_input = sui_transaction_builder::unresolved::Input::owned(
             gas_coin.object_id(),
             gas_coin.object_ref.version(),
             *gas_coin.object_ref.digest(),
         );
         tb.add_gas_objects(vec![gas_input]);
-        debug!("Gas coin selected: id={} ver={} digest={} balance={}", 
-            gas_coin.object_id(), gas_coin.object_ref.version(), gas_coin.object_ref.digest(), gas_coin.balance);
+        debug!(
+            "Gas coin selected: id={} ver={} digest={} balance={}",
+            gas_coin.object_id(),
+            gas_coin.object_ref.version(),
+            gas_coin.object_ref.digest(),
+            gas_coin.balance
+        );
 
         // Fetch the current version and ownership info of app_instance object
         // Do this fresh for each retry to get the latest version
-        let (app_instance_ref, initial_shared_version) = get_object_details(app_instance_id).await
+        let (app_instance_ref, initial_shared_version) = get_object_details(app_instance_id)
+            .await
             .context("Failed to get app instance details")?;
-        
+
         // Create input based on whether object is shared or owned
         let app_instance_input = if let Some(shared_version) = initial_shared_version {
             if retry_count > 0 {
-                info!("Retry {}/{}: Using updated shared object version {} for app_instance", 
-                    retry_count, MAX_RETRIES, shared_version);
+                info!(
+                    "Retry {}/{}: Using updated shared object version {} for app_instance",
+                    retry_count, MAX_RETRIES, shared_version
+                );
             }
-            debug!("Using shared object input for app_instance ({}) with initial_shared_version={}", 
-                function_name, shared_version);
+            debug!(
+                "Using shared object input for app_instance with initial_shared_version={}",
+                shared_version
+            );
             sui_transaction_builder::unresolved::Input::shared(
                 app_instance_id,
                 shared_version,
-                true // mutable
+                true, // mutable
             )
         } else {
-            debug!("Using owned object input for app_instance ({})", function_name);
+            debug!("Using owned object input for app_instance");
             sui_transaction_builder::unresolved::Input::owned(
                 *app_instance_ref.object_id(),
                 app_instance_ref.version(),
@@ -983,37 +1410,225 @@ where
         let app_instance_arg = tb.input(app_instance_input);
 
         // Clock object (shared)
-        let clock_input = sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
+        let clock_input =
+            sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
         let clock_arg = tb.input(clock_input);
 
-        // Build function-specific arguments
-        // The closure can be called multiple times since it's Fn, not FnOnce
-        let args = build_args(&mut tb, app_instance_arg, clock_arg);
+        // Add all function calls to the transaction
+        for (function_name, build_args) in &operations {
+            // Build function-specific arguments
+            let args = build_args(&mut tb, app_instance_arg, clock_arg);
 
-        // Function call
-        let func = sui_transaction_builder::Function::new(
-            package_id,
-            "app_instance".parse()
-                .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
-            function_name.parse()
-                .map_err(|e| anyhow!("Failed to parse function name '{}': {}", function_name, e))?,
-            vec![],
-        );
-        tb.move_call(func, args);
+            // Function call
+            let func = sui_transaction_builder::Function::new(
+                package_id,
+                "app_instance"
+                    .parse()
+                    .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+                function_name.parse().map_err(|e| {
+                    anyhow!("Failed to parse function name '{}': {}", function_name, e)
+                })?,
+                vec![],
+            );
+            tb.move_call(func, args);
+        }
 
         // Finalize and sign
         let tx = tb.finish()?;
         let sig = sk.sign_transaction(&tx)?;
+
+        // Perform dry run if gas estimation is needed
+        if needs_gas_estimation && retry_count == 0 {
+            let num_operations = operations.len();
+            debug!(
+                "Performing gas estimation dry run for {} Move call(s): {}",
+                num_operations,
+                function_names.join(", ")
+            );
+            debug!(
+                "Initial budget for simulation: {} MIST ({} SUI)",
+                gas_budget,
+                gas_budget as f64 / 1_000_000_000.0
+            );
+
+            // Try gas estimation once - no retries
+            let mut live_data = client.live_data_client();
+            let simulate_req = SimulateTransactionRequest {
+                transaction: Some(tx.clone().into()),
+                read_mask: Some(FieldMask {
+                    paths: vec![
+                        "transaction.effects.status".into(),
+                        "transaction.effects.gas_used".into(),
+                    ],
+                }),
+                checks: Some(simulate_transaction_request::TransactionChecks::Enabled as i32),
+                do_gas_selection: Some(false), // We're managing gas ourselves
+            };
+
+            match live_data.simulate_transaction(simulate_req).await {
+                Ok(sim_resp) => {
+                    let sim_result = sim_resp.into_inner();
+
+                    // Check if simulation succeeded
+                    if let Some(ref transaction) = sim_result.transaction {
+                        if let Some(ref effects) = transaction.effects {
+                            if let Some(ref status) = effects.status {
+                                if status.error.is_none() {
+                                    // Simulation succeeded, extract gas usage
+                                    if let Some(ref gas_summary) = effects.gas_used {
+                                        let computation_cost =
+                                            gas_summary.computation_cost.unwrap_or(0);
+                                        let storage_cost = gas_summary.storage_cost.unwrap_or(0);
+                                        let storage_rebate =
+                                            gas_summary.storage_rebate.unwrap_or(0);
+                                        let non_refundable_storage_fee =
+                                            gas_summary.non_refundable_storage_fee.unwrap_or(0);
+
+                                        // Calculate total gas needed with 20% buffer
+                                        let total_gas_used = computation_cost
+                                            + storage_cost
+                                            + non_refundable_storage_fee
+                                            - storage_rebate;
+                                        let estimated_budget = (total_gas_used as f64 * 1.2) as u64;
+
+                                        // Ensure minimum budget of 10M MIST (0.01 SUI)
+                                        let final_budget = estimated_budget.max(10_000_000);
+
+                                        // Cap at 5 SUI maximum (5 billion MIST) - Sui network limit
+                                        const MAX_GAS_BUDGET_MIST: u64 = 5_000_000_000;
+                                        let final_budget = if final_budget > MAX_GAS_BUDGET_MIST {
+                                            // Check if this is due to invalid simulation result
+                                            if final_budget == u64::MAX || final_budget > MAX_GAS_BUDGET_MIST * 100 {
+                                                warn!(
+                                                    "Gas estimation returned invalid value: {} MIST, using fallback budget of 0.5 SUI",
+                                                    final_budget
+                                                );
+                                                gas_budget = 500_000_000; // 0.5 SUI fallback
+                                                gas_budget
+                                            } else {
+                                                warn!(
+                                                    "Gas estimation returned excessive value: {} MIST ({:.4} SUI), capping at {} MIST ({} SUI)",
+                                                    final_budget,
+                                                    final_budget as f64 / 1_000_000_000.0,
+                                                    MAX_GAS_BUDGET_MIST,
+                                                    MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                                                );
+                                                MAX_GAS_BUDGET_MIST
+                                            }
+                                        } else {
+                                            final_budget
+                                        };
+
+                                        // Calculate average per move call
+                                        let num_calls = operations.len() as u64;
+                                        let avg_per_call = if num_calls > 0 {
+                                            total_gas_used / num_calls
+                                        } else {
+                                            0
+                                        };
+
+                                        debug!("Dry run gas summary:");
+                                        debug!("  Computation cost: {} MIST", computation_cost);
+                                        debug!("  Storage cost: {} MIST", storage_cost);
+                                        debug!("  Storage rebate: {} MIST", storage_rebate);
+                                        debug!(
+                                            "  Non-refundable fee: {} MIST",
+                                            non_refundable_storage_fee
+                                        );
+                                        debug!("  Total gas used: {} MIST", total_gas_used);
+                                        debug!(
+                                            "  Estimated budget (with 20% buffer): {} MIST",
+                                            estimated_budget
+                                        );
+                                        debug!(
+                                            "  Final budget: {} MIST ({} SUI)",
+                                            final_budget,
+                                            final_budget as f64 / 1_000_000_000.0
+                                        );
+
+                                        // Info log with key metrics
+                                        debug!(
+                                            "Gas estimation complete: {} Move calls, total gas used: {} MIST ({:.4} SUI), avg per call: {} MIST ({:.6} SUI), final budget: {} MIST ({:.4} SUI)",
+                                            num_calls,
+                                            total_gas_used,
+                                            total_gas_used as f64 / 1_000_000_000.0,
+                                            avg_per_call,
+                                            avg_per_call as f64 / 1_000_000_000.0,
+                                            final_budget,
+                                            final_budget as f64 / 1_000_000_000.0
+                                        );
+
+                                        // Update gas budget with the estimated value
+                                        if final_budget != gas_budget {
+                                            let old_budget = gas_budget;
+                                            gas_budget = final_budget;
+
+                                            debug!(
+                                                "Updating gas budget from simulation: {} MIST ({:.4} SUI) -> {} MIST ({:.4} SUI)",
+                                                old_budget,
+                                                old_budget as f64 / 1_000_000_000.0,
+                                                gas_budget,
+                                                gas_budget as f64 / 1_000_000_000.0
+                                            );
+
+                                            // Release the gas coin and retry with new budget
+                                            if let Some(old_guard) = gas_guard.take() {
+                                                debug!(
+                                                    "Releasing gas coin {} to retry with new budget",
+                                                    old_guard.coin_id()
+                                                );
+                                                drop(old_guard);
+                                                sleep(Duration::from_millis(100)).await;
+                                            }
+                                            continue; // Retry the loop with new gas budget
+                                        } else {
+                                            debug!(
+                                                "Gas estimation result: using estimated budget {} MIST ({:.4} SUI)",
+                                                gas_budget,
+                                                gas_budget as f64 / 1_000_000_000.0
+                                            );
+                                        }
+                                    } else {
+                                        warn!("Dry run succeeded but no gas cost summary available, using fallback budget of 0.5 SUI");
+                                        gas_budget = 500_000_000; // 0.5 SUI fallback
+                                    }
+                                } else {
+                                    // Simulation failed
+                                    if let Some(ref error) = status.error {
+                                        warn!("Dry run failed with error: {:?}, using fallback budget of 0.5 SUI", error);
+                                    } else {
+                                        warn!("Dry run failed with unknown error, using fallback budget of 0.5 SUI");
+                                    }
+                                    gas_budget = 500_000_000; // 0.5 SUI fallback
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to perform dry run: {}, using fallback budget of 0.5 SUI", e);
+                    gas_budget = 500_000_000; // 0.5 SUI fallback
+                }
+            }
+        }
 
         // Execute transaction via gRPC
         let mut exec = client.execution_client();
         let req = proto::ExecuteTransactionRequest {
             transaction: Some(tx.into()),
             signatures: vec![sig.into()],
-            read_mask: Some(FieldMask { paths: vec!["finality".into(), "transaction".into()] }),
+            read_mask: Some(FieldMask {
+                paths: vec!["finality".into(), "transaction".into()],
+            }),
         };
 
-        debug!("Sending {} transaction (attempt {}/{})...", function_name, retry_count + 1, MAX_RETRIES + 1);
+        let functions_str = function_names.join(", ");
+        debug!(
+            "Sending batch transaction [{}] (attempt {}/{})...",
+            functions_str,
+            retry_count + 1,
+            MAX_RETRIES + 1
+        );
         let tx_start = std::time::Instant::now();
         let exec_result = exec.execute_transaction(req).await;
         let tx_elapsed_ms = tx_start.elapsed().as_millis();
@@ -1022,14 +1637,20 @@ where
             Ok(r) => r,
             Err(e) => {
                 let error_str = e.to_string();
-                
+
                 // Clean up error message - remove binary details
-                let clean_error = if error_str.contains("Object ID") && error_str.contains("is not available for consumption") {
+                let clean_error = if error_str.contains("Object ID")
+                    && error_str.contains("is not available for consumption")
+                {
                     // Extract just the relevant object version conflict info
                     if let Some(obj_start) = error_str.find("Object ID") {
                         if let Some(version_info) = error_str.find("current version:") {
-                            let end_idx = error_str[version_info..].find('.').unwrap_or(50) + version_info;
-                            format!("Object version conflict - {}", &error_str[obj_start..end_idx])
+                            let end_idx =
+                                error_str[version_info..].find('.').unwrap_or(50) + version_info;
+                            format!(
+                                "Object version conflict - {}",
+                                &error_str[obj_start..end_idx]
+                            )
                         } else {
                             "Object version conflict - transaction inputs are outdated".to_string()
                         }
@@ -1046,36 +1667,56 @@ where
                 } else {
                     error_str
                 };
-                
+
                 // Check if this is a version conflict that we should retry
-                if (clean_error.contains("version conflict") || clean_error.contains("not available for consumption")) 
-                    && retry_count < MAX_RETRIES {
+                if (clean_error.contains("version conflict")
+                    || clean_error.contains("not available for consumption"))
+                    && retry_count < MAX_RETRIES
+                {
                     retry_count += 1;
-                    info!("Transaction {} failed with version conflict on attempt {}/{}. Retrying with fresh object version. Version conflict details: {}", 
-                        function_name, retry_count, MAX_RETRIES + 1, clean_error);
-                    
+                    info!(
+                        "Batch transaction [{}] failed with version conflict on attempt {}/{}. Retrying with fresh object version. Version conflict details: {}",
+                        functions_str,
+                        retry_count,
+                        MAX_RETRIES + 1,
+                        clean_error
+                    );
+
                     // Add exponential backoff delay before retry
                     let delay = Duration::from_millis(1000 * (2_u64.pow(retry_count - 1)));
                     sleep(delay).await;
-                    
+
                     continue; // Retry the transaction
                 }
-                
+
                 // Log as warning for expected race conditions, error for unexpected issues
-                if clean_error.contains("version conflict") || clean_error.contains("not available for consumption") {
-                    error!("Transaction {} failed after {} retries with version conflict: {}", 
-                        function_name, retry_count + 1, clean_error);
+                if clean_error.contains("version conflict")
+                    || clean_error.contains("not available for consumption")
+                {
+                    error!(
+                        "Batch transaction [{}] failed after {} retries with version conflict: {}",
+                        functions_str,
+                        retry_count + 1,
+                        clean_error
+                    );
                 } else {
-                    error!("Transaction {} failed: {}", function_name, clean_error);
+                    error!(
+                        "Batch transaction [{}] failed: {}",
+                        functions_str, clean_error
+                    );
                 }
-                
-                return Err(anyhow!("Failed to execute {} transaction: {}", function_name, clean_error));
+
+                return Err(anyhow!(
+                    "Failed to execute batch transaction [{}]: {}",
+                    functions_str,
+                    clean_error
+                ));
             }
         };
         let tx_resp = resp.into_inner();
 
         // Check transaction effects for errors
-        check_transaction_effects(&tx_resp, function_name)?;
+        check_transaction_effects(&tx_resp, &functions_str)?;
 
         let tx_digest = tx_resp
             .transaction
@@ -1085,20 +1726,27 @@ where
             .to_string();
 
         if retry_count > 0 {
-            info!("{} transaction succeeded after {} retries: {} (took {}ms)",
-                function_name, retry_count, tx_digest, tx_elapsed_ms);
+            info!(
+                "Batch transaction [{}] succeeded after {} retries: {} (took {}ms)",
+                functions_str, retry_count, tx_digest, tx_elapsed_ms
+            );
         } else {
-            debug!("{} transaction executed successfully: {} (took {}ms)",
-                function_name, tx_digest, tx_elapsed_ms);
+            debug!(
+                "Batch transaction [{}] executed successfully: {} (took {}ms)",
+                functions_str, tx_digest, tx_elapsed_ms
+            );
         }
 
         // Wait for the transaction to be available in the ledger
         // Pass the gas_guard to keep the coin locked until transaction is confirmed
         if let Err(e) = wait_for_transaction(&tx_digest, None, gas_guard).await {
-            warn!("Failed to wait for {} transaction to be available: {}", function_name, e);
+            warn!(
+                "Failed to wait for batch transaction [{}] to be available: {}",
+                functions_str, e
+            );
             // Continue anyway, the transaction was successful
         }
-        
+
         // Release the app_instance lock after transaction is confirmed
         drop(app_instance_guard);
         debug!("Released app_instance lock: {}", app_instance_id);
@@ -1110,26 +1758,19 @@ where
 /// Try to create a new block for the app instance
 /// This function calls the try_create_block Move function on the blockchain
 /// which will check if conditions are met to create a new block
-pub async fn try_create_block_tx(
-    app_instance_str: &str,
-) -> Result<String> {
+pub async fn try_create_block_tx(app_instance_str: &str) -> Result<String> {
     execute_app_instance_function(
         app_instance_str,
         "try_create_block",
-        |_tb, app_instance_arg, clock_arg| {
-            vec![app_instance_arg, clock_arg]
-        },
-    ).await
+        |_tb, app_instance_arg, clock_arg| vec![app_instance_arg, clock_arg],
+    )
+    .await
 }
 
 /// Set a key-value pair in the app instance KV store
-pub async fn set_kv_tx(
-    app_instance_str: &str,
-    key: String,
-    value: String,
-) -> Result<String> {
+pub async fn set_kv_tx(app_instance_str: &str, key: String, value: String) -> Result<String> {
     debug!("Creating set_kv transaction for key: {}", key);
-    
+
     execute_app_instance_function(
         app_instance_str,
         "set_kv",
@@ -1138,16 +1779,14 @@ pub async fn set_kv_tx(
             let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
             vec![app_instance_arg, key_arg, value_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Delete a key-value pair from the app instance KV store
-pub async fn delete_kv_tx(
-    app_instance_str: &str,
-    key: String,
-) -> Result<String> {
+pub async fn delete_kv_tx(app_instance_str: &str, key: String) -> Result<String> {
     debug!("Creating delete_kv transaction for key: {}", key);
-    
+
     execute_app_instance_function(
         app_instance_str,
         "delete_kv",
@@ -1155,17 +1794,14 @@ pub async fn delete_kv_tx(
             let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
             vec![app_instance_arg, key_arg]
         },
-    ).await
+    )
+    .await
 }
 
 /// Add metadata to the app instance (write-once)
-pub async fn add_metadata_tx(
-    app_instance_str: &str,
-    key: String,
-    value: String,
-) -> Result<String> {
+pub async fn add_metadata_tx(app_instance_str: &str, key: String, value: String) -> Result<String> {
     debug!("Creating add_metadata transaction for key: {}", key);
-    
+
     execute_app_instance_function(
         app_instance_str,
         "add_metadata",
@@ -1174,6 +1810,134 @@ pub async fn add_metadata_tx(
             let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
             vec![app_instance_arg, key_arg, value_arg]
         },
-    ).await
+    )
+    .await
 }
 
+/// Fetch and parse events from a transaction
+/// Returns a vector of event strings for analysis
+pub async fn fetch_transaction_events(tx_digest: &str) -> Result<Vec<String>> {
+    debug!("Fetching events for transaction: {}", tx_digest);
+
+    let shared_state = SharedSuiState::get_instance();
+    let mut client = shared_state.get_sui_client();
+
+    // Parse transaction digest
+    let digest = sui_sdk_types::Digest::from_str(tx_digest)
+        .map_err(|e| anyhow!("Failed to parse transaction digest: {}", e))?;
+
+    // Fetch transaction with events
+    let mut ledger = client.ledger_client();
+    let req = proto::GetTransactionRequest {
+        digest: Some(digest.to_string()),
+        read_mask: Some(FieldMask {
+            paths: vec!["events".into()],
+        }),
+    };
+
+    let resp = ledger
+        .get_transaction(req)
+        .await
+        .map_err(|e| anyhow!("Failed to fetch transaction: {}", e))?;
+
+    let transaction = resp.into_inner();
+    let mut events = Vec::new();
+
+    // Parse events from the transaction
+    if let Some(ref tx) = transaction.transaction {
+        if let Some(ref tx_events) = tx.events {
+            for event in &tx_events.events {
+                // Extract event type
+                let event_type = event
+                    .event_type
+                    .as_ref()
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string());
+
+                // Try to parse event contents as a simple string representation
+                // The actual BCS data would need proper deserialization based on the event type
+                let contents = format!("{}", event_type);
+
+                events.push(contents);
+                debug!("Event: {}", events.last().unwrap());
+            }
+        }
+    }
+
+    debug!("Found {} events in transaction {}", events.len(), tx_digest);
+    Ok(events)
+}
+
+/// Fetch and parse transaction events as JSON
+pub async fn fetch_transaction_events_as_json(tx_digest: &str) -> Result<serde_json::Value> {
+    use serde_json::json;
+    debug!("Fetching events for transaction: {}", tx_digest);
+
+    let shared_state = SharedSuiState::get_instance();
+    let mut client = shared_state.get_sui_client();
+
+    // Parse transaction digest
+    let digest = sui_sdk_types::Digest::from_str(tx_digest)
+        .map_err(|e| anyhow!("Failed to parse transaction digest: {}", e))?;
+
+    // Fetch transaction with events
+    let mut ledger = client.ledger_client();
+    let req = proto::GetTransactionRequest {
+        digest: Some(digest.to_string()),
+        read_mask: Some(FieldMask {
+            paths: vec!["events".into()],
+        }),
+    };
+
+    let resp = ledger
+        .get_transaction(req)
+        .await
+        .map_err(|e| anyhow!("Failed to fetch transaction: {}", e))?;
+
+    let transaction = resp.into_inner();
+    let mut events_json = Vec::new();
+
+    // Parse events from the transaction
+    if let Some(ref tx) = transaction.transaction {
+        if let Some(ref tx_events) = tx.events {
+            for event in &tx_events.events {
+                // Extract event type and basic info
+                let event_type = event
+                    .event_type
+                    .as_ref()
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string());
+
+                // Parse the event data - it's usually in the json field
+                let mut event_obj = json!({
+                    "event_type": event_type,
+                    "package_id": event.package_id.as_ref().map(|p| p.to_string()),
+                    "module": &event.module,
+                    "sender": event.sender.as_ref().map(|s| s.to_string()),
+                });
+
+                // The actual event data is in the json field as a protobuf Value
+                if let Some(ref json_value) = event.json {
+                    // Convert protobuf Value to JSON
+                    if let Some(prost_types::value::Kind::StructValue(struct_val)) =
+                        &json_value.kind
+                    {
+                        // Convert the protobuf struct to JSON using the helper from parse module
+                        for (key, value) in &struct_val.fields {
+                            event_obj[key] = crate::parse::proto_to_json(value);
+                        }
+                    }
+                }
+
+                events_json.push(event_obj);
+            }
+        }
+    }
+
+    debug!(
+        "Found {} events in transaction {}",
+        events_json.len(),
+        tx_digest
+    );
+    Ok(json!(events_json))
+}

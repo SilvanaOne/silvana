@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use sui_rpc::proto::sui::rpc::v2beta2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
+use tracing::debug;
 
 const MAX_RETRIES: u32 = 6;
 const RETRY_DELAY_MS: u64 = 500;
@@ -137,6 +138,9 @@ pub async fn fetch_coin(
             .await?
             .into_inner();
 
+        debug!("Attempt {}/{}: Found {} SUI coins for address {}", 
+               attempt, MAX_RETRIES, resp.objects.len(), sender);
+
         // Collect all suitable coins first, then try to lock them
         let mut suitable_coins = Vec::new();
         for obj in resp.objects {
@@ -167,17 +171,36 @@ pub async fn fetch_coin(
 
         // Sort by balance ascending to prefer smaller coins first
         suitable_coins.sort_by(|a, b| a.2.cmp(&b.2));
+        
+        debug!("Found {} suitable coins with balance >= {} MIST ({:.4} SUI)", 
+               suitable_coins.len(), min_balance, min_balance as f64 / 1_000_000_000.0);
+        
+        if suitable_coins.is_empty() {
+            debug!("No coins with sufficient balance found. Need at least {} MIST ({:.4} SUI)",
+                   min_balance, min_balance as f64 / 1_000_000_000.0);
+        }
 
         // Try to lock coins in order of preference
+        let mut locked_count = 0;
         for (object_id, object_ref, balance) in suitable_coins {
             // Try to lock this coin atomically
             if let Some(guard) = lock_manager.try_lock_coin(object_id) {
+                debug!("Successfully locked coin {} with balance {} MIST ({:.4} SUI)",
+                       object_id, balance, balance as f64 / 1_000_000_000.0);
                 let coin_info = CoinInfo {
                     object_ref,
                     balance,
                 };
                 return Ok(Some((coin_info, guard)));
+            } else {
+                locked_count += 1;
+                debug!("Coin {} is already locked (balance: {} MIST = {:.4} SUI)",
+                       object_id, balance, balance as f64 / 1_000_000_000.0);
             }
+        }
+        
+        if locked_count > 0 {
+            debug!("All {} suitable coins are currently locked, will retry", locked_count);
         }
 
         if attempt < MAX_RETRIES {
@@ -187,9 +210,11 @@ pub async fn fetch_coin(
         }
     }
 
-    println!(
-        "No unlocked coins found with sufficient balance after {} attempts",
-        MAX_RETRIES
+    debug!(
+        "No unlocked coins found with sufficient balance after {} attempts (min_balance: {} MIST = {:.4} SUI)",
+        MAX_RETRIES,
+        min_balance,
+        min_balance as f64 / 1_000_000_000.0
     );
     Ok(None)
 }

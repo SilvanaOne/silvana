@@ -41,9 +41,8 @@ pub const JOB_ACQUISITION_DELAY_PER_CONTAINER_MS: u64 = 1000; // 1000ms per cont
 pub const JOB_ACQUISITION_MAX_DELAY_MS: u64 = 10000; // 10 seconds max
 
 /// Minimum time that must pass between creating consecutive blocks (in milliseconds).
-/// Blocks will not be created more frequently than this interval, even if new
-/// sequences are available. This ensures blocks have a reasonable time window.
-pub const BLOCK_CREATION_MIN_INTERVAL_MS: u64 = 60000; // 60 seconds
+// Block creation interval is now dynamically configured per app instance via min_time_between_blocks field
+// pub const BLOCK_CREATION_MIN_INTERVAL_MS: u64 = 60000; // 60 seconds
 
 /// Time buffer for periodic jobs (in milliseconds).
 /// Settlement nodes use this value directly, while regular nodes use 2x this value.
@@ -113,6 +112,11 @@ pub const DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS: u64 = 5;
 // Task Scheduling and Intervals
 // =============================================================================
 
+/// Interval for executing multicall batch operations (in seconds).
+/// Job operations (start, complete, fail, terminate) are batched and executed
+/// together using multicall at this interval to reduce transaction costs.
+pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
+
 /// Interval for reconciliation task (in seconds).
 /// The coordinator reconciles its state with the blockchain at this interval.
 pub const RECONCILIATION_INTERVAL_SECS: u64 = 600; // 10 minutes
@@ -143,7 +147,7 @@ pub const SHUTDOWN_PROGRESS_INTERVAL_SECS: u64 = 10;
 
 /// Timeout for stuck jobs (in seconds).
 /// Jobs running longer than this are considered stuck and will be failed.
-pub const STUCK_JOB_TIMEOUT_SECS: u64 = 600; // 10 minutes
+pub const STUCK_JOB_TIMEOUT_SECS: u64 = 900; // 15 minutes
 
 /// Delay before initial reconciliation on startup (in seconds).
 /// Allows the system to initialize before the first reconciliation.
@@ -196,11 +200,15 @@ pub const RESOURCE_ERROR_RETRY_DELAY_SECS: u64 = 1;
 
 /// Delay between job availability checks (in seconds).
 /// How often to check if new jobs are available.
-pub const JOB_AVAILABILITY_CHECK_DELAY_SECS: u64 = 1;
+// pub const JOB_AVAILABILITY_CHECK_DELAY_SECS: u64 = 1; // No longer used after refactoring
 
 /// Delay for waiting for pending jobs (in milliseconds).
 /// Wait time when checking for pending jobs state changes.
 pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
+
+/// Delay before checking blockchain job status after container completion (in seconds).
+/// Time to wait for multicall requests to be processed before checking blockchain.
+pub const JOB_STATUS_CHECK_DELAY_SECS: u64 = 5;
 
 // =============================================================================
 // Data Availability Configuration
@@ -222,3 +230,8 @@ pub const WALRUS_TEST: bool = false;
 /// Delay after transaction submission in CLI (in seconds).
 /// Wait time for transaction processing in CLI commands.
 pub const CLI_TRANSACTION_WAIT_SECS: u64 = 5;
+
+/// Delay between batched multicall executions (in seconds).
+/// When operations exceed multicall limits and need to be split into multiple batches,
+/// this delay is applied between consecutive batch executions to avoid overwhelming the network.
+pub const MULTICALL_BATCH_DELAY_SECS: u64 = 5;

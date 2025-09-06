@@ -2,7 +2,9 @@ use crate::constants::{MAX_JOBS_PER_INSTANCE_BATCH, PERIODIC_JOB_EXECUTION_BUFFE
 use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use anyhow::{anyhow, Result};
-use tracing::{debug, warn, error};
+use tracing::{debug, warn, error, info};
+use crate::state::{SharedState, CreateAppJobRequest};
+use tokio::time::Instant;
 
 /// Check if an app_instance can be safely removed from tracking
 /// An app_instance can only be removed when:
@@ -212,13 +214,12 @@ pub async fn check_settlement_opportunities_range(
 pub async fn create_periodic_settle_job(
     app_instance: &AppInstance,
     settlement_chain: &str,
+    state: &SharedState,
 ) -> Result<()> {
     debug!("Creating periodic settle job for app instance {} on chain {}", 
         app_instance.silvana_app_name, settlement_chain);
     
     // Create a periodic job with 1 minute interval
-    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-    
     // Create job description data
     let job_description = format!("Periodic settlement check for {}", settlement_chain);
     
@@ -237,31 +238,26 @@ pub async fn create_periodic_settle_job(
     job_data.extend_from_slice(&interval_ms.to_le_bytes());
     job_data.extend_from_slice(&next_run_time.to_le_bytes());
     
-    match sui_interface.create_app_job(
-        &app_instance.id,
-        "settle".to_string(),
-        Some(job_description),
-        None, // No specific block number
-        None, // No specific sequences
-        None, // No sequences1
-        None, // No sequences2
-        job_data,
-        Some(interval_ms),
-        Some(next_run_time),
-        Some(settlement_chain.to_string()),
-    ).await {
-        Ok(tx_digest) => {
-            debug!("Successfully created periodic settle job for chain {} - tx: {}", 
-                settlement_chain, tx_digest);
-            Ok(())
-        }
-        Err(e) => {
-            error!("Failed to create periodic settle job for chain {}: {}", 
-                settlement_chain, e);
-            Err(anyhow!("Failed to create settle job for chain {}: {}", 
-                settlement_chain, e))
-        }
-    }
+    // Add the settlement job creation request to shared state for multicall processing
+    state.add_create_app_job_request(
+        app_instance.id.clone(),
+        CreateAppJobRequest {
+            method_name: "settle".to_string(),
+            job_description: Some(job_description),
+            block_number: None,
+            sequences: None,
+            sequences1: None,
+            sequences2: None,
+            data: job_data,
+            interval_ms: Some(interval_ms),
+            next_scheduled_at: Some(next_run_time),
+            settlement_chain: Some(settlement_chain.to_string()),
+            _timestamp: Instant::now(),
+        },
+    ).await;
+    
+    info!("Added settlement job creation request to multicall queue for chain {}", settlement_chain);
+    Ok(())
 }
 
 

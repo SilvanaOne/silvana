@@ -2,13 +2,12 @@ use crate::agent::AgentJob;
 use crate::constants::{WALRUS_QUILT_BLOCK_INTERVAL, WALRUS_TEST};
 use crate::proof::analyze_proof_completion;
 use crate::proofs_storage::{ProofMetadata, ProofStorage};
-use crate::settlement::fetch_pending_job_from_instances;
 use crate::state::SharedState;
 use monitoring::coordinator_metrics;
 use std::path::Path;
 use sui::fetch::block::fetch_block_info;
-use sui::start_job_tx;
 use tokio::net::UnixListener;
+use tokio::time::Instant;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::{Request, Response, Status, transport::Server};
 use tracing::{debug, error, info, warn};
@@ -61,17 +60,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let start_time = std::time::Instant::now();
         let req = request.into_inner();
 
-        debug!(
+        // Get buffer stats
+        let sui_state = sui::SharedSuiState::get_instance();
+        let buffer_count = sui_state.get_started_jobs_count();
+        
+        info!(
             developer = %req.developer,
             agent = %req.agent,
             agent_method = %req.agent_method,
             session_id = %req.session_id,
-            "Received GetJob request"
+            buffer_count = buffer_count,
+            "📊 GetJob request (buffer: {} jobs)",
+            buffer_count
         );
 
-        // Check if system is shutting down - don't return new jobs during shutdown
-        if self.state.is_shutting_down() {
-            debug!("System is shutting down, returning empty GetJob response");
+        // Check if system is shutting down - allow returning buffered jobs but no new ones
+        if self.state.is_shutting_down() && buffer_count == 0 {
+            debug!("System is shutting down and buffer is empty, returning empty GetJob response");
             return Ok(Response::new(GetJobResponse {
                 success: true,
                 message: "System is shutting down".to_string(),
@@ -79,430 +84,233 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
-        // Check if there's an app_instance filter configured
-        let app_instance_filter = self.state.get_app_instance_filter().await;
-
-        // First check if there's a ready job in the agent database
-        // Pass session_id to get session-specific jobs for Docker containers
-        if let Some(agent_job) = self
-            .state
+        // First check for session-specific jobs (jobs reserved for this Docker session)
+        if let Some(agent_job) = self.state
             .get_agent_job_db()
-            .get_ready_job(
-                &req.developer,
-                &req.agent,
-                &req.agent_method,
-                Some(&req.session_id),
-            )
+            .get_ready_job(&req.developer, &req.agent, &req.agent_method, Some(&req.session_id))
             .await
         {
-            // Check if job matches the app_instance filter (if set)
-            let mut should_process = if let Some(ref filter) = app_instance_filter {
-                if agent_job.app_instance != *filter {
-                    debug!(
-                        "Job from app_instance {} does not match filter {}, skipping",
-                        agent_job.app_instance, filter
-                    );
-                    false
-                } else {
-                    true
+            debug!(
+                "Found session job for session {}: job_id={}",
+                req.session_id, agent_job.job_id
+            );
+
+            // Determine settlement chain if this is a settlement job
+            let settlement_chain = if agent_job.pending_job.app_instance_method == "settle" {
+                // Fetch app instance to find which chain this settle job belongs to
+                match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                    Ok(app_instance) => {
+                        app_instance
+                            .settlements
+                            .iter()
+                            .find(|(_, settlement)| {
+                                settlement.settlement_job == Some(agent_job.job_sequence)
+                            })
+                            .map(|(chain_name, _)| chain_name.clone())
+                    }
+                    Err(e) => {
+                        warn!("Failed to fetch app instance for settlement chain detection: {}", e);
+                        None
+                    }
                 }
             } else {
-                true
+                None
             };
 
-            if should_process {
-                // Check if this is a settlement job by looking at the app instance settlements
-                let chain = if let Ok(app_instance) =
-                    sui::fetch::fetch_app_instance(&agent_job.app_instance).await
-                {
-                    // Find which chain this job belongs to by checking settlement_job in each settlement
-                    let chain_opt = app_instance
-                        .settlements
-                        .iter()
-                        .find(|(_, settlement)| {
-                            settlement.settlement_job == Some(agent_job.job_sequence)
-                        })
-                        .map(|(chain_name, _)| chain_name.clone());
+            let elapsed = start_time.elapsed();
+            info!(
+                "✅ GetJob: dev={}, agent={}/{}, session_job={}, time={:?}",
+                req.developer, req.agent, req.agent_method, agent_job.job_id, elapsed
+            );
 
-                    // If this is a settle job but not found in any settlement, it's obsolete and should be terminated
-                    if chain_opt.is_none() && agent_job.pending_job.app_instance_method == "settle"
-                    {
-                        error!(
-                            "Found obsolete settle job {} that is not associated with any settlement, terminating it",
-                            agent_job.job_sequence
-                        );
+            return Ok(Response::new(GetJobResponse {
+                success: true,
+                message: format!("Session job retrieved: {}", agent_job.job_id),
+                job: Some(Job {
+                    job_sequence: agent_job.job_sequence,
+                    description: agent_job.pending_job.description.clone(),
+                    developer: agent_job.developer,
+                    agent: agent_job.agent,
+                    agent_method: agent_job.agent_method,
+                    app: agent_job.pending_job.app.clone(),
+                    app_instance: agent_job.app_instance,
+                    app_instance_method: agent_job.pending_job.app_instance_method.clone(),
+                    block_number: agent_job.pending_job.block_number,
+                    sequences: agent_job.pending_job.sequences.unwrap_or_default(),
+                    sequences1: agent_job.pending_job.sequences1.unwrap_or_default(),
+                    sequences2: agent_job.pending_job.sequences2.unwrap_or_default(),
+                    data: agent_job.pending_job.data.clone(),
+                    job_id: agent_job.job_id,
+                    attempts: agent_job.pending_job.attempts as u32,
+                    created_at: agent_job.pending_job.created_at,
+                    updated_at: agent_job.pending_job.updated_at,
+                    chain: settlement_chain, // Set the settlement chain if this is a settlement job
+                }),
+            }));
+        }
 
-                        // Terminate the obsolete settle job
-                        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-                        if let Err(e) = sui_interface
-                            .terminate_app_job(&agent_job.app_instance, agent_job.job_sequence)
-                            .await
-                        {
-                            error!(
-                                "Failed to terminate obsolete settle job {}: {}",
-                                agent_job.job_sequence, e
-                            );
-                        } else {
-                            info!(
-                                "Successfully terminated obsolete settle job {}",
-                                agent_job.job_sequence
-                            );
-                        }
-
-                        // Remove from agent database
-                        self.state
-                            .get_agent_job_db()
-                            .terminate_job(&agent_job.job_id)
-                            .await;
-
-                        // Skip this job and continue looking for others
-                        should_process = false;
-                    }
-
-                    chain_opt
-                } else {
-                    None
-                };
-
-                // Get the current agent to check settlement chain
-                let current_agent = self.state.get_current_agent(&req.session_id).await;
-
-                // Check if this is a settlement job and if agent has a different settlement chain
-                if let Some(ref settlement_chain) = chain {
-                    if let Some(ref agent) = current_agent {
-                        if let Some(ref agent_chain) = agent.settlement_chain {
-                            if agent_chain != settlement_chain {
-                                debug!(
-                                    "Settlement job for chain {} does not match agent's settlement chain {}, skipping",
-                                    settlement_chain, agent_chain
-                                );
-                                // Skip this job as it's for a different settlement chain
-                                should_process = false;
-                            }
-                        } else {
-                            // Agent doesn't have a settlement chain yet, set it now
-                            self.state
-                                .set_agent_settlement_chain(
-                                    &req.session_id,
-                                    settlement_chain.clone(),
-                                )
-                                .await;
-                        }
-                    }
+        // Fall back to checking the buffer for started jobs
+        // The buffer contains jobs that have been started on blockchain via multicall
+        if let Some(started_job) = sui_state.get_next_started_job() {
+            debug!(
+                "Found started job in buffer: app_instance={}, sequence={}",
+                started_job.app_instance, started_job.job_sequence
+            );
+            
+            // Fetch the app instance to get the jobs table
+            let app_instance = match sui::fetch::fetch_app_instance(&started_job.app_instance).await {
+                Ok(instance) => instance,
+                Err(e) => {
+                    error!("Failed to fetch app instance {}: {}", started_job.app_instance, e);
+                    // Put the job back in the buffer and return empty response
+                    sui_state.add_started_jobs(vec![sui::StartedJob {
+                        app_instance: started_job.app_instance,
+                        job_sequence: started_job.job_sequence,
+                        memory_requirement: started_job.memory_requirement,
+                    }]);
+                    return Ok(Response::new(GetJobResponse {
+                        success: true,
+                        message: "Failed to fetch app instance, job returned to buffer".to_string(),
+                        job: None,
+                    }));
                 }
-
-                if should_process {
+            };
+            
+            // Get the jobs table ID
+            let jobs_table = match &app_instance.jobs {
+                Some(jobs) => &jobs.id,
+                None => {
+                    error!("App instance {} has no jobs table", started_job.app_instance);
+                    // Put the job back in the buffer and return empty response
+                    sui_state.add_started_jobs(vec![sui::StartedJob {
+                        app_instance: started_job.app_instance,
+                        job_sequence: started_job.job_sequence,
+                        memory_requirement: started_job.memory_requirement,
+                    }]);
+                    return Ok(Response::new(GetJobResponse {
+                        success: true,
+                        message: "App instance has no jobs table, job returned to buffer".to_string(),
+                        job: None,
+                    }));
+                }
+            };
+            
+            // Fetch the full job details from blockchain using the jobs table
+            match sui::fetch::jobs::fetch_job_by_id(jobs_table, started_job.job_sequence).await {
+                Ok(Some(pending_job)) => {
+                    // Store in agent database for tracking
+                    let job_id = format!("job_{}", started_job.job_sequence);
+                    let agent_job = crate::agent::AgentJob {
+                        job_id: job_id.clone(),
+                        job_sequence: started_job.job_sequence,
+                        app_instance: started_job.app_instance.clone(),
+                        developer: req.developer.clone(),
+                        agent: req.agent.clone(),
+                        agent_method: req.agent_method.clone(),
+                        pending_job: pending_job.clone(),
+                        sent_at: chrono::Utc::now().timestamp() as u64,
+                        start_tx_sent: true, // Already sent via multicall
+                        start_tx_hash: None, // Transaction was part of multicall
+                    };
+                    
+                    // Store in agent database
+                    self.state
+                        .get_agent_job_db()
+                        .add_to_pending(agent_job.clone())
+                        .await;
+                    
+                    // Set current agent for this session
+                    self.state
+                        .set_current_agent(
+                            req.session_id.clone(),
+                            req.developer.clone(),
+                            req.agent.clone(),
+                            req.agent_method.clone(),
+                        )
+                        .await;
+                    
+                    // Track app_instance for this session
+                    
+                    // Check if this is a settlement job
+                    let settlement_chain = if pending_job.app_instance_method == "settle" {
+                        // Fetch app instance to find which chain this settle job is for
+                        if let Ok(app_instance) = sui::fetch::fetch_app_instance(&started_job.app_instance).await {
+                            app_instance
+                                .settlements
+                                .iter()
+                                .find(|(_, settlement)| settlement.settlement_job == Some(started_job.job_sequence))
+                                .map(|(chain_name, _)| chain_name.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    
+                    // Convert to protobuf Job
+                    let job = Job {
+                        job_sequence: started_job.job_sequence,
+                        description: pending_job.description.clone(),
+                        developer: req.developer.clone(),
+                        agent: req.agent.clone(),
+                        agent_method: req.agent_method.clone(),
+                        app: pending_job.app.clone(),
+                        app_instance: started_job.app_instance.clone(),
+                        app_instance_method: pending_job.app_instance_method.clone(),
+                        block_number: pending_job.block_number,
+                        sequences: pending_job.sequences.clone().unwrap_or_default(),
+                        sequences1: pending_job.sequences1.clone().unwrap_or_default(),
+                        sequences2: pending_job.sequences2.clone().unwrap_or_default(),
+                        data: pending_job.data.clone(),
+                        job_id,
+                        attempts: pending_job.attempts as u32,
+                        created_at: pending_job.created_at,
+                        updated_at: pending_job.updated_at,
+                        chain: settlement_chain,
+                    };
+                    
                     let elapsed = start_time.elapsed();
-                    let tx_info = agent_job
-                        .start_tx_hash
-                        .as_ref()
-                        .map(|tx| format!(", tx={}", tx))
-                        .unwrap_or_default();
                     info!(
-                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=db{}, time={:?}",
-                        agent_job.app_instance,
+                        "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=buffer, time={:?}",
+                        started_job.app_instance,
                         req.developer,
                         req.agent,
                         req.agent_method,
-                        agent_job.job_sequence,
-                        agent_job.pending_job.app_instance_method,
-                        tx_info,
+                        started_job.job_sequence,
+                        pending_job.app_instance_method,
                         elapsed
                     );
-
-                    // Convert AgentJob to protobuf Job
-                    let job = Job {
-                        job_sequence: agent_job.job_sequence,
-                        description: agent_job.pending_job.description.clone(),
-                        developer: agent_job.developer.clone(),
-                        agent: agent_job.agent.clone(),
-                        agent_method: agent_job.agent_method.clone(),
-                        app: agent_job.pending_job.app.clone(),
-                        app_instance: agent_job.app_instance.clone(),
-                        app_instance_method: agent_job.pending_job.app_instance_method.clone(),
-                        block_number: agent_job.pending_job.block_number,
-                        sequences: agent_job.pending_job.sequences.clone().unwrap_or_default(),
-                        sequences1: agent_job.pending_job.sequences1.clone().unwrap_or_default(),
-                        sequences2: agent_job.pending_job.sequences2.clone().unwrap_or_default(),
-                        data: agent_job.pending_job.data.clone(),
-                        job_id: agent_job.job_id,
-                        attempts: agent_job.pending_job.attempts as u32,
-                        created_at: agent_job.pending_job.created_at,
-                        updated_at: agent_job.pending_job.updated_at,
-                        chain,
-                    };
-
-                    let elapsed = start_time.elapsed();
-                    let elapsed_ms = elapsed.as_millis() as f64;
-
-                    // Record successful gRPC span for APM
-                    coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
-
+                    
                     return Ok(Response::new(GetJobResponse {
                         success: true,
-                        message: format!("Job {} retrieved from database", agent_job.job_sequence),
+                        message: format!("Job {} retrieved from buffer", started_job.job_sequence),
                         job: Some(job),
                     }));
                 }
-            }
-        }
-
-        // If no ready job found, check if the requested job matches the current running agent for this session
-        let current_agent = self.state.get_current_agent(&req.session_id).await;
-
-        if let Some(ref current) = current_agent {
-            if current.developer == req.developer
-                && current.agent == req.agent
-                && current.agent_method == req.agent_method
-            {
-                // Get current_app_instances for this agent session
-                let mut current_instances =
-                    self.state.get_current_app_instances(&req.session_id).await;
-
-                // Filter instances based on app_instance_filter if set
-                if let Some(ref filter) = app_instance_filter {
-                    current_instances.retain(|instance| instance == filter);
-                    if current_instances.is_empty() {
-                        debug!("No app_instances match the filter: {}", filter);
-                    }
-                }
-
-                if !current_instances.is_empty() {
-                    debug!(
-                        "Found {} current app_instances for this agent",
-                        current_instances.len()
+                Ok(None) => {
+                    warn!(
+                        "Started job {} from buffer not found on blockchain, skipping",
+                        started_job.job_sequence
                     );
-
-                    // Use index-based fetching to get the job with lowest job_sequence
-                    match fetch_pending_job_from_instances(
-                        &current_instances,
-                        &req.developer,
-                        &req.agent,
-                        &req.agent_method,
-                        self.state.is_settle_only(),
-                    )
-                    .await
-                    {
-                        Ok(Some(pending_job)) => {
-                            debug!("Found pending job {} using index", pending_job.job_sequence);
-
-                            // Check if this is a settlement job and handle settlement chain filtering
-                            let mut skip_job = false;
-                            let settlement_chain = if let Ok(app_instance) =
-                                sui::fetch::fetch_app_instance(&pending_job.app_instance).await
-                            {
-                                // Find which chain this job belongs to by checking settlement_job in each settlement
-                                let chain_opt = app_instance
-                                    .settlements
-                                    .iter()
-                                    .find(|(_, settlement)| {
-                                        settlement.settlement_job == Some(pending_job.job_sequence)
-                                    })
-                                    .map(|(chain_name, _)| chain_name.clone());
-
-                                // If this is a settle job but not found in any settlement, it's obsolete and should be terminated
-                                if chain_opt.is_none()
-                                    && pending_job.app_instance_method == "settle"
-                                {
-                                    error!(
-                                        "Found obsolete settle job {} that is not associated with any settlement, terminating it",
-                                        pending_job.job_sequence
-                                    );
-
-                                    // Terminate the obsolete settle job
-                                    let mut sui_interface =
-                                        sui::interface::SilvanaSuiInterface::new();
-                                    if let Err(e) = sui_interface
-                                        .terminate_app_job(
-                                            &pending_job.app_instance,
-                                            pending_job.job_sequence,
-                                        )
-                                        .await
-                                    {
-                                        warn!(
-                                            "Failed to terminate obsolete settle job {}: {}",
-                                            pending_job.job_sequence, e
-                                        );
-                                    } else {
-                                        info!(
-                                            "Successfully terminated obsolete settle job {}",
-                                            pending_job.job_sequence
-                                        );
-                                    }
-
-                                    // Mark to skip this job
-                                    skip_job = true;
-                                }
-
-                                chain_opt
-                            } else {
-                                None
-                            };
-
-                            // Check settlement chain compatibility
-                            let mut should_process_job = !skip_job;
-                            if let Some(ref chain) = settlement_chain {
-                                if let Some(ref current) = current_agent {
-                                    if let Some(ref agent_chain) = current.settlement_chain {
-                                        if agent_chain != chain {
-                                            debug!(
-                                                "Settlement job {} for chain {} does not match agent's settlement chain {}, skipping",
-                                                pending_job.job_sequence, chain, agent_chain
-                                            );
-                                            should_process_job = false;
-                                        }
-                                    } else {
-                                        // Agent doesn't have a settlement chain yet, set it now
-                                        self.state
-                                            .set_agent_settlement_chain(
-                                                &req.session_id,
-                                                chain.clone(),
-                                            )
-                                            .await;
-                                    }
-                                }
-                            }
-
-                            if !should_process_job {
-                                // Skip this job and continue looking for others
-                                debug!(
-                                    "Skipping job {} due to settlement chain mismatch",
-                                    pending_job.job_sequence
-                                );
-                            } else {
-                                // Execute start_job transaction on Sui before returning the job
-                                match start_job_tx(
-                                    &pending_job.app_instance,
-                                    pending_job.job_sequence,
-                                )
-                                .await
-                                {
-                                    Ok(tx_digest) => {
-                                        debug!(
-                                            "Successfully started job {} with tx: {}",
-                                            pending_job.job_sequence, tx_digest
-                                        );
-
-                                        // Create AgentJob and add it to agent database
-                                        let mut agent_job = AgentJob::new(pending_job, &self.state);
-                                        agent_job.start_tx_hash = Some(tx_digest.clone());
-                                        agent_job.start_tx_sent = true;
-
-                                        // Add to pending jobs (job has been started and is being returned to agent)
-                                        self.state
-                                            .get_agent_job_db()
-                                            .add_to_pending(agent_job.clone())
-                                            .await;
-
-                                        debug!(
-                                            "Added job {} to agent database with job_id: {}",
-                                            agent_job.job_sequence, agent_job.job_id
-                                        );
-
-                                        let elapsed = start_time.elapsed();
-                                        info!(
-                                            "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, tx={}, source=sui, time={:?}",
-                                            agent_job.app_instance,
-                                            req.developer,
-                                            req.agent,
-                                            req.agent_method,
-                                            agent_job.job_sequence,
-                                            agent_job.pending_job.app_instance_method,
-                                            tx_digest,
-                                            elapsed
-                                        );
-
-                                        // Convert AgentJob to protobuf Job
-                                        let job = Job {
-                                            job_sequence: agent_job.job_sequence,
-                                            description: agent_job.pending_job.description.clone(),
-                                            developer: agent_job.developer.clone(),
-                                            agent: agent_job.agent.clone(),
-                                            agent_method: agent_job.agent_method.clone(),
-                                            app: agent_job.pending_job.app.clone(),
-                                            app_instance: agent_job.app_instance.clone(),
-                                            app_instance_method: agent_job
-                                                .pending_job
-                                                .app_instance_method
-                                                .clone(),
-                                            block_number: agent_job.pending_job.block_number,
-                                            sequences: agent_job
-                                                .pending_job
-                                                .sequences
-                                                .clone()
-                                                .unwrap_or_default(),
-                                            sequences1: agent_job
-                                                .pending_job
-                                                .sequences1
-                                                .clone()
-                                                .unwrap_or_default(),
-                                            sequences2: agent_job
-                                                .pending_job
-                                                .sequences2
-                                                .clone()
-                                                .unwrap_or_default(),
-                                            data: agent_job.pending_job.data.clone(),
-                                            job_id: agent_job.job_id,
-                                            attempts: agent_job.pending_job.attempts as u32,
-                                            created_at: agent_job.pending_job.created_at,
-                                            updated_at: agent_job.pending_job.updated_at,
-                                            chain: settlement_chain, // Set the settlement chain if this is a settlement job
-                                        };
-
-                                        return Ok(Response::new(GetJobResponse {
-                                            success: true,
-                                            message: format!(
-                                                "Job {} retrieved from Sui",
-                                                agent_job.job_sequence
-                                            ),
-                                            job: Some(job),
-                                        }));
-                                    }
-                                    Err(e) => {
-                                        info!(
-                                            "Failed to start job {} on Sui: {}",
-                                            pending_job.job_sequence, e
-                                        );
-                                        // Don't return the job if start_job transaction failed
-                                        // Continue to check for other jobs or return None
-                                    }
-                                }
-                            }
-                        }
-                        Ok(None) => {
-                            debug!(
-                                "No pending jobs found using index for {}/{}/{}",
-                                req.developer, req.agent, req.agent_method
-                            );
-                        }
-                        Err(e) => {
-                            warn!("Failed to fetch jobs using index: {}", e);
-                            // If it's a not found error, remove the stale app_instance
-                            if e.to_string().contains("not found")
-                                || e.to_string().contains("NotFound")
-                            {
-                                warn!("Jobs object not found: {}", current_instances.join(", "));
-                                // for instance in &current_instances {
-                                //     self.state.remove_app_instance(instance).await;
-                                // }
-                            }
-                        }
-                    }
-
-                    debug!("No pending jobs found in any current app_instances");
-                } else {
-                    debug!("No current app_instances for this agent");
+                    // Continue to check if there are more jobs in buffer
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to fetch job {} from blockchain: {}",
+                        started_job.job_sequence, e
+                    );
+                    // Continue to check if there are more jobs in buffer
                 }
             }
         }
-
-        // No matching job found
+        
+        // If buffer is empty, return no job available
         let elapsed = start_time.elapsed();
         let elapsed_ms = elapsed.as_millis() as f64;
-
+        
         // Record gRPC span for APM
         coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
-
+        
         info!(
             "⭕ GetJob: dev={}, agent={}/{}, no_job_found, time={:?}",
             req.developer, req.agent, req.agent_method, elapsed
@@ -576,54 +384,44 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
-        // Execute complete_job transaction on Sui
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        // Add complete job request to batch instead of executing immediately
+        self.state.add_complete_job_request(
+            agent_job.app_instance.clone(),
+            agent_job.job_sequence
+        ).await;
 
-        let tx_hash = sui_interface
-            .complete_job(&agent_job.app_instance, agent_job.job_sequence)
+        // Remove job from agent database
+        let removed_job = self
+            .state
+            .get_agent_job_db()
+            .complete_job(&req.job_id)
             .await;
-
-        if let Some(tx) = tx_hash {
-            // Remove job from agent database
-            let removed_job = self
-                .state
-                .get_agent_job_db()
-                .complete_job(&req.job_id)
-                .await;
-            if removed_job.is_some() {
-                let elapsed = start_time.elapsed();
-                info!(
-                    "✅ CompleteJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, job_id={}, tx={}, time={}ms",
-                    agent_job.app_instance,
-                    agent_job.developer,
-                    agent_job.agent,
-                    agent_job.agent_method,
-                    agent_job.job_sequence,
-                    agent_job.pending_job.app_instance_method,
-                    req.job_id,
-                    tx,
-                    elapsed.as_millis()
-                );
-            } else {
-                warn!(
-                    "Job {} completed on blockchain but was not found in agent database",
-                    req.job_id
-                );
-            }
-            Ok(Response::new(CompleteJobResponse {
-                success: true,
-                message: format!("Job {} completed successfully", req.job_id),
-            }))
-        } else {
+        
+        if removed_job.is_some() {
             let elapsed = start_time.elapsed();
-            warn!(
-                "❌ CompleteJob: job_id={}, failed_on_blockchain, time={}ms",
+            info!(
+                "✅ CompleteJob (batched): app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, job_id={}, time={}ms",
+                agent_job.app_instance,
+                agent_job.developer,
+                agent_job.agent,
+                agent_job.agent_method,
+                agent_job.job_sequence,
+                agent_job.pending_job.app_instance_method,
                 req.job_id,
                 elapsed.as_millis()
             );
             Ok(Response::new(CompleteJobResponse {
+                success: true,
+                message: format!("Job {} marked for completion", agent_job.job_sequence),
+            }))
+        } else {
+            warn!(
+                "Job {} not found in agent database",
+                req.job_id
+            );
+            Ok(Response::new(CompleteJobResponse {
                 success: false,
-                message: format!("Failed to complete job {} on blockchain", req.job_id),
+                message: format!("Job {} not found", req.job_id),
             }))
         }
     }
@@ -687,35 +485,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
-        // Execute fail_job transaction on Sui
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        // Add fail job request to batch instead of executing immediately
+        self.state.add_fail_job_request(
+            agent_job.app_instance.clone(),
+            agent_job.job_sequence,
+            req.error_message.clone()
+        ).await;
 
-        match sui_interface
-            .fail_job(
-                &agent_job.app_instance,
-                agent_job.job_sequence,
-                &req.error_message,
-            )
-            .await
-        {
-            Some(tx_hash) => {
-                // Remove job from agent database
-                self.state.get_agent_job_db().fail_job(&req.job_id).await;
+        // Remove job from agent database
+        self.state.get_agent_job_db().fail_job(&req.job_id).await;
 
-                info!("Successfully failed job {}, tx: {}", req.job_id, tx_hash);
-                Ok(Response::new(FailJobResponse {
-                    success: true,
-                    message: format!("Job {} failed successfully, tx: {}", req.job_id, tx_hash),
-                }))
-            }
-            None => {
-                error!("Failed to fail job {} on blockchain", req.job_id);
-                Ok(Response::new(FailJobResponse {
-                    success: false,
-                    message: format!("Failed to fail job {} on blockchain", req.job_id),
-                }))
-            }
-        }
+        info!("Job {} marked for failure (batched): {}", req.job_id, req.error_message);
+        Ok(Response::new(FailJobResponse {
+            success: true,
+            message: format!("Job {} marked for failure", req.job_id),
+        }))
     }
 
     async fn terminate_job(
@@ -961,24 +745,27 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Fetch the real ProofCalculation from blockchain to get start_sequence and end_sequence
 
-        // Submit proof transaction on Sui
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-
-        let tx_result = sui_interface
-            .submit_proof(
-                &agent_job.app_instance,
-                req.block_number,
-                sequences.clone(),
+        // Add submit_proof request to shared state for multicall
+        self.state.add_submit_proof_request(
+            agent_job.app_instance.clone(),
+            crate::state::SubmitProofRequest {
+                block_number: req.block_number,
+                sequences: sequences.clone(),
                 merged_sequences_1,
                 merged_sequences_2,
-                req.job_id.clone(),
-                descriptor.to_string(), // Use full descriptor (chain:network:hash) instead of just hash
-                hardware_info.cpu_cores,
-                hardware_info.prover_architecture.clone(),
-                hardware_info.prover_memory,
-                req.cpu_time,
-            )
-            .await;
+                job_id: req.job_id.clone(),
+                da_hash: descriptor.to_string(), // Use full descriptor (chain:network:hash) instead of just hash
+                cpu_cores: hardware_info.cpu_cores,
+                prover_architecture: hardware_info.prover_architecture.clone(),
+                prover_memory: hardware_info.prover_memory,
+                cpu_time: req.cpu_time,
+                _timestamp: Instant::now(),
+            },
+        )
+        .await;
+        
+        // Return success immediately - the actual blockchain transaction will be sent via multicall
+        let tx_result: Result<String, String> = Ok("".to_string());
 
         match tx_result {
             Ok(tx_hash) => {
@@ -1005,6 +792,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 // Spawn merge analysis in background to not delay the response
                 let app_instance_id = agent_job.app_instance.clone();
                 let job_id_clone = req.job_id.clone();
+                let state_clone = self.state.clone();
 
                 tokio::spawn(async move {
                     debug!(
@@ -1015,7 +803,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     // Fetch the AppInstance first
                     match sui::fetch::fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
-                            if let Err(e) = analyze_proof_completion(&app_instance).await {
+                            if let Err(e) = analyze_proof_completion(&app_instance, &state_clone).await {
                                 warn!("Failed to analyze proof completion in background: {}", e);
                             } else {
                                 debug!(
@@ -1050,6 +838,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 // Even after failure, spawn merge analysis in background
                 let app_instance_id = agent_job.app_instance.clone();
                 let job_id_clone = req.job_id.clone();
+                let state_clone = self.state.clone();
 
                 tokio::spawn(async move {
                     info!(
@@ -1060,7 +849,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     // Fetch the AppInstance first
                     match sui::fetch::fetch_app_instance(&app_instance_id).await {
                         Ok(app_instance) => {
-                            if let Err(analysis_err) = analyze_proof_completion(&app_instance).await
+                            if let Err(analysis_err) = analyze_proof_completion(&app_instance, &state_clone).await
                             {
                                 warn!(
                                     "Failed to analyze failed proof for merge opportunities: {}",
@@ -1328,17 +1117,20 @@ impl CoordinatorService for CoordinatorServiceImpl {
             None
         };
 
-        // Call update_state_for_sequence on Sui
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-
-        let tx_result = sui_interface
-            .update_state_for_sequence(
-                &agent_job.app_instance,
-                req.sequence,
-                req.new_state_data,
-                da_descriptor.clone(),
-            )
-            .await;
+        // Add update_state_for_sequence request to shared state for multicall
+        self.state.add_update_state_for_sequence_request(
+            agent_job.app_instance.clone(),
+            crate::state::UpdateStateForSequenceRequest {
+                sequence: req.sequence,
+                new_state_data: req.new_state_data,
+                new_data_availability_hash: da_descriptor.clone(),
+                _timestamp: Instant::now(),
+            },
+        )
+        .await;
+        
+        // Return success immediately - the actual blockchain transaction will be sent via multicall
+        let tx_result: Result<String, String> = Ok("".to_string());
 
         match tx_result {
             Ok(tx_hash) => {

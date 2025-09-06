@@ -1,5 +1,7 @@
 module coordination::jobs;
 
+use coordination::multicall;
+use std::bcs;
 use std::string::{Self, String};
 use sui::clock::{Self, Clock};
 use sui::event;
@@ -141,15 +143,6 @@ public struct JobRescheduledEvent has copy, drop {
     rescheduled_at: u64,
 }
 
-// Error events for debugging failed operations
-public struct JobOperationFailedEvent has copy, drop {
-    operation: String, // "start", "complete", "fail", "terminate"
-    job_sequence: u64,
-    coordinator: address,
-    reason: String, // "job_not_found", "wrong_status", "not_due_yet"
-    current_status: Option<JobStatus>, // Current status if job exists
-    timestamp: u64,
-}
 
 // Multicall result event
 public struct MulticallExecutedEvent has copy, drop {
@@ -225,11 +218,22 @@ public fun create_job(
     next_scheduled_at: Option<u64>,
     clock: &Clock,
     ctx: &mut TxContext,
-): u64 {
+): (bool, u64) {
     // Validate interval if provided
     if (option::is_some(&interval_ms)) {
         let interval = *option::borrow(&interval_ms);
-        assert!(interval >= MIN_INTERVAL_MS, EIntervalTooShort);
+        if (interval < MIN_INTERVAL_MS) {
+            multicall::emit_operation_failed(
+                string::utf8(b"create"),
+                string::utf8(b"job"),
+                0,
+                string::utf8(EIntervalTooShort),
+                ctx.sender(),
+                clock::timestamp_ms(clock),
+                option::none(),
+            );
+            return (false, 0)
+        };
     };
 
     let job_sequence = jobs.next_job_sequence;
@@ -284,7 +288,7 @@ public fun create_job(
 
     jobs.next_job_sequence = job_sequence + 1;
 
-    job_sequence
+    (true, job_sequence)
 }
 
 // Update job status to running - returns true if successful, false otherwise
@@ -298,14 +302,15 @@ public fun start_job(
 
     // Check if job exists
     if (!object_table::contains(&jobs.jobs, job_sequence)) {
-        event::emit(JobOperationFailedEvent {
-            operation: string::utf8(b"start"),
+        multicall::emit_operation_failed(
+            string::utf8(b"start"),
+            string::utf8(b"job"),
             job_sequence,
-            coordinator: ctx.sender(),
-            reason: string::utf8(b"job_not_found"),
-            current_status: option::none(),
-            timestamp: now,
-        });
+            string::utf8(b"job_not_found"),
+            ctx.sender(),
+            now,
+            option::none(),
+        );
         return false
     };
 
@@ -313,14 +318,15 @@ public fun start_job(
 
     // Check if job is in Pending status
     if (job.status != JobStatus::Pending) {
-        event::emit(JobOperationFailedEvent {
-            operation: string::utf8(b"start"),
+        multicall::emit_operation_failed(
+            string::utf8(b"start"),
+            string::utf8(b"job"),
             job_sequence,
-            coordinator: ctx.sender(),
-            reason: string::utf8(b"wrong_status"),
-            current_status: option::some(job.status),
-            timestamp: now,
-        });
+            string::utf8(b"wrong_status"),
+            ctx.sender(),
+            now,
+            option::some(bcs::to_bytes(&job.status)),
+        );
         return false
     };
 
@@ -328,14 +334,15 @@ public fun start_job(
     if (is_periodic_job(job)) {
         let due_at = *option::borrow(&job.next_scheduled_at);
         if (now < due_at) {
-            event::emit(JobOperationFailedEvent {
-                operation: string::utf8(b"start"),
+            multicall::emit_operation_failed(
+                string::utf8(b"start"),
+                string::utf8(b"job"),
                 job_sequence,
-                coordinator: ctx.sender(),
-                reason: string::utf8(b"not_due_yet"),
-                current_status: option::some(job.status),
-                timestamp: now,
-            });
+                string::utf8(b"not_due_yet"),
+                ctx.sender(),
+                now,
+                option::some(bcs::to_bytes(&job.status)),
+            );
             return false
         };
     };
@@ -379,28 +386,30 @@ public fun complete_job(
 
     // Check if job exists
     if (!object_table::contains(&jobs.jobs, job_sequence)) {
-        event::emit(JobOperationFailedEvent {
-            operation: string::utf8(b"complete"),
+        multicall::emit_operation_failed(
+            string::utf8(b"complete"),
+            string::utf8(b"job"),
             job_sequence,
-            coordinator: ctx.sender(),
-            reason: string::utf8(b"job_not_found"),
-            current_status: option::none(),
-            timestamp: now,
-        });
+            string::utf8(b"job_not_found"),
+            ctx.sender(),
+            now,
+            option::none(),
+        );
         return false
     };
 
     let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
     // Check if job is in Running status
     if (job.status != JobStatus::Running) {
-        event::emit(JobOperationFailedEvent {
-            operation: string::utf8(b"complete"),
+        multicall::emit_operation_failed(
+            string::utf8(b"complete"),
+            string::utf8(b"job"),
             job_sequence,
-            coordinator: ctx.sender(),
-            reason: string::utf8(b"wrong_status"),
-            current_status: option::some(job.status),
-            timestamp: now,
-        });
+            string::utf8(b"wrong_status, should be running"),
+            ctx.sender(),
+            now,
+            option::some(bcs::to_bytes(&job.status)),
+        );
         return false
     };
 
@@ -468,14 +477,15 @@ public fun fail_job(
 
     // Check if job exists
     if (!object_table::contains(&jobs.jobs, job_sequence)) {
-        event::emit(JobOperationFailedEvent {
-            operation: string::utf8(b"fail"),
+        multicall::emit_operation_failed(
+            string::utf8(b"fail"),
+            string::utf8(b"job"),
             job_sequence,
-            coordinator: ctx.sender(),
-            reason: string::utf8(b"job_not_found"),
-            current_status: option::none(),
-            timestamp: now,
-        });
+            string::utf8(b"job_not_found"),
+            ctx.sender(),
+            now,
+            option::none(),
+        );
         return false
     };
 
@@ -483,14 +493,15 @@ public fun fail_job(
 
     // Job must be in Running state to fail
     if (job.status != JobStatus::Running) {
-        event::emit(JobOperationFailedEvent {
-            operation: string::utf8(b"fail"),
+        multicall::emit_operation_failed(
+            string::utf8(b"fail"),
+            string::utf8(b"job"),
             job_sequence,
-            coordinator: ctx.sender(),
-            reason: string::utf8(b"wrong_status"),
-            current_status: option::some(job.status),
-            timestamp: now,
-        });
+            string::utf8(b"wrong_status, should be running"),
+            ctx.sender(),
+            now,
+            option::some(bcs::to_bytes(&job.status)),
+        );
         return false
     };
     event::emit(JobFailedEvent {
@@ -684,14 +695,15 @@ public fun terminate_job(
 
     // Check if job exists
     if (!object_table::contains(&jobs.jobs, job_sequence)) {
-        event::emit(JobOperationFailedEvent {
-            operation: string::utf8(b"terminate"),
+        multicall::emit_operation_failed(
+            string::utf8(b"terminate"),
+            string::utf8(b"job"),
             job_sequence,
-            coordinator: ctx.sender(),
-            reason: string::utf8(b"job_not_found"),
-            current_status: option::none(),
-            timestamp: now,
-        });
+            string::utf8(b"job_not_found"),
+            ctx.sender(),
+            now,
+            option::none(),
+        );
         return false
     };
 

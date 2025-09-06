@@ -1,6 +1,8 @@
 module coordination::prover;
 
-use std::string::String;
+use coordination::multicall;
+use std::bcs;
+use std::string::{Self, String};
 use sui::clock::Clock;
 use sui::display;
 use sui::event;
@@ -16,7 +18,7 @@ public struct Proof has copy, drop, store {
     timestamp: u64,
     prover: address,
     user: Option<address>,
-    job_id: String,
+    job_id: Option<String>,
 }
 
 public struct ProofCalculation has key, store {
@@ -77,6 +79,7 @@ public struct ProofRejectedEvent has copy, drop {
     verifier: address,
 }
 
+
 public struct BlockProofEvent has copy, drop {
     block_number: u64,
     start_sequence: u64,
@@ -115,9 +118,6 @@ const PROOF_STATUS_USED: u8 = 5;
 // Error codes
 #[error]
 const EProofNotCalculated: vector<u8> = b"Proof not calculated or already used";
-
-#[error]
-const EProofAlreadyStarted: vector<u8> = b"Proof already started";
 
 #[error]
 const ESequenceOutOfRange: vector<u8> =
@@ -333,10 +333,9 @@ public(package) fun start_proving(
     sequences: vector<u64>,
     sequence1: Option<vector<u64>>,
     sequence2: Option<vector<u64>>,
-    job_id: String,
     clock: &Clock,
     ctx: &TxContext,
-) {
+): bool {
     // Sort and validate all sequences, get back sorted versions
     let sorted_sequences = sort_and_validate_sequences(
         &sequences,
@@ -383,7 +382,7 @@ public(package) fun start_proving(
         sequence1: sorted_sequence1,
         sequence2: sorted_sequence2,
         rejected_count: 0,
-        job_id,
+        job_id: option::none(),
         prover: ctx.sender(),
         user: option::none(),
         da_hash: option::none(),
@@ -398,10 +397,19 @@ public(package) fun start_proving(
                 &mut proof_calculation.proofs,
                 &sorted_sequences,
             );
-            assert!(
-                existing_proof.status == PROOF_STATUS_REJECTED,
-                EProofAlreadyStarted,
-            );
+            // Check if proof can be restarted (must be rejected)
+            if (existing_proof.status != PROOF_STATUS_REJECTED) {
+                multicall::emit_operation_failed(
+                    string::utf8(b"start_proving"),
+                    string::utf8(b"proof"),
+                    proof_calculation.block_number,
+                    string::utf8(b"proof_already_started"),
+                    ctx.sender(),
+                    sui::clock::timestamp_ms(clock),
+                    option::some(bcs::to_bytes(&sorted_sequences)),
+                );
+                return false
+            };
             let rejected_count = existing_proof.rejected_count;
             if (existing_proof.sequence1.is_some()) {
                 existing_sequence_1 = *existing_proof.sequence1.borrow();
@@ -476,7 +484,8 @@ public(package) fun start_proving(
         sequences: sorted_sequences,
         timestamp: sui::clock::timestamp_ms(clock),
         prover: ctx.sender(),
-    })
+    });
+    true
 }
 
 public fun reject_proof(
@@ -633,7 +642,7 @@ public fun submit_proof(
         sequence1: sorted_sequence1,
         sequence2: sorted_sequence2,
         rejected_count: 0,
-        job_id,
+        job_id: option::some(job_id),
         prover: ctx.sender(),
         user: option::none(),
         da_hash: option::some(da_hash),

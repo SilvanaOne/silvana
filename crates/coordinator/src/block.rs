@@ -1,4 +1,3 @@
-use crate::constants::BLOCK_CREATION_MIN_INTERVAL_MS;
 use sui::interface::SilvanaSuiInterface;
 use anyhow::Result;
 use tracing::{info, debug, error};
@@ -134,7 +133,7 @@ pub async fn settle(
 /// Try to create a new block for the app instance
 /// This function checks if the conditions are met to create a new block:
 /// 1. No new sequences pending (sequence != previous_block_last_sequence + 1)
-/// 2. Sufficient time has passed since the last block (current_time - previous_block_timestamp > MIN_TIME_BETWEEN_BLOCKS)
+/// 2. Sufficient time has passed since the last block (current_time - previous_block_timestamp > app_instance.min_time_between_blocks)
 pub async fn try_create_block(
     sui_interface: &mut SilvanaSuiInterface,
     app_instance_id: &str,
@@ -156,7 +155,7 @@ pub async fn try_create_block(
     // 2. Sufficient time has passed since last block
     let has_new_sequences = app_instance.sequence != app_instance.previous_block_last_sequence + 1;
     let time_since_last_block = current_time.saturating_sub(app_instance.previous_block_timestamp);
-    let sufficient_time_passed = time_since_last_block > BLOCK_CREATION_MIN_INTERVAL_MS;
+    let sufficient_time_passed = time_since_last_block > app_instance.min_time_between_blocks;
     
     debug!(
         "Block creation check for {}: sequence={}, prev_block_last_seq={}, prev_block_timestamp={}, current_time={}, time_since_last={}, has_new_sequences={}, sufficient_time={}",

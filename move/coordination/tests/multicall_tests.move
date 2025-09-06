@@ -28,7 +28,7 @@ module coordination::multicall_tests {
             let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
             
             // Create multiple jobs for testing
-            let job1 = create_job(
+            let (success1, job1) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -48,7 +48,7 @@ module coordination::multicall_tests {
                 ts::ctx(&mut scenario),
             );
             
-            let job2 = create_job(
+            let (success2, job2) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -68,7 +68,7 @@ module coordination::multicall_tests {
                 ts::ctx(&mut scenario),
             );
             
-            let job3 = create_job(
+            let (success3, job3) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -88,7 +88,7 @@ module coordination::multicall_tests {
                 ts::ctx(&mut scenario),
             );
             
-            let job4 = create_job(
+            let (success4, job4) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -107,6 +107,10 @@ module coordination::multicall_tests {
                 &clock,
                 ts::ctx(&mut scenario),
             );
+            assert!(success1, 100);
+            assert!(success2, 101);
+            assert!(success3, 102);
+            assert!(success4, 103);
             
             // Start jobs to make them active
             assert!(start_job(&mut jobs, job1, &clock, ts::ctx(&mut scenario)), 1);
@@ -171,7 +175,7 @@ module coordination::multicall_tests {
             let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
             
             // Create multiple jobs
-            let job1 = create_job(
+            let (success1, job1) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -191,7 +195,7 @@ module coordination::multicall_tests {
                 ts::ctx(&mut scenario),
             );
             
-            let job2 = create_job(
+            let (success2, job2) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -211,7 +215,7 @@ module coordination::multicall_tests {
                 ts::ctx(&mut scenario),
             );
             
-            let job3 = create_job(
+            let (success3, job3) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -230,6 +234,9 @@ module coordination::multicall_tests {
                 &clock,
                 ts::ctx(&mut scenario),
             );
+            assert!(success1, 300);
+            assert!(success2, 301);
+            assert!(success3, 302);
             
             // Prepare start jobs with different memory requirements
             let mut start_jobs = vector::empty<u64>();
@@ -311,7 +318,7 @@ module coordination::multicall_tests {
             let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
             
             // Create a mix of jobs in different states
-            let job1 = create_job(
+            let (success1, job1) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -331,7 +338,7 @@ module coordination::multicall_tests {
                 ts::ctx(&mut scenario),
             );
             
-            let job2 = create_job(
+            let (success2, job2) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -351,7 +358,7 @@ module coordination::multicall_tests {
                 ts::ctx(&mut scenario),
             );
             
-            let job3 = create_job(
+            let (success3, job3) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -370,6 +377,9 @@ module coordination::multicall_tests {
                 &clock,
                 ts::ctx(&mut scenario),
             );
+            assert!(success1, 200);
+            assert!(success2, 201);
+            assert!(success3, 202);
             
             // Start job1 and job2
             assert!(start_job(&mut jobs, job1, &clock, ts::ctx(&mut scenario)), 1);
@@ -427,7 +437,7 @@ module coordination::multicall_tests {
             let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
             
             // Create a job
-            let job1 = create_job(
+            let (success1, job1) = create_job(
                 &mut jobs,
                 option::none(),
                 b"dev".to_string(),
@@ -446,6 +456,7 @@ module coordination::multicall_tests {
                 &clock,
                 ts::ctx(&mut scenario),
             );
+            assert!(success1, 400);
             
             // Try to start job with more memory than available
             let mut start_jobs = vector::empty<u64>();
@@ -492,7 +503,7 @@ module coordination::multicall_tests {
             let mut all_jobs = vector::empty<u64>();
             let mut i = 0;
             while (i < 5) {
-                let job = create_job(
+                let (success, job) = create_job(
                     &mut jobs,
                     option::none(),
                     b"dev".to_string(),
@@ -511,6 +522,7 @@ module coordination::multicall_tests {
                     &clock,
                     ts::ctx(&mut scenario),
                 );
+                assert!(success, 500 + i);
                 vector::push_back(&mut all_jobs, job);
                 i = i + 1;
             };

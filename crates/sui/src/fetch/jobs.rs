@@ -137,51 +137,7 @@ pub struct Jobs {
 impl Jobs {
     /// Parse Jobs from protobuf struct value
     pub fn from_proto_struct(struct_value: &prost_types::Struct) -> Option<Self> {
-        // Debug: Show the raw Jobs struct from Sui
-        debug!("=== Raw Jobs struct from Sui ===");
-        debug!("Jobs {{");
-        for (key, value) in &struct_value.fields {
-            // Special handling for nested structures
-            match key.as_str() {
-                "pending_jobs_indexes" => {
-                    debug!("    pending_jobs_indexes: {{");
-                    if let Some(prost_types::value::Kind::StructValue(indexes_struct)) = &value.kind {
-                        if let Some(contents) = indexes_struct.fields.get("contents") {
-                            if let Some(prost_types::value::Kind::ListValue(list)) = &contents.kind {
-                                debug!("        contents: [{} entries]", list.values.len());
-                                for (i, entry) in list.values.iter().enumerate().take(3) {
-                                    debug!("            Entry {}: {:?}", i, entry.kind);
-                                }
-                                if list.values.len() > 3 {
-                                    debug!("            ... and {} more entries", list.values.len() - 3);
-                                }
-                            }
-                        }
-                    }
-                    debug!("    }},");
-                },
-                "pending_jobs" | "failed_jobs_index" => {
-                    if let Some(prost_types::value::Kind::StructValue(vecset_struct)) = &value.kind {
-                        if let Some(contents) = vecset_struct.fields.get("contents") {
-                            if let Some(prost_types::value::Kind::ListValue(list)) = &contents.kind {
-                                debug!("    {}: VecSet with {} items,", key, list.values.len());
-                            } else {
-                                debug!("    {}: {:?},", key, value.kind);
-                            }
-                        } else {
-                            debug!("    {}: {:?},", key, value.kind);
-                        }
-                    } else {
-                        debug!("    {}: {:?},", key, value.kind);
-                    }
-                },
-                _ => {
-                    debug!("    {}: {:?},", key, value.kind);
-                }
-            }
-        }
-        debug!("}}");
-        debug!("=== End Raw Jobs ===");
+
         
         // Extract Jobs table ID
         let jobs_table_id = struct_value.fields.get("jobs")
@@ -401,11 +357,11 @@ pub fn extract_job_from_json(json_value: &prost_types::Value) -> Result<Job> {
         let status = struct_value.fields.get("status")
             .and_then(|field| {
                 // Debug: print the raw status field
-                debug!("Raw status field: {:?}", field);
+                //debug!("Raw status field: {:?}", field);
                 
                 if let Some(prost_types::value::Kind::StructValue(status_struct)) = &field.kind {
                     // Debug: print all fields in the status struct
-                    debug!("Status struct fields: {:?}", status_struct.fields.keys().collect::<Vec<_>>());
+                    //debug!("Status struct fields: {:?}", status_struct.fields.keys().collect::<Vec<_>>());
                     
                     // Parse JobStatus enum - check the @variant field
                     if let Some(variant_field) = status_struct.fields.get("@variant") {
@@ -792,7 +748,7 @@ pub async fn fetch_job_by_id(
     job_sequence: u64,
 ) -> Result<Option<Job>> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
-    debug!("Fetching job {} from jobs table {}", job_sequence, jobs_table_id);
+    //debug!("Fetching job {} from jobs table {}", job_sequence, jobs_table_id);
     
     let mut page_token: Option<tonic::codegen::Bytes> = None;
     let mut total_fields_checked = 0;
@@ -823,9 +779,9 @@ pub async fn fetch_job_by_id(
         
         let response = list_response.into_inner();
         
-        debug!("Listed {} dynamic fields in page (total checked: {})", 
-            response.dynamic_fields.len(), 
-            total_fields_checked + response.dynamic_fields.len());
+        // debug!("Listed {} dynamic fields in page (total checked: {})", 
+        //     response.dynamic_fields.len(), 
+        //     total_fields_checked + response.dynamic_fields.len());
         
         // Find the specific job entry in this page
         for field in &response.dynamic_fields {
@@ -835,7 +791,7 @@ pub async fn fetch_job_by_id(
                     Ok(field_job_sequence) => {
                         if field_job_sequence == job_sequence {
                             if let Some(field_id) = &field.field_id {
-                                debug!("Found job {} in jobs table with field_id {}", job_sequence, field_id);
+                                //debug!("Found job {} in jobs table with field_id {}", job_sequence, field_id);
                                 // Found the job, fetch its content
                                 return fetch_job_object_by_field_id(field_id, job_sequence).await;
                             }
@@ -854,7 +810,7 @@ pub async fn fetch_job_by_id(
         if let Some(next_token) = response.next_page_token {
             if !next_token.is_empty() {
                 page_token = Some(next_token);
-                debug!("Continuing to next page of dynamic fields...");
+                //debug!("Continuing to next page of dynamic fields...");
             } else {
                 break;
             }
@@ -874,7 +830,7 @@ async fn fetch_job_object_by_field_id(
     job_sequence: u64,
 ) -> Result<Option<Job>> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
-    debug!("📄 Fetching job {} from field {}", job_sequence, field_id);
+    //debug!("📄 Fetching job {} from field {}", job_sequence, field_id);
     
     // Fetch the Field wrapper object
     let field_request = GetObjectRequest {

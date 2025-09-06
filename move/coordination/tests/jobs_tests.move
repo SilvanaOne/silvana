@@ -78,7 +78,7 @@ fun test_create_job() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::some(b"Test job".to_string()),
             b"developer1".to_string(),
@@ -98,6 +98,7 @@ fun test_create_job() {
             ts::ctx(&mut scenario),
         );
         
+        assert!(_success, 1000);
         assert!(job_sequence == 1, 0);
         assert!(job_exists(&jobs, job_sequence), 1);
         assert!(get_pending_jobs_count(&jobs) == 1, 2);
@@ -122,7 +123,7 @@ fun test_start_job() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -167,7 +168,7 @@ fun test_start_job_not_pending() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -209,7 +210,7 @@ fun test_complete_job() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -251,7 +252,7 @@ fun test_fail_job_with_retry() {
     {
         let mut jobs = create_jobs(option::some(3), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -315,7 +316,7 @@ fun test_multiple_pending_jobs() {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
         // Create multiple jobs
-        let _job_sequence1 = create_job(
+        let (_success1, _job_sequence1) = create_job(
             &mut jobs,
             option::some(b"Job 1".to_string()),
             b"dev1".to_string(),
@@ -335,7 +336,7 @@ fun test_multiple_pending_jobs() {
             ts::ctx(&mut scenario),
         );
         
-        let job_sequence2 = create_job(
+        let (_success2, job_sequence2) = create_job(
             &mut jobs,
             option::some(b"Job 2".to_string()),
             b"dev2".to_string(),
@@ -355,7 +356,7 @@ fun test_multiple_pending_jobs() {
             ts::ctx(&mut scenario),
         );
         
-        let _job_sequence3 = create_job(
+        let (_success3, _job_sequence3) = create_job(
             &mut jobs,
             option::some(b"Job 3".to_string()),
             b"dev3".to_string(),
@@ -385,11 +386,11 @@ fun test_multiple_pending_jobs() {
         assert!(option::is_some(&next), 2);
         
         // Start one job
-        start_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
+        assert!(start_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario)), 2000);
         assert!(get_pending_jobs_count(&jobs) == 2, 3);
         
         // Complete one job
-        complete_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
+        assert!(complete_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario)), 2001);
         assert!(get_pending_jobs_count(&jobs) == 2, 4);
         assert!(!job_exists(&jobs, job_sequence2), 5);
         
@@ -465,7 +466,7 @@ fun test_pending_jobs_index() {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
         // Create jobs for same developer/agent/method
-        let job_sequence1 = create_job(
+        let (_success1, job_sequence1) = create_job(
             &mut jobs,
             option::some(b"Job 1".to_string()),
             b"dev1".to_string(),
@@ -485,7 +486,7 @@ fun test_pending_jobs_index() {
             ts::ctx(&mut scenario),
         );
         
-        let job_sequence2 = create_job(
+        let (_success2, job_sequence2) = create_job(
             &mut jobs,
             option::some(b"Job 2".to_string()),
             b"dev1".to_string(),
@@ -506,7 +507,7 @@ fun test_pending_jobs_index() {
         );
         
         // Create job for different method
-        let _job_sequence3 = create_job(
+        let (_success3, _job_sequence3) = create_job(
             &mut jobs,
             option::some(b"Job 3".to_string()),
             b"dev1".to_string(),
@@ -586,7 +587,7 @@ fun test_pending_jobs_count_tracking() {
         assert!(get_pending_jobs_count(&jobs) == 0, 0);
         
         // Create first job
-        let job_sequence1 = create_job(
+        let (_success1, job_sequence1) = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -608,7 +609,7 @@ fun test_pending_jobs_count_tracking() {
         assert!(get_pending_jobs_count(&jobs) == 1, 1);
         
         // Create second job
-        let job_sequence2 = create_job(
+        let (_success2, job_sequence2) = create_job(
             &mut jobs,
             option::none(),
             b"dev2".to_string(),
@@ -644,9 +645,9 @@ fun test_pending_jobs_count_tracking() {
         assert!(get_pending_jobs_count(&jobs) == 1, 6);
         
         // Start and complete job2
-        start_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
+        assert!(start_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario)), 2000);
         assert!(get_pending_jobs_count(&jobs) == 0, 7);
-        complete_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
+        assert!(complete_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario)), 2001);
         assert!(get_pending_jobs_count(&jobs) == 0, 8);
         
         transfer::public_share_object(jobs);
@@ -664,7 +665,7 @@ fun test_complete_job_not_running() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -703,7 +704,7 @@ fun test_fail_job_not_running() {
     {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -742,7 +743,7 @@ fun test_index_with_retry() {
     {
         let mut jobs = create_jobs(option::some(2), ts::ctx(&mut scenario));
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"dev1".to_string(),
@@ -828,7 +829,7 @@ fun test_create_periodic_job() {
         let start_time = clock::timestamp_ms(&clock);
         let next_scheduled = start_time + interval;
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::some(b"Periodic Task".to_string()),
             b"developer1".to_string(),
@@ -861,7 +862,6 @@ fun test_create_periodic_job() {
 }
 
 #[test]
-#[expected_failure(abort_code = jobs::EIntervalTooShort)]
 fun test_periodic_job_interval_too_short() {
     let (mut scenario, clock) = setup_test();
     
@@ -874,7 +874,7 @@ fun test_periodic_job_interval_too_short() {
         let next_scheduled = start_time + interval;
         
         // This should fail - interval must be >= 60000ms
-        let _job_sequence = create_job(
+        let (success, _job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -893,6 +893,9 @@ fun test_periodic_job_interval_too_short() {
             &clock,
             ts::ctx(&mut scenario),
         );
+        
+        // Verify that the job creation failed due to short interval
+        assert!(!success, 0);
         
         transfer::public_share_object(jobs);
     };
@@ -913,7 +916,7 @@ fun test_periodic_job_cannot_start_before_due() {
         let start_time = clock::timestamp_ms(&clock);
         let next_scheduled = start_time + interval; // Due in 1 minute
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -956,7 +959,7 @@ fun test_periodic_job_can_start_when_due() {
         let start_time = clock::timestamp_ms(&clock);
         let next_scheduled = start_time + interval;
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -1002,7 +1005,7 @@ fun test_periodic_job_reschedule_on_complete() {
         let start_time = clock::timestamp_ms(&clock);
         let next_scheduled = start_time; // Can start immediately
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -1066,7 +1069,7 @@ fun test_periodic_job_reschedule_after_max_failures() {
         let start_time = clock::timestamp_ms(&clock);
         let next_scheduled = start_time; // Can start immediately
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -1134,7 +1137,7 @@ fun test_periodic_job_retry_within_interval() {
         let start_time = clock::timestamp_ms(&clock);
         let next_scheduled = start_time; // Can start immediately
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -1194,7 +1197,7 @@ fun test_terminate_periodic_job() {
         let start_time = clock::timestamp_ms(&clock);
         let next_scheduled = start_time;
         
-        let job_sequence = create_job(
+        let (_success, job_sequence) = create_job(
             &mut jobs,
             option::none(),
             b"developer1".to_string(),
@@ -1245,7 +1248,7 @@ fun test_mixed_periodic_and_onetime_jobs() {
         let mut jobs = create_jobs(option::none(), ts::ctx(&mut scenario));
         
         // Create one-time job
-        let onetime_job = create_job(
+        let (_success_onetime, onetime_job) = create_job(
             &mut jobs,
             option::some(b"One-time Job".to_string()),
             b"developer1".to_string(),
@@ -1267,7 +1270,7 @@ fun test_mixed_periodic_and_onetime_jobs() {
         
         // Create periodic job
         let interval = 60_000u64;
-        let periodic_job = create_job(
+        let (_success_periodic, periodic_job) = create_job(
             &mut jobs,
             option::some(b"Periodic Job".to_string()),
             b"developer1".to_string(),
@@ -1321,7 +1324,7 @@ fun test_restart_failed_jobs_with_vector() {
         let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
         
         // Create multiple jobs
-        let job1 = create_job(
+        let (_success1, job1) = create_job(
             &mut jobs,
             option::none(),
             b"dev".to_string(),
@@ -1341,7 +1344,7 @@ fun test_restart_failed_jobs_with_vector() {
             ts::ctx(&mut scenario),
         );
         
-        let job2 = create_job(
+        let (_success2, job2) = create_job(
             &mut jobs,
             option::none(),
             b"dev".to_string(),
@@ -1361,7 +1364,7 @@ fun test_restart_failed_jobs_with_vector() {
             ts::ctx(&mut scenario),
         );
         
-        let job3 = create_job(
+        let (_success3, job3) = create_job(
             &mut jobs,
             option::none(),
             b"dev".to_string(),
@@ -1429,7 +1432,7 @@ fun test_remove_failed_jobs() {
         let mut jobs = create_jobs(option::some(1), ts::ctx(&mut scenario));
         
         // Create multiple jobs
-        let job1 = create_job(
+        let (_success1, job1) = create_job(
             &mut jobs,
             option::none(),
             b"dev".to_string(),
@@ -1449,7 +1452,7 @@ fun test_remove_failed_jobs() {
             ts::ctx(&mut scenario),
         );
         
-        let job2 = create_job(
+        let (_success2, job2) = create_job(
             &mut jobs,
             option::none(),
             b"dev".to_string(),

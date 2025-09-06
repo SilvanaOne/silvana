@@ -3,6 +3,7 @@ pub mod balance;
 pub mod chain;
 pub mod coin;
 pub mod coin_management;
+pub mod constants;
 pub mod error;
 pub mod events;
 pub mod faucet;
@@ -14,6 +15,7 @@ pub mod object_lock;
 pub mod parse;
 pub mod state;
 pub mod transactions;
+pub mod types;
 
 // Re-export commonly used types
 pub use balance::{
@@ -44,10 +46,13 @@ pub use network_info::{
     get_network_info, print_network_info, get_network_summary, get_service_info,
     get_service_info_full, verify_chain_config, NetworkInfo, ServiceInfo,
 };
-pub use state::SharedSuiState;
+pub use state::{SharedSuiState, StartedJob};
 pub use transactions::{
-    add_metadata_tx, complete_job_tx, delete_kv_tx, fail_job_tx, set_kv_tx, start_job_tx,
-    submit_proof_tx, update_state_for_sequence_tx,
+    add_metadata_tx, delete_kv_tx, set_kv_tx,
+    fetch_transaction_events,
+    fetch_transaction_events_as_json,
 };
 // Re-export selected fetch utilities for convenient access at crate root
 pub use fetch::fetch_agent_method;
+// Re-export multicall constants
+pub use constants::{get_max_move_calls_per_transaction, get_max_operations_per_multicall};
