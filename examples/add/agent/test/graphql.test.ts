@@ -106,7 +106,7 @@ describe("GraphQL Transaction Count", async () => {
 
     let hasNextPage = true;
     let cursor: string | null = null;
-    const maxCount = 100000;
+    const maxCount = 1_000_000;
 
     // Paginate through all transactions
     while (hasNextPage && totalCount < maxCount) {

@@ -1,6 +1,6 @@
 module coordination::jobs;
 
-use std::string::String;
+use std::string::{Self, String};
 use sui::clock::{Self, Clock};
 use sui::event;
 use sui::object_table::{Self, ObjectTable};
@@ -89,6 +89,7 @@ public struct JobUpdatedEvent has copy, drop {
 public struct JobStartedEvent has copy, drop {
     job_sequence: u64,
     app_instance: String,
+    coordinator: address,
     started_at: u64,
 }
 
@@ -107,12 +108,14 @@ public struct JobsRestartedEvent has copy, drop {
 public struct JobCompletedEvent has copy, drop {
     job_sequence: u64,
     app_instance: String,
+    coordinator: address,
     completed_at: u64,
 }
 
 public struct JobFailedEvent has copy, drop {
     job_sequence: u64,
     app_instance: String,
+    coordinator: address,
     error: String,
     attempts: u8,
     failed_at: u64,
@@ -127,6 +130,7 @@ public struct JobDeletedEvent has copy, drop {
 public struct JobTerminatedEvent has copy, drop {
     job_sequence: u64,
     app_instance: String,
+    coordinator: address,
     terminated_at: u64,
 }
 
@@ -135,6 +139,30 @@ public struct JobRescheduledEvent has copy, drop {
     app_instance: String,
     next_scheduled_at: u64,
     rescheduled_at: u64,
+}
+
+// Error events for debugging failed operations
+public struct JobOperationFailedEvent has copy, drop {
+    operation: String, // "start", "complete", "fail", "terminate"
+    job_sequence: u64,
+    coordinator: address,
+    reason: String, // "job_not_found", "wrong_status", "not_due_yet"
+    current_status: Option<JobStatus>, // Current status if job exists
+    timestamp: u64,
+}
+
+// Multicall result event
+public struct MulticallExecutedEvent has copy, drop {
+    coordinator: address,
+    complete_jobs: vector<u64>,
+    complete_results: vector<bool>,
+    fail_jobs: vector<u64>,
+    fail_results: vector<bool>,
+    terminate_jobs: vector<u64>,
+    terminate_results: vector<bool>,
+    start_jobs: vector<u64>,
+    start_results: vector<bool>,
+    timestamp: u64,
 }
 
 // Constants
@@ -150,13 +178,12 @@ const EJobNotFound: vector<u8> = b"Job not found";
 const EJobNotPending: vector<u8> = b"Job is not in pending state";
 
 #[error]
-const EJobNotRunning: vector<u8> = b"Job is not in running state";
-
-#[error]
 const EIntervalTooShort: vector<u8> = b"Interval must be >= 60000 ms";
 
+/// Multicall function arguments validation error
 #[error]
-const ENotDueYet: vector<u8> = b"Periodic job is not due yet";
+const EInvalidArguments: vector<u8> =
+    b"Invalid arguments: fail_job_sequences and fail_errors must have same length";
 
 // Initialize Jobs storage with optional max_attempts
 public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
@@ -260,19 +287,57 @@ public fun create_job(
     job_sequence
 }
 
-// Update job status to running
-public fun start_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
-    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
-
+// Update job status to running - returns true if successful, false otherwise
+public fun start_job(
+    jobs: &mut Jobs,
+    job_sequence: u64,
+    clock: &Clock,
+    ctx: &TxContext,
+): bool {
     let now = clock::timestamp_ms(clock);
+
+    // Check if job exists
+    if (!object_table::contains(&jobs.jobs, job_sequence)) {
+        event::emit(JobOperationFailedEvent {
+            operation: string::utf8(b"start"),
+            job_sequence,
+            coordinator: ctx.sender(),
+            reason: string::utf8(b"job_not_found"),
+            current_status: option::none(),
+            timestamp: now,
+        });
+        return false
+    };
+
     let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
 
-    assert!(job.status == JobStatus::Pending, EJobNotPending);
+    // Check if job is in Pending status
+    if (job.status != JobStatus::Pending) {
+        event::emit(JobOperationFailedEvent {
+            operation: string::utf8(b"start"),
+            job_sequence,
+            coordinator: ctx.sender(),
+            reason: string::utf8(b"wrong_status"),
+            current_status: option::some(job.status),
+            timestamp: now,
+        });
+        return false
+    };
 
     // If periodic, enforce that it's due
     if (is_periodic_job(job)) {
         let due_at = *option::borrow(&job.next_scheduled_at);
-        assert!(now >= due_at, ENotDueYet);
+        if (now < due_at) {
+            event::emit(JobOperationFailedEvent {
+                operation: string::utf8(b"start"),
+                job_sequence,
+                coordinator: ctx.sender(),
+                reason: string::utf8(b"not_due_yet"),
+                current_status: option::some(job.status),
+                timestamp: now,
+            });
+            return false
+        };
     };
 
     // Update job
@@ -295,24 +360,54 @@ public fun start_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
     event::emit(JobStartedEvent {
         job_sequence,
         app_instance: job.app_instance,
+        coordinator: ctx.sender(),
         started_at: now,
     });
     remove_pending_job(jobs, job_sequence);
+    true
 }
 
 // Mark job as completed and remove it (or reschedule if periodic)
-// Only running jobs can be completed
-public fun complete_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
-    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
-
+// Only running jobs can be completed - returns true if successful, false otherwise
+public fun complete_job(
+    jobs: &mut Jobs,
+    job_sequence: u64,
+    clock: &Clock,
+    ctx: &TxContext,
+): bool {
     let now = clock::timestamp_ms(clock);
 
+    // Check if job exists
+    if (!object_table::contains(&jobs.jobs, job_sequence)) {
+        event::emit(JobOperationFailedEvent {
+            operation: string::utf8(b"complete"),
+            job_sequence,
+            coordinator: ctx.sender(),
+            reason: string::utf8(b"job_not_found"),
+            current_status: option::none(),
+            timestamp: now,
+        });
+        return false
+    };
+
     let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
-    assert!(job.status == JobStatus::Running, EJobNotRunning);
+    // Check if job is in Running status
+    if (job.status != JobStatus::Running) {
+        event::emit(JobOperationFailedEvent {
+            operation: string::utf8(b"complete"),
+            job_sequence,
+            coordinator: ctx.sender(),
+            reason: string::utf8(b"wrong_status"),
+            current_status: option::some(job.status),
+            timestamp: now,
+        });
+        return false
+    };
 
     event::emit(JobCompletedEvent {
         job_sequence,
         app_instance: job.app_instance,
+        coordinator: ctx.sender(),
         completed_at: now,
     });
 
@@ -356,28 +451,52 @@ public fun complete_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
         let job = object_table::remove(&mut jobs.jobs, job_sequence);
         let Job { id, .. } = job;
         object::delete(id);
-    }
+    };
+    true
 }
 
 // Mark job as failed and retry or remove (or reschedule if periodic)
-// Only running jobs can fail
+// Only running jobs can fail - returns true if successful, false otherwise
 public fun fail_job(
     jobs: &mut Jobs,
     job_sequence: u64,
     error: String,
     clock: &Clock,
-) {
-    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
-
+    ctx: &TxContext,
+): bool {
     let now = clock::timestamp_ms(clock);
+
+    // Check if job exists
+    if (!object_table::contains(&jobs.jobs, job_sequence)) {
+        event::emit(JobOperationFailedEvent {
+            operation: string::utf8(b"fail"),
+            job_sequence,
+            coordinator: ctx.sender(),
+            reason: string::utf8(b"job_not_found"),
+            current_status: option::none(),
+            timestamp: now,
+        });
+        return false
+    };
 
     let job = object_table::borrow_mut(&mut jobs.jobs, job_sequence);
 
     // Job must be in Running state to fail
-    assert!(job.status == JobStatus::Running, EJobNotRunning);
+    if (job.status != JobStatus::Running) {
+        event::emit(JobOperationFailedEvent {
+            operation: string::utf8(b"fail"),
+            job_sequence,
+            coordinator: ctx.sender(),
+            reason: string::utf8(b"wrong_status"),
+            current_status: option::some(job.status),
+            timestamp: now,
+        });
+        return false
+    };
     event::emit(JobFailedEvent {
         job_sequence,
         app_instance: job.app_instance,
+        coordinator: ctx.sender(),
         error,
         attempts: job.attempts,
         failed_at: now,
@@ -430,7 +549,8 @@ public fun fail_job(
             jobs.failed_jobs_count = jobs.failed_jobs_count + 1;
             vec_set::insert(&mut jobs.failed_jobs_index, job_sequence);
         }
-    }
+    };
+    true
 }
 
 public fun get_failed_jobs(jobs: &Jobs): vector<u64> {
@@ -553,18 +673,36 @@ public fun remove_failed_jobs(
 }
 
 // Terminate a job (one-time or periodic) - removes it completely
-public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
-    assert!(object_table::contains(&jobs.jobs, job_sequence), EJobNotFound);
+// Returns true if successful, false otherwise
+public fun terminate_job(
+    jobs: &mut Jobs,
+    job_sequence: u64,
+    clock: &Clock,
+    ctx: &TxContext,
+): bool {
+    let now = clock::timestamp_ms(clock);
+
+    // Check if job exists
+    if (!object_table::contains(&jobs.jobs, job_sequence)) {
+        event::emit(JobOperationFailedEvent {
+            operation: string::utf8(b"terminate"),
+            job_sequence,
+            coordinator: ctx.sender(),
+            reason: string::utf8(b"job_not_found"),
+            current_status: option::none(),
+            timestamp: now,
+        });
+        return false
+    };
 
     // Settlement job tracking is now handled per-chain in the Settlement struct
-
-    let now = clock::timestamp_ms(clock);
     remove_pending_job(jobs, job_sequence);
     let job = object_table::remove(&mut jobs.jobs, job_sequence);
 
     event::emit(JobTerminatedEvent {
         job_sequence,
         app_instance: job.app_instance,
+        coordinator: ctx.sender(),
         terminated_at: now,
     });
 
@@ -576,6 +714,86 @@ public fun terminate_job(jobs: &mut Jobs, job_sequence: u64, clock: &Clock) {
 
     let Job { id, .. } = job;
     object::delete(id);
+    true
+}
+
+// Multicall function to batch execute multiple job operations
+// Executes in order: complete, fail, terminate, then start
+public fun multicall_job_operations(
+    jobs: &mut Jobs,
+    complete_job_sequences: vector<u64>,
+    fail_job_sequences: vector<u64>,
+    fail_errors: vector<String>,
+    terminate_job_sequences: vector<u64>,
+    start_job_sequences: vector<u64>,
+    clock: &Clock,
+    ctx: &TxContext,
+) {
+    // Ensure fail arrays have same length
+    assert!(
+        vector::length(&fail_job_sequences) == vector::length(&fail_errors),
+        EInvalidArguments,
+    );
+    let now = clock::timestamp_ms(clock);
+
+    // Process complete operations
+    let mut complete_results = vector::empty<bool>();
+    let mut i = 0;
+    let complete_len = vector::length(&complete_job_sequences);
+    while (i < complete_len) {
+        let job_sequence = *vector::borrow(&complete_job_sequences, i);
+        let result = complete_job(jobs, job_sequence, clock, ctx);
+        vector::push_back(&mut complete_results, result);
+        i = i + 1;
+    };
+
+    // Process fail operations
+    let mut fail_results = vector::empty<bool>();
+    i = 0;
+    let fail_len = vector::length(&fail_job_sequences);
+    while (i < fail_len) {
+        let job_sequence = *vector::borrow(&fail_job_sequences, i);
+        let error = *vector::borrow(&fail_errors, i);
+        let result = fail_job(jobs, job_sequence, error, clock, ctx);
+        vector::push_back(&mut fail_results, result);
+        i = i + 1;
+    };
+
+    // Process terminate operations
+    let mut terminate_results = vector::empty<bool>();
+    i = 0;
+    let terminate_len = vector::length(&terminate_job_sequences);
+    while (i < terminate_len) {
+        let job_sequence = *vector::borrow(&terminate_job_sequences, i);
+        let result = terminate_job(jobs, job_sequence, clock, ctx);
+        vector::push_back(&mut terminate_results, result);
+        i = i + 1;
+    };
+
+    // Process start operations
+    let mut start_results = vector::empty<bool>();
+    i = 0;
+    let start_len = vector::length(&start_job_sequences);
+    while (i < start_len) {
+        let job_sequence = *vector::borrow(&start_job_sequences, i);
+        let result = start_job(jobs, job_sequence, clock, ctx);
+        vector::push_back(&mut start_results, result);
+        i = i + 1;
+    };
+
+    // Emit multicall event
+    event::emit(MulticallExecutedEvent {
+        coordinator: ctx.sender(),
+        complete_jobs: complete_job_sequences,
+        complete_results,
+        fail_jobs: fail_job_sequences,
+        fail_results,
+        terminate_jobs: terminate_job_sequences,
+        terminate_results,
+        start_jobs: start_job_sequences,
+        start_results,
+        timestamp: now,
+    });
 }
 
 fun add_pending_job(jobs: &mut Jobs, job_sequence: u64) {

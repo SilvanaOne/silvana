@@ -75,6 +75,7 @@ public struct DeveloperNamesUpdatedEvent has copy, drop {
     version: u64,
 }
 
+// Error codes
 #[error]
 const EInvalidOwner: vector<u8> = b"Invalid owner";
 

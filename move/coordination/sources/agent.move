@@ -118,6 +118,7 @@ public struct DefaultMethodRemovedEvent has copy, drop {
     removed_at: u64,
 }
 
+// Error codes
 #[error]
 const EInvalidOwner: vector<u8> = b"Invalid owner";
 

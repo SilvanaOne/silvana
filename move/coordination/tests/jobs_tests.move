@@ -143,7 +143,7 @@ fun test_start_job() {
         );
         
         // Start the job
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         
         let job = get_job(&jobs, job_sequence);
         assert!(is_job_running(job), 0);
@@ -160,7 +160,6 @@ fun test_start_job() {
 }
 
 #[test]
-#[expected_failure(abort_code = jobs::EJobNotPending)]
 fun test_start_job_not_pending() {
     let (mut scenario, clock) = setup_test();
     
@@ -188,9 +187,12 @@ fun test_start_job_not_pending() {
             ts::ctx(&mut scenario),
         );
         
-        start_job(&mut jobs, job_sequence, &clock);
-        // This should fail - trying to start an already running job
-        start_job(&mut jobs, job_sequence, &clock);
+        let result1 = start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
+        assert!(result1 == true, 0); // First start should succeed
+        
+        // This should return false - trying to start an already running job
+        let result2 = start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
+        assert!(result2 == false, 1);
         
         transfer::public_share_object(jobs);
     };
@@ -227,8 +229,8 @@ fun test_complete_job() {
             ts::ctx(&mut scenario),
         );
         
-        start_job(&mut jobs, job_sequence, &clock);
-        complete_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
+        complete_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         
         // Job should be deleted
         assert!(!job_exists(&jobs, job_sequence), 0);
@@ -270,27 +272,27 @@ fun test_fail_job_with_retry() {
         );
         
         // First attempt
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 0);
         
         // Fail the job - should go back to pending
-        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock, ts::ctx(&mut scenario));
         assert!(job_exists(&jobs, job_sequence), 1);
         assert!(is_job_pending(get_job(&jobs, job_sequence)), 2);
         assert!(get_pending_jobs_count(&jobs) == 1, 3);
         
         // Second attempt
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 4);
-        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock, ts::ctx(&mut scenario));
         assert!(job_exists(&jobs, job_sequence), 5);
         
         // Third attempt
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 3, 6);
         
         // Fail after max attempts - job should be marked as failed
-        fail_job(&mut jobs, job_sequence, b"Error 3".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error 3".to_string(), &clock, ts::ctx(&mut scenario));
         assert!(job_exists(&jobs, job_sequence), 7);
         assert!(is_job_failed(get_job(&jobs, job_sequence)), 8);
         assert!(is_job_in_failed_index(&jobs, job_sequence), 9);
@@ -383,11 +385,11 @@ fun test_multiple_pending_jobs() {
         assert!(option::is_some(&next), 2);
         
         // Start one job
-        start_job(&mut jobs, job_sequence2, &clock);
+        start_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 2, 3);
         
         // Complete one job
-        complete_job(&mut jobs, job_sequence2, &clock);
+        complete_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 2, 4);
         assert!(!job_exists(&jobs, job_sequence2), 5);
         
@@ -554,7 +556,7 @@ fun test_pending_jobs_index() {
         assert!(vector::is_empty(&no_jobs), 4);
         
         // Start job1 - should remove from index
-        start_job(&mut jobs, job_sequence1, &clock);
+        start_job(&mut jobs, job_sequence1, &clock, ts::ctx(&mut scenario));
         let method1_jobs_after = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),
@@ -628,23 +630,23 @@ fun test_pending_jobs_count_tracking() {
         assert!(get_pending_jobs_count(&jobs) == 2, 2);
         
         // Start job1 - count should decrease
-        start_job(&mut jobs, job_sequence1, &clock);
+        start_job(&mut jobs, job_sequence1, &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 1, 3);
         
         // Fail job1 - should go back to pending, count increases
-        fail_job(&mut jobs, job_sequence1, b"Error".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence1, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 2, 4);
         
         // Start and complete job1 - count should decrease
-        start_job(&mut jobs, job_sequence1, &clock);
+        start_job(&mut jobs, job_sequence1, &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 1, 5);
-        complete_job(&mut jobs, job_sequence1, &clock);
+        complete_job(&mut jobs, job_sequence1, &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 1, 6);
         
         // Start and complete job2
-        start_job(&mut jobs, job_sequence2, &clock);
+        start_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 0, 7);
-        complete_job(&mut jobs, job_sequence2, &clock);
+        complete_job(&mut jobs, job_sequence2, &clock, ts::ctx(&mut scenario));
         assert!(get_pending_jobs_count(&jobs) == 0, 8);
         
         transfer::public_share_object(jobs);
@@ -655,7 +657,6 @@ fun test_pending_jobs_count_tracking() {
 }
 
 #[test]
-#[expected_failure(abort_code = jobs::EJobNotRunning)]
 fun test_complete_job_not_running() {
     let (mut scenario, clock) = setup_test();
     
@@ -683,8 +684,9 @@ fun test_complete_job_not_running() {
             ts::ctx(&mut scenario),
         );
         
-        // Try to complete a pending job - should fail
-        complete_job(&mut jobs, job_sequence, &clock);
+        // Try to complete a pending job - should return false
+        let result = complete_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
+        assert!(result == false, 0);
         
         transfer::public_share_object(jobs);
     };
@@ -694,7 +696,6 @@ fun test_complete_job_not_running() {
 }
 
 #[test]
-#[expected_failure(abort_code = jobs::EJobNotRunning)]
 fun test_fail_job_not_running() {
     let (mut scenario, clock) = setup_test();
     
@@ -722,8 +723,9 @@ fun test_fail_job_not_running() {
             ts::ctx(&mut scenario),
         );
         
-        // Try to fail a pending job - should fail
-        fail_job(&mut jobs, job_sequence, b"Error".to_string(), &clock);
+        // Try to fail a pending job - should return false
+        let result = fail_job(&mut jobs, job_sequence, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
+        assert!(result == false, 0);
         
         transfer::public_share_object(jobs);
     };
@@ -770,7 +772,7 @@ fun test_index_with_retry() {
         assert!(vector::contains(&jobs_in_index, &job_sequence), 0);
         
         // Start job - should be removed from index
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         let jobs_after_start = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),
@@ -780,7 +782,7 @@ fun test_index_with_retry() {
         assert!(vector::is_empty(&jobs_after_start), 1);
         
         // Fail job (first attempt) - should be back in index
-        fail_job(&mut jobs, job_sequence, b"Error".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
         let jobs_after_fail = get_pending_jobs_for_method(
             &jobs,
             &b"dev1".to_string(),
@@ -790,8 +792,8 @@ fun test_index_with_retry() {
         assert!(vector::contains(&jobs_after_fail, &job_sequence), 2);
         
         // Start again and fail on max attempts - should be marked as failed
-        start_job(&mut jobs, job_sequence, &clock);
-        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
+        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock, ts::ctx(&mut scenario));
         
         // Job should exist but be marked as failed (max attempts reached)
         assert!(job_exists(&jobs, job_sequence), 3);
@@ -900,7 +902,6 @@ fun test_periodic_job_interval_too_short() {
 }
 
 #[test]
-#[expected_failure(abort_code = jobs::ENotDueYet)]
 fun test_periodic_job_cannot_start_before_due() {
     let (mut scenario, clock) = setup_test();
     
@@ -932,8 +933,9 @@ fun test_periodic_job_cannot_start_before_due() {
             ts::ctx(&mut scenario),
         );
         
-        // Try to start immediately - should fail because not due yet
-        start_job(&mut jobs, job_sequence, &clock);
+        // Try to start immediately - should return false because not due yet
+        let result = start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
+        assert!(result == false, 0);
         
         transfer::public_share_object(jobs);
     };
@@ -978,7 +980,7 @@ fun test_periodic_job_can_start_when_due() {
         clock::increment_for_testing(&mut clock, interval);
         
         // Now should be able to start
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(is_job_running(get_job(&jobs, job_sequence)), 0);
         
         transfer::public_share_object(jobs);
@@ -1021,10 +1023,10 @@ fun test_periodic_job_reschedule_on_complete() {
         );
         
         // Start and complete the job
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(is_job_running(get_job(&jobs, job_sequence)), 0);
         
-        complete_job(&mut jobs, job_sequence, &clock);
+        complete_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         
         // Job should still exist and be pending (rescheduled)
         assert!(job_exists(&jobs, job_sequence), 1);
@@ -1042,7 +1044,7 @@ fun test_periodic_job_reschedule_on_complete() {
         clock::increment_for_testing(&mut clock, 1); // Now at next interval
         
         // Can start again
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(is_job_running(get_job(&jobs, job_sequence)), 5);
         
         transfer::public_share_object(jobs);
@@ -1085,18 +1087,18 @@ fun test_periodic_job_reschedule_after_max_failures() {
         );
         
         // First attempt - fail
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 0);
-        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock, ts::ctx(&mut scenario));
         assert!(is_job_pending(get_job(&jobs, job_sequence)), 1); // Should retry
         
         // Wait for retry interval before second attempt
         clock::increment_for_testing(&mut clock, 60_000); // RETRY_INTERVAL_MS
         
         // Second attempt - fail again (max attempts reached)
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 2);
-        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock);
+        fail_job(&mut jobs, job_sequence, b"Error 2".to_string(), &clock, ts::ctx(&mut scenario));
         
         // Job should still exist but be rescheduled for next interval
         assert!(job_exists(&jobs, job_sequence), 3);
@@ -1110,7 +1112,7 @@ fun test_periodic_job_reschedule_after_max_failures() {
         clock::increment_for_testing(&mut clock, interval);
         
         // Can start again in new interval
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 6); // Fresh attempt count
         
         transfer::public_share_object(jobs);
@@ -1153,8 +1155,8 @@ fun test_periodic_job_retry_within_interval() {
         );
         
         // First attempt - fail
-        start_job(&mut jobs, job_sequence, &clock);
-        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
+        fail_job(&mut jobs, job_sequence, b"Error 1".to_string(), &clock, ts::ctx(&mut scenario));
         assert!(is_job_pending(get_job(&jobs, job_sequence)), 0);
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 1, 1);
         
@@ -1162,11 +1164,11 @@ fun test_periodic_job_retry_within_interval() {
         clock::increment_for_testing(&mut clock, 60_000); // RETRY_INTERVAL_MS
         
         // Can retry after waiting for retry interval
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(job_attempts(get_job(&jobs, job_sequence)) == 2, 2);
         
         // Complete successfully on second attempt
-        complete_job(&mut jobs, job_sequence, &clock);
+        complete_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         
         // Job should be rescheduled for next interval with attempts reset
         assert!(job_exists(&jobs, job_sequence), 3);
@@ -1213,15 +1215,15 @@ fun test_terminate_periodic_job() {
         );
         
         // Start the job
-        start_job(&mut jobs, job_sequence, &clock);
+        start_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(is_job_running(get_job(&jobs, job_sequence)), 0);
         
         // Complete it once
-        complete_job(&mut jobs, job_sequence, &clock);
+        complete_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         assert!(is_job_pending(get_job(&jobs, job_sequence)), 1);
         
         // Terminate the periodic job
-        terminate_job(&mut jobs, job_sequence, &clock);
+        terminate_job(&mut jobs, job_sequence, &clock, ts::ctx(&mut scenario));
         
         // Job should be completely removed
         assert!(!job_exists(&jobs, job_sequence), 2);
@@ -1288,16 +1290,16 @@ fun test_mixed_periodic_and_onetime_jobs() {
         assert!(get_pending_jobs_count(&jobs) == 2, 0);
         
         // Start and complete one-time job
-        start_job(&mut jobs, onetime_job, &clock);
-        complete_job(&mut jobs, onetime_job, &clock);
+        start_job(&mut jobs, onetime_job, &clock, ts::ctx(&mut scenario));
+        complete_job(&mut jobs, onetime_job, &clock, ts::ctx(&mut scenario));
         
         // One-time job should be deleted
         assert!(!job_exists(&jobs, onetime_job), 1);
         assert!(get_pending_jobs_count(&jobs) == 1, 2);
         
         // Start and complete periodic job
-        start_job(&mut jobs, periodic_job, &clock);
-        complete_job(&mut jobs, periodic_job, &clock);
+        start_job(&mut jobs, periodic_job, &clock, ts::ctx(&mut scenario));
+        complete_job(&mut jobs, periodic_job, &clock, ts::ctx(&mut scenario));
         
         // Periodic job should still exist (rescheduled)
         assert!(job_exists(&jobs, periodic_job), 3);
@@ -1380,14 +1382,14 @@ fun test_restart_failed_jobs_with_vector() {
         );
         
         // Fail all three jobs
-        start_job(&mut jobs, job1, &clock);
-        fail_job(&mut jobs, job1, b"Error".to_string(), &clock);
+        start_job(&mut jobs, job1, &clock, ts::ctx(&mut scenario));
+        fail_job(&mut jobs, job1, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
         
-        start_job(&mut jobs, job2, &clock);
-        fail_job(&mut jobs, job2, b"Error".to_string(), &clock);
+        start_job(&mut jobs, job2, &clock, ts::ctx(&mut scenario));
+        fail_job(&mut jobs, job2, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
         
-        start_job(&mut jobs, job3, &clock);
-        fail_job(&mut jobs, job3, b"Error".to_string(), &clock);
+        start_job(&mut jobs, job3, &clock, ts::ctx(&mut scenario));
+        fail_job(&mut jobs, job3, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
         
         // All should be failed
         assert!(get_failed_jobs_count(&jobs) == 3, 0);
@@ -1468,11 +1470,11 @@ fun test_remove_failed_jobs() {
         );
         
         // Fail both jobs
-        start_job(&mut jobs, job1, &clock);
-        fail_job(&mut jobs, job1, b"Error".to_string(), &clock);
+        start_job(&mut jobs, job1, &clock, ts::ctx(&mut scenario));
+        fail_job(&mut jobs, job1, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
         
-        start_job(&mut jobs, job2, &clock);
-        fail_job(&mut jobs, job2, b"Error".to_string(), &clock);
+        start_job(&mut jobs, job2, &clock, ts::ctx(&mut scenario));
+        fail_job(&mut jobs, job2, b"Error".to_string(), &clock, ts::ctx(&mut scenario));
         
         assert!(get_failed_jobs_count(&jobs) == 2, 0);
         

@@ -31,6 +31,7 @@ public struct RegistryCreatedEvent has copy, drop {
 
 public struct REGISTRY has drop {}
 
+// Error codes
 #[error]
 const ENotAdmin: vector<u8> = b"Not admin";
 
@@ -615,6 +616,7 @@ public fun create_app_instance_from_registry(
     description: Option<String>,
     settlement_chains: vector<String>, // vector of chain names
     settlement_addresses: vector<Option<String>>, // vector of optional settlement addresses
+    min_time_between_blocks: u64, // Minimum time between blocks in milliseconds
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstanceCap {
@@ -624,6 +626,7 @@ public fun create_app_instance_from_registry(
         description,
         settlement_chains,
         settlement_addresses,
+        min_time_between_blocks,
         clock,
         ctx,
     )

@@ -3,7 +3,10 @@ module coordination::app_instance;
 use commitment::state::{AppState, get_state_commitment, create_app_state};
 use coordination::app_method::{Self, AppMethod};
 use coordination::block::{Self, Block};
-use coordination::jobs::{Self, Jobs};
+use coordination::jobs::{
+    Self, 
+    Jobs, 
+};
 use coordination::prover::{Self, ProofCalculation};
 use coordination::sequence_state::{Self, SequenceState, SequenceStateManager};
 use coordination::settlement::{Self, Settlement};
@@ -40,6 +43,7 @@ public struct AppInstance has key, store {
     last_proved_block_number: u64,
     last_settled_block_number: u64,
     isPaused: bool,
+    min_time_between_blocks: u64, // Configurable minimum time between blocks
     created_at: u64,
     updated_at: u64,
 }
@@ -101,7 +105,46 @@ public struct BlockPurgedEvent has copy, drop {
     reason: String,
 }
 
+// Debug event for tracking block cleanup
+public struct BlockCleanupEvent has copy, drop {
+    app_instance_address: address,
+    previous_last_settled: u64,
+    new_min_settled: u64,
+    start_block: u64,
+    settlements_count: u64,
+}
+
 public struct APP_INSTANCE has drop {}
+
+// Constants
+const MIN_TIME_BETWEEN_BLOCKS: u64 = 60_000;
+
+// Error codes
+#[error]
+const ENotAuthorized: vector<u8> = b"Not authorized";
+
+#[error]
+const EAppInstancePaused: vector<u8> = b"App instance is paused";
+
+#[error]
+const EMinTimeBetweenBlocksTooLow: vector<u8> = b"Min time between blocks must be at least 60000ms";
+
+#[error]
+const EBlockNotProved: vector<u8> = b"Block not proved";
+
+#[error]
+const ESettlementChainNotFound: vector<u8> = b"Settlement chain not found";
+
+#[error]
+const ESettlementVectorLengthMismatch: vector<u8> =
+    b"Settlement chains and addresses vectors must have the same length";
+
+#[error]
+const ESettlementJobAlreadyExists: vector<u8> =
+    b"Settlement job already exists for this chain";
+
+#[error]
+const EMethodNotFound: vector<u8> = b"Method not found in app instance";
 
 fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
@@ -126,9 +169,15 @@ public fun create_app_instance(
     instance_description: Option<String>,
     settlement_chains: vector<String>, // vector of chain names
     settlement_addresses: vector<Option<String>>, // vector of optional settlement addresses
+    min_time_between_blocks: u64, // Minimum time between blocks in milliseconds
     clock: &Clock,
     ctx: &mut TxContext,
 ): AppInstanceCap {
+    // Enforce minimum value
+    assert!(
+        min_time_between_blocks >= MIN_TIME_BETWEEN_BLOCKS,
+        EMinTimeBetweenBlocksTooLow,
+    );
     // Create settlements VecMap from provided chains
     // First check that both vectors have the same length
     assert!(
@@ -202,6 +251,7 @@ public fun create_app_instance(
         last_proved_block_number: 0u64,
         last_settled_block_number: 0u64,
         isPaused: false,
+        min_time_between_blocks,
         created_at: timestamp,
         updated_at: timestamp,
     };
@@ -237,22 +287,32 @@ public fun create_app_instance(
     }
 }
 
-// Error codes
-#[error]
-const ENotAuthorized: vector<u8> = b"Not authorized";
-
 public(package) fun only_admin(app_instance: &AppInstance, ctx: &TxContext) {
     assert!(app_instance.admin == ctx.sender(), ENotAuthorized);
 }
-
-#[error]
-const EAppInstancePaused: vector<u8> = b"App instance is paused";
 
 public(package) fun not_paused(app_instance: &AppInstance) {
     assert!(app_instance.isPaused == false, EAppInstancePaused);
 }
 
-const MIN_TIME_BETWEEN_BLOCKS: u64 = 60_000;
+// Update the minimum time between blocks
+// Only admin can call this function
+public fun update_min_time_between_blocks(
+    app_instance: &mut AppInstance,
+    new_min_time: u64,
+    ctx: &TxContext,
+) {
+    // Only admin can update this setting
+    assert!(ctx.sender() == app_instance.admin, ENotAuthorized);
+    
+    // Enforce minimum value
+    assert!(
+        new_min_time >= MIN_TIME_BETWEEN_BLOCKS,
+        EMinTimeBetweenBlocksTooLow,
+    );
+    
+    app_instance.min_time_between_blocks = new_min_time;
+}
 
 public fun increase_sequence(
     app_instance: &mut AppInstance,
@@ -297,14 +357,14 @@ public fun try_create_block(
     };
 
     if (
-        current_time - app_instance.previous_block_timestamp <= MIN_TIME_BETWEEN_BLOCKS
+        current_time - app_instance.previous_block_timestamp <= app_instance.min_time_between_blocks
     ) {
         event::emit(InsufficientTimeForBlockEvent {
             app_instance_address: app_instance.id.to_address(),
             current_time,
             previous_block_timestamp: app_instance.previous_block_timestamp,
             time_since_last_block: current_time - app_instance.previous_block_timestamp,
-            min_time_required: MIN_TIME_BETWEEN_BLOCKS,
+            min_time_required: app_instance.min_time_between_blocks,
         });
         return
     };
@@ -566,17 +626,6 @@ public fun update_block_proof_data_availability(
     );
 }
 
-#[error]
-const EBlockNotProved: vector<u8> = b"Block not proved";
-#[error]
-const ESettlementChainNotFound: vector<u8> = b"Settlement chain not found";
-#[error]
-const ESettlementVectorLengthMismatch: vector<u8> =
-    b"Settlement chains and addresses vectors must have the same length";
-#[error]
-const ESettlementJobAlreadyExists: vector<u8> =
-    b"Settlement job already exists for this chain";
-
 public fun update_block_settlement_tx_hash(
     app_instance: &mut AppInstance,
     chain: String,
@@ -611,15 +660,6 @@ public fun update_block_settlement_tx_hash(
         option::none(),
         ctx,
     );
-}
-
-// Debug event for tracking block cleanup
-public struct BlockCleanupEvent has copy, drop {
-    app_instance_address: address,
-    previous_last_settled: u64,
-    new_min_settled: u64,
-    start_block: u64,
-    settlements_count: u64,
 }
 
 // Helper function to update AppInstance's last_settled_block_number
@@ -952,6 +992,10 @@ public fun previous_block_last_sequence(app_instance: &AppInstance): u64 {
     app_instance.previous_block_last_sequence
 }
 
+public fun min_time_between_blocks(app_instance: &AppInstance): u64 {
+    app_instance.min_time_between_blocks
+}
+
 public fun previous_block_actions_state(
     app_instance: &AppInstance,
 ): &Element<Scalar> {
@@ -1058,9 +1102,6 @@ public fun get_proof_calculation_mut(
 }
 
 // Job-related convenience methods
-#[error]
-const EMethodNotFound: vector<u8> = b"Method not found in app instance";
-
 public fun create_app_job(
     app_instance: &mut AppInstance,
     method_name: String,
@@ -1129,16 +1170,18 @@ public fun start_app_job(
     app_instance: &mut AppInstance,
     job_id: u64,
     clock: &Clock,
-) {
-    jobs::start_job(&mut app_instance.jobs, job_id, clock)
+    ctx: &TxContext,
+): bool {
+    jobs::start_job(&mut app_instance.jobs, job_id, clock, ctx)
 }
 
 public fun complete_app_job(
     app_instance: &mut AppInstance,
     job_id: u64,
     clock: &Clock,
-) {
-    jobs::complete_job(&mut app_instance.jobs, job_id, clock)
+    ctx: &TxContext,
+): bool {
+    jobs::complete_job(&mut app_instance.jobs, job_id, clock, ctx)
 }
 
 public fun fail_app_job(
@@ -1146,15 +1189,17 @@ public fun fail_app_job(
     job_id: u64,
     error: String,
     clock: &Clock,
-) {
-    jobs::fail_job(&mut app_instance.jobs, job_id, error, clock)
+    ctx: &TxContext,
+): bool {
+    jobs::fail_job(&mut app_instance.jobs, job_id, error, clock, ctx)
 }
 
 public fun terminate_app_job(
     app_instance: &mut AppInstance,
     job_id: u64,
     clock: &Clock,
-) {
+    ctx: &TxContext,
+): bool {
     // Check if this job is a settlement job for any chain and clear it
     let keys = vec_map::keys(&app_instance.settlements);
     let mut i = 0;
@@ -1171,7 +1216,7 @@ public fun terminate_app_job(
         i = i + 1;
     };
 
-    jobs::terminate_job(&mut app_instance.jobs, job_id, clock)
+    jobs::terminate_job(&mut app_instance.jobs, job_id, clock, ctx)
 }
 
 public fun restart_failed_app_jobs(
@@ -1188,6 +1233,28 @@ public fun remove_failed_app_jobs(
     clock: &Clock,
 ) {
     jobs::remove_failed_jobs(&mut app_instance.jobs, job_sequences, clock)
+}
+
+public fun multicall_app_job_operations(
+    app_instance: &mut AppInstance,
+    complete_job_sequences: vector<u64>,
+    fail_job_sequences: vector<u64>,
+    fail_errors: vector<String>,
+    terminate_job_sequences: vector<u64>,
+    start_job_sequences: vector<u64>,
+    clock: &Clock,
+    ctx: &TxContext,
+) {
+    jobs::multicall_job_operations(
+        &mut app_instance.jobs,
+        complete_job_sequences,
+        fail_job_sequences,
+        fail_errors,
+        terminate_job_sequences,
+        start_job_sequences,
+        clock,
+        ctx,
+    )
 }
 
 public fun get_app_job(app_instance: &AppInstance, job_id: u64): &jobs::Job {

@@ -35,6 +35,7 @@ public fun create_test_app(
         option::none(),
         vector::empty<String>(),  // no settlement chains
         vector::empty<Option<String>>(),  // no settlement addresses
+        60_000, // Use minimum allowed time between blocks (60 seconds)
         clock,
         ctx,
     );

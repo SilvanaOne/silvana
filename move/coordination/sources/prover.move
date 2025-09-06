@@ -7,12 +7,6 @@ use sui::event;
 use sui::package;
 use sui::vec_map::{VecMap, contains, insert, get_mut, empty};
 
-const PROOF_STATUS_STARTED: u8 = 1;
-const PROOF_STATUS_CALCULATED: u8 = 2;
-const PROOF_STATUS_REJECTED: u8 = 3;
-const PROOF_STATUS_RESERVED: u8 = 4;
-const PROOF_STATUS_USED: u8 = 5;
-
 public struct Proof has copy, drop, store {
     status: u8,
     da_hash: Option<String>,
@@ -110,6 +104,27 @@ public struct ProofCalculationFinishedEvent has copy, drop {
 }
 
 public struct PROVER has drop {}
+
+// Constants
+const PROOF_STATUS_STARTED: u8 = 1;
+const PROOF_STATUS_CALCULATED: u8 = 2;
+const PROOF_STATUS_REJECTED: u8 = 3;
+const PROOF_STATUS_RESERVED: u8 = 4;
+const PROOF_STATUS_USED: u8 = 5;
+
+// Error codes
+#[error]
+const EProofNotCalculated: vector<u8> = b"Proof not calculated or already used";
+
+#[error]
+const EProofAlreadyStarted: vector<u8> = b"Proof already started";
+
+#[error]
+const ESequenceOutOfRange: vector<u8> =
+    b"Sequence is outside valid range for this block";
+
+#[error]
+const ESequencesCannotBeEmpty: vector<u8> = b"Sequences vector cannot be empty";
 
 fun init(otw: PROVER, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
@@ -281,9 +296,6 @@ public(package) fun delete_proof_calculation(
     object::delete(id);
 }
 
-#[error]
-const EProofNotCalculated: vector<u8> = b"Proof not calculated or already used";
-
 fun use_proof(proof: &mut Proof, clock: &Clock, ctx: &TxContext) {
     assert!(
         proof.status != PROOF_STATUS_REJECTED && proof.status != PROOF_STATUS_STARTED,
@@ -315,9 +327,6 @@ fun reserve_proof(
     proof.timestamp = sui::clock::timestamp_ms(clock);
     proof.user = option::some(ctx.sender());
 }
-
-#[error]
-const EProofAlreadyStarted: vector<u8> = b"Proof already started";
 
 public(package) fun start_proving(
     proof_calculation: &mut ProofCalculation,
@@ -527,13 +536,6 @@ public fun reject_proof(
         verifier: ctx.sender(),
     });
 }
-
-#[error]
-const ESequenceOutOfRange: vector<u8> =
-    b"Sequence is outside valid range for this block";
-
-#[error]
-const ESequencesCannotBeEmpty: vector<u8> = b"Sequences vector cannot be empty";
 
 // Helper function to sort and validate that all sequences are within the valid range
 // Returns a sorted copy of the input sequences
