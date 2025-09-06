@@ -230,7 +230,7 @@ impl ProofStorageBackend for WalrusStorage {
             ));
         }
 
-        warn!(
+        info!(
             "Storing quilt to Walrus ({}) with {} pieces (including metadata)",
             self.network,
             quilt_data.len()

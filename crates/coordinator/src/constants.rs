@@ -1,5 +1,5 @@
 //! Centralized constants for the coordinator crate
-//! 
+//!
 //! This module contains all configurable constants for max jobs, delays, timeouts, etc.
 
 // =============================================================================
@@ -208,7 +208,7 @@ pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 
 /// Number of blocks to store as a quilt in Walrus for proof data availability.
 /// When block_number % this value == 0, the last N block proofs are stored as a quilt.
-pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 10;
+pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 100;
 
 /// Test mode for Walrus quilts - when true, adds 580 test entries to simulate 600 proofs
 /// This is used for testing Walrus's ability to handle large quilts with many pieces
@@ -222,4 +222,3 @@ pub const WALRUS_TEST: bool = false;
 /// Delay after transaction submission in CLI (in seconds).
 /// Wait time for transaction processing in CLI commands.
 pub const CLI_TRANSACTION_WAIT_SECS: u64 = 5;
-

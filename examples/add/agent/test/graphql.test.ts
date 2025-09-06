@@ -38,7 +38,16 @@ describe("GraphQL Transaction Count", async () => {
       url: graphqlUrl,
     });
 
-    // Query to get transactions with fee details
+    // Define sender categories
+    const USER_SENDER =
+      "0x8af5716ef88bd3f050b5f349b6eac298dca1c41da2d0e304353c0bc08a360efc";
+    const SILVANA_SENDERS = [
+      "0x14e146de44eca76e2b86daf0ed3a248baa9fcdfb050ee5b33884aa1bfc19488a",
+      "0xb2f38ecd2c5b18505ec5e93ad61e66b4306d84830e1d2664da3c42277f8b9e53",
+      "0xeef5a28c2b2e493543cdde13332074f295f47ae05e6ba9d04436b9f2dbdcfeab",
+    ];
+
+    // Query to get transactions with fee details and sender
     const query = `
       query GetTransactionCount($objectId: SuiAddress!) {
         transactionBlocks(
@@ -53,6 +62,9 @@ describe("GraphQL Transaction Count", async () => {
           }
           nodes {
             digest
+            sender {
+              address
+            }
             effects {
               gasEffects {
                 gasSummary {
@@ -68,14 +80,33 @@ describe("GraphQL Transaction Count", async () => {
       }
     `;
 
+    // Total metrics
     let totalCount = 0;
     let totalComputationCost = 0n;
     let totalStorageCost = 0n;
     let totalStorageRebate = 0n;
     let totalNonRefundableStorageFee = 0n;
+
+    // User metrics
+    let userCount = 0;
+    let userComputationCost = 0n;
+    let userStorageCost = 0n;
+    let userStorageRebate = 0n;
+    let userNonRefundableStorageFee = 0n;
+
+    // Silvana metrics
+    let silvanaCount = 0;
+    let silvanaComputationCost = 0n;
+    let silvanaStorageCost = 0n;
+    let silvanaStorageRebate = 0n;
+    let silvanaNonRefundableStorageFee = 0n;
+
+    // Unknown senders
+    const unknownSenders = new Set<string>();
+
     let hasNextPage = true;
     let cursor: string | null = null;
-    const maxCount = 100000; // Process up to 100k transactions
+    const maxCount = 100000;
 
     // Paginate through all transactions
     while (hasNextPage && totalCount < maxCount) {
@@ -95,6 +126,9 @@ describe("GraphQL Transaction Count", async () => {
             }
             nodes {
               digest
+              sender {
+                address
+              }
               effects {
                 gasEffects {
                   gasSummary {
@@ -138,7 +172,9 @@ describe("GraphQL Transaction Count", async () => {
 
         for (const tx of transactionBlocks.nodes) {
           const gasSummary = tx.effects?.gasEffects?.gasSummary;
-          if (gasSummary) {
+          const sender = tx.sender?.address;
+
+          if (gasSummary && sender) {
             const computationCost = BigInt(gasSummary.computationCost || 0);
             const storageCost = BigInt(gasSummary.storageCost || 0);
             const storageRebate = BigInt(gasSummary.storageRebate || 0);
@@ -146,10 +182,28 @@ describe("GraphQL Transaction Count", async () => {
               gasSummary.nonRefundableStorageFee || 0
             );
 
+            // Update total metrics
             totalComputationCost += computationCost;
             totalStorageCost += storageCost;
             totalStorageRebate += storageRebate;
             totalNonRefundableStorageFee += nonRefundableStorageFee;
+
+            // Categorize by sender
+            if (sender === USER_SENDER) {
+              userCount++;
+              userComputationCost += computationCost;
+              userStorageCost += storageCost;
+              userStorageRebate += storageRebate;
+              userNonRefundableStorageFee += nonRefundableStorageFee;
+            } else if (SILVANA_SENDERS.includes(sender)) {
+              silvanaCount++;
+              silvanaComputationCost += computationCost;
+              silvanaStorageCost += storageCost;
+              silvanaStorageRebate += storageRebate;
+              silvanaNonRefundableStorageFee += nonRefundableStorageFee;
+            } else {
+              unknownSenders.add(sender);
+            }
           }
         }
       }
@@ -160,8 +214,11 @@ describe("GraphQL Transaction Count", async () => {
 
     if (totalCount > 0) {
       console.log("\n" + "=".repeat(60));
-      console.log("SUMMARY:");
+      console.log("TOTAL SUMMARY:");
       console.log(`  Total Transactions: ${totalCount}`);
+      console.log(`    User transactions: ${userCount}`);
+      console.log(`    Silvana transactions: ${silvanaCount}`);
+      console.log(`    Unknown sender transactions: ${unknownSenders.size}`);
       console.log(
         `  Total Computation Cost: ${(
           Number(totalComputationCost) / 1_000_000_000
@@ -188,16 +245,8 @@ describe("GraphQL Transaction Count", async () => {
           1_000_000_000
         ).toFixed(9)} SUI`
       );
-      console.log(
-        `  Average Net Gas Cost per Tx: ${(
-          (totalComputationCost + totalStorageCost - totalStorageRebate) /
-          BigInt(totalCount)
-        ).toString()} MIST`
-      );
-
-      // Averages
       console.log("\n" + "=".repeat(60));
-      console.log("AVERAGES:");
+      console.log("OVERALL AVERAGES:");
       console.log(
         `  Average Computation Cost per Tx: ${(
           totalComputationCost / BigInt(totalCount)
@@ -209,31 +258,121 @@ describe("GraphQL Transaction Count", async () => {
         ).toString()} MIST`
       );
       console.log(
-        `  Average Storage Cost per Tx: ${(
-          totalStorageCost / BigInt(totalCount)
-        ).toString()} MIST`
-      );
-      console.log(
-        `  Average Storage Rebate per Tx: ${(
-          totalStorageRebate / BigInt(totalCount)
+        `  Average Net Gas Cost per Tx: ${(
+          (totalComputationCost + totalStorageCost - totalStorageRebate) /
+          BigInt(totalCount)
         ).toString()} MIST`
       );
 
-      // Key metric: Sum of computationCost + nonRefundableStorageFee
-      const totalComputationAndNonRefundableFee =
-        totalComputationCost + totalNonRefundableStorageFee;
-      console.log("\n" + "=".repeat(60));
-      console.log("KEY METRIC:");
-      console.log(
-        `  Sum of Computation Cost + Non-refundable Storage Fee: ${(
-          Number(totalComputationAndNonRefundableFee) / 1_000_000_000
-        ).toFixed(9)} SUI`
-      );
-      console.log(
-        `  Average per Tx: ${(
-          totalComputationAndNonRefundableFee / BigInt(totalCount)
-        ).toString()} MIST`
-      );
+      // User metrics
+      if (userCount > 0) {
+        console.log("\n" + "=".repeat(60));
+        console.log("USER TRANSACTIONS:");
+        console.log(`  Count: ${userCount}`);
+        console.log(
+          `  Total Computation Cost: ${(
+            Number(userComputationCost) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Storage Cost: ${(
+            Number(userStorageCost) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Storage Rebate: ${(
+            Number(userStorageRebate) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Non-refundable Storage Fee: ${(
+            Number(userNonRefundableStorageFee) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Net Gas Cost: ${(
+            Number(userComputationCost + userStorageCost - userStorageRebate) /
+            1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Average Computation Cost per Tx: ${(
+            userComputationCost / BigInt(userCount)
+          ).toString()} MIST`
+        );
+        console.log(
+          `  Average Non-refundable Storage Fee per Tx: ${(
+            userNonRefundableStorageFee / BigInt(userCount)
+          ).toString()} MIST`
+        );
+        console.log(
+          `  Average Net Gas Cost per Tx: ${(
+            (userComputationCost + userStorageCost - userStorageRebate) /
+            BigInt(userCount)
+          ).toString()} MIST`
+        );
+      }
+
+      // Silvana metrics
+      if (silvanaCount > 0) {
+        console.log("\n" + "=".repeat(60));
+        console.log("SILVANA TRANSACTIONS:");
+        console.log(`  Count: ${silvanaCount}`);
+        console.log(
+          `  Total Computation Cost: ${(
+            Number(silvanaComputationCost) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Storage Cost: ${(
+            Number(silvanaStorageCost) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Storage Rebate: ${(
+            Number(silvanaStorageRebate) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Non-refundable Storage Fee: ${(
+            Number(silvanaNonRefundableStorageFee) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Total Net Gas Cost: ${(
+            Number(
+              silvanaComputationCost + silvanaStorageCost - silvanaStorageRebate
+            ) / 1_000_000_000
+          ).toFixed(9)} SUI`
+        );
+        console.log(
+          `  Average Computation Cost per Tx: ${(
+            silvanaComputationCost / BigInt(silvanaCount)
+          ).toString()} MIST`
+        );
+        console.log(
+          `  Average Non-refundable Storage Fee per Tx: ${(
+            silvanaNonRefundableStorageFee / BigInt(silvanaCount)
+          ).toString()} MIST`
+        );
+        console.log(
+          `  Average Net Gas Cost per Tx: ${(
+            (silvanaComputationCost +
+              silvanaStorageCost -
+              silvanaStorageRebate) /
+            BigInt(silvanaCount)
+          ).toString()} MIST`
+        );
+      }
+
+      // Unknown senders
+      if (unknownSenders.size > 0) {
+        console.log("\n" + "=".repeat(60));
+        console.log("UNKNOWN SENDERS:");
+        unknownSenders.forEach((sender) => {
+          console.log(`  ${sender}`);
+        });
+      }
     }
 
     if (totalCount >= maxCount) {
