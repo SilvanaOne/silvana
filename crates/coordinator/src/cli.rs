@@ -131,6 +131,9 @@ pub enum Commands {
     Balance {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
+        
+        /// Address to check balance for (defaults to SUI_ADDRESS env var)
+        address: Option<String>,
     },
     
     /// Split coins to maintain gas coin pool

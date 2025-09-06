@@ -14,11 +14,24 @@ pub struct BalanceInfo {
     pub gas_coins_info: GasCoinsInfo,
 }
 
-/// Get complete balance information for the current account
-pub async fn get_balance_info() -> Result<BalanceInfo> {
+/// Get complete balance information for the current account or a specific address
+pub async fn get_balance_info(address_str: Option<&str>) -> Result<BalanceInfo> {
+    use sui_sdk_types::Address;
+    use std::str::FromStr;
+    
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let address = shared_state.get_sui_address();
+    
+    // Get the address to use
+    let (address, address_string) = if let Some(addr_str) = address_str {
+        // Parse the provided address
+        let addr = Address::from_str(addr_str)?;
+        (addr, addr_str.to_string())
+    } else {
+        // Use the default address from SharedSuiState
+        let addr = shared_state.get_sui_address();
+        (addr, addr.to_string())
+    };
     
     // List all coins
     let coins = list_coins(&mut client, address).await?;
@@ -27,10 +40,10 @@ pub async fn get_balance_info() -> Result<BalanceInfo> {
     
     // Get gas coin pool info
     let config = CoinPoolConfig::default();
-    let gas_coins_info = get_gas_coins_info(&config).await?;
+    let gas_coins_info = get_gas_coins_info(&config, address).await?;
     
     Ok(BalanceInfo {
-        address: address.to_string(),
+        address: address_string,
         total_balance,
         total_balance_sui,
         coins,
@@ -77,8 +90,8 @@ pub fn get_network_name() -> String {
 }
 
 /// Print formatted balance information
-pub async fn print_balance_info() -> Result<()> {
-    let balance_info = get_balance_info().await?;
+pub async fn print_balance_info(address: Option<&str>) -> Result<()> {
+    let balance_info = get_balance_info(address).await?;
     let env_network = get_network_name();
     
     // Try to get actual network info from RPC
@@ -118,11 +131,21 @@ pub async fn print_balance_info() -> Result<()> {
     );
     println!("  Total coins: {}", balance_info.gas_coins_info.total_coins);
     
+    // Show dust coins info
+    if !balance_info.gas_coins_info.dust_coins.is_empty() {
+        let dust_total: u64 = balance_info.gas_coins_info.dust_coins.iter().map(|c| c.balance).sum();
+        let dust_total_sui = dust_total as f64 / 1_000_000_000.0;
+        println!("  Dust coins (< 0.1 SUI): {} coins totaling {} SUI", 
+            balance_info.gas_coins_info.dust_coins.len(),
+            dust_total_sui
+        );
+    }
+    
     if let Some(faucet_coin) = balance_info.gas_coins_info.faucet_coin {
         let faucet_balance_sui = faucet_coin.balance as f64 / 1_000_000_000.0;
-        println!("  Largest coin: {} SUI (suitable for splitting)", faucet_balance_sui);
+        println!("  Smallest splittable coin: {} SUI", faucet_balance_sui);
     } else {
-        println!("  No coin large enough for splitting (need > 5 SUI)");
+        println!("  No coin large enough for splitting (need >= 4.1 SUI)");
     }
     
     // Show individual coins if not too many

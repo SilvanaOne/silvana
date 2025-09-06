@@ -25,8 +25,8 @@ pub use coin::{
     CoinInfo, CoinLockGuard, CoinLockManager, fetch_coin, get_coin_lock_manager, list_coins,
 };
 pub use coin_management::{
-    ensure_gas_coin_pool, initialize_gas_coin_pool, split_gas_coins, get_gas_coins_info,
-    CoinPoolConfig, GasCoinsInfo,
+    ensure_gas_coin_pool, initialize_gas_coin_pool, split_gas_coins, merge_gas_coins,
+    get_gas_coins_info, CoinPoolConfig, GasCoinsInfo,
 };
 pub use faucet::{
     request_tokens_from_faucet, request_tokens_for_default_address, 

@@ -971,7 +971,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        Commands::Balance { rpc_url } => {
+        Commands::Balance { rpc_url, address } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
@@ -982,8 +982,8 @@ async fn main() -> Result<()> {
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
             sui::SharedSuiState::initialize(&rpc_url).await?;
 
-            // Simply show the balance
-            sui::print_balance_info().await?;
+            // Show the balance, passing the optional address
+            sui::print_balance_info(address.as_deref()).await?;
 
             Ok(())
         }
@@ -1007,7 +1007,7 @@ async fn main() -> Result<()> {
 
                     // Show updated balance info
                     println!("\nUpdated balance:");
-                    sui::print_balance_info().await?;
+                    sui::print_balance_info(None).await?;
                 }
                 Err(e) => {
                     error!("Failed to manage gas coin pool: {}", e);

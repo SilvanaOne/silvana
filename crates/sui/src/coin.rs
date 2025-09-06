@@ -165,8 +165,8 @@ pub async fn fetch_coin(
             }
         }
 
-        // Sort by balance descending to prefer larger coins
-        suitable_coins.sort_by(|a, b| b.2.cmp(&a.2));
+        // Sort by balance ascending to prefer smaller coins first
+        suitable_coins.sort_by(|a, b| a.2.cmp(&b.2));
 
         // Try to lock coins in order of preference
         for (object_id, object_ref, balance) in suitable_coins {
