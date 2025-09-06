@@ -46,7 +46,7 @@ pub use network_info::{
     get_network_info, print_network_info, get_network_summary, get_service_info,
     get_service_info_full, verify_chain_config, NetworkInfo, ServiceInfo,
 };
-pub use state::{SharedSuiState, StartedJob};
+pub use state::SharedSuiState;
 pub use transactions::{
     add_metadata_tx, delete_kv_tx, set_kv_tx,
     fetch_transaction_events,

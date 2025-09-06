@@ -152,8 +152,6 @@ impl JobSearcher {
 
     /// Process jobs from the buffer by starting Docker containers
     async fn process_buffer_jobs(&self) -> Result<()> {
-        let sui_state = sui::SharedSuiState::get_instance();
-
         // Check buffer and process jobs one by one until limits are reached
         loop {
             // If shutting down, don't start new containers
@@ -176,7 +174,7 @@ impl JobSearcher {
             }
 
             // Get next job from buffer
-            let started_job = sui_state.get_next_started_job();
+            let started_job = self.state.get_next_started_job().await;
             if started_job.is_none() {
                 debug!("No more jobs in buffer to process");
                 break;
@@ -264,7 +262,7 @@ impl JobSearcher {
                         }
                         Ok(false) => {
                             // Put job back in buffer (at the front) and wait
-                            sui_state.add_started_jobs(vec![started_job]);
+                            self.state.add_started_jobs(vec![started_job]).await;
                             debug!(
                                 "Insufficient resources for job {}, returned to buffer",
                                 job.job_sequence
@@ -274,7 +272,7 @@ impl JobSearcher {
                         Err(e) => {
                             error!("Error checking resources: {}", e);
                             // Put job back in buffer
-                            sui_state.add_started_jobs(vec![started_job]);
+                            self.state.add_started_jobs(vec![started_job]).await;
                             break;
                         }
                     }
@@ -345,8 +343,7 @@ impl JobSearcher {
     /// Main loop for the job searcher
     pub async fn run(&mut self) -> Result<()> {
         // Check initial buffer status
-        let sui_state = sui::SharedSuiState::get_instance();
-        let initial_buffer_count = sui_state.get_started_jobs_count();
+        let initial_buffer_count = self.state.get_started_jobs_count().await;
         info!(
             "🔍 Job searcher started (buffer: {} jobs)",
             initial_buffer_count
@@ -505,8 +502,7 @@ impl JobSearcher {
                 }
 
                 // Get memory reserved by jobs in buffer
-                let sui_state = sui::SharedSuiState::get_instance();
-                let buffer_count = sui_state.get_started_jobs_count();
+                let buffer_count = self.state.get_started_jobs_count().await;
                 // TODO: Track actual buffer memory in SharedSuiState
                 // For now, estimate 3GB per buffered job (conservative)
                 let buffer_memory_gb = (buffer_count as f64) * 3.0;
@@ -1391,14 +1387,13 @@ impl JobSearcher {
                 );
 
                 // Add successful jobs to buffer for container launching
-                let sui_state = sui::SharedSuiState::get_instance();
                 for (i, sequence) in final_start_sequences.iter().enumerate() {
                     let memory_req = final_start_memory.get(i).copied().unwrap_or(0);
-                    sui_state.add_started_jobs(vec![sui::StartedJob {
+                    self.state.add_started_jobs(vec![crate::state::StartedJob {
                         app_instance: app_instance.to_string(),
                         job_sequence: *sequence,
                         memory_requirement: memory_req,
-                    }]);
+                    }]).await;
                 }
 
                 if !final_start_sequences.is_empty() {

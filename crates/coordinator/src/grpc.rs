@@ -61,8 +61,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let req = request.into_inner();
 
         // Get buffer stats
-        let sui_state = sui::SharedSuiState::get_instance();
-        let buffer_count = sui_state.get_started_jobs_count();
+        let buffer_count = self.state.get_started_jobs_count().await;
         
         info!(
             developer = %req.developer,
@@ -151,7 +150,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Fall back to checking the buffer for started jobs
         // The buffer contains jobs that have been started on blockchain via multicall
-        if let Some(started_job) = sui_state.get_next_started_job() {
+        if let Some(started_job) = self.state.get_next_started_job().await {
             debug!(
                 "Found started job in buffer: app_instance={}, sequence={}",
                 started_job.app_instance, started_job.job_sequence
@@ -163,11 +162,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Err(e) => {
                     error!("Failed to fetch app instance {}: {}", started_job.app_instance, e);
                     // Put the job back in the buffer and return empty response
-                    sui_state.add_started_jobs(vec![sui::StartedJob {
+                    self.state.add_started_jobs(vec![crate::state::StartedJob {
                         app_instance: started_job.app_instance,
                         job_sequence: started_job.job_sequence,
                         memory_requirement: started_job.memory_requirement,
-                    }]);
+                    }]).await;
                     return Ok(Response::new(GetJobResponse {
                         success: true,
                         message: "Failed to fetch app instance, job returned to buffer".to_string(),
@@ -182,11 +181,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 None => {
                     error!("App instance {} has no jobs table", started_job.app_instance);
                     // Put the job back in the buffer and return empty response
-                    sui_state.add_started_jobs(vec![sui::StartedJob {
+                    self.state.add_started_jobs(vec![crate::state::StartedJob {
                         app_instance: started_job.app_instance,
                         job_sequence: started_job.job_sequence,
                         memory_requirement: started_job.memory_requirement,
-                    }]);
+                    }]).await;
                     return Ok(Response::new(GetJobResponse {
                         success: true,
                         message: "App instance has no jobs table, job returned to buffer".to_string(),

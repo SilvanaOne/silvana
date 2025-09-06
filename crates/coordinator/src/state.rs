@@ -2,7 +2,7 @@ use crate::agent::AgentJobDatabase;
 use crate::jobs::JobsTracker;
 use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use tonic::transport::Channel;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{RwLock, Mutex};
@@ -16,6 +16,14 @@ pub struct CurrentAgent {
     pub agent: String,
     pub agent_method: String,
     pub settlement_chain: Option<String>,  // Track which chain this agent is settling for
+}
+
+/// Information about a job that has been started on the blockchain
+#[derive(Debug, Clone)]
+pub struct StartedJob {
+    pub app_instance: String,
+    pub job_sequence: u64,
+    pub memory_requirement: u64,
 }
 
 /// Request to create a new job
@@ -150,6 +158,7 @@ pub struct SharedState {
     app_instance_filter: Arc<RwLock<Option<String>>>, // Optional filter to only process jobs from a specific app instance
     settle_only: Arc<AtomicBool>, // Flag to run as a dedicated settlement node
     multicall_requests: Arc<Mutex<HashMap<String, MulticallRequests>>>, // Batched job operation requests per app instance
+    started_jobs_buffer: Arc<Mutex<VecDeque<StartedJob>>>,  // Buffer of jobs started on blockchain
 }
 
 impl SharedState {
@@ -181,6 +190,7 @@ impl SharedState {
             app_instance_filter: Arc::new(RwLock::new(None)),
             settle_only: Arc::new(AtomicBool::new(false)),
             multicall_requests: Arc::new(Mutex::new(HashMap::new())),
+            started_jobs_buffer: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -727,6 +737,44 @@ impl SharedState {
         let mut requests = self.multicall_requests.lock().await;
         if let Some(entry) = requests.get_mut(app_instance) {
             entry.last_execution = Instant::now();
+        }
+    }
+
+    /// Add started jobs to the buffer
+    pub async fn add_started_jobs(&self, jobs: Vec<StartedJob>) {
+        let mut buffer = self.started_jobs_buffer.lock().await;
+        for job in jobs {
+            debug!("Adding started job to buffer: app_instance={}, sequence={}, memory={}",
+                  job.app_instance, job.job_sequence, job.memory_requirement);
+            buffer.push_back(job);
+        }
+        debug!("Started jobs buffer now contains {} jobs", buffer.len());
+    }
+    
+    /// Get the next started job from the buffer (thread-safe)
+    pub async fn get_next_started_job(&self) -> Option<StartedJob> {
+        let mut buffer = self.started_jobs_buffer.lock().await;
+        let job = buffer.pop_front();
+        if let Some(ref j) = job {
+            debug!("Retrieved started job from buffer: app_instance={}, sequence={}, memory={}",
+                  j.app_instance, j.job_sequence, j.memory_requirement);
+            debug!("Started jobs buffer now contains {} jobs", buffer.len());
+        }
+        job
+    }
+    
+    /// Get the number of jobs in the buffer
+    pub async fn get_started_jobs_count(&self) -> usize {
+        self.started_jobs_buffer.lock().await.len()
+    }
+    
+    /// Clear all jobs from the buffer (for emergency use)
+    pub async fn clear_started_jobs_buffer(&self) {
+        let mut buffer = self.started_jobs_buffer.lock().await;
+        let count = buffer.len();
+        buffer.clear();
+        if count > 0 {
+            info!("Cleared {} jobs from started jobs buffer", count);
         }
     }
 }
