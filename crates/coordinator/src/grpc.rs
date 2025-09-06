@@ -1,4 +1,3 @@
-use crate::agent::AgentJob;
 use crate::constants::{WALRUS_QUILT_BLOCK_INTERVAL, WALRUS_TEST};
 use crate::proof::analyze_proof_completion;
 use crate::proofs_storage::{ProofMetadata, ProofStorage};
@@ -84,68 +83,83 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // First check for session-specific jobs (jobs reserved for this Docker session)
-        if let Some(agent_job) = self.state
-            .get_agent_job_db()
-            .get_ready_job(&req.developer, &req.agent, &req.agent_method, Some(&req.session_id))
-            .await
-        {
-            debug!(
-                "Found session job for session {}: job_id={}",
-                req.session_id, agent_job.job_id
-            );
+        'job_search: loop {
+            if let Some(agent_job) = self.state
+                .get_agent_job_db()
+                .get_ready_job(&req.developer, &req.agent, &req.agent_method, Some(&req.session_id))
+                .await
+            {
+                debug!(
+                    "Found session job for session {}: job_id={}",
+                    req.session_id, agent_job.job_id
+                );
 
-            // Determine settlement chain if this is a settlement job
-            let settlement_chain = if agent_job.pending_job.app_instance_method == "settle" {
-                // Fetch app instance to find which chain this settle job belongs to
-                match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
-                    Ok(app_instance) => {
-                        app_instance
-                            .settlements
-                            .iter()
-                            .find(|(_, settlement)| {
-                                settlement.settlement_job == Some(agent_job.job_sequence)
-                            })
-                            .map(|(chain_name, _)| chain_name.clone())
+                // Determine settlement chain if this is a settlement job
+                let settlement_chain = if agent_job.pending_job.app_instance_method == "settle" {
+                    // Use helper function to get chain by job sequence
+                    match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&agent_job.app_instance, agent_job.job_sequence).await {
+                        Ok(chain) => chain,
+                        Err(e) => {
+                            warn!("Failed to lookup settlement chain for job {} in app instance {}: {}", 
+                                agent_job.job_sequence, agent_job.app_instance, e);
+                            None
+                        }
                     }
-                    Err(e) => {
-                        warn!("Failed to fetch app instance for settlement chain detection: {}", e);
-                        None
-                    }
+                } else {
+                    None
+                };
+
+                // If this is a settlement job with no associated chain, terminate it and look for next job
+                if agent_job.pending_job.app_instance_method == "settle" && settlement_chain.is_none() {
+                    error!("🚨 Settlement job {} has no associated chain - terminating and looking for next job", agent_job.job_sequence);
+                    
+                    // Add terminate request to multicall queue
+                    self.state.add_terminate_job_request(
+                        agent_job.app_instance.clone(), 
+                        agent_job.job_sequence
+                    ).await;
+                    
+                    // Remove this job from the agent database so we don't pick it again
+                    self.state.get_agent_job_db().terminate_job(&agent_job.job_id).await;
+                    
+                    // Continue to look for next job
+                    continue 'job_search;
                 }
-            } else {
-                None
-            };
 
-            let elapsed = start_time.elapsed();
-            info!(
-                "✅ GetJob: dev={}, agent={}/{}, session_job={}, time={:?}",
-                req.developer, req.agent, req.agent_method, agent_job.job_id, elapsed
-            );
+                let elapsed = start_time.elapsed();
+                info!(
+                    "✅ GetJob: dev={}, agent={}/{}, session_job={}, time={:?}",
+                    req.developer, req.agent, req.agent_method, agent_job.job_id, elapsed
+                );
 
-            return Ok(Response::new(GetJobResponse {
-                success: true,
-                message: format!("Session job retrieved: {}", agent_job.job_id),
-                job: Some(Job {
-                    job_sequence: agent_job.job_sequence,
-                    description: agent_job.pending_job.description.clone(),
-                    developer: agent_job.developer,
-                    agent: agent_job.agent,
-                    agent_method: agent_job.agent_method,
-                    app: agent_job.pending_job.app.clone(),
-                    app_instance: agent_job.app_instance,
-                    app_instance_method: agent_job.pending_job.app_instance_method.clone(),
-                    block_number: agent_job.pending_job.block_number,
-                    sequences: agent_job.pending_job.sequences.unwrap_or_default(),
-                    sequences1: agent_job.pending_job.sequences1.unwrap_or_default(),
-                    sequences2: agent_job.pending_job.sequences2.unwrap_or_default(),
-                    data: agent_job.pending_job.data.clone(),
-                    job_id: agent_job.job_id,
-                    attempts: agent_job.pending_job.attempts as u32,
-                    created_at: agent_job.pending_job.created_at,
-                    updated_at: agent_job.pending_job.updated_at,
-                    chain: settlement_chain, // Set the settlement chain if this is a settlement job
-                }),
-            }));
+                return Ok(Response::new(GetJobResponse {
+                    success: true,
+                    message: format!("Session job retrieved: {}", agent_job.job_id),
+                    job: Some(Job {
+                        job_sequence: agent_job.job_sequence,
+                        description: agent_job.pending_job.description.clone(),
+                        developer: agent_job.developer,
+                        agent: agent_job.agent,
+                        agent_method: agent_job.agent_method,
+                        app: agent_job.pending_job.app.clone(),
+                        app_instance: agent_job.app_instance,
+                        app_instance_method: agent_job.pending_job.app_instance_method.clone(),
+                        block_number: agent_job.pending_job.block_number,
+                        sequences: agent_job.pending_job.sequences.unwrap_or_default(),
+                        sequences1: agent_job.pending_job.sequences1.unwrap_or_default(),
+                        sequences2: agent_job.pending_job.sequences2.unwrap_or_default(),
+                        data: agent_job.pending_job.data.clone(),
+                        job_id: agent_job.job_id,
+                        attempts: agent_job.pending_job.attempts as u32,
+                        created_at: agent_job.pending_job.created_at,
+                        updated_at: agent_job.pending_job.updated_at,
+                        chain: settlement_chain, // Set the settlement chain if this is a settlement job
+                    }),
+                }));
+            }
+            
+            // No session-specific job found, break to check buffer
+            break 'job_search;
         }
 
         // Fall back to checking the buffer for started jobs
@@ -232,19 +246,36 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     
                     // Check if this is a settlement job
                     let settlement_chain = if pending_job.app_instance_method == "settle" {
-                        // Fetch app instance to find which chain this settle job is for
-                        if let Ok(app_instance) = sui::fetch::fetch_app_instance(&started_job.app_instance).await {
-                            app_instance
-                                .settlements
-                                .iter()
-                                .find(|(_, settlement)| settlement.settlement_job == Some(started_job.job_sequence))
-                                .map(|(chain_name, _)| chain_name.clone())
-                        } else {
-                            None
+                        // Use helper function to get chain by job sequence
+                        match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&started_job.app_instance, started_job.job_sequence).await {
+                            Ok(chain) => chain,
+                            Err(e) => {
+                                warn!("Failed to lookup settlement chain for job {} in app instance {}: {}", 
+                                    started_job.job_sequence, started_job.app_instance, e);
+                                None
+                            }
                         }
                     } else {
                         None
                     };
+                    
+                    // If this is a settlement job with no associated chain, terminate it and return no job
+                    if pending_job.app_instance_method == "settle" && settlement_chain.is_none() {
+                        error!("🚨 Settlement job {} (from buffer) has no associated chain - terminating", started_job.job_sequence);
+                        
+                        // Add terminate request to multicall queue
+                        self.state.add_terminate_job_request(
+                            started_job.app_instance.clone(), 
+                            started_job.job_sequence
+                        ).await;
+                        
+                        // Don't put it back in buffer, just return no job available
+                        return Ok(Response::new(GetJobResponse {
+                            success: true,
+                            message: "Settlement job with no chain terminated".to_string(),
+                            job: None,
+                        }));
+                    }
                     
                     // Convert to protobuf Job
                     let job = Job {

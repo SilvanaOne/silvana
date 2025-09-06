@@ -1,7 +1,7 @@
 use crate::constants::{MAX_JOBS_PER_INSTANCE_BATCH, PERIODIC_JOB_EXECUTION_BUFFER_MS};
 use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use tracing::{debug, warn, error, info};
 use crate::state::{SharedState, CreateAppJobRequest};
 use tokio::time::Instant;

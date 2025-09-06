@@ -117,6 +117,11 @@ pub const DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS: u64 = 5;
 /// together using multicall at this interval to reduce transaction costs.
 pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
 
+/// Memory calculation coefficient for job buffer sizing.
+/// Multiplies available memory to allow more jobs to be buffered between multicalls.
+/// Higher coefficient = more jobs in buffer to avoid running out before next multicall.
+pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 5.0;
+
 /// Interval for reconciliation task (in seconds).
 /// The coordinator reconciles its state with the blockchain at this interval.
 pub const RECONCILIATION_INTERVAL_SECS: u64 = 600; // 10 minutes
@@ -172,6 +177,7 @@ pub const MERGE_RETRY_DELAY_MS: u64 = 500;
 
 /// Delay for blockchain state propagation (in milliseconds).
 /// Wait time to allow blockchain state changes to propagate.
+#[allow(dead_code)]
 pub const BLOCKCHAIN_PROPAGATION_DELAY_MS: u64 = 100;
 
 /// Delay for shutdown cleanup (in milliseconds).
@@ -188,14 +194,17 @@ pub const CONTAINER_STATUS_CHECK_INTERVAL_SECS: u64 = 1;
 
 /// Periodic container health check interval (in seconds).
 /// Safety check to ensure containers are still running properly.
+#[allow(dead_code)]
 pub const CONTAINER_HEALTH_CHECK_INTERVAL_SECS: u64 = 5;
 
 /// Delay when waiting for resources (in seconds).
 /// Wait time when system resources are insufficient.
+#[allow(dead_code)]
 pub const RESOURCE_WAIT_DELAY_SECS: u64 = 2;
 
 /// Delay after resource check error (in seconds).
 /// Wait time before retrying after a resource check fails.
+#[allow(dead_code)]
 pub const RESOURCE_ERROR_RETRY_DELAY_SECS: u64 = 1;
 
 /// Delay between job availability checks (in seconds).
@@ -204,6 +213,7 @@ pub const RESOURCE_ERROR_RETRY_DELAY_SECS: u64 = 1;
 
 /// Delay for waiting for pending jobs (in milliseconds).
 /// Wait time when checking for pending jobs state changes.
+#[allow(dead_code)]
 pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 
 /// Delay before checking blockchain job status after container completion (in seconds).
@@ -234,4 +244,5 @@ pub const CLI_TRANSACTION_WAIT_SECS: u64 = 5;
 /// Delay between batched multicall executions (in seconds).
 /// When operations exceed multicall limits and need to be split into multiple batches,
 /// this delay is applied between consecutive batch executions to avoid overwhelming the network.
+#[allow(dead_code)]
 pub const MULTICALL_BATCH_DELAY_SECS: u64 = 5;

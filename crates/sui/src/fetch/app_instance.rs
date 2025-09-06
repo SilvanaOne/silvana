@@ -355,6 +355,46 @@ pub async fn get_settlement_job_ids_for_instance(
     Ok(settlement_jobs)
 }
 
+/// Get the settlement chain for a specific job sequence by fetching app instance
+/// Returns Some(chain_name) if the job sequence matches a settlement job, None otherwise
+pub async fn get_settlement_chain_by_job_sequence(
+    app_instance_id: &str,
+    job_sequence: u64,
+) -> Result<Option<String>> {
+    debug!(
+        "Looking up settlement chain for job sequence {} in app instance {}",
+        job_sequence, app_instance_id
+    );
+
+    // Fetch the app instance
+    let app_instance = match fetch_app_instance(app_instance_id).await {
+        Ok(instance) => instance,
+        Err(e) => {
+            warn!("Failed to fetch app instance {}: {}", app_instance_id, e);
+            return Err(e);
+        }
+    };
+
+    // Iterate through settlements to find matching job sequence
+    for (chain_name, settlement) in &app_instance.settlements {
+        if let Some(settlement_job_sequence) = settlement.settlement_job {
+            if settlement_job_sequence == job_sequence {
+                debug!(
+                    "Found job sequence {} belongs to settlement chain '{}'",
+                    job_sequence, chain_name
+                );
+                return Ok(Some(chain_name.clone()));
+            }
+        }
+    }
+
+    debug!(
+        "Job sequence {} not found in any settlement for app instance {}",
+        job_sequence, app_instance_id
+    );
+    Ok(None)
+}
+
 /// Fetch a BlockSettlement from a Settlement's ObjectTable
 pub async fn fetch_block_settlement(
     settlement: &Settlement,

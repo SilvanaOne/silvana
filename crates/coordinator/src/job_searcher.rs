@@ -1,10 +1,9 @@
 use crate::agent::AgentJob;
 use crate::constants::{
-    AGENT_MIN_MEMORY_REQUIREMENT_GB, CONTAINER_HEALTH_CHECK_INTERVAL_SECS,
+    AGENT_MIN_MEMORY_REQUIREMENT_GB,
     CONTAINER_STATUS_CHECK_INTERVAL_SECS, DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS,
-    JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS, JOB_SELECTION_POOL_SIZE,
+    JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS, JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE,
     JOB_STATUS_CHECK_DELAY_SECS, MAX_CONCURRENT_AGENT_CONTAINERS, MULTICALL_INTERVAL_SECS,
-    PENDING_JOBS_CHECK_DELAY_MS,
 };
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
@@ -22,7 +21,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use sui::fetch::{AgentMethod, Job};
 use sui::fetch_agent_method;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 
@@ -507,18 +506,20 @@ impl JobSearcher {
                 // For now, estimate 3GB per buffered job (conservative)
                 let buffer_memory_gb = (buffer_count as f64) * 3.0;
 
-                // Calculate memory available for new jobs
-                // Available = Hardware Available - Buffer Reserved
-                let memory_for_new_jobs_gb = hardware_available_gb as f64 - buffer_memory_gb;
+                // Calculate memory available for new jobs with coefficient multiplier
+                // Available = (Hardware Available - Buffer Reserved) * Coefficient
+                // Coefficient allows more jobs to be buffered between multicall intervals
+                let memory_for_new_jobs_gb = (hardware_available_gb as f64 - buffer_memory_gb) * JOB_BUFFER_MEMORY_COEFFICIENT;
 
                 info!(
-                    "Memory status: Hardware total={:.2} GB, available={:.2} GB, running={:.2} GB, buffer={:.2} GB ({}), available for new={:.2} GB",
+                    "Memory status: Hardware total={:.2} GB, available={:.2} GB, running={:.2} GB, buffer={:.2} GB ({}), available for new={:.2} GB (x{:.1} coefficient)",
                     hardware_total_gb as f64,
                     hardware_available_gb as f64,
                     running_memory_gb,
                     buffer_memory_gb,
                     buffer_count,
-                    memory_for_new_jobs_gb
+                    memory_for_new_jobs_gb,
+                    JOB_BUFFER_MEMORY_COEFFICIENT
                 );
                 
                 // Group jobs by app_instance for multicall batching
@@ -1017,6 +1018,51 @@ impl JobSearcher {
                 let all_create_app_jobs = requests.create_app_jobs;
                 let all_create_merge_jobs = requests.create_merge_jobs;
 
+                // Validate settlement jobs and log chain information
+                // Check start_jobs for settlement jobs by looking up their sequences
+                let mut valid_start_jobs = Vec::new();
+                for start_job in all_start_jobs.into_iter() {
+                    // Check if this job sequence corresponds to a settlement job
+                    match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&app_instance, start_job.job_sequence).await {
+                        Ok(Some(chain)) => {
+                            // This is a settlement job with a valid chain
+                            info!("✅ Settlement start_job {} for app_instance {} - chain: '{}'", start_job.job_sequence, app_instance, chain);
+                            valid_start_jobs.push(start_job);
+                        }
+                        Ok(None) => {
+                            // This is either not a settlement job, or a settlement job without chain
+                            // We need to determine which case this is - let's assume non-settlement jobs and include them
+                            // Settlement jobs without chain will be caught and terminated in gRPC layer
+                            valid_start_jobs.push(start_job);
+                        }
+                        Err(e) => {
+                            // Failed to lookup - include the job but log the error
+                            warn!("Failed to lookup chain for start_job {} in app_instance {}: {} - including anyway", start_job.job_sequence, app_instance, e);
+                            valid_start_jobs.push(start_job);
+                        }
+                    }
+                }
+
+                // Check create_app_jobs for settlement jobs
+                let mut valid_create_app_jobs = Vec::new();
+                for create_job in all_create_app_jobs.into_iter() {
+                    // Check if this is a settlement job
+                    if create_job.method_name == "settle" {
+                        if let Some(ref chain) = create_job.settlement_chain {
+                            info!("✅ Settlement create_job for app_instance {} - chain: '{}'", app_instance, chain);
+                            valid_create_app_jobs.push(create_job);
+                        } else {
+                            error!("🚨 Settlement create_job for app_instance {} has no settlement_chain - SKIPPING", app_instance);
+                        }
+                    } else {
+                        valid_create_app_jobs.push(create_job);
+                    }
+                }
+
+                // Use validated collections
+                let all_start_jobs = valid_start_jobs;
+                let all_create_app_jobs = valid_create_app_jobs;
+
                 // Calculate total operations for this app instance
                 let total_operations = all_start_jobs.len()
                     + all_complete_jobs.len()
@@ -1063,6 +1109,13 @@ impl JobSearcher {
                 // Collect started jobs for buffer management
                 for (i, sequence) in start_sequences.iter().enumerate() {
                     let memory_req = start_memory.get(i).copied().unwrap_or(0);
+                    
+                    // Check for duplicates before adding
+                    if all_started_jobs.iter().any(|(_, seq, _)| seq == sequence) {
+                        warn!("Duplicate job sequence {} detected for app_instance {} - skipping", sequence, app_instance);
+                        continue;
+                    }
+                    
                     all_started_jobs.push((app_instance.clone(), *sequence, memory_req));
                 }
             }
@@ -1101,17 +1154,33 @@ impl JobSearcher {
                     total_operations, result.tx_digest
                 );
 
-                // Add all successful started jobs to buffer for container launching
-                let started_jobs_count = all_started_jobs.len();
-                for (app_instance, sequence, memory_req) in all_started_jobs {
+                // Add only successfully started jobs to buffer for container launching
+                let successful_start_sequences = result.successful_start_jobs();
+                let failed_start_sequences = result.failed_start_jobs();
+                
+                if !failed_start_sequences.is_empty() {
+                    warn!("Some start jobs failed: {:?}", failed_start_sequences);
+                }
+                
+                // Filter all_started_jobs to only include successful ones
+                let successful_started_jobs: Vec<_> = all_started_jobs
+                    .into_iter()
+                    .filter(|(_, sequence, _)| successful_start_sequences.contains(sequence))
+                    .collect();
+                
+                for (app_instance, sequence, memory_req) in successful_started_jobs.iter() {
                     self.state.add_started_jobs(vec![crate::state::StartedJob {
-                        app_instance,
-                        job_sequence: sequence,
-                        memory_requirement: memory_req,
+                        app_instance: app_instance.clone(),
+                        job_sequence: *sequence,
+                        memory_requirement: *memory_req,
                     }]).await;
                 }
 
-                info!("Added {} started jobs to container launch buffer", started_jobs_count);
+                info!(
+                    "Added {} successfully started jobs to container launch buffer (out of {} attempted)",
+                    successful_started_jobs.len(), 
+                    successful_start_sequences.len() + failed_start_sequences.len()
+                );
             }
             Err((error_msg, tx_digest_opt)) => {
                 error!(
