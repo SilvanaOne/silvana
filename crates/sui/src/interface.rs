@@ -260,56 +260,29 @@ impl SilvanaSuiInterface {
         }
     }
 
-    /// Execute multiple job operations in a single transaction (multicall)
+    /// Execute multiple job operations across multiple app instances in a single transaction (multicall)
     /// Operations are executed in order: complete, fail, terminate, then start
     /// Returns Ok(MulticallResult) if successful, Err((error_msg, optional_tx_digest)) if failed
     pub async fn multicall_job_operations(
         &mut self,
-        app_instance: &str,
-        complete_job_sequences: Vec<u64>,
-        fail_job_sequences: Vec<u64>,
-        fail_errors: Vec<String>,
-        terminate_job_sequences: Vec<u64>,
-        start_job_sequences: Vec<u64>,
-        start_job_memory_requirements: Vec<u64>,
-        available_memory: u64,
-        update_state_for_sequences: Vec<(u64, Option<Vec<u8>>, Option<String>)>, // (sequence, new_state_data, new_data_availability_hash)
-        submit_proofs: Vec<(u64, Vec<u64>, Option<Vec<u64>>, Option<Vec<u64>>, String, String, u8, String, u64, u64)>, // (block_number, sequences, merged_sequences_1, merged_sequences_2, job_id, da_hash, cpu_cores, prover_architecture, prover_memory, cpu_time)
-        create_jobs: Vec<(String, Option<String>, Option<u64>, Option<Vec<u64>>, Option<Vec<u64>>, Option<Vec<u64>>, Vec<u8>, Option<u64>, Option<u64>, Option<String>)>, // (method_name, job_description, block_number, sequences, sequences1, sequences2, data, interval_ms, next_scheduled_at, settlement_chain)
-        create_merge_jobs: Vec<(u64, Vec<u64>, Vec<u64>, Vec<u64>, Option<String>)>, // (block_number, sequences, sequences1, sequences2, job_description)
+        operations: Vec<crate::types::MulticallOperations>,
         gas_budget_sui: Option<f64>,
     ) -> Result<crate::types::MulticallResult, (String, Option<String>)> {
         use crate::constants::MAX_OPERATIONS_PER_MULTICALL;
 
-        // Validate that fail arrays have same length
-        if fail_job_sequences.len() != fail_errors.len() {
-            return Err((
-                format!(
-                    "fail_job_sequences and fail_errors must have the same length: {} != {}",
-                    fail_job_sequences.len(),
-                    fail_errors.len()
-                ),
-                None,
-            ));
+        if operations.is_empty() {
+            return Err(("No operations provided".to_string(), None));
         }
 
-        // Validate that start job arrays have same length
-        if start_job_sequences.len() != start_job_memory_requirements.len() {
-            return Err((
-                format!(
-                    "start_job_sequences and start_job_memory_requirements must have the same length: {} != {}",
-                    start_job_sequences.len(),
-                    start_job_memory_requirements.len()
-                ),
-                None,
-            ));
+        // Validate all operations
+        for (i, op) in operations.iter().enumerate() {
+            if let Err(e) = op.validate() {
+                return Err((format!("Validation failed for operation {}: {}", i, e), None));
+            }
         }
 
-        // Validate total operations don't exceed limit
-        let total_operations = complete_job_sequences.len()
-            + fail_job_sequences.len()
-            + terminate_job_sequences.len()
-            + start_job_sequences.len();
+        // Calculate total operations across all app instances
+        let total_operations: usize = operations.iter().map(|op| op.total_operations()).sum();
 
         if total_operations > MAX_OPERATIONS_PER_MULTICALL {
             return Err((
@@ -321,34 +294,15 @@ impl SilvanaSuiInterface {
             ));
         }
 
+        let app_instances: Vec<String> = operations.iter().map(|op| op.app_instance.clone()).collect();
         debug!(
-            "Attempting multicall job operations: {} complete, {} fail, {} terminate, {} start (available memory: {:.2} GB)",
-            complete_job_sequences.len(),
-            fail_job_sequences.len(),
-            terminate_job_sequences.len(),
-            start_job_sequences.len(),
-            available_memory as f64 / (1024.0 * 1024.0 * 1024.0)
+            "Attempting batch multicall job operations for {} app instances: {:?} (total operations: {})",
+            operations.len(), app_instances, total_operations
         );
 
         let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
 
-        match multicall_job_operations_tx(
-            app_instance,
-            complete_job_sequences.clone(),
-            fail_job_sequences.clone(),
-            fail_errors,
-            terminate_job_sequences.clone(),
-            start_job_sequences.clone(),
-            start_job_memory_requirements.clone(),
-            available_memory,
-            update_state_for_sequences.clone(),
-            submit_proofs.clone(),
-            create_jobs.clone(),
-            create_merge_jobs.clone(),
-            gas_budget_mist,
-        )
-        .await
-        {
+        match multicall_job_operations_tx(operations.clone(), gas_budget_mist).await {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully executed multicall job operations on blockchain, tx: {}",

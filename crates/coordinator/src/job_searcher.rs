@@ -989,19 +989,25 @@ impl JobSearcher {
         self.execute_multicall_batches_for_app_instances(app_instances).await
     }
     
-    /// Execute multicall batches for specific app instances
+    /// Execute single multicall for all app instances (respects MULTICALL_INTERVAL_SECS)
     async fn execute_multicall_batches_for_app_instances(&self, app_instances: Vec<String>) -> Result<()> {
-        use crate::constants::MULTICALL_BATCH_DELAY_SECS;
+        if app_instances.is_empty() {
+            return Ok(());
+        }
 
         // Get multicall limits
         let max_operations = sui::get_max_operations_per_multicall();
+        
+        // Collect all operations from all app instances
+        let mut all_operations = Vec::new();
+        let mut all_started_jobs = Vec::new(); // For buffer management
 
         for app_instance in app_instances {
             if let Some(requests) = self.state.take_multicall_requests(&app_instance).await {
                 // Get available memory similar to hardware check
                 let available_memory_bytes = get_available_memory_gb() * 1024 * 1024 * 1024;
 
-                // Prepare all operations
+                // Prepare all operations for this app instance
                 let all_start_jobs = requests.start_jobs;
                 let all_complete_jobs = requests.complete_jobs;
                 let all_fail_jobs = requests.fail_jobs;
@@ -1011,7 +1017,7 @@ impl JobSearcher {
                 let all_create_app_jobs = requests.create_app_jobs;
                 let all_create_merge_jobs = requests.create_merge_jobs;
 
-                // Calculate total operations (update_state_for_sequences, submit_proofs, create_app_jobs and create_merge_jobs are now included in multicall)
+                // Calculate total operations for this app instance
                 let total_operations = all_start_jobs.len()
                     + all_complete_jobs.len()
                     + all_fail_jobs.len()
@@ -1025,306 +1031,103 @@ impl JobSearcher {
                     continue;
                 }
 
-                // Determine if we need to batch
-                let needs_batching = total_operations > max_operations;
+                info!(
+                    "Collecting {} operations from app_instance {}",
+                    total_operations, app_instance
+                );
 
-                if needs_batching {
-                    info!(
-                        "Total operations ({}) exceeds limit ({}), splitting into batches for app_instance {}",
-                        total_operations, max_operations, app_instance
-                    );
+                // Convert to MulticallOperations struct
+                let start_sequences: Vec<u64> = all_start_jobs.iter().map(|job| job.job_sequence).collect();
+                let start_memory: Vec<u64> = all_start_jobs.iter().map(|job| job.memory_requirement).collect();
+                let complete_sequences: Vec<u64> = all_complete_jobs.iter().map(|job| job.job_sequence).collect();
+                let (fail_sequences, fail_errors): (Vec<u64>, Vec<String>) = all_fail_jobs.into_iter().map(|job| (job.job_sequence, job.error)).unzip();
+                let terminate_sequences: Vec<u64> = all_terminate_jobs.iter().map(|job| job.job_sequence).collect();
 
-                    // Execute in batches
-                    let mut batch_num = 0;
-                    let mut start_idx = 0;
-                    let mut complete_idx = 0;
-                    let mut fail_idx = 0;
-                    let mut terminate_idx = 0;
+                let operations = sui::MulticallOperations {
+                    app_instance: app_instance.clone(),
+                    complete_job_sequences: complete_sequences,
+                    fail_job_sequences: fail_sequences,
+                    fail_errors,
+                    terminate_job_sequences: terminate_sequences,
+                    start_job_sequences: start_sequences.clone(),
+                    start_job_memory_requirements: start_memory.clone(),
+                    available_memory: available_memory_bytes,
+                    update_state_for_sequences: all_update_state_for_sequences.into_iter().map(|req| (req.sequence, req.new_state_data, req.new_data_availability_hash)).collect(),
+                    submit_proofs: all_submit_proofs.into_iter().map(|req| (req.block_number, req.sequences, req.merged_sequences_1, req.merged_sequences_2, req.job_id, req.da_hash, req.cpu_cores, req.prover_architecture, req.prover_memory, req.cpu_time)).collect(),
+                    create_jobs: all_create_app_jobs.into_iter().map(|req| (req.method_name, req.job_description, req.block_number, req.sequences, req.sequences1, req.sequences2, req.data, req.interval_ms, req.next_scheduled_at, req.settlement_chain)).collect(),
+                    create_merge_jobs: all_create_merge_jobs.into_iter().map(|req| (req.block_number, req.sequences, req.sequences1, req.sequences2, req.job_description)).collect(),
+                };
 
-                    loop {
-                        let mut batch_size = 0;
-                        let mut batch_start = Vec::new();
-                        let mut batch_start_memory = Vec::new();
-                        let mut batch_complete = Vec::new();
-                        let mut batch_fail = Vec::new();
-                        let mut batch_fail_errors = Vec::new();
-                        let mut batch_terminate = Vec::new();
+                all_operations.push(operations);
 
-                        // Fill batch up to max_operations, prioritizing complete, fail, terminate, then start
-
-                        // Add complete operations
-                        while complete_idx < all_complete_jobs.len() && batch_size < max_operations {
-                            batch_complete.push(all_complete_jobs[complete_idx].job_sequence);
-                            complete_idx += 1;
-                            batch_size += 1;
-                        }
-
-                        // Add fail operations
-                        while fail_idx < all_fail_jobs.len() && batch_size < max_operations {
-                            batch_fail.push(all_fail_jobs[fail_idx].job_sequence);
-                            batch_fail_errors.push(all_fail_jobs[fail_idx].error.clone());
-                            fail_idx += 1;
-                            batch_size += 1;
-                        }
-
-                        // Add terminate operations
-                        while terminate_idx < all_terminate_jobs.len() && batch_size < max_operations {
-                            batch_terminate.push(all_terminate_jobs[terminate_idx].job_sequence);
-                            terminate_idx += 1;
-                            batch_size += 1;
-                        }
-
-                        // Add start operations
-                        while start_idx < all_start_jobs.len() && batch_size < max_operations {
-                            batch_start.push(all_start_jobs[start_idx].job_sequence);
-                            batch_start_memory.push(all_start_jobs[start_idx].memory_requirement);
-                            start_idx += 1;
-                            batch_size += 1;
-                        }
-
-                        if batch_size == 0 {
-                            break; // No more operations to process
-                        }
-
-                        debug!(
-                            "Executing batch {} for {}: {} start, {} complete, {} fail, {} terminate",
-                            batch_num + 1,
-                            app_instance,
-                            batch_start.len(),
-                            batch_complete.len(),
-                            batch_fail.len(),
-                            batch_terminate.len()
-                        );
-
-                        // Execute this batch (no update_state, submit_proof, create_jobs or create_merge_jobs in batched execution)
-                        self.execute_single_multicall(
-                            &app_instance,
-                            batch_complete,
-                            batch_fail,
-                            batch_fail_errors,
-                            batch_terminate,
-                            batch_start,
-                            batch_start_memory,
-                            available_memory_bytes,
-                            Vec::new(), // No update_state in batched execution
-                            Vec::new(), // No submit_proofs in batched execution
-                            Vec::new(), // No create_jobs in batched execution
-                            Vec::new(), // No create_merge_jobs in batched execution
-                        )
-                        .await?;
-
-                        batch_num += 1;
-
-                        // Add delay between batches
-                        if start_idx < all_start_jobs.len()
-                            || complete_idx < all_complete_jobs.len()
-                            || fail_idx < all_fail_jobs.len()
-                            || terminate_idx < all_terminate_jobs.len()
-                        {
-                            debug!(
-                                "Waiting {} seconds before next batch for app_instance {}",
-                                MULTICALL_BATCH_DELAY_SECS, app_instance
-                            );
-                            sleep(Duration::from_secs(MULTICALL_BATCH_DELAY_SECS)).await;
-                        }
-                    }
-
-                    // Handle update_state_for_sequences, submit_proofs, create_app_jobs and create_merge_jobs after regular job operations
-                    if !all_update_state_for_sequences.is_empty()
-                        || !all_submit_proofs.is_empty()
-                        || !all_create_app_jobs.is_empty()
-                        || !all_create_merge_jobs.is_empty()
-                    {
-                        // Prepare operations for the final multicall
-                        let update_state_operations: Vec<(u64, Option<Vec<u8>>, Option<String>)> = all_update_state_for_sequences
-                            .iter()
-                            .map(|req| (
-                                req.sequence,
-                                req.new_state_data.clone(),
-                                req.new_data_availability_hash.clone(),
-                            ))
-                            .collect();
-                        
-                        // Prepare submit_proof operations
-                        let submit_proof_operations: Vec<(u64, Vec<u64>, Option<Vec<u64>>, Option<Vec<u64>>, String, String, u8, String, u64, u64)> = all_submit_proofs
-                            .iter()
-                            .map(|req| (
-                                req.block_number,
-                                req.sequences.clone(),
-                                req.merged_sequences_1.clone(),
-                                req.merged_sequences_2.clone(),
-                                req.job_id.clone(),
-                                req.da_hash.clone(),
-                                req.cpu_cores,
-                                req.prover_architecture.clone(),
-                                req.prover_memory,
-                                req.cpu_time,
-                            ))
-                            .collect();
-
-                        // Prepare create_app_job operations
-                        let create_job_operations: Vec<(String, Option<String>, Option<u64>, Option<Vec<u64>>, Option<Vec<u64>>, Option<Vec<u64>>, Vec<u8>, Option<u64>, Option<u64>, Option<String>)> = all_create_app_jobs
-                            .iter()
-                            .map(|req| (
-                                req.method_name.clone(),
-                                req.job_description.clone(),
-                                req.block_number,
-                                req.sequences.clone(),
-                                req.sequences1.clone(),
-                                req.sequences2.clone(),
-                                req.data.clone(),
-                                req.interval_ms,
-                                req.next_scheduled_at,
-                                req.settlement_chain.clone(),
-                            ))
-                            .collect();
-                        
-                        // Prepare create_merge_job operations
-                        let merge_job_operations: Vec<(u64, Vec<u64>, Vec<u64>, Vec<u64>, Option<String>)> = all_create_merge_jobs
-                            .iter()
-                            .map(|req| (
-                                req.block_number,
-                                req.sequences.clone(),
-                                req.sequences1.clone(),
-                                req.sequences2.clone(),
-                                req.job_description.clone(),
-                            ))
-                            .collect();
-
-                        debug!(
-                            "Executing multicall for {}: {} start, {} complete, {} fail, {} terminate, {} update_state, {} submit_proof, {} create_job, {} create_merge",
-                            app_instance,
-                            0, // No more start operations in final call
-                            0, // No more complete operations in final call
-                            0, // No more fail operations in final call  
-                            0, // No more terminate operations in final call
-                            update_state_operations.len(),
-                            submit_proof_operations.len(),
-                            create_job_operations.len(),
-                            merge_job_operations.len()
-                        );
-
-                        // Execute the final multicall with remaining operations
-                        self.execute_single_multicall(
-                            &app_instance,
-                            Vec::new(), // No more regular job operations
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            available_memory_bytes,
-                            update_state_operations,
-                            submit_proof_operations,
-                            create_job_operations,
-                            merge_job_operations,
-                        )
-                        .await?;
-                    }
-                } else {
-                    // Single multicall can handle all operations
-                    
-                    // Prepare update_state_for_sequences operations
-                    let update_state_operations: Vec<(u64, Option<Vec<u8>>, Option<String>)> = all_update_state_for_sequences
-                        .iter()
-                        .map(|req| (
-                            req.sequence,
-                            req.new_state_data.clone(),
-                            req.new_data_availability_hash.clone(),
-                        ))
-                        .collect();
-                    
-                    // Prepare submit_proof operations
-                    let submit_proof_operations: Vec<(u64, Vec<u64>, Option<Vec<u64>>, Option<Vec<u64>>, String, String, u8, String, u64, u64)> = all_submit_proofs
-                        .iter()
-                        .map(|req| (
-                            req.block_number,
-                            req.sequences.clone(),
-                            req.merged_sequences_1.clone(),
-                            req.merged_sequences_2.clone(),
-                            req.job_id.clone(),
-                            req.da_hash.clone(),
-                            req.cpu_cores,
-                            req.prover_architecture.clone(),
-                            req.prover_memory,
-                            req.cpu_time,
-                        ))
-                        .collect();
-
-                    // Prepare create_app_job operations
-                    let create_job_operations: Vec<(String, Option<String>, Option<u64>, Option<Vec<u64>>, Option<Vec<u64>>, Option<Vec<u64>>, Vec<u8>, Option<u64>, Option<u64>, Option<String>)> = all_create_app_jobs
-                        .iter()
-                        .map(|req| (
-                            req.method_name.clone(),
-                            req.job_description.clone(),
-                            req.block_number,
-                            req.sequences.clone(),
-                            req.sequences1.clone(),
-                            req.sequences2.clone(),
-                            req.data.clone(),
-                            req.interval_ms,
-                            req.next_scheduled_at,
-                            req.settlement_chain.clone(),
-                        ))
-                        .collect();
-                    
-                    // Prepare create_merge_job operations
-                    let merge_job_operations: Vec<(u64, Vec<u64>, Vec<u64>, Vec<u64>, Option<String>)> = all_create_merge_jobs
-                        .iter()
-                        .map(|req| (
-                            req.block_number,
-                            req.sequences.clone(),
-                            req.sequences1.clone(),
-                            req.sequences2.clone(),
-                            req.job_description.clone(),
-                        ))
-                        .collect();
-                        
-
-                    debug!(
-                        "Executing multicall for {}: {} start, {} complete, {} fail, {} terminate, {} update_state, {} submit_proof, {} create_job, {} create_merge",
-                        app_instance,
-                        all_start_jobs.len(),
-                        all_complete_jobs.len(),
-                        all_fail_jobs.len(),
-                        all_terminate_jobs.len(),
-                        update_state_operations.len(),
-                        submit_proof_operations.len(),
-                        create_job_operations.len(),
-                        merge_job_operations.len()
-                    );
-
-                    // Extract data for multicall
-                    let start_sequences: Vec<u64> = all_start_jobs.iter().map(|j| j.job_sequence).collect();
-                    let start_memory: Vec<u64> = all_start_jobs.iter().map(|j| j.memory_requirement).collect();
-                    let complete_sequences: Vec<u64> = all_complete_jobs.iter().map(|j| j.job_sequence).collect();
-                    let fail_sequences: Vec<u64> = all_fail_jobs.iter().map(|j| j.job_sequence).collect();
-                    let fail_errors: Vec<String> = all_fail_jobs.iter().map(|j| j.error.clone()).collect();
-                    let terminate_sequences: Vec<u64> = all_terminate_jobs.iter().map(|j| j.job_sequence).collect();
-
-                    // Execute the single multicall with all operations
-                    self.execute_single_multicall(
-                        &app_instance,
-                        complete_sequences,
-                        fail_sequences,
-                        fail_errors,
-                        terminate_sequences,
-                        start_sequences,
-                        start_memory,
-                        available_memory_bytes,
-                        update_state_operations,
-                        submit_proof_operations,
-                        create_job_operations,
-                        merge_job_operations,
-                    )
-                    .await?;
+                // Collect started jobs for buffer management
+                for (i, sequence) in start_sequences.iter().enumerate() {
+                    let memory_req = start_memory.get(i).copied().unwrap_or(0);
+                    all_started_jobs.push((app_instance.clone(), *sequence, memory_req));
                 }
-                
-                // All operations (including update_state_for_sequences and submit_proofs) are now included in the multicall above
             }
         }
+
+        if all_operations.is_empty() {
+            debug!("No operations collected from any app instances");
+            return Ok(());
+        }
+
+        // Calculate total operations across all app instances
+        let total_operations: usize = all_operations.iter().map(|op| op.total_operations()).sum();
+        
+        if total_operations > max_operations {
+            warn!(
+                "Total operations ({}) exceeds maximum allowed per multicall ({}). This should be handled by batching logic in the future.",
+                total_operations, max_operations
+            );
+        }
+
+        info!(
+            "Executing SINGLE multicall for {} app instances with {} total operations",
+            all_operations.len(), total_operations
+        );
+
+        // Execute single multicall with all operations
+        let mut sui_interface = sui::SilvanaSuiInterface::new();
+        let total_operations = all_operations.len();
+        match sui_interface
+            .multicall_job_operations(all_operations, None)
+            .await
+        {
+            Ok(result) => {
+                info!(
+                    "Successfully executed batch multicall for {} app instances (tx: {})",
+                    total_operations, result.tx_digest
+                );
+
+                // Add all successful started jobs to buffer for container launching
+                let started_jobs_count = all_started_jobs.len();
+                for (app_instance, sequence, memory_req) in all_started_jobs {
+                    self.state.add_started_jobs(vec![crate::state::StartedJob {
+                        app_instance,
+                        job_sequence: sequence,
+                        memory_requirement: memory_req,
+                    }]).await;
+                }
+
+                info!("Added {} started jobs to container launch buffer", started_jobs_count);
+            }
+            Err((error_msg, tx_digest_opt)) => {
+                error!(
+                    "Batch multicall failed: {} (tx: {:?})",
+                    error_msg, tx_digest_opt
+                );
+                return Err(CoordinatorError::Other(anyhow::anyhow!(
+                    "Batch multicall failed: {}",
+                    error_msg
+                )));
+            }
+        }
+
         Ok(())
     }
+
 
     /// Execute pending multicall batches immediately without waiting for interval
     async fn execute_multicall_batches_immediate(&self) -> Result<()> {
@@ -1340,85 +1143,6 @@ impl JobSearcher {
         self.execute_multicall_batches_for_app_instances(app_instances).await
     }
 
-
-    /// Execute a single multicall with the given operations
-    async fn execute_single_multicall(
-        &self,
-        app_instance: &str,
-        complete_sequences: Vec<u64>,
-        fail_sequences: Vec<u64>,
-        fail_errors: Vec<String>,
-        terminate_sequences: Vec<u64>,
-        start_sequences: Vec<u64>,
-        start_memory: Vec<u64>,
-        available_memory_bytes: u64,
-        update_state_for_sequences: Vec<(u64, Option<Vec<u8>>, Option<String>)>,
-        submit_proofs: Vec<(u64, Vec<u64>, Option<Vec<u64>>, Option<Vec<u64>>, String, String, u8, String, u64, u64)>,
-        create_jobs: Vec<(String, Option<String>, Option<u64>, Option<Vec<u64>>, Option<Vec<u64>>, Option<Vec<u64>>, Vec<u8>, Option<u64>, Option<u64>, Option<String>)>,
-        create_merge_jobs: Vec<(u64, Vec<u64>, Vec<u64>, Vec<u64>, Option<String>)>,
-    ) -> Result<()> {
-        // Use the provided start sequences directly
-        // Shutdown check should be done by the caller if needed
-        let (final_start_sequences, final_start_memory) = (start_sequences, start_memory);
-
-        let mut sui_interface = sui::SilvanaSuiInterface::new();
-        match sui_interface
-            .multicall_job_operations(
-                app_instance,
-                complete_sequences.clone(),
-                fail_sequences.clone(),
-                fail_errors,
-                terminate_sequences.clone(),
-                final_start_sequences.clone(),
-                final_start_memory.clone(),
-                available_memory_bytes, // Pass actual available memory for Move contract validation
-                update_state_for_sequences, // Pass update_state_for_sequences  
-                submit_proofs,          // Pass submit_proofs  
-                create_jobs,            // Pass create_jobs for batched execution
-                create_merge_jobs,      // Pass create_merge_jobs for batched execution
-                None,                   // Let gas be estimated automatically
-            )
-            .await
-        {
-            Ok(result) => {
-                info!(
-                    "Successfully executed multicall for {} (tx: {})",
-                    app_instance, result.tx_digest
-                );
-
-                // Add successful jobs to buffer for container launching
-                for (i, sequence) in final_start_sequences.iter().enumerate() {
-                    let memory_req = final_start_memory.get(i).copied().unwrap_or(0);
-                    self.state.add_started_jobs(vec![crate::state::StartedJob {
-                        app_instance: app_instance.to_string(),
-                        job_sequence: *sequence,
-                        memory_requirement: memory_req,
-                    }]).await;
-                }
-
-                if !final_start_sequences.is_empty() {
-                    info!(
-                        "✅ Adding {} successfully started jobs to buffer for app_instance {} (out of {} attempted)",
-                        final_start_sequences.len(),
-                        app_instance,
-                        final_start_sequences.len()
-                    );
-                }
-
-                Ok(())
-            }
-            Err((error_msg, tx_digest)) => {
-                error!(
-                    "Failed to execute multicall for {}: {} (tx: {:?})",
-                    app_instance, error_msg, tx_digest
-                );
-                Err(CoordinatorError::Other(anyhow::anyhow!(
-                    "Multicall failed for {}: {}",
-                    app_instance, error_msg
-                )))
-            }
-        }
-    }
 
 
     /// Retrieve secrets for a job from the secrets storage (old version, no longer used)
