@@ -119,6 +119,7 @@ impl JobsTracker {
     
     /// Get app_instances that have pending jobs for a specific (developer, agent, agent_method)
     /// This is used by gRPC to quickly find relevant app_instances
+    #[allow(dead_code)]
     pub async fn get_app_instances_for_agent_method(
         &self,
         developer: &str,

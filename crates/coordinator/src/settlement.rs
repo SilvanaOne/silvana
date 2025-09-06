@@ -262,6 +262,7 @@ pub async fn create_periodic_settle_job(
 
 
 /// Try to fetch a pending job from any of the given app_instances using the index
+#[allow(dead_code)]
 pub async fn fetch_pending_job_from_instances(
     app_instances: &[String],
     developer: &str,

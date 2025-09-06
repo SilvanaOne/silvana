@@ -113,6 +113,7 @@ pub struct JobSearcher {
     state: SharedState,
     docker_manager: Arc<DockerManager>,
     container_timeout_secs: u64,
+    #[allow(dead_code)]
     searcher_state: Arc<RwLock<SearcherState>>,
     secrets_client: Option<SecretsClient>,
     jobs_cache: JobsCache,
@@ -1199,6 +1200,7 @@ impl JobSearcher {
 
 
     /// Execute pending multicall batches immediately without waiting for interval
+    #[allow(dead_code)]
     async fn execute_multicall_batches_immediate(&self) -> Result<()> {
         // Get all app instances with pending requests (no interval check)
         let app_instances = self.state.get_all_pending_multicall_app_instances().await;

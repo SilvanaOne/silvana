@@ -621,6 +621,7 @@ impl SilvanaSuiInterface {
 
     /// Create a merge job on the Sui blockchain (convenience method)
     /// Returns the transaction hash if successful, or an error if it failed  
+    #[allow(dead_code)]
     pub(crate) async fn create_merge_job(
         &mut self,
         app_instance: &str,
@@ -663,6 +664,7 @@ impl SilvanaSuiInterface {
     /// Create a merge job with proof reservation on the Sui blockchain
     /// This function first reserves the proofs via start_proving, then creates the job
     /// Returns the transaction hash if successful, or an error if it failed
+    #[allow(dead_code)]
     pub(crate) async fn create_merge_job_with_proving(
         &mut self,
         app_instance: &str,
@@ -849,6 +851,7 @@ impl SilvanaSuiInterface {
 
     /// Submit a proof on the Sui blockchain by calling the submit_proof Move function
     /// Returns the transaction hash if successful, or None if it failed
+    #[allow(dead_code)]
     pub(crate) async fn submit_proof(
         &mut self,
         app_instance: &str,
@@ -964,6 +967,7 @@ impl SilvanaSuiInterface {
     /// Returns the transaction hash if successful, or an error if it failed
     /// Note: This may fail if another coordinator has already reserved the proofs
     /// DEPRECATED: Use create_merge_job_with_proving instead to ensure atomic operation
+    #[allow(dead_code)]
     pub(crate) async fn start_proving(
         &mut self,
         app_instance: &str,
@@ -1007,6 +1011,7 @@ impl SilvanaSuiInterface {
 
     /// Update state for a sequence on the Sui blockchain by calling the update_state_for_sequence Move function
     /// Returns the transaction hash if successful, or an error if it failed
+    #[allow(dead_code)]
     pub(crate) async fn update_state_for_sequence(
         &mut self,
         app_instance: &str,

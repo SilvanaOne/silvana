@@ -189,6 +189,7 @@ struct JobCreatedEventBcs {
 struct JobFailedEventBcs {
     job_sequence: u64,
     app_instance: String,
+    #[allow(dead_code)]
     coordinator: [u8; 32],  // Address is 32 bytes in Sui
     error: String,
     attempts: u8,

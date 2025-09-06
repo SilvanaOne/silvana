@@ -15,6 +15,7 @@ pub struct CurrentAgent {
     pub developer: String,
     pub agent: String,
     pub agent_method: String,
+    #[allow(dead_code)]
     pub settlement_chain: Option<String>,  // Track which chain this agent is settling for
 }
 
@@ -247,6 +248,7 @@ impl SharedState {
     }
     
     /// Update the settlement chain for a current agent
+    #[allow(dead_code)]
     pub async fn set_agent_settlement_chain(&self, session_id: &str, chain: String) {
         let mut current_agents = self.current_agents.write().await;
         if let Some(agent) = current_agents.get_mut(session_id) {
@@ -375,6 +377,7 @@ impl SharedState {
     }
 
     /// Get app_instances with pending jobs for the current agent
+    #[allow(dead_code)]
     pub async fn get_current_app_instances(&self, session_id: &str) -> Vec<String> {
         if let Some(current_agent) = self.get_current_agent(session_id).await {
             self.jobs_tracker
@@ -407,6 +410,7 @@ impl SharedState {
     }
 
     /// Fast check if there are pending jobs available
+    #[allow(dead_code)]
     pub fn has_pending_jobs_available(&self) -> bool {
         self.has_pending_jobs.load(Ordering::Acquire)
     }
@@ -429,6 +433,7 @@ impl SharedState {
     }
     
     /// Get the app instance filter
+    #[allow(dead_code)]
     pub async fn get_app_instance_filter(&self) -> Option<String> {
         let lock = self.app_instance_filter.read().await;
         lock.clone()
@@ -465,7 +470,19 @@ impl SharedState {
             last_execution: Instant::now(),
         });
         
-        entry.create_jobs.push(request);
+        // Check for duplicate job based on key identifying fields and replace if found
+        if let Some(existing_index) = entry.create_jobs.iter().position(|job| 
+            job.agent == request.agent && 
+            job.agent_method == request.agent_method && 
+            job.app_instance_method == request.app_instance_method &&
+            job.job_sequence == request.job_sequence
+        ) {
+            debug!("Replacing existing create job request for app_instance {} (agent: {}, method: {})", 
+                   app_instance, request.agent, request.agent_method);
+            entry.create_jobs[existing_index] = request;
+        } else {
+            entry.create_jobs.push(request);
+        }
         
         debug!("Added create job request for app_instance {}", app_instance);
     }
@@ -488,11 +505,21 @@ impl SharedState {
             last_execution: Instant::now(),
         });
         
-        entry.start_jobs.push(StartJobRequest {
-            job_sequence,
-            memory_requirement,
-            _timestamp: Instant::now(),
-        });
+        // Check if job with same sequence already exists and replace it
+        if let Some(existing_index) = entry.start_jobs.iter().position(|job| job.job_sequence == job_sequence) {
+            debug!("Replacing existing start job request for job {} in app_instance {}", job_sequence, app_instance);
+            entry.start_jobs[existing_index] = StartJobRequest {
+                job_sequence,
+                memory_requirement,
+                _timestamp: Instant::now(),
+            };
+        } else {
+            entry.start_jobs.push(StartJobRequest {
+                job_sequence,
+                memory_requirement,
+                _timestamp: Instant::now(),
+            });
+        }
         
         debug!("Added start job request for job {} in app_instance {} (memory: {:.2} GB)", 
                job_sequence, app_instance, memory_requirement as f64 / (1024.0 * 1024.0 * 1024.0));
@@ -540,11 +567,21 @@ impl SharedState {
             last_execution: Instant::now(),
         });
         
-        entry.fail_jobs.push(FailJobRequest {
-            job_sequence,
-            error,
-            _timestamp: Instant::now(),
-        });
+        // Check if fail job with same sequence already exists and replace it
+        if let Some(existing_index) = entry.fail_jobs.iter().position(|job| job.job_sequence == job_sequence) {
+            debug!("Replacing existing fail job request for job {} in app_instance {}", job_sequence, app_instance);
+            entry.fail_jobs[existing_index] = FailJobRequest {
+                job_sequence,
+                error,
+                _timestamp: Instant::now(),
+            };
+        } else {
+            entry.fail_jobs.push(FailJobRequest {
+                job_sequence,
+                error,
+                _timestamp: Instant::now(),
+            });
+        }
         
         debug!("Added fail job request for job {} in app_instance {}", job_sequence, app_instance);
     }
@@ -654,7 +691,25 @@ impl SharedState {
             last_execution: Instant::now(),
         });
         
-        entry.create_app_jobs.push(request);
+        // For settlement jobs, check for duplicates with same chain and replace them
+        if request.method_name == "settle" {
+            if let Some(ref chain) = request.settlement_chain {
+                if let Some(existing_index) = entry.create_app_jobs.iter().position(|job| 
+                    job.method_name == "settle" && job.settlement_chain.as_ref() == Some(chain)
+                ) {
+                    debug!("Replacing existing settlement job for app_instance {} chain '{}'", app_instance, chain);
+                    entry.create_app_jobs[existing_index] = request;
+                } else {
+                    entry.create_app_jobs.push(request);
+                }
+            } else {
+                debug!("Settlement job without chain for app_instance {} - adding anyway", app_instance);
+                entry.create_app_jobs.push(request);
+            }
+        } else {
+            // For non-settlement jobs, just add normally (could add dedup logic later if needed)
+            entry.create_app_jobs.push(request);
+        }
         
         debug!("Added create app job request for app_instance {}", app_instance);
     }
@@ -676,7 +731,17 @@ impl SharedState {
             last_execution: Instant::now(),
         });
         
-        entry.create_merge_jobs.push(request);
+        // Check for duplicate merge job based on block_number and sequences and replace if found
+        if let Some(existing_index) = entry.create_merge_jobs.iter().position(|job| 
+            job.block_number == request.block_number && 
+            job.sequences == request.sequences
+        ) {
+            debug!("Replacing existing create merge job request for app_instance {} (block: {}, sequences: {:?})", 
+                   app_instance, request.block_number, request.sequences);
+            entry.create_merge_jobs[existing_index] = request;
+        } else {
+            entry.create_merge_jobs.push(request);
+        }
         
         debug!("Added create merge job request for app_instance {}", app_instance);
     }
@@ -711,6 +776,7 @@ impl SharedState {
     }
 
     /// Get all app instances with pending multicall requests (no interval check)
+    #[allow(dead_code)]
     pub async fn get_all_pending_multicall_app_instances(&self) -> Vec<String> {
         let requests = self.multicall_requests.lock().await;
         
@@ -733,6 +799,7 @@ impl SharedState {
     }
 
     /// Update last execution time for an app instance
+    #[allow(dead_code)]
     pub async fn update_multicall_execution_time(&self, app_instance: &str) {
         let mut requests = self.multicall_requests.lock().await;
         if let Some(entry) = requests.get_mut(app_instance) {
@@ -769,6 +836,7 @@ impl SharedState {
     }
     
     /// Clear all jobs from the buffer (for emergency use)
+    #[allow(dead_code)]
     pub async fn clear_started_jobs_buffer(&self) {
         let mut buffer = self.started_jobs_buffer.lock().await;
         let count = buffer.len();

@@ -588,6 +588,7 @@ pub async fn remove_failed_jobs_tx(
 }
 
 /// Create and submit a transaction to submit a proof
+#[allow(dead_code)]
 pub(crate) async fn submit_proof_tx(
     app_instance_str: &str,
     block_number: u64,
@@ -644,6 +645,7 @@ pub(crate) async fn submit_proof_tx(
 }
 
 /// Create and submit a transaction to update state for a sequence
+#[allow(dead_code)]
 pub(crate) async fn update_state_for_sequence_tx(
     app_instance_str: &str,
     sequence: u64,
@@ -769,6 +771,7 @@ pub async fn reject_proof_tx(
 
 /// Create and submit a transaction to start proving (reserve proofs)
 /// DEPRECATED: Use create_merge_job_with_proving_tx instead
+#[allow(dead_code)]
 pub(crate) async fn start_proving_tx(
     app_instance_str: &str,
     block_number: u64,
@@ -821,6 +824,7 @@ pub(crate) async fn start_proving_tx(
 
 /// Convenience function to create a merge job (old version - just creates the job)
 /// Use create_merge_job_with_proving_tx for the new version that reserves proofs first
+#[allow(dead_code)]
 pub(crate) async fn create_merge_job_tx(
     app_instance_str: &str,
     block_number: u64,
@@ -860,6 +864,7 @@ pub(crate) async fn create_merge_job_tx(
 /// Create a merge job with proof reservation
 /// This function first calls start_proving to reserve the proofs, then creates the job
 /// Returns the transaction digest on success
+#[allow(dead_code)]
 pub(crate) async fn create_merge_job_with_proving_tx(
     app_instance_str: &str,
     block_number: u64,
