@@ -1,4 +1,4 @@
-use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, restart_failed_jobs_with_sequences_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
+use crate::transactions::{start_job_tx, complete_job_tx, fail_job_tx, terminate_job_tx, multicall_job_operations_tx, restart_failed_jobs_with_sequences_tx, submit_proof_tx, update_state_for_sequence_tx, create_app_job_tx, create_merge_job_tx, create_settle_job_tx, update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx, reject_proof_tx, start_proving_tx, try_create_block_tx};
 use tracing::{info, warn, error, debug};
 
 /// Interface for calling Sui Move functions related to job management
@@ -144,6 +144,77 @@ impl SilvanaSuiInterface {
             Err(e) => {
                 let error_msg = e.to_string();
                 error!("Failed to restart all failed jobs on blockchain: {}", error_msg);
+                
+                // Extract tx digest from error if it's a TransactionError
+                let tx_digest = if let Some(sui_error) = e.downcast_ref::<crate::error::SilvanaSuiInterfaceError>() {
+                    if let crate::error::SilvanaSuiInterfaceError::TransactionError { tx_digest, .. } = sui_error {
+                        tx_digest.clone()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                Err((error_msg, tx_digest))
+            }
+        }
+    }
+
+    /// Execute multiple job operations in a single transaction (multicall)
+    /// Operations are executed in order: complete, fail, terminate, then start
+    /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
+    pub async fn multicall_job_operations(
+        &mut self,
+        app_instance: &str,
+        complete_job_sequences: Vec<u64>,
+        fail_job_sequences: Vec<u64>,
+        fail_errors: Vec<String>,
+        terminate_job_sequences: Vec<u64>,
+        start_job_sequences: Vec<u64>,
+        gas_budget_sui: Option<f64>,
+    ) -> Result<String, (String, Option<String>)> {
+        // Validate that fail arrays have same length
+        if fail_job_sequences.len() != fail_errors.len() {
+            return Err((
+                format!(
+                    "fail_job_sequences and fail_errors must have the same length: {} != {}",
+                    fail_job_sequences.len(),
+                    fail_errors.len()
+                ),
+                None,
+            ));
+        }
+
+        debug!(
+            "Attempting multicall job operations: {} complete, {} fail, {} terminate, {} start",
+            complete_job_sequences.len(),
+            fail_job_sequences.len(),
+            terminate_job_sequences.len(),
+            start_job_sequences.len()
+        );
+
+        let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
+        
+        match multicall_job_operations_tx(
+            app_instance,
+            complete_job_sequences.clone(),
+            fail_job_sequences.clone(),
+            fail_errors,
+            terminate_job_sequences.clone(),
+            start_job_sequences.clone(),
+            gas_budget_mist,
+        ).await {
+            Ok(tx_digest) => {
+                debug!(
+                    "Successfully executed multicall job operations on blockchain, tx: {}",
+                    tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                error!("Failed to execute multicall job operations on blockchain: {}", error_msg);
                 
                 // Extract tx digest from error if it's a TransactionError
                 let tx_digest = if let Some(sui_error) = e.downcast_ref::<crate::error::SilvanaSuiInterfaceError>() {

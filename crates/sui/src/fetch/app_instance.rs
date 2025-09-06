@@ -73,6 +73,8 @@ pub struct AppInstance {
     pub settlements: HashMap<String, Settlement>,
     /// Whether the app is paused
     pub is_paused: bool,
+    /// Minimum time between blocks in milliseconds
+    pub min_time_between_blocks: u64,
     /// Creation timestamp
     pub created_at: u64,
     /// Last update timestamp
@@ -240,6 +242,7 @@ pub fn parse_app_instance_from_struct(
         last_settled_block_number: get_u64(struct_value, "last_settled_block_number"),
         settlements: parse_settlements(struct_value),
         is_paused: get_bool(struct_value, "isPaused"),
+        min_time_between_blocks: get_u64(struct_value, "min_time_between_blocks"),
         created_at: get_u64(struct_value, "created_at"),
         updated_at: get_u64(struct_value, "updated_at"),
     };
@@ -292,6 +295,7 @@ mod tests {
                 settlements
             },
             is_paused: false,
+            min_time_between_blocks: 60_000,
             created_at: 1234567890,
             updated_at: 1234567891,
         };

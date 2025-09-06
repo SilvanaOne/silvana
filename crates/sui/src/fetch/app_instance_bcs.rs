@@ -270,6 +270,7 @@ pub struct AppInstanceBcs {
     pub settlements: VecMap<MoveString, SettlementBcs>,
     #[serde(rename = "isPaused")]
     pub is_paused: bool,
+    pub min_time_between_blocks: u64,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -493,6 +494,7 @@ pub async fn fetch_app_instance_bcs(
         last_settled_block_number: raw.last_settled_block_number,
         settlements: parse_settlements_bcs(raw.settlements),
         is_paused: raw.is_paused,
+        min_time_between_blocks: raw.min_time_between_blocks,
         created_at: raw.created_at,
         updated_at: raw.updated_at,
     })

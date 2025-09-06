@@ -258,6 +258,59 @@ pub async fn terminate_job_tx(
     ).await
 }
 
+/// Create and submit a multicall transaction for batch job operations
+/// Executes operations in order: complete, fail, terminate, then start
+pub async fn multicall_job_operations_tx(
+    app_instance_str: &str,
+    complete_job_sequences: Vec<u64>,
+    fail_job_sequences: Vec<u64>,
+    fail_errors: Vec<String>,
+    terminate_job_sequences: Vec<u64>,
+    start_job_sequences: Vec<u64>,
+    gas_budget: Option<u64>,
+) -> Result<String> {
+    // Validate that fail arrays have same length
+    if fail_job_sequences.len() != fail_errors.len() {
+        return Err(anyhow!(
+            "fail_job_sequences and fail_errors must have the same length: {} != {}",
+            fail_job_sequences.len(),
+            fail_errors.len()
+        ));
+    }
+    
+    debug!(
+        "Creating multicall_app_job_operations transaction: {} complete, {} fail, {} terminate, {} start",
+        complete_job_sequences.len(),
+        fail_job_sequences.len(),
+        terminate_job_sequences.len(),
+        start_job_sequences.len()
+    );
+    
+    execute_app_instance_function_with_gas(
+        app_instance_str,
+        "multicall_app_job_operations",
+        gas_budget,
+        move |tb, app_instance_arg, clock_arg| {
+            // Create vector arguments for each operation type
+            let complete_arg = tb.input(sui_transaction_builder::Serialized(&complete_job_sequences));
+            let fail_sequences_arg = tb.input(sui_transaction_builder::Serialized(&fail_job_sequences));
+            let fail_errors_arg = tb.input(sui_transaction_builder::Serialized(&fail_errors));
+            let terminate_arg = tb.input(sui_transaction_builder::Serialized(&terminate_job_sequences));
+            let start_arg = tb.input(sui_transaction_builder::Serialized(&start_job_sequences));
+            
+            vec![
+                app_instance_arg,
+                complete_arg,
+                fail_sequences_arg,
+                fail_errors_arg,
+                terminate_arg,
+                start_arg,
+                clock_arg,
+            ]
+        },
+    ).await
+}
+
 /// Create and submit a transaction to restart failed jobs (with optional specific job sequences)
 pub async fn restart_failed_jobs_with_sequences_tx(
     app_instance_str: &str,
