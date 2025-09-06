@@ -172,6 +172,8 @@ impl SilvanaSuiInterface {
         fail_errors: Vec<String>,
         terminate_job_sequences: Vec<u64>,
         start_job_sequences: Vec<u64>,
+        start_job_memory_requirements: Vec<u64>,
+        available_memory: u64,
         gas_budget_sui: Option<f64>,
     ) -> Result<String, (String, Option<String>)> {
         // Validate that fail arrays have same length
@@ -185,13 +187,26 @@ impl SilvanaSuiInterface {
                 None,
             ));
         }
+        
+        // Validate that start job arrays have same length
+        if start_job_sequences.len() != start_job_memory_requirements.len() {
+            return Err((
+                format!(
+                    "start_job_sequences and start_job_memory_requirements must have the same length: {} != {}",
+                    start_job_sequences.len(),
+                    start_job_memory_requirements.len()
+                ),
+                None,
+            ));
+        }
 
         debug!(
-            "Attempting multicall job operations: {} complete, {} fail, {} terminate, {} start",
+            "Attempting multicall job operations: {} complete, {} fail, {} terminate, {} start (available memory: {})",
             complete_job_sequences.len(),
             fail_job_sequences.len(),
             terminate_job_sequences.len(),
-            start_job_sequences.len()
+            start_job_sequences.len(),
+            available_memory
         );
 
         let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
@@ -203,6 +218,8 @@ impl SilvanaSuiInterface {
             fail_errors,
             terminate_job_sequences.clone(),
             start_job_sequences.clone(),
+            start_job_memory_requirements.clone(),
+            available_memory,
             gas_budget_mist,
         ).await {
             Ok(tx_digest) => {

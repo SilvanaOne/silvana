@@ -718,7 +718,8 @@ public fun terminate_job(
 }
 
 // Multicall function to batch execute multiple job operations
-// Executes in order: complete, fail, terminate, then start
+// Executes in order: complete, fail, terminate, then start (with memory management)
+// For start operations: only starts jobs if sufficient memory is available
 public fun multicall_job_operations(
     jobs: &mut Jobs,
     complete_job_sequences: vector<u64>,
@@ -726,6 +727,8 @@ public fun multicall_job_operations(
     fail_errors: vector<String>,
     terminate_job_sequences: vector<u64>,
     start_job_sequences: vector<u64>,
+    start_job_memory_requirements: vector<u64>, // Memory required for each start job
+    available_memory: u64, // Total available memory
     clock: &Clock,
     ctx: &TxContext,
 ) {
@@ -734,7 +737,13 @@ public fun multicall_job_operations(
         vector::length(&fail_job_sequences) == vector::length(&fail_errors),
         EInvalidArguments,
     );
+    // Ensure start arrays have same length
+    assert!(
+        vector::length(&start_job_sequences) == vector::length(&start_job_memory_requirements),
+        EInvalidArguments,
+    );
     let now = clock::timestamp_ms(clock);
+    let mut remaining_memory = available_memory;
 
     // Process complete operations
     let mut complete_results = vector::empty<bool>();
@@ -770,13 +779,27 @@ public fun multicall_job_operations(
         i = i + 1;
     };
 
-    // Process start operations
+    // Process start operations with memory management
     let mut start_results = vector::empty<bool>();
     i = 0;
     let start_len = vector::length(&start_job_sequences);
     while (i < start_len) {
         let job_sequence = *vector::borrow(&start_job_sequences, i);
-        let result = start_job(jobs, job_sequence, clock, ctx);
+        let required_memory =
+            *vector::borrow(&start_job_memory_requirements, i);
+
+        // Only start job if sufficient memory is available
+        let result = if (remaining_memory >= required_memory) {
+            let start_result = start_job(jobs, job_sequence, clock, ctx);
+            // If job started successfully, deduct memory
+            if (start_result) {
+                remaining_memory = remaining_memory - required_memory;
+            };
+            start_result
+        } else {
+            false
+        };
+
         vector::push_back(&mut start_results, result);
         i = i + 1;
     };

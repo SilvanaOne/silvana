@@ -267,6 +267,8 @@ pub async fn multicall_job_operations_tx(
     fail_errors: Vec<String>,
     terminate_job_sequences: Vec<u64>,
     start_job_sequences: Vec<u64>,
+    start_job_memory_requirements: Vec<u64>,
+    available_memory: u64,
     gas_budget: Option<u64>,
 ) -> Result<String> {
     // Validate that fail arrays have same length
@@ -278,12 +280,22 @@ pub async fn multicall_job_operations_tx(
         ));
     }
     
+    // Validate that start job arrays have same length
+    if start_job_sequences.len() != start_job_memory_requirements.len() {
+        return Err(anyhow!(
+            "start_job_sequences and start_job_memory_requirements must have the same length: {} != {}",
+            start_job_sequences.len(),
+            start_job_memory_requirements.len()
+        ));
+    }
+    
     debug!(
-        "Creating multicall_app_job_operations transaction: {} complete, {} fail, {} terminate, {} start",
+        "Creating multicall_app_job_operations transaction: {} complete, {} fail, {} terminate, {} start (available memory: {})",
         complete_job_sequences.len(),
         fail_job_sequences.len(),
         terminate_job_sequences.len(),
-        start_job_sequences.len()
+        start_job_sequences.len(),
+        available_memory
     );
     
     execute_app_instance_function_with_gas(
@@ -297,6 +309,8 @@ pub async fn multicall_job_operations_tx(
             let fail_errors_arg = tb.input(sui_transaction_builder::Serialized(&fail_errors));
             let terminate_arg = tb.input(sui_transaction_builder::Serialized(&terminate_job_sequences));
             let start_arg = tb.input(sui_transaction_builder::Serialized(&start_job_sequences));
+            let start_memory_arg = tb.input(sui_transaction_builder::Serialized(&start_job_memory_requirements));
+            let available_memory_arg = tb.input(sui_transaction_builder::Serialized(&available_memory));
             
             vec![
                 app_instance_arg,
@@ -305,6 +319,8 @@ pub async fn multicall_job_operations_tx(
                 fail_errors_arg,
                 terminate_arg,
                 start_arg,
+                start_memory_arg,
+                available_memory_arg,
                 clock_arg,
             ]
         },

@@ -1242,6 +1242,8 @@ public fun multicall_app_job_operations(
     fail_errors: vector<String>,
     terminate_job_sequences: vector<u64>,
     start_job_sequences: vector<u64>,
+    start_job_memory_requirements: vector<u64>,
+    available_memory: u64,
     clock: &Clock,
     ctx: &TxContext,
 ) {
@@ -1252,6 +1254,8 @@ public fun multicall_app_job_operations(
         fail_errors,
         terminate_job_sequences,
         start_job_sequences,
+        start_job_memory_requirements,
+        available_memory,
         clock,
         ctx,
     )
