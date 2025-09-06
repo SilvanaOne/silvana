@@ -713,26 +713,26 @@ impl JobSearcher {
             
             // Step 3: Call multicall (only if not shutting down)
             if !self.state.is_shutting_down() {
-                debug!("Step 3: Executing multicall batches");
+                info!("Step 3: Executing multicall batches");
                 if let Err(e) = self.execute_multicall_batches().await {
                     error!("Failed to execute multicall batches: {}", e);
                 }
             } else {
-                debug!("Step 3: Skipping multicall due to shutdown");
+                info!("Step 3: Skipping multicall due to shutdown");
             }
             
             // Step 4: Try to start jobs with success status from multicall
             // This is already handled in execute_multicall_batches which adds successful jobs to buffer
-            debug!("Step 4: Successfully started jobs from multicall have been added to buffer");
+            info!("Step 4: Successfully started jobs from multicall have been added to buffer");
             
             // Step 5: Process newly buffered jobs - start Docker containers
-            debug!("Step 5: Processing newly buffered jobs from multicall");
+            info!("Step 5: Processing newly buffered jobs from multicall");
             if let Err(e) = self.process_buffer_jobs().await {
                 error!("Failed to process buffer jobs after multicall: {}", e);
             }
             
             // Step 6: Sleep for MULTICALL_INTERVAL_SECS
-            debug!("Step 6: Sleeping for {} seconds before next cycle", MULTICALL_INTERVAL_SECS);
+            info!("Step 6: Sleeping for {} seconds before next cycle", MULTICALL_INTERVAL_SECS);
             sleep(Duration::from_secs(MULTICALL_INTERVAL_SECS)).await;
             
             // Step 7: Loop back to step 1
@@ -975,15 +975,13 @@ impl JobSearcher {
 
     /// Execute pending multicall batches
     async fn execute_multicall_batches(&self) -> Result<()> {
-        use std::time::Duration;
-        
-        // Check for app instances with pending requests that have waited long enough
+        // Check for app instances with pending requests 
         let app_instances = self.state
-            .has_pending_multicall_requests(Duration::from_secs(MULTICALL_INTERVAL_SECS))
+            .has_pending_multicall_requests()
             .await;
 
         if app_instances.is_empty() {
-            debug!("No app instances ready for multicall execution (waiting for {} second interval)", MULTICALL_INTERVAL_SECS);
+            debug!("No app instances with pending multicall requests");
             return Ok(());
         }
 
@@ -1006,8 +1004,10 @@ impl JobSearcher {
 
         for app_instance in app_instances {
             if let Some(requests) = self.state.take_multicall_requests(&app_instance).await {
-                // Get available memory similar to hardware check
-                let available_memory_bytes = get_available_memory_gb() * 1024 * 1024 * 1024;
+                // Get available memory with coefficient (consistent with job selection logic)
+                let raw_available_memory_gb = get_available_memory_gb();
+                let available_memory_with_coefficient_gb = raw_available_memory_gb as f64 * JOB_BUFFER_MEMORY_COEFFICIENT;
+                let available_memory_bytes = (available_memory_with_coefficient_gb * 1024.0 * 1024.0 * 1024.0) as u64;
 
                 // Prepare all operations for this app instance
                 let all_start_jobs = requests.start_jobs;

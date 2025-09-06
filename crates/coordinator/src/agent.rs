@@ -121,7 +121,30 @@ impl AgentJobDatabase {
 
         let job = {
             let mut session_jobs = self.session_jobs.write().await;
-            session_jobs.remove(session_id)
+            
+            // Debug: Log all session jobs before attempting removal
+            if session_jobs.is_empty() {
+                debug!("No session jobs available at all");
+            } else {
+                debug!("Available session jobs: {:?}", session_jobs.keys().collect::<Vec<_>>());
+            }
+            
+            // Get job for this session if it exists
+            if let Some(job) = session_jobs.get(session_id) {
+                // Validate that this job matches the requested agent/method
+                if job.developer == developer && job.agent == agent && job.agent_method == agent_method {
+                    debug!("Found matching session job for session {}: dev={}, agent={}, method={}", 
+                           session_id, developer, agent, agent_method);
+                    session_jobs.remove(session_id)
+                } else {
+                    debug!("Session job found for {} but doesn't match agent: job(dev={}, agent={}, method={}) vs requested(dev={}, agent={}, method={})", 
+                           session_id, job.developer, job.agent, job.agent_method, developer, agent, agent_method);
+                    None
+                }
+            } else {
+                debug!("No session job found for session_id: {}", session_id);
+                None
+            }
         };
         
         if let Some(job) = job {

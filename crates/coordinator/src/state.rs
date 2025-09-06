@@ -6,8 +6,17 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{RwLock, Mutex};
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 use tracing::{debug, error, info};
+
+/// Normalize app instance ID to always have 0x prefix
+fn normalize_app_instance_id(app_instance: &str) -> String {
+    if app_instance.starts_with("0x") {
+        app_instance.to_string()
+    } else {
+        format!("0x{}", app_instance)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CurrentAgent {
@@ -357,7 +366,8 @@ impl SharedState {
     /// Remove an app_instance when it has no pending jobs
     #[allow(dead_code)]
     pub async fn remove_app_instance(&self, app_instance_id: &str) {
-        self.jobs_tracker.remove_app_instance(app_instance_id).await;
+        let app_instance_id = normalize_app_instance_id(app_instance_id);
+        self.jobs_tracker.remove_app_instance(&app_instance_id).await;
 
         // Check if we still have app_instances with pending jobs
         let count = self.jobs_tracker.app_instances_count().await;
@@ -455,6 +465,7 @@ impl SharedState {
     /// Add a create job request to the batch
     #[allow(dead_code)]
     pub async fn add_create_job_request(&self, app_instance: String, request: CreateJobRequest) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -490,6 +501,7 @@ impl SharedState {
     /// Add a start job request to the batch
     #[allow(dead_code)]
     pub async fn add_start_job_request(&self, app_instance: String, job_sequence: u64, memory_requirement: u64) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -527,6 +539,7 @@ impl SharedState {
 
     /// Add a complete job request to the batch
     pub async fn add_complete_job_request(&self, app_instance: String, job_sequence: u64) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -552,6 +565,7 @@ impl SharedState {
 
     /// Add a fail job request to the batch
     pub async fn add_fail_job_request(&self, app_instance: String, job_sequence: u64, error: String) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -588,9 +602,10 @@ impl SharedState {
 
     /// Check if a specific job has pending complete or fail requests in multicall queue
     pub async fn has_pending_job_request(&self, app_instance: &str, job_sequence: u64) -> bool {
+        let app_instance = normalize_app_instance_id(app_instance);
         let requests = self.multicall_requests.lock().await;
         
-        if let Some(app_requests) = requests.get(app_instance) {
+        if let Some(app_requests) = requests.get(&app_instance) {
             // Check for complete job requests
             let has_complete = app_requests.complete_jobs.iter()
                 .any(|req| req.job_sequence == job_sequence);
@@ -607,6 +622,7 @@ impl SharedState {
 
     /// Add a terminate job request to the batch
     pub async fn add_terminate_job_request(&self, app_instance: String, job_sequence: u64) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -632,6 +648,7 @@ impl SharedState {
 
     /// Add an update state for sequence request to the batch
     pub async fn add_update_state_for_sequence_request(&self, app_instance: String, request: UpdateStateForSequenceRequest) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -654,6 +671,7 @@ impl SharedState {
     
     /// Add a submit proof request to the batch
     pub async fn add_submit_proof_request(&self, app_instance: String, request: SubmitProofRequest) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -676,6 +694,7 @@ impl SharedState {
 
     /// Add a create app job request to the batch (for settlement and other app jobs)
     pub async fn add_create_app_job_request(&self, app_instance: String, request: CreateAppJobRequest) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -716,6 +735,7 @@ impl SharedState {
     
     /// Add a create merge job request to the batch
     pub async fn add_create_merge_job_request(&self, app_instance: String, request: CreateMergeJobRequest) {
+        let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
         let entry = requests.entry(app_instance.clone()).or_insert_with(|| MulticallRequests {
             _app_instance: app_instance.clone(),
@@ -748,28 +768,26 @@ impl SharedState {
 
     /// Get and clear all pending multicall requests for an app instance
     pub async fn take_multicall_requests(&self, app_instance: &str) -> Option<MulticallRequests> {
+        let app_instance = normalize_app_instance_id(app_instance);
         let mut requests = self.multicall_requests.lock().await;
-        requests.remove(app_instance)
+        requests.remove(&app_instance)
     }
 
     /// Check if any app instance has pending requests ready for execution
-    pub async fn has_pending_multicall_requests(&self, interval: Duration) -> Vec<String> {
+    pub async fn has_pending_multicall_requests(&self) -> Vec<String> {
         let requests = self.multicall_requests.lock().await;
-        let now = Instant::now();
         
         requests
             .iter()
             .filter(|(_, req)| {
-                // Check if enough time has passed since last execution
-                now.duration_since(req.last_execution) >= interval &&
-                // Check if there are any pending operations
-                (!req.create_jobs.is_empty() ||
+                // Check if there are any pending operations (no interval wait)
+                !req.create_jobs.is_empty() ||
                  !req.start_jobs.is_empty() || 
                  !req.complete_jobs.is_empty() || 
                  !req.fail_jobs.is_empty() || 
                  !req.terminate_jobs.is_empty() ||
                  !req.submit_proofs.is_empty() ||
-                 !req.create_merge_jobs.is_empty())
+                 !req.create_merge_jobs.is_empty()
             })
             .map(|(app_instance, _)| app_instance.clone())
             .collect()
@@ -801,8 +819,9 @@ impl SharedState {
     /// Update last execution time for an app instance
     #[allow(dead_code)]
     pub async fn update_multicall_execution_time(&self, app_instance: &str) {
+        let app_instance = normalize_app_instance_id(app_instance);
         let mut requests = self.multicall_requests.lock().await;
-        if let Some(entry) = requests.get_mut(app_instance) {
+        if let Some(entry) = requests.get_mut(&app_instance) {
             entry.last_execution = Instant::now();
         }
     }

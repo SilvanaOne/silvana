@@ -72,17 +72,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
             buffer_count
         );
 
-        // Check if system is shutting down - allow returning buffered jobs but no new ones
-        if self.state.is_shutting_down() && buffer_count == 0 {
-            debug!("System is shutting down and buffer is empty, returning empty GetJob response");
-            return Ok(Response::new(GetJobResponse {
-                success: true,
-                message: "System is shutting down".to_string(),
-                job: None,
-            }));
-        }
-
         // First check for session-specific jobs (jobs reserved for this Docker session)
+        // Session jobs should ALWAYS be returned, even during shutdown
         'job_search: loop {
             if let Some(agent_job) = self.state
                 .get_agent_job_db()
@@ -334,22 +325,35 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         }
         
-        // If buffer is empty, return no job available
+        // If no session jobs and no buffer jobs, check if system is shutting down
         let elapsed = start_time.elapsed();
         let elapsed_ms = elapsed.as_millis() as f64;
         
         // Record gRPC span for APM
         coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
         
-        info!(
-            "⭕ GetJob: dev={}, agent={}/{}, no_job_found, time={:?}",
-            req.developer, req.agent, req.agent_method, elapsed
-        );
-        Ok(Response::new(GetJobResponse {
-            success: true,
-            message: "No pending jobs found".to_string(),
-            job: None,
-        }))
+        if self.state.is_shutting_down() {
+            debug!("System is shutting down and no reserved/buffered jobs available");
+            info!(
+                "⭕ GetJob: dev={}, agent={}/{}, shutdown_no_jobs, time={:?}",
+                req.developer, req.agent, req.agent_method, elapsed
+            );
+            Ok(Response::new(GetJobResponse {
+                success: true,
+                message: "System is shutting down".to_string(),
+                job: None,
+            }))
+        } else {
+            info!(
+                "⭕ GetJob: dev={}, agent={}/{}, no_job_found, time={:?}",
+                req.developer, req.agent, req.agent_method, elapsed
+            );
+            Ok(Response::new(GetJobResponse {
+                success: true,
+                message: "No pending jobs found".to_string(),
+                job: None,
+            }))
+        }
     }
 
     async fn complete_job(

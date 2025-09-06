@@ -1294,8 +1294,8 @@ where
     // Determine if we need to estimate gas
     let needs_gas_estimation = custom_gas_budget.is_none();
 
-    // Use custom gas budget or default to 0.5 SUI for simulation
-    let mut gas_budget = custom_gas_budget.unwrap_or(500_000_000);
+    // Use custom gas budget or default to 1.0 SUI for simulation
+    let mut gas_budget = custom_gas_budget.unwrap_or(1_000_000_000);
     debug!(
         "Initial gas budget: {} MIST ({} SUI), needs estimation: {}",
         gas_budget,
@@ -1513,7 +1513,7 @@ where
                                                     "Gas estimation returned invalid value: {} MIST, using fallback budget of 0.5 SUI",
                                                     final_budget
                                                 );
-                                                gas_budget = 500_000_000; // 0.5 SUI fallback
+                                                gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
                                                 gas_budget
                                             } else {
                                                 warn!(
@@ -1599,29 +1599,36 @@ where
                                             );
                                         }
                                     } else {
-                                        warn!("Dry run succeeded but no gas cost summary available, using fallback budget of 0.5 SUI");
-                                        gas_budget = 500_000_000; // 0.5 SUI fallback
+                                        warn!("Dry run succeeded but no gas cost summary available, using fallback budget of 1.0 SUI");
+                                        gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
                                     }
                                 } else {
                                     // Simulation failed
                                     if let Some(ref error) = status.error {
-                                        warn!("Dry run failed with error: {:?}, using fallback budget of 0.5 SUI", error);
+                                        warn!("Dry run failed with error: {:?}, using fallback budget of 1.0 SUI", error);
                                     } else {
-                                        warn!("Dry run failed with unknown error, using fallback budget of 0.5 SUI");
+                                        warn!("Dry run failed with unknown error, using fallback budget of 1.0 SUI");
                                     }
-                                    gas_budget = 500_000_000; // 0.5 SUI fallback
+                                    gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to perform dry run: {}, using fallback budget of 0.5 SUI", e);
-                    gas_budget = 500_000_000; // 0.5 SUI fallback
+                    warn!("Failed to perform dry run: {}, using fallback budget of 1.0 SUI", e);
+                    gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
                 }
             }
         }
 
+        // Log final gas budget before execution
+        info!(
+            "Executing transaction with gas budget: {} MIST ({} SUI)",
+            gas_budget,
+            gas_budget as f64 / 1_000_000_000.0
+        );
+        
         // Execute transaction via gRPC
         let mut exec = client.execution_client();
         let req = proto::ExecuteTransactionRequest {

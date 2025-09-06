@@ -120,7 +120,7 @@ pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
 /// Memory calculation coefficient for job buffer sizing.
 /// Multiplies available memory to allow more jobs to be buffered between multicalls.
 /// Higher coefficient = more jobs in buffer to avoid running out before next multicall.
-pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 5.0;
+pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 10.0;
 
 /// Interval for reconciliation task (in seconds).
 /// The coordinator reconciles its state with the blockchain at this interval.
