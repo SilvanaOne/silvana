@@ -711,51 +711,19 @@ impl JobSearcher {
                 debug!("No new jobs found to collect");
             }
             
-            // Step 3: Call multicall (only if not shutting down)
+            // Step 3: Smart batching - check if we should execute multicall
             if !self.state.is_shutting_down() {
-                info!("Step 3: Executing multicall batches");
-                if let Err(e) = self.execute_multicall_batches().await {
-                    error!("Failed to execute multicall batches: {}", e);
-                }
-            } else {
-                info!("Step 3: Skipping multicall due to shutdown");
-            }
-            
-            // Step 4: Try to start jobs with success status from multicall
-            // This is already handled in execute_multicall_batches which adds successful jobs to buffer
-            info!("Step 4: Successfully started jobs from multicall have been added to buffer");
-            
-            // Step 5: Process newly buffered jobs - start Docker containers
-            info!("Step 5: Processing newly buffered jobs from multicall");
-            if let Err(e) = self.process_buffer_jobs().await {
-                error!("Failed to process buffer jobs after multicall: {}", e);
-            }
-            
-            // Step 6: Smart batching - monitor every 10 seconds and execute multicalls when needed
-            info!("Step 6: Starting smart batching monitoring loop");
-            
-            loop {
-                // Sleep for 10 seconds between monitoring checks
-                sleep(Duration::from_secs(10)).await;
-                
-                // Check for shutdown
-                if self.state.is_shutting_down() {
-                    break;
-                }
-                
-                // Check if we should execute multicall due to limits
                 let should_execute_by_limit = self.state.should_execute_multicall_by_limit().await;
                 let should_execute_by_time = self.state.should_execute_multicall_by_time().await;
                 let total_operations = self.state.get_total_operations_count().await;
                 
                 if should_execute_by_limit {
                     info!(
-                        "Executing multicall due to operation limit: {} operations >= {} limit",
+                        "Step 3: Executing multicall due to operation limit: {} operations >= {} limit",
                         total_operations,
                         sui::get_max_operations_per_multicall()
                     );
                     
-                    // Execute multicall immediately
                     if let Err(e) = self.execute_multicall_batches().await {
                         error!("Failed to execute limit-triggered multicall: {}", e);
                     }
@@ -764,16 +732,12 @@ impl JobSearcher {
                     if let Err(e) = self.process_buffer_jobs().await {
                         error!("Failed to process buffer jobs after limit-triggered multicall: {}", e);
                     }
-                    
-                    // Continue monitoring
-                    continue;
                 } else if should_execute_by_time && total_operations > 0 {
                     info!(
-                        "Executing multicall due to time interval: {} seconds passed with {} operations",
+                        "Step 3: Executing multicall due to time interval: {} seconds passed with {} operations",
                         MULTICALL_INTERVAL_SECS, total_operations
                     );
                     
-                    // Execute multicall after time interval
                     if let Err(e) = self.execute_multicall_batches().await {
                         error!("Failed to execute time-triggered multicall: {}", e);
                     }
@@ -782,27 +746,27 @@ impl JobSearcher {
                     if let Err(e) = self.process_buffer_jobs().await {
                         error!("Failed to process buffer jobs after time-triggered multicall: {}", e);
                     }
-                    
-                    // Continue monitoring
-                    continue;
                 } else if should_execute_by_time {
                     // Time passed but no operations - just update timestamp to reset the timer
-                    debug!("Time interval passed but no operations to execute");
+                    debug!("Step 3: Time interval passed but no operations to execute");
                     self.state.update_last_multicall_timestamp().await;
-                }
-                
-                // If neither condition met, continue monitoring
-                if total_operations > 0 {
+                } else if total_operations > 0 {
                     debug!(
-                        "Monitoring: {} operations pending, {} seconds since last multicall",
+                        "Step 3: {} operations pending, waiting {} more seconds ({}s elapsed since last multicall)",
                         total_operations,
+                        MULTICALL_INTERVAL_SECS - self.state.get_seconds_since_last_multicall().await,
                         self.state.get_seconds_since_last_multicall().await
                     );
+                } else {
+                    debug!("Step 3: No operations to process");
                 }
-                
-                // Break out of monitoring loop to start next main cycle
-                break;
+            } else {
+                debug!("Step 3: Skipping multicall due to shutdown");
             }
+            
+            // Step 4: Sleep for 10 seconds before next cycle
+            info!("Step 4: Sleeping for 10 seconds before next cycle");
+            sleep(Duration::from_secs(10)).await;
             
             // Step 7: Loop back to step 1
         }
