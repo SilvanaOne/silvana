@@ -1,8 +1,8 @@
 use crate::agent::AgentJob;
 use crate::constants::{
-    AGENT_MIN_MEMORY_REQUIREMENT_GB,
-    CONTAINER_STATUS_CHECK_INTERVAL_SECS, DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS,
-    JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS, JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE,
+    AGENT_MIN_MEMORY_REQUIREMENT_GB, CONTAINER_STATUS_CHECK_INTERVAL_SECS,
+    DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS, JOB_ACQUISITION_DELAY_PER_CONTAINER_MS,
+    JOB_ACQUISITION_MAX_DELAY_MS, JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE,
     JOB_STATUS_CHECK_DELAY_SECS, MAX_CONCURRENT_AGENT_CONTAINERS, MULTICALL_INTERVAL_SECS,
 };
 use crate::error::{CoordinatorError, Result};
@@ -154,12 +154,6 @@ impl JobSearcher {
     async fn process_buffer_jobs(&self) -> Result<()> {
         // Check buffer and process jobs one by one until limits are reached
         loop {
-            // If shutting down, don't start new containers
-            if self.state.is_shutting_down() {
-                debug!("Shutdown requested, not starting new Docker containers");
-                break;
-            }
-            
             // Check current container counts
             let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
             let total_containers = loading_count + running_count;
@@ -183,8 +177,8 @@ impl JobSearcher {
             let started_job = started_job.unwrap();
             info!(
                 "Processing buffered job: app_instance={}, sequence={}, memory={:.2} GB",
-                started_job.app_instance, 
-                started_job.job_sequence, 
+                started_job.app_instance,
+                started_job.job_sequence,
                 started_job.memory_requirement as f64 / (1024.0 * 1024.0 * 1024.0)
             );
 
@@ -219,10 +213,7 @@ impl JobSearcher {
             match job_result {
                 Ok(Some(job)) => {
                     // Check if job is still in a state we can process
-                    let can_process = matches!(
-                        job.status,
-                        sui::fetch::JobStatus::Pending | sui::fetch::JobStatus::Running
-                    );
+                    let can_process = matches!(job.status, sui::fetch::JobStatus::Running);
 
                     debug!(
                         "Buffered job {} status: {:?}, can_process: {}",
@@ -263,7 +254,7 @@ impl JobSearcher {
                         Ok(false) => {
                             // Put job back in buffer (at the front) and wait
                             self.state.add_started_jobs(vec![started_job]).await;
-                            debug!(
+                            warn!(
                                 "Insufficient resources for job {}, returned to buffer",
                                 job.job_sequence
                             );
@@ -283,7 +274,7 @@ impl JobSearcher {
                         match lock_manager.try_lock_job(&job.app_instance, job.job_sequence) {
                             Some(lock) => lock,
                             None => {
-                                debug!("Job {} already locked, skipping", job.job_sequence);
+                                warn!("Job {} already locked, skipping", job.job_sequence);
                                 continue;
                             }
                         };
@@ -450,37 +441,39 @@ impl JobSearcher {
             // Job searcher cycle:
             // 1) Try to start all jobs from buffer (from previous cycle)
             // 2) Collect new jobs
-            // 3) Call multicall  
+            // 3) Call multicall
             // 4) Multicall adds successfully started jobs to buffer
             // 5) Process newly buffered jobs - start Docker containers
             // 6) Sleep for MULTICALL_INTERVAL_SECS
             // 7) Repeat
 
             debug!("Starting job searcher cycle");
-            
+
             // Step 1: Try to start all jobs from buffer
-            debug!("Step 1: Processing jobs from buffer");
+            info!("Step 1: Processing jobs from buffer");
             if let Err(e) = self.process_buffer_jobs().await {
                 error!("Failed to process buffer jobs: {}", e);
             }
 
             // Check if shutdown was requested - if so, skip collecting new jobs
             if self.state.is_shutting_down() {
-                debug!("Shutdown requested, skipping new job collection and waiting for existing jobs to complete");
+                info!(
+                    "Shutdown requested, skipping new job collection and waiting for existing jobs to complete"
+                );
                 // Wait a bit before checking again
                 sleep(Duration::from_secs(5)).await;
                 continue;
             }
 
             // Step 2: Collect new jobs
-            debug!("Step 2: Collecting new jobs");
-            
+            info!("Step 2: Collecting new jobs");
+
             // Periodically clean up expired entries from the failed jobs cache
             self.jobs_cache.cleanup_expired().await;
-            
+
             // Check for pending jobs and clean up app_instances without jobs
             let jobs = self.check_and_clean_pending_jobs().await?;
-            
+
             if !jobs.is_empty() {
                 // Calculate available memory for new jobs
                 let hardware_total_gb = get_total_memory_gb();
@@ -510,7 +503,8 @@ impl JobSearcher {
                 // Calculate memory available for new jobs with coefficient multiplier
                 // Available = (Hardware Available - Buffer Reserved) * Coefficient
                 // Coefficient allows more jobs to be buffered between multicall intervals
-                let memory_for_new_jobs_gb = (hardware_available_gb as f64 - buffer_memory_gb) * JOB_BUFFER_MEMORY_COEFFICIENT;
+                let memory_for_new_jobs_gb = (hardware_available_gb as f64 - buffer_memory_gb)
+                    * JOB_BUFFER_MEMORY_COEFFICIENT;
 
                 info!(
                     "Memory status: Hardware total={:.2} GB, available={:.2} GB, running={:.2} GB, buffer={:.2} GB ({}), available for new={:.2} GB (x{:.1} coefficient)",
@@ -522,7 +516,7 @@ impl JobSearcher {
                     memory_for_new_jobs_gb,
                     JOB_BUFFER_MEMORY_COEFFICIENT
                 );
-                
+
                 // Group jobs by app_instance for multicall batching
                 let mut jobs_by_app_instance: std::collections::HashMap<String, Vec<Job>> =
                     std::collections::HashMap::new();
@@ -615,11 +609,7 @@ impl JobSearcher {
                             batch_memory_gb += job_memory_gb;
                             let memory_requirement =
                                 (agent_method.min_memory_gb as u64) * 1024 * 1024 * 1024;
-                            jobs_to_add.push((
-                                job,
-                                memory_requirement,
-                                agent_method.min_memory_gb,
-                            ));
+                            jobs_to_add.push((job, memory_requirement, agent_method.min_memory_gb));
                         } else {
                             error!(
                                 "Failed to fetch agent method for job {} ({}/{}/{})",
@@ -710,41 +700,47 @@ impl JobSearcher {
             } else {
                 debug!("No new jobs found to collect");
             }
-            
+
             // Step 3: Smart batching - check if we should execute multicall
             if !self.state.is_shutting_down() {
                 let should_execute_by_limit = self.state.should_execute_multicall_by_limit().await;
                 let should_execute_by_time = self.state.should_execute_multicall_by_time().await;
                 let total_operations = self.state.get_total_operations_count().await;
-                
+
                 if should_execute_by_limit {
                     info!(
                         "Step 3: Executing multicall due to operation limit: {} operations >= {} limit",
                         total_operations,
                         sui::get_max_operations_per_multicall()
                     );
-                    
+
                     if let Err(e) = self.execute_multicall_batches().await {
                         error!("Failed to execute limit-triggered multicall: {}", e);
                     }
-                    
+
                     // Process newly buffered jobs from multicall
                     if let Err(e) = self.process_buffer_jobs().await {
-                        error!("Failed to process buffer jobs after limit-triggered multicall: {}", e);
+                        error!(
+                            "Failed to process buffer jobs after limit-triggered multicall: {}",
+                            e
+                        );
                     }
                 } else if should_execute_by_time && total_operations > 0 {
                     info!(
                         "Step 3: Executing multicall due to time interval: {} seconds passed with {} operations",
                         MULTICALL_INTERVAL_SECS, total_operations
                     );
-                    
+
                     if let Err(e) = self.execute_multicall_batches().await {
                         error!("Failed to execute time-triggered multicall: {}", e);
                     }
-                    
+
                     // Process newly buffered jobs from multicall
                     if let Err(e) = self.process_buffer_jobs().await {
-                        error!("Failed to process buffer jobs after time-triggered multicall: {}", e);
+                        error!(
+                            "Failed to process buffer jobs after time-triggered multicall: {}",
+                            e
+                        );
                     }
                 } else if should_execute_by_time {
                     // Time passed but no operations - just update timestamp to reset the timer
@@ -754,7 +750,8 @@ impl JobSearcher {
                     debug!(
                         "Step 3: {} operations pending, waiting {} more seconds ({}s elapsed since last multicall)",
                         total_operations,
-                        MULTICALL_INTERVAL_SECS - self.state.get_seconds_since_last_multicall().await,
+                        MULTICALL_INTERVAL_SECS
+                            - self.state.get_seconds_since_last_multicall().await,
                         self.state.get_seconds_since_last_multicall().await
                     );
                 } else {
@@ -763,11 +760,11 @@ impl JobSearcher {
             } else {
                 debug!("Step 3: Skipping multicall due to shutdown");
             }
-            
+
             // Step 4: Sleep for 10 seconds before next cycle
             info!("Step 4: Sleeping for 10 seconds before next cycle");
             sleep(Duration::from_secs(10)).await;
-            
+
             // Step 7: Loop back to step 1
         }
     }
@@ -1008,28 +1005,33 @@ impl JobSearcher {
 
     /// Execute pending multicall batches
     async fn execute_multicall_batches(&self) -> Result<()> {
-        // Check for app instances with pending requests 
-        let app_instances = self.state
-            .has_pending_multicall_requests()
-            .await;
+        // Check for app instances with pending requests
+        let app_instances = self.state.has_pending_multicall_requests().await;
 
         if app_instances.is_empty() {
             debug!("No app instances with pending multicall requests");
             return Ok(());
         }
 
-        debug!("Found {} app instances ready for multicall execution", app_instances.len());
-        self.execute_multicall_batches_for_app_instances(app_instances).await
+        debug!(
+            "Found {} app instances ready for multicall execution",
+            app_instances.len()
+        );
+        self.execute_multicall_batches_for_app_instances(app_instances)
+            .await
     }
-    
+
     /// Execute single multicall for all app instances (respects MULTICALL_INTERVAL_SECS)
-    async fn execute_multicall_batches_for_app_instances(&self, app_instances: Vec<String>) -> Result<()> {
+    async fn execute_multicall_batches_for_app_instances(
+        &self,
+        app_instances: Vec<String>,
+    ) -> Result<()> {
         if app_instances.is_empty() {
             return Ok(());
         }
 
         let max_operations = sui::get_max_operations_per_multicall();
-        
+
         // Build only ONE batch per call - don't loop through multiple batches
         let mut current_batch_operations = Vec::new();
         let mut current_batch_started_jobs = Vec::new();
@@ -1041,44 +1043,57 @@ impl JobSearcher {
             if current_operation_count >= max_operations {
                 break; // Batch is full
             }
-            
+
             // Try to get some operations from this app instance (without taking all)
-            if let Some(operations) = self.take_partial_multicall_operations(&app_instance, max_operations - current_operation_count).await {
+            if let Some(operations) = self
+                .take_partial_multicall_operations(
+                    &app_instance,
+                    max_operations - current_operation_count,
+                )
+                .await
+            {
                 let operation_count = operations.total_operations();
                 if operation_count > 0 {
                     has_operations = true;
                     current_operation_count += operation_count;
-                    
+
                     // Collect started jobs for buffer management
                     for (i, sequence) in operations.start_job_sequences.iter().enumerate() {
-                        let memory_req = operations.start_job_memory_requirements.get(i).copied().unwrap_or(0);
-                        current_batch_started_jobs.push((app_instance.clone(), *sequence, memory_req));
+                        let memory_req = operations
+                            .start_job_memory_requirements
+                            .get(i)
+                            .copied()
+                            .unwrap_or(0);
+                        current_batch_started_jobs.push((
+                            app_instance.clone(),
+                            *sequence,
+                            memory_req,
+                        ));
                     }
-                    
+
                     info!(
                         "Added {} operations from app_instance {} to batch (batch total: {})",
-                        operation_count,
-                        app_instance,
-                        current_operation_count
+                        operation_count, app_instance, current_operation_count
                     );
-                    
+
                     current_batch_operations.push(operations);
                 }
             }
         }
-        
+
         // If no operations were collected, we're done
         if !has_operations {
             debug!("No operations to process in this batch");
             return Ok(());
         }
-        
+
         // Execute this single batch
         info!(
             "Executing multicall batch with {} operations from {} app instances",
-            current_operation_count, current_batch_operations.len()
+            current_operation_count,
+            current_batch_operations.len()
         );
-        
+
         let mut sui_interface = sui::SilvanaSuiInterface::new();
         match sui_interface
             .multicall_job_operations(current_batch_operations, None)
@@ -1093,29 +1108,31 @@ impl JobSearcher {
                 // Add only successfully started jobs to buffer for container launching
                 let successful_start_sequences = result.successful_start_jobs();
                 let failed_start_sequences = result.failed_start_jobs();
-                
+
                 if !failed_start_sequences.is_empty() {
                     warn!("Some start jobs failed: {:?}", failed_start_sequences);
                 }
-                
+
                 // Filter started jobs to only include successful ones
                 let successful_started_jobs: Vec<_> = current_batch_started_jobs
                     .into_iter()
                     .filter(|(_, sequence, _)| successful_start_sequences.contains(sequence))
                     .collect();
-                
+
                 for (app_instance, sequence, memory_req) in successful_started_jobs.iter() {
-                    self.state.add_started_jobs(vec![crate::state::StartedJob {
-                        app_instance: app_instance.clone(),
-                        job_sequence: *sequence,
-                        memory_requirement: *memory_req,
-                    }]).await;
+                    self.state
+                        .add_started_jobs(vec![crate::state::StartedJob {
+                            app_instance: app_instance.clone(),
+                            job_sequence: *sequence,
+                            memory_requirement: *memory_req,
+                        }])
+                        .await;
                 }
 
                 info!(
                     "Added {} successfully started jobs to container launch buffer (out of {} attempted)",
-                    successful_started_jobs.len(), 
-                    successful_start_sequences.len() + failed_start_sequences.len()
+                    successful_started_jobs.len(),
+                    successful_start_sequences.len() + failed_start_sequences.len(),
                 );
 
                 // Update the last multicall timestamp after successful execution
@@ -1137,16 +1154,20 @@ impl JobSearcher {
     }
 
     /// Take partial operations from an app instance up to the specified limit
-    async fn take_partial_multicall_operations(&self, app_instance: &str, max_operations: usize) -> Option<sui::MulticallOperations> {
+    async fn take_partial_multicall_operations(
+        &self,
+        app_instance: &str,
+        max_operations: usize,
+    ) -> Option<sui::MulticallOperations> {
         let app_instance = crate::state::normalize_app_instance_id(app_instance);
         let mut requests_lock = self.state.get_multicall_requests_mut().await;
-        
+
         if let Some(requests) = requests_lock.get_mut(&app_instance) {
             let mut operations_count = 0;
             let mut taken_operations = sui::MulticallOperations::new(app_instance.clone(), 0);
-            
+
             // Take operations one by one until we hit the limit
-            
+
             // Start jobs - but sort them first: settlement jobs first, then merge jobs by sequence, then other jobs by sequence
             if operations_count < max_operations && !requests.start_jobs.is_empty() {
                 // Sort start jobs: settlement first, then merge by sequence, then others by sequence
@@ -1155,72 +1176,102 @@ impl JobSearcher {
                     // For now, let's sort by job sequence and handle settlement validation below
                     a.job_sequence.cmp(&b.job_sequence)
                 });
-                
+
                 // Take start jobs with validation
                 let mut validated_start_jobs = Vec::new();
                 let mut remaining_start_jobs = Vec::new();
-                
+
                 for start_job in requests.start_jobs.drain(..) {
                     if operations_count >= max_operations {
                         remaining_start_jobs.push(start_job);
                         continue;
                     }
-                    
+
                     // Validate settlement jobs by checking chain
                     let is_valid = true;
-                    if let Ok(Some(_chain)) = sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&app_instance, start_job.job_sequence).await {
-                        info!("✅ Settlement start_job {} for app_instance {} - validated", start_job.job_sequence, app_instance);
-                    } else if let Err(e) = sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&app_instance, start_job.job_sequence).await {
-                        warn!("Failed to lookup chain for start_job {} in app_instance {}: {} - including anyway", start_job.job_sequence, app_instance, e);
+                    if let Ok(Some(_chain)) =
+                        sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
+                            &app_instance,
+                            start_job.job_sequence,
+                        )
+                        .await
+                    {
+                        info!(
+                            "✅ Settlement start_job {} for app_instance {} - validated",
+                            start_job.job_sequence, app_instance
+                        );
+                    } else if let Err(e) =
+                        sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
+                            &app_instance,
+                            start_job.job_sequence,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "Failed to lookup chain for start_job {} in app_instance {}: {} - including anyway",
+                            start_job.job_sequence, app_instance, e
+                        );
                     }
-                    
+
                     if is_valid {
-                        taken_operations.start_job_sequences.push(start_job.job_sequence);
-                        taken_operations.start_job_memory_requirements.push(start_job.memory_requirement);
+                        taken_operations
+                            .start_job_sequences
+                            .push(start_job.job_sequence);
+                        taken_operations
+                            .start_job_memory_requirements
+                            .push(start_job.memory_requirement);
                         operations_count += 1;
                         validated_start_jobs.push(start_job);
                     } else {
                         remaining_start_jobs.push(start_job);
                     }
                 }
-                
+
                 // Put remaining jobs back
                 requests.start_jobs = remaining_start_jobs;
             }
-            
+
             // Complete jobs
             while operations_count < max_operations && !requests.complete_jobs.is_empty() {
                 let complete_job = requests.complete_jobs.remove(0);
-                taken_operations.complete_job_sequences.push(complete_job.job_sequence);
+                taken_operations
+                    .complete_job_sequences
+                    .push(complete_job.job_sequence);
                 operations_count += 1;
             }
-            
+
             // Fail jobs
             while operations_count < max_operations && !requests.fail_jobs.is_empty() {
                 let fail_job = requests.fail_jobs.remove(0);
-                taken_operations.fail_job_sequences.push(fail_job.job_sequence);
+                taken_operations
+                    .fail_job_sequences
+                    .push(fail_job.job_sequence);
                 taken_operations.fail_errors.push(fail_job.error);
                 operations_count += 1;
             }
-            
+
             // Terminate jobs
             while operations_count < max_operations && !requests.terminate_jobs.is_empty() {
                 let terminate_job = requests.terminate_jobs.remove(0);
-                taken_operations.terminate_job_sequences.push(terminate_job.job_sequence);
+                taken_operations
+                    .terminate_job_sequences
+                    .push(terminate_job.job_sequence);
                 operations_count += 1;
             }
-            
+
             // Update state operations
-            while operations_count < max_operations && !requests.update_state_for_sequences.is_empty() {
+            while operations_count < max_operations
+                && !requests.update_state_for_sequences.is_empty()
+            {
                 let update_req = requests.update_state_for_sequences.remove(0);
                 taken_operations.update_state_for_sequences.push((
                     update_req.sequence,
                     update_req.new_state_data,
-                    update_req.new_data_availability_hash
+                    update_req.new_data_availability_hash,
                 ));
                 operations_count += 1;
             }
-            
+
             // Submit proofs
             while operations_count < max_operations && !requests.submit_proofs.is_empty() {
                 let proof_req = requests.submit_proofs.remove(0);
@@ -1234,26 +1285,29 @@ impl JobSearcher {
                     proof_req.cpu_cores,
                     proof_req.prover_architecture,
                     proof_req.prover_memory,
-                    proof_req.cpu_time
+                    proof_req.cpu_time,
                 ));
                 operations_count += 1;
             }
-            
+
             // Create app jobs - validate settlement jobs
             if operations_count < max_operations && !requests.create_app_jobs.is_empty() {
                 let mut validated_create_jobs = Vec::new();
                 let mut remaining_create_jobs = Vec::new();
-                
+
                 for create_req in requests.create_app_jobs.drain(..) {
                     if operations_count >= max_operations {
                         remaining_create_jobs.push(create_req);
                         continue;
                     }
-                    
+
                     // Check if this is a settlement job
                     if create_req.method_name == "settle" {
                         if create_req.settlement_chain.is_some() {
-                            info!("✅ Settlement create_job for app_instance {} - validated", app_instance);
+                            info!(
+                                "✅ Settlement create_job for app_instance {} - validated",
+                                app_instance
+                            );
                             taken_operations.create_jobs.push((
                                 create_req.method_name.clone(),
                                 create_req.job_description.clone(),
@@ -1264,12 +1318,15 @@ impl JobSearcher {
                                 create_req.data.clone(),
                                 create_req.interval_ms,
                                 create_req.next_scheduled_at,
-                                create_req.settlement_chain.clone()
+                                create_req.settlement_chain.clone(),
                             ));
                             operations_count += 1;
                             validated_create_jobs.push(create_req);
                         } else {
-                            error!("🚨 Settlement create_job for app_instance {} has no settlement_chain - SKIPPING", app_instance);
+                            error!(
+                                "🚨 Settlement create_job for app_instance {} has no settlement_chain - SKIPPING",
+                                app_instance
+                            );
                             // Don't add this to taken operations or remaining - skip it entirely
                         }
                     } else {
@@ -1284,17 +1341,17 @@ impl JobSearcher {
                             create_req.data.clone(),
                             create_req.interval_ms,
                             create_req.next_scheduled_at,
-                            create_req.settlement_chain.clone()
+                            create_req.settlement_chain.clone(),
                         ));
                         operations_count += 1;
                         validated_create_jobs.push(create_req);
                     }
                 }
-                
+
                 // Put remaining jobs back
                 requests.create_app_jobs = remaining_create_jobs;
             }
-            
+
             // Create merge jobs
             while operations_count < max_operations && !requests.create_merge_jobs.is_empty() {
                 let merge_req = requests.create_merge_jobs.remove(0);
@@ -1303,17 +1360,19 @@ impl JobSearcher {
                     merge_req.sequences,
                     merge_req.sequences1,
                     merge_req.sequences2,
-                    merge_req.job_description
+                    merge_req.job_description,
                 ));
                 operations_count += 1;
             }
-            
+
             // Get available memory (consistent with previous logic)
             let raw_available_memory_gb = get_available_memory_gb();
-            let available_memory_with_coefficient_gb = raw_available_memory_gb as f64 * JOB_BUFFER_MEMORY_COEFFICIENT;
-            let available_memory_bytes = (available_memory_with_coefficient_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+            let available_memory_with_coefficient_gb =
+                raw_available_memory_gb as f64 * JOB_BUFFER_MEMORY_COEFFICIENT;
+            let available_memory_bytes =
+                (available_memory_with_coefficient_gb * 1024.0 * 1024.0 * 1024.0) as u64;
             taken_operations.available_memory = available_memory_bytes;
-            
+
             // Remove app instance from map if no operations remain
             if requests.create_jobs.is_empty()
                 && requests.start_jobs.is_empty()
@@ -1327,7 +1386,7 @@ impl JobSearcher {
             {
                 requests_lock.remove(&app_instance);
             }
-            
+
             if operations_count > 0 {
                 Some(taken_operations)
             } else {
@@ -1338,23 +1397,24 @@ impl JobSearcher {
         }
     }
 
-
     /// Execute pending multicall batches immediately without waiting for interval
     #[allow(dead_code)]
     async fn execute_multicall_batches_immediate(&self) -> Result<()> {
         // Get all app instances with pending requests (no interval check)
         let app_instances = self.state.get_all_pending_multicall_app_instances().await;
-        
+
         if app_instances.is_empty() {
             debug!("No app instances with pending multicall requests");
             return Ok(());
         }
 
-        debug!("Found {} app instances with pending multicall requests (immediate execution)", app_instances.len());
-        self.execute_multicall_batches_for_app_instances(app_instances).await
+        debug!(
+            "Found {} app instances with pending multicall requests (immediate execution)",
+            app_instances.len()
+        );
+        self.execute_multicall_batches_for_app_instances(app_instances)
+            .await
     }
-
-
 
     /// Retrieve secrets for a job from the secrets storage (old version, no longer used)
     #[allow(dead_code)]
@@ -1519,7 +1579,10 @@ async fn retrieve_secrets_for_job(
 /// This is called after container termination (normal, timeout, or shutdown)
 async fn ensure_job_failed_if_not_completed(job: &Job, reason: &str, state: &SharedState) {
     // First check if there's already a complete/fail request for this job in the multicall queue
-    if state.has_pending_job_request(&job.app_instance, job.job_sequence).await {
+    if state
+        .has_pending_job_request(&job.app_instance, job.job_sequence)
+        .await
+    {
         return; // Skip blockchain check if already handled
     }
 
@@ -1527,7 +1590,10 @@ async fn ensure_job_failed_if_not_completed(job: &Job, reason: &str, state: &Sha
     sleep(Duration::from_secs(JOB_STATUS_CHECK_DELAY_SECS)).await;
 
     // Check again if a request was added while we were waiting
-    if state.has_pending_job_request(&job.app_instance, job.job_sequence).await {
+    if state
+        .has_pending_job_request(&job.app_instance, job.job_sequence)
+        .await
+    {
         return; // Skip blockchain check if now handled
     }
 
@@ -1569,29 +1635,50 @@ async fn ensure_job_failed_if_not_completed(job: &Job, reason: &str, state: &Sha
                             error_message.clone(),
                         )
                         .await;
-                    info!("Job {} found in Running state after container terminated ({}), added fail request to multicall batch", job.job_sequence, reason);
+                    info!(
+                        "Job {} found in Running state after container terminated ({}), added fail request to multicall batch",
+                        job.job_sequence, reason
+                    );
                 }
                 sui::fetch::JobStatus::Pending => {
                     // For periodic jobs, this is expected - they go back to pending after completion
                     // For failed jobs with retries, they also go back to pending
                     if current_job.interval_ms.is_some() {
-                        info!("Periodic job {} returned to Pending state after container terminated ({})", job.job_sequence, reason);
+                        info!(
+                            "Periodic job {} returned to Pending state after container terminated ({})",
+                            job.job_sequence, reason
+                        );
                     } else if current_job.attempts < 3 {
-                        info!("Job {} returned to Pending state for retry (attempt {}) after container terminated ({})", job.job_sequence, current_job.attempts, reason);
+                        info!(
+                            "Job {} returned to Pending state for retry (attempt {}) after container terminated ({})",
+                            job.job_sequence, current_job.attempts, reason
+                        );
                     } else {
-                        warn!("Job {} unexpectedly in Pending state after container terminated ({})", job.job_sequence, reason);
+                        warn!(
+                            "Job {} unexpectedly in Pending state after container terminated ({})",
+                            job.job_sequence, reason
+                        );
                     }
                 }
                 sui::fetch::JobStatus::Failed(_) => {
-                    info!("Job {} already in Failed state on blockchain after container terminated ({})", job.job_sequence, reason);
+                    info!(
+                        "Job {} already in Failed state on blockchain after container terminated ({})",
+                        job.job_sequence, reason
+                    );
                 }
             }
         }
         Ok(None) => {
-            info!("Job {} no longer exists on blockchain after container terminated ({})", job.job_sequence, reason);
+            info!(
+                "Job {} no longer exists on blockchain after container terminated ({})",
+                job.job_sequence, reason
+            );
         }
         Err(e) => {
-            error!("Failed to fetch job {} status after container terminated ({}): {}", job.job_sequence, reason, e);
+            error!(
+                "Failed to fetch job {} status after container terminated ({}): {}",
+                job.job_sequence, reason, e
+            );
         }
     }
 }

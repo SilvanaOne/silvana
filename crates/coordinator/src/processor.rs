@@ -1,7 +1,9 @@
 use crate::config::Config;
-use crate::constants::{RETRY_INITIAL_DELAY_SECS, RETRY_MAX_ATTEMPTS, RETRY_MAX_DELAY_SECS, GRPC_STREAM_TIMEOUT_SECS};
+use crate::constants::{
+    GRPC_STREAM_TIMEOUT_SECS, RETRY_INITIAL_DELAY_SECS, RETRY_MAX_ATTEMPTS, RETRY_MAX_DELAY_SECS,
+};
 use crate::error::{CoordinatorError, Result};
-use crate::events::{parse_coordination_events, parse_jobs_event_with_contents, CoordinationEvent};
+use crate::events::{CoordinationEvent, parse_coordination_events, parse_jobs_event_with_contents};
 use crate::metrics::CoordinatorMetrics;
 use crate::state::SharedState;
 use std::collections::HashMap;
@@ -9,7 +11,7 @@ use std::time::Duration;
 use sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsResponse;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 pub struct EventProcessor {
     config: Config,
@@ -33,7 +35,7 @@ impl EventProcessor {
     pub fn set_metrics(&mut self, metrics: std::sync::Arc<CoordinatorMetrics>) {
         self.metrics = Some(metrics);
     }
-    
+
     pub async fn run(&mut self) -> Result<()> {
         let mut retry_count = 0;
 
@@ -56,8 +58,9 @@ impl EventProcessor {
                     }
 
                     // Exponential backoff: double the delay each time, capped at RETRY_MAX_DELAY_SECS
-                    let delay_secs = (RETRY_INITIAL_DELAY_SECS * 2_u64.pow((retry_count - 1) as u32))
-                        .min(RETRY_MAX_DELAY_SECS);
+                    let delay_secs = (RETRY_INITIAL_DELAY_SECS
+                        * 2_u64.pow((retry_count - 1) as u32))
+                    .min(RETRY_MAX_DELAY_SECS);
                     let delay = Duration::from_secs(delay_secs);
                     warn!("Retrying in {}s...", delay_secs);
                     sleep(delay).await;
@@ -122,31 +125,50 @@ impl EventProcessor {
                         // Parse and display the event details
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             // Extract and track the job in shared state
-                            if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
-                                if let Some(job_sequence_str) = extract_field(&job_details, "job_sequence: ") {
+                            if let Some(app_instance) =
+                                extract_field(&job_details, "app_instance: ")
+                            {
+                                if let Some(job_sequence_str) =
+                                    extract_field(&job_details, "job_sequence: ")
+                                {
                                     if let Ok(job_sequence) = job_sequence_str.parse::<u64>() {
                                         // Extract developer, agent, and agent_method for this event
-                                        let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
-                                        let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
-                                        let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
-                                        let app_instance_method = extract_field(&job_details, "app_instance_method: ").unwrap_or_default();
-                                        let block_number = extract_field(&job_details, "block_number: ")
-                                            .and_then(|s| s.parse::<u64>().ok())
-                                            .unwrap_or(0);
-                                        let sequences = extract_field(&job_details, "sequences: ").unwrap_or_default();
-                                        
+                                        let developer = extract_field(&job_details, "developer: ")
+                                            .unwrap_or_default();
+                                        let agent = extract_field(&job_details, "agent: ")
+                                            .unwrap_or_default();
+                                        let agent_method =
+                                            extract_field(&job_details, "agent_method: ")
+                                                .unwrap_or_default();
+                                        let app_instance_method =
+                                            extract_field(&job_details, "app_instance_method: ")
+                                                .unwrap_or_default();
+                                        let block_number =
+                                            extract_field(&job_details, "block_number: ")
+                                                .and_then(|s| s.parse::<u64>().ok())
+                                                .unwrap_or(0);
+                                        let sequences = extract_field(&job_details, "sequences: ")
+                                            .unwrap_or_default();
+
                                         // Add to shared state - this will trigger the job searcher
-                                        self.state.add_job(
-                                            job_sequence,
-                                            developer.clone(),
-                                            agent.clone(),
-                                            agent_method.clone(),
-                                            app_instance.clone(),
-                                        ).await;
-                                        
+                                        self.state
+                                            .add_job(
+                                                developer.clone(),
+                                                agent.clone(),
+                                                agent_method.clone(),
+                                                app_instance.clone(),
+                                            )
+                                            .await;
+
                                         info!(
                                             "📝 JobCreated: seq={}, dev={}, agent={}/{}, app_method={}, block={}, seqs={}, app={}",
-                                            job_sequence, developer, agent, agent_method, app_instance_method, block_number, sequences, 
+                                            job_sequence,
+                                            developer,
+                                            agent,
+                                            agent_method,
+                                            app_instance_method,
+                                            block_number,
+                                            sequences,
                                             &app_instance[..16.min(app_instance.len())]
                                         );
                                     }
@@ -166,9 +188,11 @@ impl EventProcessor {
                     {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             info!("Jobs Event Details:\n{}", job_details);
-                            
+
                             // Extract job_sequence and remove from tracking
-                            if let Some(job_sequence_str) = extract_field(&job_details, "job_sequence: ") {
+                            if let Some(job_sequence_str) =
+                                extract_field(&job_details, "job_sequence: ")
+                            {
                                 if let Ok(job_sequence) = job_sequence_str.parse::<u64>() {
                                     self.state.remove_job(job_sequence).await;
                                     info!("Removed completed job {} from tracking", job_sequence);
@@ -203,27 +227,43 @@ impl EventProcessor {
                     {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             info!("🔄 JobUpdatedEvent: {}", job_details);
-                            
+
                             // Check if status is Pending (job was retried after failure)
                             if job_details.contains("status: JobStatus::Pending") {
                                 // Extract job details to re-add to tracking
-                                if let Some(job_sequence_str) = extract_field(&job_details, "job_sequence: ") {
+                                if let Some(job_sequence_str) =
+                                    extract_field(&job_details, "job_sequence: ")
+                                {
                                     if let Ok(job_sequence) = job_sequence_str.parse::<u64>() {
-                                        if let Some(app_instance) = extract_field(&job_details, "app_instance: ") {
-                                            let developer = extract_field(&job_details, "developer: ").unwrap_or_default();
-                                            let agent = extract_field(&job_details, "agent: ").unwrap_or_default();
-                                            let agent_method = extract_field(&job_details, "agent_method: ").unwrap_or_default();
-                                            
+                                        if let Some(app_instance) =
+                                            extract_field(&job_details, "app_instance: ")
+                                        {
+                                            let developer =
+                                                extract_field(&job_details, "developer: ")
+                                                    .unwrap_or_default();
+                                            let agent = extract_field(&job_details, "agent: ")
+                                                .unwrap_or_default();
+                                            let agent_method =
+                                                extract_field(&job_details, "agent_method: ")
+                                                    .unwrap_or_default();
+
                                             // Re-add to tracking (job was retried and is pending again)
-                                            self.state.add_job(
+                                            self.state
+                                                .add_job(
+                                                    developer.clone(),
+                                                    agent.clone(),
+                                                    agent_method.clone(),
+                                                    app_instance.clone(),
+                                                )
+                                                .await;
+                                            info!(
+                                                "✅ Job {} was retried and re-added to tracking: {} ({}/{}/{})",
                                                 job_sequence,
-                                                developer.clone(),
-                                                agent.clone(),
-                                                agent_method.clone(),
-                                                app_instance.clone(),
-                                            ).await;
-                                            info!("✅ Job {} was retried and re-added to tracking: {} ({}/{}/{})", 
-                                                job_sequence, app_instance, developer, agent, agent_method);
+                                                app_instance,
+                                                developer,
+                                                agent,
+                                                agent_method
+                                            );
                                         }
                                     }
                                 }
@@ -244,9 +284,11 @@ impl EventProcessor {
                     {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             info!("Jobs Event Details:\n{}", job_details);
-                            
+
                             // Extract job_sequence and remove from tracking
-                            if let Some(job_sequence_str) = extract_field(&job_details, "job_sequence: ") {
+                            if let Some(job_sequence_str) =
+                                extract_field(&job_details, "job_sequence: ")
+                            {
                                 if let Ok(job_sequence) = job_sequence_str.parse::<u64>() {
                                     self.state.remove_job(job_sequence).await;
                                     info!("Removed deleted job {} from tracking", job_sequence);
@@ -310,13 +352,9 @@ impl EventProcessor {
         event_index: usize,
     ) -> Result<Option<sui_rpc::proto::sui::rpc::v2beta2::Event>> {
         // Use the helper function from the sui crate's checkpoint module
-        sui::fetch::checkpoint::fetch_event_with_contents(
-            checkpoint_seq,
-            tx_index,
-            event_index,
-        )
-        .await
-        .map_err(|e| CoordinatorError::RpcConnectionError(e.to_string()))
+        sui::fetch::checkpoint::fetch_event_with_contents(checkpoint_seq, tx_index, event_index)
+            .await
+            .map_err(|e| CoordinatorError::RpcConnectionError(e.to_string()))
     }
 }
 

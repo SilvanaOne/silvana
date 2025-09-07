@@ -153,28 +153,22 @@ impl CoordinatorService for CoordinatorServiceImpl {
             break 'job_search;
         }
 
-        // Fall back to checking the buffer for started jobs
+        // Fall back to checking the buffer for started jobs that match this agent
         // The buffer contains jobs that have been started on blockchain via multicall
-        if let Some(started_job) = self.state.get_next_started_job().await {
+        if let Some(started_job) = self.state.get_started_job_for_agent(&req.developer, &req.agent, &req.agent_method).await {
             debug!(
-                "Found started job in buffer: app_instance={}, sequence={}",
+                "Found matching started job in buffer: app_instance={}, sequence={}",
                 started_job.app_instance, started_job.job_sequence
             );
             
-            // Fetch the app instance to get the jobs table
+            // Fetch the app instance to get the jobs table (we know this should work since get_started_job_for_agent already checked)
             let app_instance = match sui::fetch::fetch_app_instance(&started_job.app_instance).await {
                 Ok(instance) => instance,
                 Err(e) => {
-                    error!("Failed to fetch app instance {}: {}", started_job.app_instance, e);
-                    // Put the job back in the buffer and return empty response
-                    self.state.add_started_jobs(vec![crate::state::StartedJob {
-                        app_instance: started_job.app_instance,
-                        job_sequence: started_job.job_sequence,
-                        memory_requirement: started_job.memory_requirement,
-                    }]).await;
+                    error!("Failed to fetch app instance {} (this should not happen): {}", started_job.app_instance, e);
                     return Ok(Response::new(GetJobResponse {
                         success: true,
-                        message: "Failed to fetch app instance, job returned to buffer".to_string(),
+                        message: "Failed to fetch app instance".to_string(),
                         job: None,
                     }));
                 }
@@ -184,16 +178,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
             let jobs_table = match &app_instance.jobs {
                 Some(jobs) => &jobs.id,
                 None => {
-                    error!("App instance {} has no jobs table", started_job.app_instance);
-                    // Put the job back in the buffer and return empty response
-                    self.state.add_started_jobs(vec![crate::state::StartedJob {
-                        app_instance: started_job.app_instance,
-                        job_sequence: started_job.job_sequence,
-                        memory_requirement: started_job.memory_requirement,
-                    }]).await;
+                    error!("App instance {} has no jobs table (this should not happen)", started_job.app_instance);
                     return Ok(Response::new(GetJobResponse {
                         success: true,
-                        message: "App instance has no jobs table, job returned to buffer".to_string(),
+                        message: "App instance has no jobs table".to_string(),
                         job: None,
                     }));
                 }
@@ -202,15 +190,16 @@ impl CoordinatorService for CoordinatorServiceImpl {
             // Fetch the full job details from blockchain using the jobs table
             match sui::fetch::jobs::fetch_job_by_id(jobs_table, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
+                    // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
                     // Store in agent database for tracking
                     let job_id = format!("job_{}", started_job.job_sequence);
                     let agent_job = crate::agent::AgentJob {
                         job_id: job_id.clone(),
                         job_sequence: started_job.job_sequence,
                         app_instance: started_job.app_instance.clone(),
-                        developer: req.developer.clone(),
-                        agent: req.agent.clone(),
-                        agent_method: req.agent_method.clone(),
+                        developer: pending_job.developer.clone(),
+                        agent: pending_job.agent.clone(),
+                        agent_method: pending_job.agent_method.clone(),
                         pending_job: pending_job.clone(),
                         sent_at: chrono::Utc::now().timestamp() as u64,
                         start_tx_sent: true, // Already sent via multicall
@@ -227,9 +216,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     self.state
                         .set_current_agent(
                             req.session_id.clone(),
-                            req.developer.clone(),
-                            req.agent.clone(),
-                            req.agent_method.clone(),
+                            pending_job.developer.clone(),
+                            pending_job.agent.clone(),
+                            pending_job.agent_method.clone(),
                         )
                         .await;
                     
@@ -272,9 +261,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     let job = Job {
                         job_sequence: started_job.job_sequence,
                         description: pending_job.description.clone(),
-                        developer: req.developer.clone(),
-                        agent: req.agent.clone(),
-                        agent_method: req.agent_method.clone(),
+                        developer: pending_job.developer.clone(),
+                        agent: pending_job.agent.clone(),
+                        agent_method: pending_job.agent_method.clone(),
                         app: pending_job.app.clone(),
                         app_instance: started_job.app_instance.clone(),
                         app_instance_method: pending_job.app_instance_method.clone(),
