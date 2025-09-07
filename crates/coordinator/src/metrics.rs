@@ -48,6 +48,7 @@ impl CoordinatorMetrics {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_docker_containers(&self, loading: usize, running: usize) {
         self.docker_containers_loading
             .store(loading, Ordering::Relaxed);

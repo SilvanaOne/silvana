@@ -263,6 +263,7 @@ impl AgentJobDatabase {
     }
 
     /// Get all jobs associated with a session (both in session_jobs and running_jobs)
+    #[allow(dead_code)]
     pub async fn get_jobs_by_session(&self, session_id: &str) -> Vec<AgentJob> {
         let mut jobs = Vec::new();
 
@@ -306,6 +307,7 @@ impl AgentJobDatabase {
     }
 
     /// Clean up session index when a session is cleared
+    #[allow(dead_code)]
     pub async fn cleanup_session(&self, session_id: &str) {
         let mut session_index = self.session_index.write().await;
         if session_index.remove(session_id).is_some() {

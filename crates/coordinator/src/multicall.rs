@@ -3,7 +3,7 @@ use crate::error::{CoordinatorError, Result};
 use crate::state::{SharedState, StartedJob};
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Multicall processor that monitors multicall_requests and executes batched operations
 pub struct MulticallProcessor {
@@ -42,7 +42,7 @@ impl MulticallProcessor {
                     error!("Failed to execute limit-triggered multicall: {}", e);
                 }
                 let duration = start_time.elapsed();
-                info!("Multicall execution time: {} ms", duration.as_millis());
+                debug!("Multicall execution time: {} ms", duration.as_millis());
             } else if should_execute_by_time && total_operations > 0 {
                 info!(
                     "Executing multicall due to time interval: {} seconds passed with {} operations",

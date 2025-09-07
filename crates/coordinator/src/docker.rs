@@ -484,8 +484,8 @@ pub struct DockerBufferProcessor {
 
 impl DockerBufferProcessor {
     pub fn new(state: SharedState, use_tee: bool, container_timeout_secs: u64) -> Result<Self> {
-        let docker_manager =
-            DockerManager::new(use_tee).map_err(|e| crate::error::CoordinatorError::DockerError(e))?;
+        let docker_manager = DockerManager::new(use_tee)
+            .map_err(|e| crate::error::CoordinatorError::DockerError(e))?;
 
         Ok(Self {
             state,
@@ -498,15 +498,16 @@ impl DockerBufferProcessor {
     /// Main loop for the docker buffer processor
     pub async fn run(&mut self) -> Result<()> {
         info!("🐳 Docker buffer processor started");
-        
+
         loop {
             // Check for shutdown request
             if self.state.is_shutting_down() {
                 info!("🛑 Docker buffer processor received shutdown signal");
-                
+
                 // Wait for running containers to complete if not force shutdown
                 if !self.state.is_force_shutdown() {
-                    let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
+                    let (loading_count, running_count) =
+                        self.docker_manager.get_container_counts().await;
                     if loading_count > 0 || running_count > 0 {
                         warn!(
                             "Waiting for {} loading and {} running containers to complete...",
@@ -516,7 +517,7 @@ impl DockerBufferProcessor {
                         continue;
                     }
                 }
-                
+
                 return Ok(());
             }
 
@@ -595,20 +596,24 @@ impl DockerBufferProcessor {
                         );
                         continue;
                     }
-                    
+
                     // Fetch agent method configuration
-                    let agent_method =
-                        match sui::fetch_agent_method(&job.developer, &job.agent, &job.agent_method).await
-                        {
-                            Ok(method) => method,
-                            Err(e) => {
-                                error!(
-                                    "Failed to fetch agent method for buffered job {}: {}",
-                                    job.job_sequence, e
-                                );
-                                continue;
-                            }
-                        };
+                    let agent_method = match sui::fetch_agent_method(
+                        &job.developer,
+                        &job.agent,
+                        &job.agent_method,
+                    )
+                    .await
+                    {
+                        Ok(method) => method,
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch agent method for buffered job {}: {}",
+                                job.job_sequence, e
+                            );
+                            continue;
+                        }
+                    };
 
                     // Check if we have sufficient resources
                     match self.can_run_agent(&agent_method).await {
@@ -618,7 +623,7 @@ impl DockerBufferProcessor {
                         Ok(false) => {
                             // Put job back in buffer (at the front) and wait
                             self.state.add_started_jobs(vec![started_job]).await;
-                            warn!(
+                            info!(
                                 "Insufficient resources for job {}, returned to buffer",
                                 job.job_sequence
                             );
@@ -692,7 +697,7 @@ impl DockerBufferProcessor {
     async fn can_run_agent(&self, agent_method: &sui::fetch::AgentMethod) -> Result<bool> {
         use crate::constants::AGENT_MIN_MEMORY_REQUIREMENT_GB;
         use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
-        
+
         // Check TEE requirement
         if agent_method.requires_tee {
             debug!("Agent requires TEE but we don't run on TEE");
@@ -743,7 +748,8 @@ impl DockerBufferProcessor {
 
         // Check against total system memory minus reserved
         let total_memory_gb = get_total_memory_gb();
-        if total_memory_needed_gb > total_memory_gb.saturating_sub(AGENT_MIN_MEMORY_REQUIREMENT_GB) {
+        if total_memory_needed_gb > total_memory_gb.saturating_sub(AGENT_MIN_MEMORY_REQUIREMENT_GB)
+        {
             debug!(
                 "Insufficient total memory: need {} GB (including {} GB for new agent), have {} GB (minus {} GB reserved)",
                 total_memory_needed_gb,

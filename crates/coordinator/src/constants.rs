@@ -106,6 +106,7 @@ pub const GRACEFUL_SHUTDOWN_TIMEOUT_SECS: u64 = 600; // 10 minutes
 
 /// Timeout when force-stopping Docker containers (in seconds).
 /// If a container doesn't stop gracefully, wait this long before killing it.
+#[allow(dead_code)]
 pub const DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS: u64 = 5;
 
 // =============================================================================
@@ -190,6 +191,7 @@ pub const SHUTDOWN_CLEANUP_DELAY_MS: u64 = 100;
 
 /// Interval for checking container status (in seconds).
 /// How often to check if a container has finished running.
+#[allow(dead_code)]
 pub const CONTAINER_STATUS_CHECK_INTERVAL_SECS: u64 = 1;
 
 /// Periodic container health check interval (in seconds).
@@ -218,6 +220,7 @@ pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 
 /// Delay before checking blockchain job status after container completion (in seconds).
 /// Time to wait for multicall requests to be processed before checking blockchain.
+#[allow(dead_code)]
 pub const JOB_STATUS_CHECK_DELAY_SECS: u64 = 5;
 
 // =============================================================================

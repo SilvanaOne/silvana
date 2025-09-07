@@ -1708,7 +1708,7 @@ where
         let sig = sk.sign_transaction(&tx)?;
 
         // Log final gas budget before execution
-        info!(
+        debug!(
             "Executing transaction with gas budget: {} MIST ({} SUI)",
             gas_budget,
             gas_budget as f64 / 1_000_000_000.0

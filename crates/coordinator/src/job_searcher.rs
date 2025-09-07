@@ -1,6 +1,4 @@
-use crate::constants::{
-    JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE,
-};
+use crate::constants::{JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE};
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_total_memory_gb};
 use crate::job_lock::get_job_lock_manager;
@@ -309,7 +307,7 @@ impl JobSearcher {
             }
 
             // Sleep before next cycle
-            sleep(Duration::from_secs(10)).await;
+            sleep(Duration::from_secs(5)).await;
         }
     }
 
@@ -462,7 +460,7 @@ impl JobSearcher {
                 settlement_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
                 merge_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
                 other_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
-                
+
                 debug!(
                     "Collected settlement jobs: {:?}",
                     settlement_jobs

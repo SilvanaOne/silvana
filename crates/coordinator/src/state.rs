@@ -616,6 +616,7 @@ impl SharedState {
     }
 
     /// Check if a specific job has pending complete or fail requests in multicall queue
+    #[allow(dead_code)]
     pub async fn has_pending_job_request(&self, app_instance: &str, job_sequence: u64) -> bool {
         let app_instance = normalize_app_instance_id(app_instance);
         let requests = self.multicall_requests.lock().await;
