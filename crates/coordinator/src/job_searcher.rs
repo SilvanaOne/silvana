@@ -731,9 +731,78 @@ impl JobSearcher {
                 error!("Failed to process buffer jobs after multicall: {}", e);
             }
             
-            // Step 6: Sleep for MULTICALL_INTERVAL_SECS
-            info!("Step 6: Sleeping for {} seconds before next cycle", MULTICALL_INTERVAL_SECS);
-            sleep(Duration::from_secs(MULTICALL_INTERVAL_SECS)).await;
+            // Step 6: Smart batching - monitor every 10 seconds and execute multicalls when needed
+            info!("Step 6: Starting smart batching monitoring loop");
+            
+            loop {
+                // Sleep for 10 seconds between monitoring checks
+                sleep(Duration::from_secs(10)).await;
+                
+                // Check for shutdown
+                if self.state.is_shutting_down() {
+                    break;
+                }
+                
+                // Check if we should execute multicall due to limits
+                let should_execute_by_limit = self.state.should_execute_multicall_by_limit().await;
+                let should_execute_by_time = self.state.should_execute_multicall_by_time().await;
+                let total_operations = self.state.get_total_operations_count().await;
+                
+                if should_execute_by_limit {
+                    info!(
+                        "Executing multicall due to operation limit: {} operations >= {} limit",
+                        total_operations,
+                        sui::get_max_operations_per_multicall()
+                    );
+                    
+                    // Execute multicall immediately
+                    if let Err(e) = self.execute_multicall_batches().await {
+                        error!("Failed to execute limit-triggered multicall: {}", e);
+                    }
+                    
+                    // Process newly buffered jobs from multicall
+                    if let Err(e) = self.process_buffer_jobs().await {
+                        error!("Failed to process buffer jobs after limit-triggered multicall: {}", e);
+                    }
+                    
+                    // Continue monitoring
+                    continue;
+                } else if should_execute_by_time && total_operations > 0 {
+                    info!(
+                        "Executing multicall due to time interval: {} seconds passed with {} operations",
+                        MULTICALL_INTERVAL_SECS, total_operations
+                    );
+                    
+                    // Execute multicall after time interval
+                    if let Err(e) = self.execute_multicall_batches().await {
+                        error!("Failed to execute time-triggered multicall: {}", e);
+                    }
+                    
+                    // Process newly buffered jobs from multicall
+                    if let Err(e) = self.process_buffer_jobs().await {
+                        error!("Failed to process buffer jobs after time-triggered multicall: {}", e);
+                    }
+                    
+                    // Continue monitoring
+                    continue;
+                } else if should_execute_by_time {
+                    // Time passed but no operations - just update timestamp to reset the timer
+                    debug!("Time interval passed but no operations to execute");
+                    self.state.update_last_multicall_timestamp().await;
+                }
+                
+                // If neither condition met, continue monitoring
+                if total_operations > 0 {
+                    debug!(
+                        "Monitoring: {} operations pending, {} seconds since last multicall",
+                        total_operations,
+                        self.state.get_seconds_since_last_multicall().await
+                    );
+                }
+                
+                // Break out of monitoring loop to start next main cycle
+                break;
+            }
             
             // Step 7: Loop back to step 1
         }
@@ -1151,8 +1220,8 @@ impl JobSearcher {
         {
             Ok(result) => {
                 info!(
-                    "Successfully executed batch multicall for {} app instances (tx: {:?})",
-                    total_operations, result.tx_digests
+                    "Successfully executed batch multicall for {} app instances (tx: {})",
+                    total_operations, result.tx_digest
                 );
 
                 // Add only successfully started jobs to buffer for container launching
@@ -1182,6 +1251,9 @@ impl JobSearcher {
                     successful_started_jobs.len(), 
                     successful_start_sequences.len() + failed_start_sequences.len()
                 );
+
+                // Update the last multicall timestamp after successful execution
+                self.state.update_last_multicall_timestamp().await;
             }
             Err((error_msg, tx_digest_opt)) => {
                 error!(

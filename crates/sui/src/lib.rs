@@ -55,6 +55,6 @@ pub use transactions::{
 // Re-export selected fetch utilities for convenient access at crate root
 pub use fetch::fetch_agent_method;
 // Re-export multicall constants
-pub use constants::{get_max_move_calls_per_transaction, get_max_operations_per_multicall};
+pub use constants::get_max_operations_per_multicall;
 // Re-export types
 pub use types::{MulticallOperations, MulticallResult};

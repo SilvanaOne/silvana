@@ -169,6 +169,7 @@ pub struct SharedState {
     settle_only: Arc<AtomicBool>, // Flag to run as a dedicated settlement node
     multicall_requests: Arc<Mutex<HashMap<String, MulticallRequests>>>, // Batched job operation requests per app instance
     started_jobs_buffer: Arc<Mutex<VecDeque<StartedJob>>>,  // Buffer of jobs started on blockchain
+    last_multicall_timestamp: Arc<Mutex<Instant>>, // Timestamp of last multicall execution
 }
 
 impl SharedState {
@@ -201,6 +202,7 @@ impl SharedState {
             settle_only: Arc::new(AtomicBool::new(false)),
             multicall_requests: Arc::new(Mutex::new(HashMap::new())),
             started_jobs_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            last_multicall_timestamp: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
@@ -863,5 +865,48 @@ impl SharedState {
         if count > 0 {
             info!("Cleared {} jobs from started jobs buffer", count);
         }
+    }
+
+    /// Get the total number of operations across all app instances
+    pub async fn get_total_operations_count(&self) -> usize {
+        let requests = self.multicall_requests.lock().await;
+        let mut total = 0;
+        for (_, req) in requests.iter() {
+            total += req.create_jobs.len()
+                + req.start_jobs.len()
+                + req.complete_jobs.len()
+                + req.fail_jobs.len()
+                + req.terminate_jobs.len()
+                + req.update_state_for_sequences.len()
+                + req.submit_proofs.len()
+                + req.create_app_jobs.len()
+                + req.create_merge_jobs.len();
+        }
+        total
+    }
+
+    /// Update the last multicall execution timestamp
+    pub async fn update_last_multicall_timestamp(&self) {
+        let mut timestamp = self.last_multicall_timestamp.lock().await;
+        *timestamp = Instant::now();
+    }
+
+    /// Check if enough time has passed since last multicall (MULTICALL_INTERVAL_SECS)
+    pub async fn should_execute_multicall_by_time(&self) -> bool {
+        use crate::constants::MULTICALL_INTERVAL_SECS;
+        let timestamp = self.last_multicall_timestamp.lock().await;
+        timestamp.elapsed().as_secs() >= MULTICALL_INTERVAL_SECS
+    }
+
+    /// Check if multicall should execute due to operation limits
+    pub async fn should_execute_multicall_by_limit(&self) -> bool {
+        let total_operations = self.get_total_operations_count().await;
+        total_operations >= sui::get_max_operations_per_multicall()
+    }
+
+    /// Get seconds elapsed since last multicall
+    pub async fn get_seconds_since_last_multicall(&self) -> u64 {
+        let timestamp = self.last_multicall_timestamp.lock().await;
+        timestamp.elapsed().as_secs()
     }
 }
