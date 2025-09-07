@@ -1,6 +1,6 @@
 
 use anyhow::Result;
-use sui::fetch::{AppInstance, ProofCalculation, Settlement, fetch_blocks_range, fetch_proof_calculations_range, fetch_block_settlement};
+use sui::fetch::{AppInstance, Settlement, fetch_blocks_range, fetch_proof_calculations_range, fetch_block_settlement};
 use tracing::{debug, info, warn};
 use crate::settlement;
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
@@ -227,13 +227,14 @@ pub async fn analyze_proof_completion(
       let block_start = std::time::Instant::now();
       debug!("📦 Analyzing block {} for merge opportunities", block_number);
       
-      // Fetch ProofCalculation for this block
-      let proof_calc_info = match sui::fetch::fetch_proof_calculation(
+      // Fetch the full ProofCalculation with proofs for this block
+      let proof_calc = match sui::fetch::fetch_proof_calculation(
           app_instance,
           block_number
       ).await {
           Ok(Some(proof_calc)) => {
-              debug!("📊 Found ProofCalculation for block {}", block_number);
+              debug!("📊 Fetched ProofCalculation with {} proofs for block {}", 
+                  proof_calc.proofs.len(), block_number);
               proof_calc
           }
           Ok(None) => {
@@ -244,17 +245,6 @@ pub async fn analyze_proof_completion(
               warn!("Failed to fetch ProofCalculation for block {}: {}, skipping", block_number, e);
               continue;
           }
-      };
-      
-      // Create a ProofCalculation struct for analysis
-      let proof_calc = ProofCalculation {
-          id: proof_calc_info.id.clone(),
-          block_number,
-          start_sequence: proof_calc_info.start_sequence,
-          end_sequence: proof_calc_info.end_sequence,
-          proofs: vec![], // Will be populated by merge analysis
-          block_proof: proof_calc_info.block_proof.clone(),
-          is_finished: proof_calc_info.is_finished,
       };
       
       // Analyze this block for merge opportunities

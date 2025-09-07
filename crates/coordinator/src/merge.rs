@@ -478,8 +478,8 @@ fn find_proofs_to_merge_excluding(
                 .find(|p| arrays_equal(&p.sequences, &sequence2));
 
             if let (Some(proof1), Some(proof2)) = (proof1, proof2) {
-                // For block proofs, check CALCULATED, USED, or RESERVED (if timed out) status
-                // This aligns with the Move contract logic which allows RESERVED for block proofs
+                // For block proofs: check CALCULATED, USED, or RESERVED (if timed out)
+                // The Move contract allows RESERVED for block proofs
                 let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
                 let proof1_available = proof1.status == ProofStatus::Calculated 
                     || proof1.status == ProofStatus::Used
@@ -487,7 +487,7 @@ fn find_proofs_to_merge_excluding(
                 let proof2_available = proof2.status == ProofStatus::Calculated 
                     || proof2.status == ProofStatus::Used
                     || (proof2.status == ProofStatus::Reserved && current_time > proof2.timestamp + PROOF_RESERVED_TIMEOUT_MS);
-                    
+                
                 if proof1_available && proof2_available {
                     debug!(
                         "Merging proofs to create block proof: sequences1={:?}, sequences2={:?}",
@@ -721,18 +721,48 @@ async fn create_merge_job(
     
     let can_reserve = match (proof1, proof2) {
         (Some(p1), Some(p2)) => {
-            // For regular proofs: must be CALCULATED
-            // For block proofs: can be CALCULATED, USED, or RESERVED
-            let p1_ok = p1.status == ProofStatus::Calculated || 
-                       (is_block_proof && (p1.status == ProofStatus::Used || p1.status == ProofStatus::Reserved));
-            let p2_ok = p2.status == ProofStatus::Calculated || 
-                       (is_block_proof && (p2.status == ProofStatus::Used || p2.status == ProofStatus::Reserved));
+            let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
+            
+            // Move contract logic:
+            // - For block proofs: CALCULATED, USED, or RESERVED (including timed out)
+            // - For regular merges: CALCULATED or (RESERVED if timed out)
+            let p1_ok = if is_block_proof {
+                // Block proofs: CALCULATED, USED, or RESERVED (Move contract allows RESERVED for block proofs)
+                p1.status == ProofStatus::Calculated || 
+                p1.status == ProofStatus::Used || 
+                p1.status == ProofStatus::Reserved
+            } else {
+                // Regular merges: CALCULATED or (RESERVED if timed out)
+                p1.status == ProofStatus::Calculated || 
+                (p1.status == ProofStatus::Reserved && current_time > p1.timestamp + PROOF_RESERVED_TIMEOUT_MS)
+            };
+            
+            let p2_ok = if is_block_proof {
+                // Block proofs: CALCULATED, USED, or RESERVED (Move contract allows RESERVED for block proofs)
+                p2.status == ProofStatus::Calculated || 
+                p2.status == ProofStatus::Used || 
+                p2.status == ProofStatus::Reserved
+            } else {
+                // Regular merges: CALCULATED or (RESERVED if timed out)
+                p2.status == ProofStatus::Calculated || 
+                (p2.status == ProofStatus::Reserved && current_time > p2.timestamp + PROOF_RESERVED_TIMEOUT_MS)
+            };
             
             if !p1_ok {
-                debug!("❌ Proof1 (sequences {:?}) cannot be reserved - status: {:?}", sequences1, p1.status);
+                debug!("❌ Proof1 (sequences {:?}) cannot be reserved - status: {:?}, is_block_proof: {}", 
+                    sequences1, p1.status, is_block_proof);
+                if p1.status == ProofStatus::Reserved {
+                    let time_since = current_time.saturating_sub(p1.timestamp);
+                    debug!("   Reserved time: {}ms, timeout: {}ms", time_since, PROOF_RESERVED_TIMEOUT_MS);
+                }
             }
             if !p2_ok {
-                debug!("❌ Proof2 (sequences {:?}) cannot be reserved - status: {:?}", sequences2, p2.status);
+                debug!("❌ Proof2 (sequences {:?}) cannot be reserved - status: {:?}, is_block_proof: {}", 
+                    sequences2, p2.status, is_block_proof);
+                if p2.status == ProofStatus::Reserved {
+                    let time_since = current_time.saturating_sub(p2.timestamp);
+                    debug!("   Reserved time: {}ms, timeout: {}ms", time_since, PROOF_RESERVED_TIMEOUT_MS);
+                }
             }
             
             p1_ok && p2_ok

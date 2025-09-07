@@ -114,6 +114,9 @@ const PROOF_STATUS_REJECTED: u8 = 3;
 const PROOF_STATUS_RESERVED: u8 = 4;
 const PROOF_STATUS_USED: u8 = 5;
 
+// Timeout for reserved proofs in milliseconds (2 minutes)
+const PROOF_RESERVED_TIMEOUT_MS: u64 = 120000;
+
 // Error codes
 #[error]
 const EProofNotCalculated: vector<u8> = b"Proof not calculated or already used";
@@ -317,9 +320,15 @@ fun reserve_proof(
     clock: &Clock,
     ctx: &TxContext,
 ): bool {
+    let current_time = sui::clock::timestamp_ms(clock);
+    let is_reserved_timed_out = proof.status == PROOF_STATUS_RESERVED && 
+                                 current_time > proof.timestamp + PROOF_RESERVED_TIMEOUT_MS;
+    
     if (
         !(
-            proof.status == PROOF_STATUS_CALCULATED || (isBlockProof && (proof.status == PROOF_STATUS_USED || proof.status == PROOF_STATUS_RESERVED)),
+            proof.status == PROOF_STATUS_CALCULATED || 
+            is_reserved_timed_out ||  // Allow timed-out RESERVED proofs for regular merges
+            (isBlockProof && (proof.status == PROOF_STATUS_USED || proof.status == PROOF_STATUS_RESERVED))
         )
     ) {
         multicall::emit_operation_failed(
@@ -335,7 +344,7 @@ fun reserve_proof(
     };
 
     proof.status = PROOF_STATUS_RESERVED;
-    proof.timestamp = sui::clock::timestamp_ms(clock);
+    proof.timestamp = current_time;
     proof.user = option::some(ctx.sender());
     true
 }
