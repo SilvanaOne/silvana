@@ -2,12 +2,12 @@
 
 /// Maximum number of Move calls that can be created in a single transaction.
 /// This limit prevents transaction size from exceeding blockchain limits.
-pub const MAX_MOVE_CALLS_PER_TRANSACTION: usize = 10;
+pub const MAX_MOVE_CALLS_PER_TRANSACTION: usize = 5;
 
 /// Maximum number of operations (complete, fail, terminate, start) that can be
 /// passed to multicall_job_operations in a single call.
 /// This limit ensures the Move function doesn't exceed gas or computational limits.
-pub const MAX_OPERATIONS_PER_MULTICALL: usize = 10;
+pub const MAX_OPERATIONS_PER_MULTICALL: usize = 8;
 
 /// Get the maximum number of Move calls per transaction
 pub fn get_max_move_calls_per_transaction() -> usize {

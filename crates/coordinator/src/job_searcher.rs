@@ -1131,8 +1131,8 @@ impl JobSearcher {
         let total_operations: usize = all_operations.iter().map(|op| op.total_operations()).sum();
         
         if total_operations > max_operations {
-            warn!(
-                "Total operations ({}) exceeds maximum allowed per multicall ({}). This should be handled by batching logic in the future.",
+            info!(
+                "Total operations ({}) exceeds maximum allowed per multicall ({}). Will be automatically batched by the sui interface.",
                 total_operations, max_operations
             );
         }
@@ -1151,8 +1151,8 @@ impl JobSearcher {
         {
             Ok(result) => {
                 info!(
-                    "Successfully executed batch multicall for {} app instances (tx: {})",
-                    total_operations, result.tx_digest
+                    "Successfully executed batch multicall for {} app instances (tx: {:?})",
+                    total_operations, result.tx_digests
                 );
 
                 // Add only successfully started jobs to buffer for container launching
