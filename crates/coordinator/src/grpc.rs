@@ -234,6 +234,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         agent: pending_job.agent.clone(),
                         agent_method: pending_job.agent_method.clone(),
                         pending_job: pending_job.clone(),
+                        memory_requirement: started_job.memory_requirement,
                         sent_at: chrono::Utc::now().timestamp() as u64,
                         start_tx_sent: true, // Already sent via multicall
                         start_tx_hash: None, // Transaction was part of multicall

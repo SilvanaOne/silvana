@@ -173,7 +173,8 @@ pub async fn run_docker_container_task(
     let start_elapsed = start_time.elapsed();
 
     // Add job to agent database as a session-specific job for Docker retrieval
-    let mut agent_job = AgentJob::new(job.clone(), &state);
+    let memory_requirement = (agent_method.min_memory_gb as u64) * 1024 * 1024 * 1024;
+    let mut agent_job = AgentJob::new(job.clone(), &state, memory_requirement);
     agent_job.start_tx_hash = Some(tx_digest.clone());
     agent_job.start_tx_sent = true;
     let job_id = agent_job.job_id.clone();

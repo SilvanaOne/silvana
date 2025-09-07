@@ -17,6 +17,7 @@ pub struct AgentJob {
     pub agent: String,
     pub agent_method: String,
     pub pending_job: Job,
+    pub memory_requirement: u64, // Memory requirement in bytes
     #[allow(dead_code)]
     pub sent_at: u64, // Unix timestamp when job was sent to agent
     pub start_tx_sent: bool, // Whether start_job transaction was sent
@@ -24,7 +25,7 @@ pub struct AgentJob {
 }
 
 impl AgentJob {
-    pub fn new(pending_job: Job, state: &SharedState) -> Self {
+    pub fn new(pending_job: Job, state: &SharedState, memory_requirement: u64) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -48,6 +49,7 @@ impl AgentJob {
             agent: pending_job.agent.clone(),
             agent_method: pending_job.agent_method.clone(),
             pending_job,
+            memory_requirement,
             sent_at: timestamp,
             start_tx_sent: false,
             start_tx_hash: None,
