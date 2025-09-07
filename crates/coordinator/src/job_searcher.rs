@@ -97,20 +97,11 @@ async fn can_run_agent(state: &SharedState, agent_method: &AgentMethod) -> Resul
     Ok(true)
 }
 
-/// State of the job searcher
-#[derive(Debug, Clone, PartialEq)]
-enum SearcherState {
-    /// Looking for jobs
-    Searching,
-}
-
 /// Job searcher that monitors shared state and runs Docker containers
 pub struct JobSearcher {
     state: SharedState,
     docker_manager: Arc<DockerManager>,
     container_timeout_secs: u64,
-    #[allow(dead_code)]
-    searcher_state: Arc<RwLock<SearcherState>>,
     secrets_client: Option<SecretsClient>,
     jobs_cache: JobsCache,
     current_job_info: Arc<RwLock<Option<(String, Job)>>>, // (container_id, job)
@@ -126,7 +117,6 @@ impl JobSearcher {
             state,
             docker_manager: Arc::new(docker_manager),
             container_timeout_secs,
-            searcher_state: Arc::new(RwLock::new(SearcherState::Searching)),
             secrets_client: None,
             jobs_cache: JobsCache::new(),
             current_job_info: Arc::new(RwLock::new(None)),
