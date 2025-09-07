@@ -1076,7 +1076,7 @@ impl JobSearcher {
                 let failed_start_sequences = result.failed_start_jobs();
 
                 if !failed_start_sequences.is_empty() {
-                    warn!("Some start jobs failed: {:?}", failed_start_sequences);
+                    info!("Some start jobs failed: {:?}", failed_start_sequences);
                 }
 
                 // Filter started jobs to only include successful ones
