@@ -480,7 +480,6 @@ impl SharedState {
     }
 
     /// Add a start job request to the batch
-    #[allow(dead_code)]
     pub async fn add_start_job_request(
         &self,
         app_instance: String,
@@ -837,13 +836,6 @@ impl SharedState {
             "Added create merge job request for app_instance {}",
             app_instance
         );
-    }
-
-    /// Get and clear all pending multicall requests for an app instance
-    pub async fn take_multicall_requests(&self, app_instance: &str) -> Option<MulticallRequests> {
-        let app_instance = normalize_app_instance_id(app_instance);
-        let mut requests = self.multicall_requests.lock().await;
-        requests.remove(&app_instance)
     }
 
     /// Check if any app instance has pending requests ready for execution

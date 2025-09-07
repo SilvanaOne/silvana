@@ -967,42 +967,6 @@ impl JobSearcher {
         }
     }
 
-    /// Process collected jobs by adding them to multicall batch
-    #[allow(dead_code)]
-    async fn _batch_job_starts(&self, jobs: Vec<Job>) -> Result<()> {
-        for job in jobs {
-            // Fetch agent method to get memory requirements
-            match fetch_agent_method(&job.developer, &job.agent, &job.app_instance_method).await {
-                Ok(agent_method) => {
-                    let memory_requirement =
-                        (agent_method.min_memory_gb as u64) * 1024 * 1024 * 1024; // Convert GB to bytes
-
-                    // Add to multicall batch
-                    self.state
-                        .add_start_job_request(
-                            job.app_instance.clone(),
-                            job.job_sequence,
-                            memory_requirement,
-                        )
-                        .await;
-
-                    debug!(
-                        "Added job {} to start batch (memory: {} GB)",
-                        job.job_sequence, agent_method.min_memory_gb
-                    );
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to fetch agent method for job {}: {}",
-                        job.job_sequence, e
-                    );
-                    // Skip this job
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Execute pending multicall batches
     async fn execute_multicall_batches(&self) -> Result<()> {
         // Check for app instances with pending requests
