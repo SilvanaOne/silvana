@@ -81,7 +81,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     &req.developer,
                     &req.agent,
                     &req.agent_method,
-                    Some(&req.session_id),
+                    &req.session_id,
                 )
                 .await
             {
@@ -91,7 +91,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 );
 
                 // Determine settlement chain if this is a settlement job
-                let settlement_chain = if agent_job.pending_job.app_instance_method == "settle" {
+                let settlement_chain = if agent_job.job.app_instance_method == "settle" {
                     // Use helper function to get chain by job sequence
                     match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
                         &agent_job.app_instance,
@@ -113,9 +113,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 };
 
                 // If this is a settlement job with no associated chain, terminate it and look for next job
-                if agent_job.pending_job.app_instance_method == "settle"
-                    && settlement_chain.is_none()
-                {
+                if agent_job.job.app_instance_method == "settle" && settlement_chain.is_none() {
                     error!(
                         "🚨 Settlement job {} has no associated chain - terminating and looking for next job",
                         agent_job.job_sequence
@@ -150,22 +148,22 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     message: format!("Session job retrieved: {}", agent_job.job_id),
                     job: Some(Job {
                         job_sequence: agent_job.job_sequence,
-                        description: agent_job.pending_job.description.clone(),
+                        description: agent_job.job.description.clone(),
                         developer: agent_job.developer,
                         agent: agent_job.agent,
                         agent_method: agent_job.agent_method,
-                        app: agent_job.pending_job.app.clone(),
+                        app: agent_job.job.app.clone(),
                         app_instance: agent_job.app_instance,
-                        app_instance_method: agent_job.pending_job.app_instance_method.clone(),
-                        block_number: agent_job.pending_job.block_number,
-                        sequences: agent_job.pending_job.sequences.unwrap_or_default(),
-                        sequences1: agent_job.pending_job.sequences1.unwrap_or_default(),
-                        sequences2: agent_job.pending_job.sequences2.unwrap_or_default(),
-                        data: agent_job.pending_job.data.clone(),
+                        app_instance_method: agent_job.job.app_instance_method.clone(),
+                        block_number: agent_job.job.block_number,
+                        sequences: agent_job.job.sequences.unwrap_or_default(),
+                        sequences1: agent_job.job.sequences1.unwrap_or_default(),
+                        sequences2: agent_job.job.sequences2.unwrap_or_default(),
+                        data: agent_job.job.data.clone(),
                         job_id: agent_job.job_id,
-                        attempts: agent_job.pending_job.attempts as u32,
-                        created_at: agent_job.pending_job.created_at,
-                        updated_at: agent_job.pending_job.updated_at,
+                        attempts: agent_job.job.attempts as u32,
+                        created_at: agent_job.job.created_at,
+                        updated_at: agent_job.job.updated_at,
                         chain: settlement_chain, // Set the settlement chain if this is a settlement job
                     }),
                 }));
@@ -227,6 +225,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     // Create AgentJob and add it to agent database
                     let agent_job = crate::agent::AgentJob::new(
                         pending_job.clone(),
+                        req.session_id.clone(),
                         &self.state,
                         started_job.memory_requirement,
                     );
@@ -234,7 +233,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     // Store in agent database
                     self.state
                         .get_agent_job_db()
-                        .add_to_pending(agent_job.clone())
+                        .add_to_running(agent_job.clone())
                         .await;
 
                     // Set current agent for this session
@@ -465,7 +464,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 agent_job.agent,
                 agent_job.agent_method,
                 agent_job.job_sequence,
-                agent_job.pending_job.app_instance_method,
+                agent_job.job.app_instance_method,
                 req.job_id,
                 elapsed.as_millis()
             );
@@ -598,53 +597,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
             req.job_id, agent_job.job_sequence, agent_job.app_instance
         );
 
-        // Execute terminate_job transaction on Sui
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-
-        // Use default gas budget of 0.1 SUI for gRPC calls
-        let result = sui_interface
-            .terminate_job(&agent_job.app_instance, agent_job.job_sequence, 0.1)
+        self.state
+            .add_terminate_job_request(agent_job.app_instance.clone(), agent_job.job_sequence)
             .await;
 
-        match result {
-            Ok(tx_hash) => {
-                // Remove job from agent database
-                self.state
-                    .get_agent_job_db()
-                    .terminate_job(&req.job_id)
-                    .await;
+        // Remove job from agent database
+        self.state
+            .get_agent_job_db()
+            .terminate_job(&req.job_id)
+            .await;
 
-                info!(
-                    "Successfully terminated job {} (tx: {})",
-                    req.job_id, tx_hash
-                );
-                Ok(Response::new(TerminateJobResponse {
-                    success: true,
-                    message: format!(
-                        "Job {} terminated successfully (tx: {})",
-                        req.job_id, tx_hash
-                    ),
-                }))
-            }
-            Err((error_msg, tx_digest)) => {
-                error!(
-                    "Failed to terminate job {} on blockchain: {}",
-                    req.job_id, error_msg
-                );
-                let message = if let Some(digest) = tx_digest {
-                    format!(
-                        "Failed to terminate job {} (tx: {}): {}",
-                        req.job_id, digest, error_msg
-                    )
-                } else {
-                    format!("Failed to terminate job {}: {}", req.job_id, error_msg)
-                };
-                Ok(Response::new(TerminateJobResponse {
-                    success: false,
-                    message,
-                }))
-            }
-        }
+        info!("Successfully terminated job {}", req.job_id);
+        Ok(Response::new(TerminateJobResponse {
+            success: true,
+            message: format!("Job {} terminated successfully", req.job_id),
+        }))
     }
 
     async fn submit_proof(
@@ -839,17 +806,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     agent_job.agent,
                     agent_job.agent_method,
                     agent_job.job_sequence,
-                    agent_job.pending_job.app_instance_method,
+                    agent_job.job.app_instance_method,
                     req.block_number,
                     sequences,
                     descriptor.to_string(),
                     tx_hash,
                     elapsed
                 );
-                debug!(
-                    "Successfully submitted proof for job {} with tx: {}",
-                    req.job_id, tx_hash
-                );
+                debug!("Successfully submitted proof for job {}", req.job_id);
 
                 Ok(Response::new(SubmitProofResponse {
                     success: true,
@@ -958,7 +922,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     agent_job.agent,
                     agent_job.agent_method,
                     agent_job.job_sequence,
-                    agent_job.pending_job.app_instance_method,
+                    agent_job.job.app_instance_method,
                     req.block_number,
                     sequences,
                     tx_hash,
@@ -1860,7 +1824,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             SecretReference {
                 developer: agent_job.developer.clone(),
                 agent: agent_job.agent.clone(),
-                app: Some(agent_job.pending_job.app.clone()),
+                app: Some(agent_job.job.app.clone()),
                 app_instance: Some(agent_job.app_instance.clone()),
                 name: Some(req.name.clone()),
             }
