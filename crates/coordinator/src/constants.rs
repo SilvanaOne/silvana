@@ -63,6 +63,10 @@ pub const PROOF_RESERVED_TIMEOUT_MS: u64 = 2 * 60 * 1000; // 2 minutes
 /// it's considered stalled and will be rejected/reassigned.
 pub const PROOF_STARTED_TIMEOUT_MS: u64 = 10 * 60 * 1000; // 10 minutes
 
+/// Timeout for USED proof status before it becomes available for strategic merging (in milliseconds).
+/// Used proofs can be merged after this timeout to help create block proofs when necessary.
+pub const PROOF_USED_MERGE_TIMEOUT_MS: u64 = 5 * 60 * 1000; // 5 minutes
+
 // =============================================================================
 // Retry and Recovery Configuration
 // =============================================================================

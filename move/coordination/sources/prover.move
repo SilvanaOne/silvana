@@ -116,6 +116,8 @@ const PROOF_STATUS_USED: u8 = 5;
 
 // Timeout for reserved proofs in milliseconds (2 minutes)
 const PROOF_RESERVED_TIMEOUT_MS: u64 = 120000;
+// Timeout for used proofs before they can be merged again (5 minutes)
+const PROOF_USED_MERGE_TIMEOUT_MS: u64 = 300000;
 
 // Error codes
 #[error]
@@ -323,11 +325,14 @@ fun reserve_proof(
     let current_time = sui::clock::timestamp_ms(clock);
     let is_reserved_timed_out = proof.status == PROOF_STATUS_RESERVED && 
                                  current_time > proof.timestamp + PROOF_RESERVED_TIMEOUT_MS;
+    let is_used_timed_out = proof.status == PROOF_STATUS_USED && 
+                             current_time > proof.timestamp + PROOF_USED_MERGE_TIMEOUT_MS;
     
     if (
         !(
             proof.status == PROOF_STATUS_CALCULATED || 
             is_reserved_timed_out ||  // Allow timed-out RESERVED proofs for regular merges
+            is_used_timed_out ||      // Allow timed-out USED proofs to prevent blocking
             (isBlockProof && (proof.status == PROOF_STATUS_USED || proof.status == PROOF_STATUS_RESERVED))
         )
     ) {

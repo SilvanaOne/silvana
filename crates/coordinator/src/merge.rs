@@ -1,6 +1,7 @@
 use crate::constants::{
     BLOCK_CREATION_CHECK_INTERVAL_SECS, MERGE_RETRY_DELAY_MS, PROOF_ANALYSIS_INTERVAL_SECS,
     PROOF_MERGE_MAX_ATTEMPTS, PROOF_RESERVED_TIMEOUT_MS, PROOF_STARTED_TIMEOUT_MS,
+    PROOF_USED_MERGE_TIMEOUT_MS,
 };
 use anyhow::Result;
 use sui::fetch::fetch_proof_calculation;
@@ -341,6 +342,11 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 .unwrap_or(&ProofStatus::Calculated);
 
             // Try to create merge job with proof reservation
+            if proof_calc.block_number == 180 {
+                info!("🔨 Block 180: Attempting to create merge job for {:?} + {:?}", 
+                      merge_request.sequences1, merge_request.sequences2);
+            }
+            
             match create_merge_job(
                 merge_request.sequences1.clone(),
                 merge_request.sequences2.clone(),
@@ -354,6 +360,9 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             .await
             {
                 Ok(_) => {
+                    if proof_calc.block_number == 180 {
+                        info!("✅ Block 180: Successfully created merge job on attempt {}", attempt);
+                    }
                     debug!(
                         "✅ Successfully created and reserved merge job for block {} on attempt {}",
                         proof_calc.block_number, attempt
@@ -362,6 +371,9 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     break; // Successfully created a merge job, stop trying
                 }
                 Err(e) => {
+                    if proof_calc.block_number == 180 {
+                        info!("❌ Block 180: Failed to create merge job: {}", e);
+                    }
                     debug!(
                         "ℹ️ Attempt {}/{}: Could not create merge job for block {} (sequences {:?} + {:?}): {}",
                         attempt,
@@ -441,6 +453,8 @@ fn find_proofs_to_merge_excluding(
         return None;
     }
 
+    let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
+
     // First priority: Try to create block proofs (complete range from start to end)
     if let Some(end_seq) = block_proofs.end_sequence {
         let start_seq = block_proofs.start_sequence;
@@ -468,7 +482,6 @@ fn find_proofs_to_merge_excluding(
             if let (Some(proof1), Some(proof2)) = (proof1, proof2) {
                 // For block proofs: check CALCULATED, USED, or RESERVED (if timed out)
                 // The Move contract allows RESERVED for block proofs
-                let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
                 let proof1_available = proof1.status == ProofStatus::Calculated
                     || proof1.status == ProofStatus::Used
                     || (proof1.status == ProofStatus::Reserved
@@ -493,12 +506,88 @@ fn find_proofs_to_merge_excluding(
         }
     }
 
-    // Second priority: Find adjacent proofs that can be merged
-    let current_time = chrono::Utc::now().timestamp() as u64 * 1000; // Convert to milliseconds
+    // Second priority: Find adjacent proofs that can be merged strategically
+    // Prioritize merges that would create proofs needed for block completion
+    
+    // If we have an end_sequence, check if we can create proofs that would help form the block proof
+    if let Some(end_seq) = block_proofs.end_sequence {
+        let start_seq = block_proofs.start_sequence;
+        
+        // Temporary info logging for block 180
+        if block_proofs.block_number == 180 {
+            info!("🔍 Block 180: Looking for strategic merges (sequences {}-{})", start_seq, end_seq);
+            info!("🔍 Block 180: Current time: {}, PROOF_USED_MERGE_TIMEOUT_MS: {}", 
+                  current_time, PROOF_USED_MERGE_TIMEOUT_MS);
+            
+            // Log all existing proofs and their statuses
+            for proof in &block_proofs.proofs {
+                let time_since = current_time.saturating_sub(proof.timestamp);
+                let available = is_proof_available(proof, current_time);
+                info!("🔍 Block 180: Proof sequences {:?}, status: {:?}, timestamp: {}, time_since: {}ms, available: {}", 
+                      proof.sequences, proof.status, proof.timestamp, time_since, available);
+            }
+        }
+        
+        debug!("Looking for strategic merges for block {} (sequences {}-{})", 
+               block_proofs.block_number, start_seq, end_seq);
+        
+        // Try to find merges that would create one half of the block proof
+        for split_point in (start_seq + 1)..=end_seq {
+            let first_half: Vec<u64> = (start_seq..split_point).collect();
+            let second_half: Vec<u64> = (split_point..=end_seq).collect();
+            
+            // Check if we can create the first half by merging existing proofs
+            let first_half_exists = block_proofs.proofs.iter().any(|p| arrays_equal(&p.sequences, &first_half));
+            if !first_half_exists {
+                if block_proofs.block_number == 180 {
+                    info!("🔍 Block 180: First half {:?} doesn't exist, looking for merge to create it", first_half);
+                }
+                debug!("First half {:?} doesn't exist, looking for merge to create it", first_half);
+                if let Some(merge) = find_merge_to_create_sequence(&first_half, block_proofs, current_time, excluded) {
+                    if block_proofs.block_number == 180 {
+                        info!("✅ Block 180: Strategic merge found to create first half: {:?} + {:?}", 
+                              merge.sequences1, merge.sequences2);
+                    }
+                    debug!("Strategic merge to create first half of block: {:?} + {:?}", merge.sequences1, merge.sequences2);
+                    return Some(merge);
+                }
+            }
+            
+            // Check if we can create the second half by merging existing proofs
+            let second_half_exists = block_proofs.proofs.iter().any(|p| arrays_equal(&p.sequences, &second_half));
+            if !second_half_exists {
+                if block_proofs.block_number == 180 {
+                    info!("🔍 Block 180: Second half {:?} doesn't exist, looking for merge to create it", second_half);
+                }
+                debug!("Second half {:?} doesn't exist, looking for merge to create it", second_half);
+                if let Some(merge) = find_merge_to_create_sequence(&second_half, block_proofs, current_time, excluded) {
+                    if block_proofs.block_number == 180 {
+                        info!("✅ Block 180: Strategic merge found to create second half: {:?} + {:?}", 
+                              merge.sequences1, merge.sequences2);
+                    }
+                    debug!("Strategic merge to create second half of block: {:?} + {:?}", merge.sequences1, merge.sequences2);
+                    return Some(merge);
+                }
+            }
+        }
+        
+        if block_proofs.block_number == 180 {
+            info!("❌ Block 180: No strategic merges found for block completion");
+        }
+        debug!("No strategic merges found for block completion");
+    }
 
+    // Fall back to finding any adjacent proofs that can be merged
+    if block_proofs.block_number == 180 {
+        info!("🔍 Block 180: Falling back to finding any adjacent proofs");
+    }
+    
     for (i, proof1) in block_proofs.proofs.iter().enumerate() {
         // Check if proof1 is available for merging
         if !is_proof_available(proof1, current_time) {
+            if block_proofs.block_number == 180 {
+                info!("🔍 Block 180: Proof {:?} not available (status: {:?})", proof1.sequences, proof1.status);
+            }
             continue;
         }
 
@@ -517,6 +606,9 @@ fn find_proofs_to_merge_excluding(
                 .iter()
                 .any(|(s1, s2)| s1 == &proof1.sequences && s2 == &proof2.sequences)
             {
+                if block_proofs.block_number == 180 {
+                    info!("🔍 Block 180: Pair {:?} + {:?} is excluded", proof1.sequences, proof2.sequences);
+                }
                 continue; // Skip this pair as it was already attempted
             }
 
@@ -536,11 +628,17 @@ fn find_proofs_to_merge_excluding(
                     });
 
                     if !already_exists {
+                        if block_proofs.block_number == 180 {
+                            info!("✅ Block 180: Found adjacent merge: {:?} + {:?} = {:?}", 
+                                  proof1.sequences, proof2.sequences, combined);
+                        }
                         return Some(MergeRequest {
                             sequences1: proof1.sequences.clone(),
                             sequences2: proof2.sequences.clone(),
                             block_proof: false,
                         });
+                    } else if block_proofs.block_number == 180 {
+                        info!("🔍 Block 180: Combined proof {:?} already exists", combined);
                     }
                 }
             }
@@ -559,6 +657,49 @@ fn arrays_equal(a: &[u64], b: &[u64]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x == y)
 }
 
+// Helper function to find a merge that would create a specific target sequence
+fn find_merge_to_create_sequence(
+    target_sequence: &[u64],
+    block_proofs: &ProofCalculation,
+    current_time: u64,
+    excluded: &[(Vec<u64>, Vec<u64>)],
+) -> Option<MergeRequest> {
+    if target_sequence.is_empty() {
+        return None;
+    }
+    
+    let target_start = *target_sequence.first().unwrap();
+    let target_end = *target_sequence.last().unwrap();
+    
+    // Try all possible split points for the target sequence
+    for split_point in (target_start + 1)..=target_end {
+        let seq1: Vec<u64> = (target_start..split_point).collect();
+        let seq2: Vec<u64> = (split_point..=target_end).collect();
+        
+        // Check if this pair is excluded
+        if excluded.iter().any(|(s1, s2)| s1 == &seq1 && s2 == &seq2) {
+            continue;
+        }
+        
+        // Find proofs matching these sequences
+        let proof1 = block_proofs.proofs.iter().find(|p| arrays_equal(&p.sequences, &seq1));
+        let proof2 = block_proofs.proofs.iter().find(|p| arrays_equal(&p.sequences, &seq2));
+        
+        if let (Some(p1), Some(p2)) = (proof1, proof2) {
+            // Check if both proofs are available (considering the strategic timeout for Used proofs)
+            if is_proof_available(p1, current_time) && is_proof_available(p2, current_time) {
+                return Some(MergeRequest {
+                    sequences1: seq1,
+                    sequences2: seq2,
+                    block_proof: false,
+                });
+            }
+        }
+    }
+    
+    None
+}
+
 fn is_proof_available(proof: &Proof, current_time: u64) -> bool {
     match proof.status {
         ProofStatus::Calculated => true,
@@ -567,7 +708,11 @@ fn is_proof_available(proof: &Proof, current_time: u64) -> bool {
             current_time > proof.timestamp + PROOF_RESERVED_TIMEOUT_MS
         }
         ProofStatus::Started => false, // Started proofs are still being calculated, not available for merging
-        ProofStatus::Used => false,    // USED proofs are NOT available for merging
+        ProofStatus::Used => {
+            // Allow Used proofs only after timeout to prevent excessive intermediate proofs
+            // This gives time for the system to find better merge paths first
+            current_time > proof.timestamp + PROOF_USED_MERGE_TIMEOUT_MS
+        },
         ProofStatus::Rejected => false, // REJECTED proofs are not available for merging
     }
 }
@@ -744,17 +889,19 @@ async fn create_merge_job(
 
             // Move contract logic:
             // - For block proofs: CALCULATED, USED, or RESERVED (including timed out)
-            // - For regular merges: CALCULATED or (RESERVED if timed out)
+            // - For regular merges: CALCULATED, (RESERVED if timed out), or (USED if timed out)
             let p1_ok = if is_block_proof {
                 // Block proofs: CALCULATED, USED, or RESERVED (Move contract allows RESERVED for block proofs)
                 p1.status == ProofStatus::Calculated
                     || p1.status == ProofStatus::Used
                     || p1.status == ProofStatus::Reserved
             } else {
-                // Regular merges: CALCULATED or (RESERVED if timed out)
+                // Regular merges: CALCULATED, (RESERVED if timed out), or (USED if timed out to prevent blocking)
                 p1.status == ProofStatus::Calculated
                     || (p1.status == ProofStatus::Reserved
                         && current_time > p1.timestamp + PROOF_RESERVED_TIMEOUT_MS)
+                    || (p1.status == ProofStatus::Used
+                        && current_time > p1.timestamp + PROOF_USED_MERGE_TIMEOUT_MS)
             };
 
             let p2_ok = if is_block_proof {
@@ -763,10 +910,12 @@ async fn create_merge_job(
                     || p2.status == ProofStatus::Used
                     || p2.status == ProofStatus::Reserved
             } else {
-                // Regular merges: CALCULATED or (RESERVED if timed out)
+                // Regular merges: CALCULATED, (RESERVED if timed out), or (USED if timed out to prevent blocking)
                 p2.status == ProofStatus::Calculated
                     || (p2.status == ProofStatus::Reserved
                         && current_time > p2.timestamp + PROOF_RESERVED_TIMEOUT_MS)
+                    || (p2.status == ProofStatus::Used
+                        && current_time > p2.timestamp + PROOF_USED_MERGE_TIMEOUT_MS)
             };
 
             if !p1_ok {
