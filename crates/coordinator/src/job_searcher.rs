@@ -3,7 +3,7 @@ use crate::constants::{
     DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS, JOB_BUFFER_MEMORY_COEFFICIENT,
     JOB_SELECTION_POOL_SIZE, MAX_CONCURRENT_AGENT_CONTAINERS, MULTICALL_INTERVAL_SECS,
 };
-use crate::docker::{ensure_job_failed_if_not_completed, run_docker_container_task};
+use crate::docker::run_docker_container_task;
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
 use crate::job_lock::get_job_lock_manager;
@@ -272,7 +272,6 @@ impl JobSearcher {
                     // Clone necessary data for the spawned task
                     let state_clone = self.state.clone();
                     let docker_manager_clone = self.docker_manager.clone();
-                    let jobs_cache_clone = self.jobs_cache.clone();
                     let container_timeout_secs = self.container_timeout_secs;
                     let secrets_client_clone = self.secrets_client.clone();
 
@@ -283,7 +282,6 @@ impl JobSearcher {
                             agent_method,
                             state_clone,
                             docker_manager_clone,
-                            jobs_cache_clone,
                             container_timeout_secs,
                             secrets_client_clone,
                             job_lock,
@@ -354,10 +352,6 @@ impl JobSearcher {
                         {
                             error!("Failed to stop container {}: {}", container_id, e);
                         }
-
-                        // Ensure the job is failed on blockchain
-                        ensure_job_failed_if_not_completed(&job, "force shutdown", &self.state)
-                            .await;
                     } else {
                         warn!(
                             "Waiting for Docker container {} (job {}) to complete before shutdown...",
@@ -395,13 +389,6 @@ impl JobSearcher {
                                     error!("Failed to stop container {}: {}", container_id, e);
                                 }
 
-                                // Ensure the job is failed on blockchain
-                                ensure_job_failed_if_not_completed(
-                                    &job,
-                                    "force shutdown during wait",
-                                    &self.state,
-                                )
-                                .await;
                                 break;
                             }
 
@@ -1172,6 +1159,62 @@ impl JobSearcher {
                     a.job_sequence.cmp(&b.job_sequence)
                 });
 
+                // Complete jobs
+                while operations_count < max_operations && !requests.complete_jobs.is_empty() {
+                    let complete_job = requests.complete_jobs.remove(0);
+                    taken_operations
+                        .complete_job_sequences
+                        .push(complete_job.job_sequence);
+                    operations_count += 1;
+                    info!("Added complete job to batch: {}", complete_job.job_sequence);
+                }
+
+                // Fail jobs
+                while operations_count < max_operations && !requests.fail_jobs.is_empty() {
+                    let fail_job = requests.fail_jobs.remove(0);
+                    taken_operations
+                        .fail_job_sequences
+                        .push(fail_job.job_sequence);
+                    taken_operations.fail_errors.push(fail_job.error);
+                    operations_count += 1;
+                    info!("Added fail job to batch: {}", fail_job.job_sequence);
+                }
+
+                // Terminate jobs
+                while operations_count < max_operations && !requests.terminate_jobs.is_empty() {
+                    let terminate_job = requests.terminate_jobs.remove(0);
+                    taken_operations
+                        .terminate_job_sequences
+                        .push(terminate_job.job_sequence);
+                    operations_count += 1;
+                    info!(
+                        "Added terminate job to batch: {}",
+                        terminate_job.job_sequence
+                    );
+                }
+
+                // Submit proofs
+                while operations_count < max_operations && !requests.submit_proofs.is_empty() {
+                    let proof_req = requests.submit_proofs.remove(0);
+                    taken_operations.submit_proofs.push((
+                        proof_req.block_number,
+                        proof_req.sequences,
+                        proof_req.merged_sequences_1,
+                        proof_req.merged_sequences_2,
+                        proof_req.job_id,
+                        proof_req.da_hash,
+                        proof_req.cpu_cores,
+                        proof_req.prover_architecture,
+                        proof_req.prover_memory,
+                        proof_req.cpu_time,
+                    ));
+                    operations_count += 1;
+                    info!(
+                        "Added submit proof to batch: block {}",
+                        proof_req.block_number
+                    );
+                }
+
                 // Take start jobs with validation
                 let mut validated_start_jobs = Vec::new();
                 let mut remaining_start_jobs = Vec::new();
@@ -1226,34 +1269,6 @@ impl JobSearcher {
                 requests.start_jobs = remaining_start_jobs;
             }
 
-            // Complete jobs
-            while operations_count < max_operations && !requests.complete_jobs.is_empty() {
-                let complete_job = requests.complete_jobs.remove(0);
-                taken_operations
-                    .complete_job_sequences
-                    .push(complete_job.job_sequence);
-                operations_count += 1;
-            }
-
-            // Fail jobs
-            while operations_count < max_operations && !requests.fail_jobs.is_empty() {
-                let fail_job = requests.fail_jobs.remove(0);
-                taken_operations
-                    .fail_job_sequences
-                    .push(fail_job.job_sequence);
-                taken_operations.fail_errors.push(fail_job.error);
-                operations_count += 1;
-            }
-
-            // Terminate jobs
-            while operations_count < max_operations && !requests.terminate_jobs.is_empty() {
-                let terminate_job = requests.terminate_jobs.remove(0);
-                taken_operations
-                    .terminate_job_sequences
-                    .push(terminate_job.job_sequence);
-                operations_count += 1;
-            }
-
             // Update state operations
             while operations_count < max_operations
                 && !requests.update_state_for_sequences.is_empty()
@@ -1263,24 +1278,6 @@ impl JobSearcher {
                     update_req.sequence,
                     update_req.new_state_data,
                     update_req.new_data_availability_hash,
-                ));
-                operations_count += 1;
-            }
-
-            // Submit proofs
-            while operations_count < max_operations && !requests.submit_proofs.is_empty() {
-                let proof_req = requests.submit_proofs.remove(0);
-                taken_operations.submit_proofs.push((
-                    proof_req.block_number,
-                    proof_req.sequences,
-                    proof_req.merged_sequences_1,
-                    proof_req.merged_sequences_2,
-                    proof_req.job_id,
-                    proof_req.da_hash,
-                    proof_req.cpu_cores,
-                    proof_req.prover_architecture,
-                    proof_req.prover_memory,
-                    proof_req.cpu_time,
                 ));
                 operations_count += 1;
             }
@@ -1368,8 +1365,8 @@ impl JobSearcher {
                 (available_memory_with_coefficient_gb * 1024.0 * 1024.0 * 1024.0) as u64;
             taken_operations.available_memory = available_memory_bytes;
 
-            // Remove app instance from map if no operations remain
-            if requests.create_jobs.is_empty()
+            // Check if we should remove the app instance from map
+            let should_remove = requests.create_jobs.is_empty()
                 && requests.start_jobs.is_empty()
                 && requests.complete_jobs.is_empty()
                 && requests.fail_jobs.is_empty()
@@ -1377,10 +1374,38 @@ impl JobSearcher {
                 && requests.update_state_for_sequences.is_empty()
                 && requests.submit_proofs.is_empty()
                 && requests.create_app_jobs.is_empty()
-                && requests.create_merge_jobs.is_empty()
-            {
+                && requests.create_merge_jobs.is_empty();
+            
+            // Log remaining operations before potentially removing
+            if !should_remove {
+                info!(
+                    "Remaining operations: {} start, {} complete, {} fail, {} terminate, {} update state, {} submit proofs, {} create app jobs, {} create merge jobs",
+                    requests.start_jobs.len(),
+                    requests.complete_jobs.len(),
+                    requests.fail_jobs.len(),
+                    requests.terminate_jobs.len(),
+                    requests.update_state_for_sequences.len(),
+                    requests.submit_proofs.len(),
+                    requests.create_app_jobs.len(),
+                    requests.create_merge_jobs.len()
+                );
+            }
+            
+            // Remove app instance from map if no operations remain
+            if should_remove {
                 requests_lock.remove(&app_instance);
             }
+
+            info!(
+                "Taken operations: {} complete, {} fail, {} terminate, {} update state, {} submit proofs, {} create app jobs, {} create merge jobs",
+                taken_operations.complete_job_sequences.len(),
+                taken_operations.fail_job_sequences.len(),
+                taken_operations.terminate_job_sequences.len(),
+                taken_operations.update_state_for_sequences.len(),
+                taken_operations.submit_proofs.len(),
+                taken_operations.create_jobs.len(),
+                taken_operations.create_merge_jobs.len()
+            );
 
             if operations_count > 0 {
                 Some(taken_operations)

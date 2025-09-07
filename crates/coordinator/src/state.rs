@@ -556,7 +556,7 @@ impl SharedState {
             _timestamp: Instant::now(),
         });
 
-        debug!(
+        info!(
             "Added complete job request for job {} in app_instance {}",
             job_sequence, app_instance
         );

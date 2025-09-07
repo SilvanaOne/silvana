@@ -1,11 +1,7 @@
 use crate::agent::AgentJob;
-use crate::constants::{
-    JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS,
-    JOB_STATUS_CHECK_DELAY_SECS,
-};
+use crate::constants::{JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS};
 use crate::error::Result;
 use crate::job_lock::JobLockGuard;
-use crate::jobs_cache::JobsCache;
 use crate::session_id::generate_docker_session;
 use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
@@ -14,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use sui::fetch::{AgentMethod, Job};
-use tokio::time::{Duration, sleep};
+use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 /// Standalone function to run a Docker container for a job (for parallel execution)
@@ -24,7 +20,6 @@ pub async fn run_docker_container_task(
     agent_method: AgentMethod,
     state: SharedState,
     docker_manager: Arc<DockerManager>,
-    _jobs_cache: JobsCache,
     container_timeout_secs: u64,
     mut secrets_client: Option<SecretsClient>,
     _job_lock: JobLockGuard, // Hold the lock for the duration of the task
@@ -123,6 +118,13 @@ pub async fn run_docker_container_task(
             // Don't add to failed cache - this is a network/fetch error, not a job failure
             // We'll retry this job on the next iteration
             state.clear_current_agent(&docker_session.session_id).await;
+            ensure_job_failed_if_not_completed(
+                &docker_session.session_id,
+                "Failed to fetch fresh AppInstance",
+                &state,
+            )
+            .await;
+
             docker_manager
                 .remove_container_tracking(&docker_session.session_id)
                 .await;
@@ -231,6 +233,14 @@ pub async fn run_docker_container_task(
         Err(e) => {
             error!("Failed to pull image for job {}: {}", job.job_sequence, e);
             state.clear_current_agent(&docker_session.session_id).await;
+
+            ensure_job_failed_if_not_completed(
+                &docker_session.session_id,
+                "Failed to pull Docker image",
+                &state,
+            )
+            .await;
+
             docker_manager
                 .remove_container_tracking(&docker_session.session_id)
                 .await;
@@ -352,7 +362,8 @@ pub async fn run_docker_container_task(
 
     // Ensure the job is failed on blockchain if it wasn't completed
     // This handles the case where the container exits without the agent calling complete/fail
-    ensure_job_failed_if_not_completed(&job, "container terminated", &state).await;
+    ensure_job_failed_if_not_completed(&docker_session.session_id, "container terminated", &state)
+        .await;
 
     // Clear the agent state after Docker completes
     state.clear_current_agent(&docker_session.session_id).await;
@@ -378,109 +389,26 @@ pub async fn run_docker_container_task(
 
 /// Ensure a job is failed on blockchain if it wasn't completed
 /// This is called after container termination (normal, timeout, or shutdown)
-pub async fn ensure_job_failed_if_not_completed(job: &Job, reason: &str, state: &SharedState) {
-    // First check if there's already a complete/fail request for this job in the multicall queue
-    if state
-        .has_pending_job_request(&job.app_instance, job.job_sequence)
-        .await
-    {
-        return; // Skip blockchain check if already handled
-    }
+pub async fn ensure_job_failed_if_not_completed(
+    session_id: &str,
+    reason: &str,
+    state: &SharedState,
+) {
+    // Fail all remaining jobs for this session
+    let failed_jobs = state
+        .get_agent_job_db()
+        .fail_all_remaining_session_jobs(&session_id)
+        .await;
 
-    // Wait for multicall requests to be processed before checking blockchain
-    sleep(Duration::from_secs(JOB_STATUS_CHECK_DELAY_SECS)).await;
-
-    // Check again if a request was added while we were waiting
-    if state
-        .has_pending_job_request(&job.app_instance, job.job_sequence)
-        .await
-    {
-        return; // Skip blockchain check if now handled
-    }
-
-    // First fetch the app instance to get the jobs table ID
-    let app_instance = match sui::fetch::fetch_app_instance(&job.app_instance).await {
-        Ok(app_inst) => app_inst,
-        Err(e) => {
-            error!(
-                "Failed to fetch app instance for job {} status check: {}",
-                job.job_sequence, e
-            );
-            return;
-        }
-    };
-
-    // Get the jobs table ID from the app instance
-    let jobs_table_id = match app_instance.jobs {
-        Some(jobs) => jobs.jobs_table_id,
-        None => {
-            error!(
-                "No jobs table found in app instance {} for job {}",
-                job.app_instance, job.job_sequence
-            );
-            return;
-        }
-    };
-
-    // Now check if the job is still in a running state on blockchain
-    match sui::fetch::fetch_job_by_id(&jobs_table_id, job.job_sequence).await {
-        Ok(Some(current_job)) => {
-            match current_job.status {
-                sui::fetch::JobStatus::Running => {
-                    // Job is still running, we need to fail it
-                    let error_message = format!("Container terminated: {}", reason);
-                    state
-                        .add_fail_job_request(
-                            job.app_instance.clone(),
-                            job.job_sequence,
-                            error_message.clone(),
-                        )
-                        .await;
-                    info!(
-                        "Job {} found in Running state after container terminated ({}), added fail request to multicall batch",
-                        job.job_sequence, reason
-                    );
-                }
-                sui::fetch::JobStatus::Pending => {
-                    // For periodic jobs, this is expected - they go back to pending after completion
-                    // For failed jobs with retries, they also go back to pending
-                    if current_job.interval_ms.is_some() {
-                        info!(
-                            "Periodic job {} returned to Pending state after container terminated ({})",
-                            job.job_sequence, reason
-                        );
-                    } else if current_job.attempts < 3 {
-                        info!(
-                            "Job {} returned to Pending state for retry (attempt {}) after container terminated ({})",
-                            job.job_sequence, current_job.attempts, reason
-                        );
-                    } else {
-                        warn!(
-                            "Job {} unexpectedly in Pending state after container terminated ({})",
-                            job.job_sequence, reason
-                        );
-                    }
-                }
-                sui::fetch::JobStatus::Failed(_) => {
-                    info!(
-                        "Job {} already in Failed state on blockchain after container terminated ({})",
-                        job.job_sequence, reason
-                    );
-                }
-            }
-        }
-        Ok(None) => {
-            info!(
-                "Job {} no longer exists on blockchain after container terminated ({})",
-                job.job_sequence, reason
-            );
-        }
-        Err(e) => {
-            error!(
-                "Failed to fetch job {} status after container terminated ({}): {}",
-                job.job_sequence, reason, e
-            );
-        }
+    // Add fail requests to multicall for any jobs that were in the database
+    for failed_job in failed_jobs {
+        state
+            .add_fail_job_request(
+                failed_job.app_instance.clone(),
+                failed_job.job_sequence,
+                format!("{}", reason),
+            )
+            .await;
     }
 }
 

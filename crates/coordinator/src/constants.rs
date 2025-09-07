@@ -152,7 +152,7 @@ pub const SHUTDOWN_PROGRESS_INTERVAL_SECS: u64 = 10;
 
 /// Timeout for stuck jobs (in seconds).
 /// Jobs running longer than this are considered stuck and will be failed.
-pub const STUCK_JOB_TIMEOUT_SECS: u64 = 900; // 15 minutes
+pub const STUCK_JOB_TIMEOUT_SECS: u64 = 600; // 15 minutes
 
 /// Delay before initial reconciliation on startup (in seconds).
 /// Allows the system to initialize before the first reconciliation.
