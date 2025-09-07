@@ -4,15 +4,16 @@ mod cli;
 mod config;
 mod constants;
 mod coordinator;
+mod docker;
 mod error;
 mod events;
-mod jobs_cache;
 mod grpc;
 mod hardware;
 mod job_id;
 mod job_lock;
 mod job_searcher;
 mod jobs;
+mod jobs_cache;
 mod merge;
 mod metrics;
 mod processor;
@@ -39,10 +40,10 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     let cli = Cli::parse();
-    
+
     // Capture the chain value for use in command handlers
     let chain_override = cli.chain.clone();
-    
+
     // Override chain if specified
     if let Some(chain) = &cli.chain {
         // Validate chain value
@@ -54,7 +55,10 @@ async fn main() -> Result<()> {
                 }
             }
             _ => {
-                eprintln!("Error: Invalid chain '{}'. Must be one of: devnet, testnet, mainnet", chain);
+                eprintln!(
+                    "Error: Invalid chain '{}'. Must be one of: devnet, testnet, mainnet",
+                    chain
+                );
                 std::process::exit(1);
             }
         }
@@ -324,8 +328,8 @@ async fn main() -> Result<()> {
             match sui::fetch::fetch_object(&object).await {
                 Ok(json_value) => {
                     // Pretty print the JSON
-                    let pretty_json = serde_json::to_string_pretty(&json_value)
-                        .map_err(|e| anyhow!(e))?;
+                    let pretty_json =
+                        serde_json::to_string_pretty(&json_value).map_err(|e| anyhow!(e))?;
                     println!("{}", pretty_json);
                 }
                 Err(e) => {
@@ -333,7 +337,7 @@ async fn main() -> Result<()> {
                     return Err(anyhow!(e).into());
                 }
             }
-            
+
             Ok(())
         }
 
@@ -443,14 +447,18 @@ async fn main() -> Result<()> {
                     println!("    block_settlements: {{");
                     for (chain, settlement) in &app_instance.settlements {
                         // Fetch the BlockSettlement from the ObjectTable
-                        let block_settlement_opt = match sui::fetch::fetch_block_settlement(settlement, block).await {
-                            Ok(bs) => bs,
-                            Err(e) => {
-                                eprintln!("Error fetching block settlement for chain {}: {}", chain, e);
-                                None
-                            }
-                        };
-                        
+                        let block_settlement_opt =
+                            match sui::fetch::fetch_block_settlement(settlement, block).await {
+                                Ok(bs) => bs,
+                                Err(e) => {
+                                    eprintln!(
+                                        "Error fetching block settlement for chain {}: {}",
+                                        chain, e
+                                    );
+                                    None
+                                }
+                            };
+
                         if let Some(block_settlement) = block_settlement_opt {
                             println!("        \"{}\": BlockSettlement {{", chain);
                             println!(
@@ -599,7 +607,7 @@ async fn main() -> Result<()> {
                 Ok(Some(job)) => {
                     // Convert data to hex
                     let data_hex = hex::encode(&job.data);
-                    
+
                     // Convert timestamps to ISO format
                     let created_iso = DateTime::<Utc>::from_timestamp_millis(job.created_at as i64)
                         .map(|dt| dt.to_rfc3339())
@@ -607,75 +615,81 @@ async fn main() -> Result<()> {
                     let updated_iso = DateTime::<Utc>::from_timestamp_millis(job.updated_at as i64)
                         .map(|dt| dt.to_rfc3339())
                         .unwrap_or_else(|| job.updated_at.to_string());
-                    
+
                     // Print formatted job
                     println!("Job {{");
                     println!("    id: \"{}\",", job.id);
                     println!("    job_sequence: {},", job.job_sequence);
-                    
+
                     if let Some(ref desc) = job.description {
                         println!("    description: Some(\"{}\"),", desc);
                     } else {
                         println!("    description: None,");
                     }
-                    
+
                     println!("    developer: \"{}\",", job.developer);
                     println!("    agent: \"{}\",", job.agent);
                     println!("    agent_method: \"{}\",", job.agent_method);
                     println!("    app: \"{}\",", job.app);
                     println!("    app_instance: \"{}\",", job.app_instance);
                     println!("    app_instance_method: \"{}\",", job.app_instance_method);
-                    
+
                     if let Some(block) = job.block_number {
                         println!("    block_number: Some({}),", block);
                     } else {
                         println!("    block_number: None,");
                     }
-                    
+
                     // Print sequences on one line
                     if let Some(ref seqs) = job.sequences {
                         print!("    sequences: Some([");
                         for (i, seq) in seqs.iter().enumerate() {
-                            if i > 0 { print!(", "); }
+                            if i > 0 {
+                                print!(", ");
+                            }
                             print!("{}", seq);
                         }
                         println!("]),");
                     } else {
                         println!("    sequences: None,");
                     }
-                    
+
                     if let Some(ref seqs1) = job.sequences1 {
                         print!("    sequences1: Some([");
                         for (i, seq) in seqs1.iter().enumerate() {
-                            if i > 0 { print!(", "); }
+                            if i > 0 {
+                                print!(", ");
+                            }
                             print!("{}", seq);
                         }
                         println!("]),");
                     } else {
                         println!("    sequences1: None,");
                     }
-                    
+
                     if let Some(ref seqs2) = job.sequences2 {
                         print!("    sequences2: Some([");
                         for (i, seq) in seqs2.iter().enumerate() {
-                            if i > 0 { print!(", "); }
+                            if i > 0 {
+                                print!(", ");
+                            }
                             print!("{}", seq);
                         }
                         println!("]),");
                     } else {
                         println!("    sequences2: None,");
                     }
-                    
+
                     println!("    data: \"0x{}\",", data_hex);
                     println!("    status: {:?},", job.status);
                     println!("    attempts: {},", job.attempts);
-                    
+
                     if let Some(interval) = job.interval_ms {
                         println!("    interval_ms: Some({}),", interval);
                     } else {
                         println!("    interval_ms: None,");
                     }
-                    
+
                     if let Some(next_at) = job.next_scheduled_at {
                         let next_iso = DateTime::<Utc>::from_timestamp_millis(next_at as i64)
                             .map(|dt| dt.to_rfc3339())
@@ -684,7 +698,7 @@ async fn main() -> Result<()> {
                     } else {
                         println!("    next_scheduled_at: None,");
                     }
-                    
+
                     println!("    created_at: \"{}\",", created_iso);
                     println!("    updated_at: \"{}\",", updated_iso);
                     println!("}}");
@@ -987,7 +1001,7 @@ async fn main() -> Result<()> {
 
             Ok(())
         }
-        
+
         Commands::Split { rpc_url } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
@@ -1011,9 +1025,7 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     error!("Failed to manage gas coin pool: {}", e);
-                    return Err(
-                        anyhow::anyhow!("Failed to manage gas coin pool: {}", e).into()
-                    );
+                    return Err(anyhow::anyhow!("Failed to manage gas coin pool: {}", e).into());
                 }
             }
 
@@ -1048,36 +1060,38 @@ async fn main() -> Result<()> {
 
             Ok(())
         }
-        
+
         Commands::Faucet { address, amount } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
                 .with(tracing_subscriber::fmt::layer())
                 .init();
-            
+
             // Get the chain from environment
-            let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()).to_lowercase();
-            
+            let chain = std::env::var("SUI_CHAIN")
+                .unwrap_or_else(|_| "devnet".to_string())
+                .to_lowercase();
+
             // Check if mainnet (no faucet available)
             if chain == "mainnet" {
                 eprintln!("❌ Error: Faucet is not available for mainnet");
                 eprintln!("   Please acquire SUI tokens through an exchange or other means");
                 return Err(anyhow!("Faucet not available for mainnet").into());
             }
-            
+
             // Validate amount
             if amount > 10.0 {
                 eprintln!("❌ Error: Amount exceeds maximum of 10 SUI");
                 eprintln!("   Maximum faucet amount is 10 SUI per request");
                 return Err(anyhow!("Amount exceeds maximum of 10 SUI").into());
             }
-            
+
             if amount <= 0.0 {
                 eprintln!("❌ Error: Amount must be greater than 0");
                 return Err(anyhow!("Invalid amount").into());
             }
-            
+
             // Get the address to fund
             let target_address = address.unwrap_or_else(|| {
                 std::env::var("SUI_ADDRESS").unwrap_or_else(|_| {
@@ -1085,46 +1099,53 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 })
             });
-            
+
             // Validate address format
             if !target_address.starts_with("0x") || target_address.len() != 66 {
                 eprintln!("❌ Error: Invalid SUI address format: {}", target_address);
                 eprintln!("   Address should start with '0x' and be 66 characters long");
                 return Err(anyhow!("Invalid address format").into());
             }
-            
+
             println!("💧 Requesting {} SUI from {} faucet...", amount, chain);
             println!("📍 Target address: {}", target_address);
-            
+
             // Get RPC URL based on chain using the resolver
             let rpc_url = sui::resolve_rpc_url(None, Some(chain.clone()))?;
-            
+
             // Initialize Sui connection to check balance
             sui::SharedSuiState::initialize(&rpc_url).await?;
-            
+
             // Check balance before faucet
             println!("\n📊 Balance before faucet:");
             let balance_before = sui::get_balance_in_sui(&target_address).await?;
             println!("   {:.4} SUI", balance_before);
-            
+
             // Call the faucet
             println!("\n🚰 Calling faucet...");
-            let faucet_result = sui::request_tokens_from_faucet(&chain, &target_address, Some(amount)).await;
-            
+            let faucet_result =
+                sui::request_tokens_from_faucet(&chain, &target_address, Some(amount)).await;
+
             match faucet_result {
                 Ok(tx_digest) => {
                     println!("✅ Faucet successful!");
                     println!("   Transaction: {}", tx_digest);
-                    
+
                     // Wait for transaction to be processed
-                    println!("\n⏳ Waiting {} seconds for transaction to be processed...", constants::CLI_TRANSACTION_WAIT_SECS);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(constants::CLI_TRANSACTION_WAIT_SECS)).await;
-                    
+                    println!(
+                        "\n⏳ Waiting {} seconds for transaction to be processed...",
+                        constants::CLI_TRANSACTION_WAIT_SECS
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(
+                        constants::CLI_TRANSACTION_WAIT_SECS,
+                    ))
+                    .await;
+
                     // Check balance after faucet
                     println!("\n📊 Balance after faucet:");
                     let balance_after = sui::get_balance_in_sui(&target_address).await?;
                     println!("   {:.4} SUI", balance_after);
-                    
+
                     let received = balance_after - balance_before;
                     if received > 0.0 {
                         println!("\n💰 Received: {:.4} SUI", received);
@@ -1135,9 +1156,8 @@ async fn main() -> Result<()> {
                     return Err(e.into());
                 }
             }
-            
+
             Ok(())
         }
     }
 }
-
