@@ -101,7 +101,7 @@ public fun create_app(
         option::none(), // description
         settlement_chains,
         settlement_addresses,
-        5 * 60 * 1000, // 5 minutes between blocks
+        60 * 1000, // 1 minute between blocks
         clock,
         ctx,
     );

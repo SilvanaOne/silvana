@@ -224,21 +224,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
             match sui::fetch::jobs::fetch_job_by_id(jobs_table_id, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
-                    // Store in agent database for tracking
-                    let job_id = format!("job_{}", started_job.job_sequence);
-                    let agent_job = crate::agent::AgentJob {
-                        job_id: job_id.clone(),
-                        job_sequence: started_job.job_sequence,
-                        app_instance: started_job.app_instance.clone(),
-                        developer: pending_job.developer.clone(),
-                        agent: pending_job.agent.clone(),
-                        agent_method: pending_job.agent_method.clone(),
-                        pending_job: pending_job.clone(),
-                        memory_requirement: started_job.memory_requirement,
-                        sent_at: chrono::Utc::now().timestamp() as u64,
-                        start_tx_sent: true, // Already sent via multicall
-                        start_tx_hash: None, // Transaction was part of multicall
-                    };
+                    // Create AgentJob and add it to agent database
+                    let agent_job = crate::agent::AgentJob::new(
+                        pending_job.clone(),
+                        &self.state,
+                        started_job.memory_requirement,
+                    );
 
                     // Store in agent database
                     self.state
@@ -318,7 +309,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         sequences1: pending_job.sequences1.clone().unwrap_or_default(),
                         sequences2: pending_job.sequences2.clone().unwrap_or_default(),
                         data: pending_job.data.clone(),
-                        job_id,
+                        job_id: agent_job.job_id,
                         attempts: pending_job.attempts as u32,
                         created_at: pending_job.created_at,
                         updated_at: pending_job.updated_at,
