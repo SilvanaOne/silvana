@@ -454,7 +454,7 @@ impl MulticallProcessor {
                                                             start_job.job_sequence
                                                         );
                                                     } else {
-                                                        warn!(
+                                                        info!(
                                                             "Settlement job {} has no settlement_chain (method: {}) - skipping",
                                                             start_job.job_sequence, fresh_job.app_instance_method
                                                         );
