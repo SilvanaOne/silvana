@@ -1,6 +1,8 @@
 use crate::constants::MULTICALL_INTERVAL_SECS;
 use crate::error::{CoordinatorError, Result};
+use crate::metrics::CoordinatorMetrics;
 use crate::state::{SharedState, StartedJob};
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info};
@@ -8,11 +10,20 @@ use tracing::{debug, error, info};
 /// Multicall processor that monitors multicall_requests and executes batched operations
 pub struct MulticallProcessor {
     state: SharedState,
+    metrics: Option<Arc<CoordinatorMetrics>>,
 }
 
 impl MulticallProcessor {
     pub fn new(state: SharedState) -> Self {
-        Self { state }
+        Self { 
+            state,
+            metrics: None,
+        }
+    }
+    
+    /// Set the metrics reporter
+    pub fn set_metrics(&mut self, metrics: Arc<CoordinatorMetrics>) {
+        self.metrics = Some(metrics);
     }
 
     /// Main loop for the multicall processor
@@ -148,6 +159,8 @@ impl MulticallProcessor {
             current_operation_count,
             current_batch_operations.len()
         );
+        
+        let batch_start_time = Instant::now();
 
         let mut sui_interface = sui::SilvanaSuiInterface::new();
         match sui_interface
@@ -155,10 +168,19 @@ impl MulticallProcessor {
             .await
         {
             Ok(result) => {
+                let batch_duration = batch_start_time.elapsed();
                 info!(
                     "Successfully executed batch multicall with {} operations (tx: {})",
                     current_operation_count, result.tx_digest
                 );
+                
+                // Report successful multicall metrics
+                if let Some(ref metrics) = self.metrics {
+                    metrics.increment_multicall_batch_executed(
+                        current_operation_count,
+                        batch_duration.as_millis() as usize
+                    );
+                }
 
                 // Add only successfully started jobs to buffer for container launching
                 let successful_start_sequences = result.successful_start_jobs();
@@ -185,7 +207,15 @@ impl MulticallProcessor {
                         "Adding {} successfully started jobs to container launch buffer",
                         successful_started_jobs.len()
                     );
-                    self.state.add_started_jobs(successful_started_jobs).await;
+                    self.state.add_started_jobs(successful_started_jobs.clone()).await;
+                    
+                    // Report start jobs metrics
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.add_multicall_start_jobs_result(
+                            successful_started_jobs.len(),
+                            failed_start_sequences.len()
+                        );
+                    }
                 }
 
                 info!(
@@ -202,6 +232,12 @@ impl MulticallProcessor {
                     "Batch multicall failed: {} (tx: {:?})",
                     error_msg, tx_digest_opt
                 );
+                
+                // Report failed multicall metrics
+                if let Some(ref metrics) = self.metrics {
+                    metrics.increment_multicall_batch_failed();
+                }
+                
                 return Err(CoordinatorError::Other(anyhow::anyhow!(
                     "Batch multicall failed: {}",
                     error_msg

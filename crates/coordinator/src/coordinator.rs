@@ -359,8 +359,10 @@ pub async fn start_coordinator(
 
     // 7. Start multicall processor in a separate thread (processes multicall queue and executes batches)
     let multicall_state = state.clone();
+    let multicall_metrics = metrics.clone();
     let multicall_handle = task::spawn(async move {
         let mut multicall_processor = crate::multicall::MulticallProcessor::new(multicall_state);
+        multicall_processor.set_metrics(multicall_metrics);
 
         // Delay multicall processor startup by 5 seconds
         info!("Multicall processor waiting 5 seconds before starting...");
@@ -375,6 +377,7 @@ pub async fn start_coordinator(
 
     // 8. Start docker buffer processor in a separate thread (processes started jobs buffer and launches containers)
     let docker_state = state.clone();
+    let docker_metrics = metrics.clone();
     let docker_handle = task::spawn(async move {
         let mut docker_processor = match crate::docker::DockerBufferProcessor::new(docker_state, use_tee, container_timeout) {
             Ok(processor) => processor,
@@ -383,6 +386,7 @@ pub async fn start_coordinator(
                 return;
             }
         };
+        docker_processor.set_metrics(docker_metrics);
 
         // Delay docker processor startup by 8 seconds
         info!("Docker buffer processor waiting 8 seconds before starting...");

@@ -987,6 +987,11 @@ impl SharedState {
     pub async fn get_started_jobs_count(&self) -> usize {
         self.started_jobs_buffer.lock().await.len()
     }
+    
+    /// Get the current size of the started jobs buffer (for metrics)
+    pub async fn get_started_jobs_buffer_size(&self) -> usize {
+        self.started_jobs_buffer.lock().await.len()
+    }
 
     /// Get the total number of operations across all app instances
     pub async fn get_total_operations_count(&self) -> usize {

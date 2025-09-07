@@ -24,6 +24,27 @@ pub fn send_coordinator_metrics(
     jobs_failed_cached_count: u64,
     last_selected_job_sequence: u64,
     last_selected_job_instance: String,
+    // Multicall processor metrics
+    multicall_total_operations: u64,
+    multicall_batches_executed: u64,
+    multicall_batches_failed: u64,
+    multicall_start_jobs_queued: u64,
+    multicall_complete_jobs_queued: u64,
+    multicall_fail_jobs_queued: u64,
+    multicall_last_batch_size: u64,
+    multicall_last_execution_time_ms: u64,
+    multicall_successful_start_jobs: u64,
+    multicall_failed_start_jobs: u64,
+    // Docker buffer processor metrics
+    docker_buffer_size: u64,
+    docker_jobs_processed: u64,
+    docker_jobs_skipped: u64,
+    docker_jobs_returned_to_buffer: u64,
+    docker_containers_started: u64,
+    docker_containers_failed: u64,
+    docker_resource_check_failures: u64,
+    docker_job_lock_conflicts: u64,
+    docker_agent_method_fetch_failures: u64,
 ) {
     let meter = global::meter("silvana-coordinator");
 
@@ -283,6 +304,200 @@ pub fn send_coordinator_metrics(
             ],
         );
     }
+
+    // Multicall processor metrics
+    let multicall_ops_gauge = meter
+        .u64_gauge("silvana.multicall.operations")
+        .with_description("Multicall operations queued")
+        .build();
+
+    multicall_ops_gauge.record(
+        multicall_total_operations,
+        &[
+            KeyValue::new("operation.type", "total"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    multicall_ops_gauge.record(
+        multicall_start_jobs_queued,
+        &[
+            KeyValue::new("operation.type", "start_jobs"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    multicall_ops_gauge.record(
+        multicall_complete_jobs_queued,
+        &[
+            KeyValue::new("operation.type", "complete_jobs"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    multicall_ops_gauge.record(
+        multicall_fail_jobs_queued,
+        &[
+            KeyValue::new("operation.type", "fail_jobs"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    let multicall_batches_gauge = meter
+        .u64_gauge("silvana.multicall.batches")
+        .with_description("Multicall batch execution stats")
+        .build();
+
+    multicall_batches_gauge.record(
+        multicall_batches_executed,
+        &[
+            KeyValue::new("batch.status", "executed"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    multicall_batches_gauge.record(
+        multicall_batches_failed,
+        &[
+            KeyValue::new("batch.status", "failed"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    let multicall_performance_gauge = meter
+        .u64_gauge("silvana.multicall.performance")
+        .with_description("Multicall performance metrics")
+        .build();
+
+    multicall_performance_gauge.record(
+        multicall_last_batch_size,
+        &[
+            KeyValue::new("metric.type", "batch_size"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    multicall_performance_gauge.record(
+        multicall_last_execution_time_ms,
+        &[
+            KeyValue::new("metric.type", "execution_time_ms"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    let multicall_start_jobs_gauge = meter
+        .u64_gauge("silvana.multicall.start_jobs")
+        .with_description("Multicall start job results")
+        .build();
+
+    multicall_start_jobs_gauge.record(
+        multicall_successful_start_jobs,
+        &[
+            KeyValue::new("result", "successful"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    multicall_start_jobs_gauge.record(
+        multicall_failed_start_jobs,
+        &[
+            KeyValue::new("result", "failed"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    // Docker buffer processor metrics
+    let docker_buffer_gauge = meter
+        .u64_gauge("silvana.docker.buffer")
+        .with_description("Docker buffer processor metrics")
+        .build();
+
+    docker_buffer_gauge.record(
+        docker_buffer_size,
+        &[
+            KeyValue::new("metric.type", "buffer_size"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    let docker_jobs_gauge = meter
+        .u64_gauge("silvana.docker.jobs")
+        .with_description("Docker job processing metrics")
+        .build();
+
+    docker_jobs_gauge.record(
+        docker_jobs_processed,
+        &[
+            KeyValue::new("job.status", "processed"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    docker_jobs_gauge.record(
+        docker_jobs_skipped,
+        &[
+            KeyValue::new("job.status", "skipped"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    docker_jobs_gauge.record(
+        docker_jobs_returned_to_buffer,
+        &[
+            KeyValue::new("job.status", "returned_to_buffer"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    let docker_containers_gauge = meter
+        .u64_gauge("silvana.docker.container_operations")
+        .with_description("Docker container operation metrics")
+        .build();
+
+    docker_containers_gauge.record(
+        docker_containers_started,
+        &[
+            KeyValue::new("operation", "started"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    docker_containers_gauge.record(
+        docker_containers_failed,
+        &[
+            KeyValue::new("operation", "failed"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    let docker_failures_gauge = meter
+        .u64_gauge("silvana.docker.failures")
+        .with_description("Docker processor failure metrics")
+        .build();
+
+    docker_failures_gauge.record(
+        docker_resource_check_failures,
+        &[
+            KeyValue::new("failure.type", "resource_check"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    docker_failures_gauge.record(
+        docker_job_lock_conflicts,
+        &[
+            KeyValue::new("failure.type", "job_lock_conflict"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
+
+    docker_failures_gauge.record(
+        docker_agent_method_fetch_failures,
+        &[
+            KeyValue::new("failure.type", "agent_method_fetch"),
+            KeyValue::new("service.name", "silvana-coordinator"),
+        ],
+    );
 
     // Uptime metric
     let uptime_counter = meter

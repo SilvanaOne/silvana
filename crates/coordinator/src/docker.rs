@@ -23,6 +23,7 @@ pub async fn run_docker_container_task(
     container_timeout_secs: u64,
     mut secrets_client: Option<SecretsClient>,
     _job_lock: JobLockGuard, // Hold the lock for the duration of the task
+    metrics: Option<Arc<CoordinatorMetrics>>,
 ) {
     let job_start = Instant::now();
 
@@ -340,6 +341,10 @@ pub async fn run_docker_container_task(
                     "❌ Docker container failed for job {} with exit code {} (docker: {:?}, total: {:?})",
                     job.job_sequence, result.exit_code, docker_elapsed, total_elapsed
                 );
+                // Increment container failed metric
+                if let Some(ref metrics) = metrics {
+                    metrics.increment_docker_containers_failed();
+                }
             }
 
             // Always display Docker logs after container exits
@@ -357,6 +362,10 @@ pub async fn run_docker_container_task(
                 "Failed to run Docker container for job {}: {} (docker: {:?}, total: {:?})",
                 job.job_sequence, e, docker_elapsed, total_elapsed
             );
+            // Increment container failed metric
+            if let Some(ref metrics) = metrics {
+                metrics.increment_docker_containers_failed();
+            }
         }
     }
 
@@ -472,6 +481,7 @@ async fn retrieve_secrets_for_job(
 }
 
 use crate::constants::MAX_CONCURRENT_AGENT_CONTAINERS;
+use crate::metrics::CoordinatorMetrics;
 use tokio::time::sleep;
 
 /// Docker buffer processor that monitors started_jobs_buffer and launches containers
@@ -480,6 +490,7 @@ pub struct DockerBufferProcessor {
     docker_manager: Arc<DockerManager>,
     container_timeout_secs: u64,
     secrets_client: Option<SecretsClient>,
+    metrics: Option<Arc<CoordinatorMetrics>>,
 }
 
 impl DockerBufferProcessor {
@@ -492,7 +503,13 @@ impl DockerBufferProcessor {
             docker_manager: Arc::new(docker_manager),
             container_timeout_secs,
             secrets_client: None,
+            metrics: None,
         })
+    }
+    
+    /// Set the metrics reporter
+    pub fn set_metrics(&mut self, metrics: Arc<CoordinatorMetrics>) {
+        self.metrics = Some(metrics);
     }
 
     /// Main loop for the docker buffer processor
@@ -521,6 +538,12 @@ impl DockerBufferProcessor {
                 return Ok(());
             }
 
+            // Report buffer size metric
+            let buffer_size = self.state.get_started_jobs_buffer_size().await;
+            if let Some(ref metrics) = self.metrics {
+                metrics.set_docker_buffer_size(buffer_size);
+            }
+            
             // Check current container counts
             let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
             let total_containers = loading_count + running_count;
@@ -550,6 +573,11 @@ impl DockerBufferProcessor {
                 started_job.job_sequence,
                 started_job.memory_requirement as f64 / (1024.0 * 1024.0 * 1024.0)
             );
+            
+            // Increment jobs processed metric
+            if let Some(ref metrics) = self.metrics {
+                metrics.increment_docker_jobs_processed();
+            }
 
             // First fetch the app instance to get the jobs table ID
             let job_result: std::result::Result<Option<sui::fetch::Job>, ()> =
@@ -594,6 +622,10 @@ impl DockerBufferProcessor {
                             "Buffered job {} from app_instance {} is in '{:?}' status, skipping",
                             started_job.job_sequence, started_job.app_instance, job.status
                         );
+                        // Increment jobs skipped metric
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.increment_docker_jobs_skipped();
+                        }
                         continue;
                     }
 
@@ -611,6 +643,10 @@ impl DockerBufferProcessor {
                                 "Failed to fetch agent method for buffered job {}: {}",
                                 job.job_sequence, e
                             );
+                            // Increment agent method fetch failures metric
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.increment_docker_agent_method_fetch_failures();
+                            }
                             continue;
                         }
                     };
@@ -627,6 +663,10 @@ impl DockerBufferProcessor {
                                 "Insufficient resources for job {}, returned to buffer",
                                 job.job_sequence
                             );
+                            // Increment jobs returned to buffer metric
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.increment_docker_jobs_returned_to_buffer();
+                            }
                             sleep(Duration::from_secs(5)).await;
                             continue;
                         }
@@ -634,6 +674,10 @@ impl DockerBufferProcessor {
                             error!("Error checking resources: {}", e);
                             // Put job back in buffer
                             self.state.add_started_jobs(vec![started_job]).await;
+                            // Increment resource check failures metric
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.increment_docker_resource_check_failures();
+                            }
                             sleep(Duration::from_secs(5)).await;
                             continue;
                         }
@@ -646,6 +690,10 @@ impl DockerBufferProcessor {
                             Some(lock) => lock,
                             None => {
                                 warn!("Job {} already locked, skipping", job.job_sequence);
+                                // Increment job lock conflicts metric
+                                if let Some(ref metrics) = self.metrics {
+                                    metrics.increment_docker_job_lock_conflicts();
+                                }
                                 continue;
                             }
                         };
@@ -654,12 +702,18 @@ impl DockerBufferProcessor {
                         "🐳 Starting Docker container for buffered job {}: {}/{}/{}",
                         job.job_sequence, job.developer, job.agent, job.agent_method
                     );
+                    
+                    // Increment containers started metric
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.increment_docker_containers_started();
+                    }
 
                     // Clone necessary data for the spawned task
                     let state_clone = self.state.clone();
                     let docker_manager_clone = self.docker_manager.clone();
                     let container_timeout_secs = self.container_timeout_secs;
                     let secrets_client_clone = self.secrets_client.clone();
+                    let metrics_clone = self.metrics.clone();
 
                     // Spawn task to run Docker container
                     tokio::spawn(async move {
@@ -671,6 +725,7 @@ impl DockerBufferProcessor {
                             container_timeout_secs,
                             secrets_client_clone,
                             job_lock,
+                            metrics_clone,
                         )
                         .await;
                     });
@@ -681,6 +736,10 @@ impl DockerBufferProcessor {
                         started_job.job_sequence, started_job.app_instance
                     );
                     // Job doesn't exist or can't be fetched, don't put it back in buffer
+                    // Increment jobs skipped metric
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.increment_docker_jobs_skipped();
+                    }
                 }
                 _ => {
                     // This shouldn't happen with our current logic

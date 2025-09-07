@@ -26,6 +26,29 @@ pub struct CoordinatorMetrics {
     pub jobs_failed_cached_count: Arc<AtomicUsize>,
     pub last_selected_job_sequence: Arc<AtomicUsize>,
     pub last_selected_job_instance: Arc<parking_lot::RwLock<String>>,
+    
+    // Multicall processor metrics
+    pub multicall_total_operations: Arc<AtomicUsize>,
+    pub multicall_batches_executed: Arc<AtomicUsize>,
+    pub multicall_batches_failed: Arc<AtomicUsize>,
+    pub multicall_start_jobs_queued: Arc<AtomicUsize>,
+    pub multicall_complete_jobs_queued: Arc<AtomicUsize>,
+    pub multicall_fail_jobs_queued: Arc<AtomicUsize>,
+    pub multicall_last_batch_size: Arc<AtomicUsize>,
+    pub multicall_last_execution_time_ms: Arc<AtomicUsize>,
+    pub multicall_successful_start_jobs: Arc<AtomicUsize>,
+    pub multicall_failed_start_jobs: Arc<AtomicUsize>,
+    
+    // Docker buffer processor metrics
+    pub docker_buffer_size: Arc<AtomicUsize>,
+    pub docker_jobs_processed: Arc<AtomicUsize>,
+    pub docker_jobs_skipped: Arc<AtomicUsize>,
+    pub docker_jobs_returned_to_buffer: Arc<AtomicUsize>,
+    pub docker_containers_started: Arc<AtomicUsize>,
+    pub docker_containers_failed: Arc<AtomicUsize>,
+    pub docker_resource_check_failures: Arc<AtomicUsize>,
+    pub docker_job_lock_conflicts: Arc<AtomicUsize>,
+    pub docker_agent_method_fetch_failures: Arc<AtomicUsize>,
 }
 
 impl CoordinatorMetrics {
@@ -45,6 +68,29 @@ impl CoordinatorMetrics {
             jobs_failed_cached_count: Arc::new(AtomicUsize::new(0)),
             last_selected_job_sequence: Arc::new(AtomicUsize::new(0)),
             last_selected_job_instance: Arc::new(parking_lot::RwLock::new(String::new())),
+            
+            // Multicall processor metrics
+            multicall_total_operations: Arc::new(AtomicUsize::new(0)),
+            multicall_batches_executed: Arc::new(AtomicUsize::new(0)),
+            multicall_batches_failed: Arc::new(AtomicUsize::new(0)),
+            multicall_start_jobs_queued: Arc::new(AtomicUsize::new(0)),
+            multicall_complete_jobs_queued: Arc::new(AtomicUsize::new(0)),
+            multicall_fail_jobs_queued: Arc::new(AtomicUsize::new(0)),
+            multicall_last_batch_size: Arc::new(AtomicUsize::new(0)),
+            multicall_last_execution_time_ms: Arc::new(AtomicUsize::new(0)),
+            multicall_successful_start_jobs: Arc::new(AtomicUsize::new(0)),
+            multicall_failed_start_jobs: Arc::new(AtomicUsize::new(0)),
+            
+            // Docker buffer processor metrics
+            docker_buffer_size: Arc::new(AtomicUsize::new(0)),
+            docker_jobs_processed: Arc::new(AtomicUsize::new(0)),
+            docker_jobs_skipped: Arc::new(AtomicUsize::new(0)),
+            docker_jobs_returned_to_buffer: Arc::new(AtomicUsize::new(0)),
+            docker_containers_started: Arc::new(AtomicUsize::new(0)),
+            docker_containers_failed: Arc::new(AtomicUsize::new(0)),
+            docker_resource_check_failures: Arc::new(AtomicUsize::new(0)),
+            docker_job_lock_conflicts: Arc::new(AtomicUsize::new(0)),
+            docker_agent_method_fetch_failures: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -96,6 +142,67 @@ impl CoordinatorMetrics {
             .store(selected_job_sequence as usize, Ordering::Relaxed);
         *self.last_selected_job_instance.write() = selected_job_instance;
     }
+
+    // Multicall processor metric setters
+    #[allow(dead_code)]
+    pub fn set_multicall_operations_queued(&self, total: usize, start: usize, complete: usize, fail: usize) {
+        self.multicall_total_operations.store(total, Ordering::Relaxed);
+        self.multicall_start_jobs_queued.store(start, Ordering::Relaxed);
+        self.multicall_complete_jobs_queued.store(complete, Ordering::Relaxed);
+        self.multicall_fail_jobs_queued.store(fail, Ordering::Relaxed);
+    }
+    
+    pub fn increment_multicall_batch_executed(&self, batch_size: usize, execution_time_ms: usize) {
+        self.multicall_batches_executed.fetch_add(1, Ordering::Relaxed);
+        self.multicall_last_batch_size.store(batch_size, Ordering::Relaxed);
+        self.multicall_last_execution_time_ms.store(execution_time_ms, Ordering::Relaxed);
+    }
+    
+    pub fn increment_multicall_batch_failed(&self) {
+        self.multicall_batches_failed.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn add_multicall_start_jobs_result(&self, successful: usize, failed: usize) {
+        self.multicall_successful_start_jobs.fetch_add(successful, Ordering::Relaxed);
+        self.multicall_failed_start_jobs.fetch_add(failed, Ordering::Relaxed);
+    }
+    
+    // Docker buffer processor metric setters
+    pub fn set_docker_buffer_size(&self, size: usize) {
+        self.docker_buffer_size.store(size, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_jobs_processed(&self) {
+        self.docker_jobs_processed.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_jobs_skipped(&self) {
+        self.docker_jobs_skipped.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_jobs_returned_to_buffer(&self) {
+        self.docker_jobs_returned_to_buffer.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_containers_started(&self) {
+        self.docker_containers_started.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_containers_failed(&self) {
+        self.docker_containers_failed.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_resource_check_failures(&self) {
+        self.docker_resource_check_failures.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_job_lock_conflicts(&self) {
+        self.docker_job_lock_conflicts.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn increment_docker_agent_method_fetch_failures(&self) {
+        self.docker_agent_method_fetch_failures.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 /// Collect and log coordinator metrics
@@ -138,6 +245,29 @@ async fn collect_coordinator_metrics(
     let jobs_failed_cached_count = metrics.jobs_failed_cached_count.load(Ordering::Relaxed);
     let last_selected_job_sequence = metrics.last_selected_job_sequence.load(Ordering::Relaxed);
     let last_selected_job_instance = metrics.last_selected_job_instance.read().clone();
+    
+    // Multicall processor metrics
+    let multicall_total_operations = metrics.multicall_total_operations.load(Ordering::Relaxed);
+    let multicall_batches_executed = metrics.multicall_batches_executed.load(Ordering::Relaxed);
+    let multicall_batches_failed = metrics.multicall_batches_failed.load(Ordering::Relaxed);
+    let multicall_start_jobs_queued = metrics.multicall_start_jobs_queued.load(Ordering::Relaxed);
+    let multicall_complete_jobs_queued = metrics.multicall_complete_jobs_queued.load(Ordering::Relaxed);
+    let multicall_fail_jobs_queued = metrics.multicall_fail_jobs_queued.load(Ordering::Relaxed);
+    let multicall_last_batch_size = metrics.multicall_last_batch_size.load(Ordering::Relaxed);
+    let multicall_last_execution_time_ms = metrics.multicall_last_execution_time_ms.load(Ordering::Relaxed);
+    let multicall_successful_start_jobs = metrics.multicall_successful_start_jobs.load(Ordering::Relaxed);
+    let multicall_failed_start_jobs = metrics.multicall_failed_start_jobs.load(Ordering::Relaxed);
+    
+    // Docker buffer processor metrics
+    let docker_buffer_size = metrics.docker_buffer_size.load(Ordering::Relaxed);
+    let docker_jobs_processed = metrics.docker_jobs_processed.load(Ordering::Relaxed);
+    let docker_jobs_skipped = metrics.docker_jobs_skipped.load(Ordering::Relaxed);
+    let docker_jobs_returned_to_buffer = metrics.docker_jobs_returned_to_buffer.load(Ordering::Relaxed);
+    let docker_containers_started = metrics.docker_containers_started.load(Ordering::Relaxed);
+    let docker_containers_failed = metrics.docker_containers_failed.load(Ordering::Relaxed);
+    let docker_resource_check_failures = metrics.docker_resource_check_failures.load(Ordering::Relaxed);
+    let docker_job_lock_conflicts = metrics.docker_job_lock_conflicts.load(Ordering::Relaxed);
+    let docker_agent_method_fetch_failures = metrics.docker_agent_method_fetch_failures.load(Ordering::Relaxed);
 
     // Coordinator info
     let coordinator_id = state.get_coordinator_id();
@@ -161,6 +291,27 @@ async fn collect_coordinator_metrics(
         jobs_failed_cached_count as u64,
         last_selected_job_sequence as u64,
         last_selected_job_instance,
+        // Multicall metrics
+        multicall_total_operations as u64,
+        multicall_batches_executed as u64,
+        multicall_batches_failed as u64,
+        multicall_start_jobs_queued as u64,
+        multicall_complete_jobs_queued as u64,
+        multicall_fail_jobs_queued as u64,
+        multicall_last_batch_size as u64,
+        multicall_last_execution_time_ms as u64,
+        multicall_successful_start_jobs as u64,
+        multicall_failed_start_jobs as u64,
+        // Docker metrics
+        docker_buffer_size as u64,
+        docker_jobs_processed as u64,
+        docker_jobs_skipped as u64,
+        docker_jobs_returned_to_buffer as u64,
+        docker_containers_started as u64,
+        docker_containers_failed as u64,
+        docker_resource_check_failures as u64,
+        docker_job_lock_conflicts as u64,
+        docker_agent_method_fetch_failures as u64,
     );
 
     // Log metrics at debug level (these will be sent to New Relic if warn/error occur)
