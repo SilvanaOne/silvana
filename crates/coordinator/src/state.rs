@@ -858,29 +858,6 @@ impl SharedState {
             .collect()
     }
 
-    /// Get all app instances with pending multicall requests (no interval check)
-    #[allow(dead_code)]
-    pub async fn get_all_pending_multicall_app_instances(&self) -> Vec<String> {
-        let requests = self.multicall_requests.lock().await;
-
-        requests
-            .iter()
-            .filter(|(_, req)| {
-                // Check if there are any pending operations
-                !req.create_jobs.is_empty()
-                    || !req.start_jobs.is_empty()
-                    || !req.complete_jobs.is_empty()
-                    || !req.fail_jobs.is_empty()
-                    || !req.terminate_jobs.is_empty()
-                    || !req.update_state_for_sequences.is_empty()
-                    || !req.submit_proofs.is_empty()
-                    || !req.create_app_jobs.is_empty()
-                    || !req.create_merge_jobs.is_empty()
-            })
-            .map(|(app_instance, _)| app_instance.clone())
-            .collect()
-    }
-
     /// Update last execution time for an app instance
     #[allow(dead_code)]
     pub async fn update_multicall_execution_time(&self, app_instance: &str) {

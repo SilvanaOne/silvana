@@ -1361,25 +1361,6 @@ impl JobSearcher {
         }
     }
 
-    /// Execute pending multicall batches immediately without waiting for interval
-    #[allow(dead_code)]
-    async fn execute_multicall_batches_immediate(&self) -> Result<()> {
-        // Get all app instances with pending requests (no interval check)
-        let app_instances = self.state.get_all_pending_multicall_app_instances().await;
-
-        if app_instances.is_empty() {
-            debug!("No app instances with pending multicall requests");
-            return Ok(());
-        }
-
-        debug!(
-            "Found {} app instances with pending multicall requests (immediate execution)",
-            app_instances.len()
-        );
-        self.execute_multicall_batches_for_app_instances(app_instances)
-            .await
-    }
-
     /// Retrieve secrets for a job from the secrets storage (old version, no longer used)
     #[allow(dead_code)]
     async fn retrieve_secrets_for_job_old(
