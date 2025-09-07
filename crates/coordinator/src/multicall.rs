@@ -5,7 +5,7 @@ use crate::state::{SharedState, StartedJob};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Multicall processor that monitors multicall_requests and executes batched operations
 pub struct MulticallProcessor {
@@ -15,12 +15,12 @@ pub struct MulticallProcessor {
 
 impl MulticallProcessor {
     pub fn new(state: SharedState) -> Self {
-        Self { 
+        Self {
             state,
             metrics: None,
         }
     }
-    
+
     /// Set the metrics reporter
     pub fn set_metrics(&mut self, metrics: Arc<CoordinatorMetrics>) {
         self.metrics = Some(metrics);
@@ -37,15 +37,20 @@ impl MulticallProcessor {
                 // Check if docker still has work
                 let buffer_size = self.state.get_started_jobs_buffer_size().await;
                 let current_agents = self.state.get_current_agent_count().await;
-                
+
                 if buffer_size == 0 && current_agents == 0 {
                     // Docker is done, now process final multicall operations
-                    info!("🛑 Multicall processor: Docker completed, processing final operations...");
-                    
+                    info!(
+                        "🛑 Multicall processor: Docker completed, processing final operations..."
+                    );
+
                     let pending_operations = self.state.get_total_operations_count().await;
                     if pending_operations > 0 {
-                        info!("📤 Processing {} final operations before shutdown...", pending_operations);
-                        
+                        info!(
+                            "📤 Processing {} final operations before shutdown...",
+                            pending_operations
+                        );
+
                         // Execute all pending batches
                         while self.state.get_total_operations_count().await > 0 {
                             if let Err(e) = self.execute_multicall_batch().await {
@@ -53,10 +58,10 @@ impl MulticallProcessor {
                                 // Continue trying to process remaining operations
                             }
                         }
-                        
+
                         info!("✅ All pending multicall operations processed");
                     }
-                    
+
                     return Ok(());
                 } else {
                     // Docker still has work, continue processing multicalls normally
@@ -191,7 +196,7 @@ impl MulticallProcessor {
             current_operation_count,
             current_batch_operations.len()
         );
-        
+
         let batch_start_time = Instant::now();
 
         let mut sui_interface = sui::SilvanaSuiInterface::new();
@@ -205,12 +210,12 @@ impl MulticallProcessor {
                     "Successfully executed batch multicall with {} operations (tx: {})",
                     current_operation_count, result.tx_digest
                 );
-                
+
                 // Report successful multicall metrics
                 if let Some(ref metrics) = self.metrics {
                     metrics.increment_multicall_batch_executed(
                         current_operation_count,
-                        batch_duration.as_millis() as usize
+                        batch_duration.as_millis() as usize,
                     );
                 }
 
@@ -239,13 +244,15 @@ impl MulticallProcessor {
                         "Adding {} successfully started jobs to container launch buffer",
                         successful_started_jobs.len()
                     );
-                    self.state.add_started_jobs(successful_started_jobs.clone()).await;
-                    
+                    self.state
+                        .add_started_jobs(successful_started_jobs.clone())
+                        .await;
+
                     // Report start jobs metrics
                     if let Some(ref metrics) = self.metrics {
                         metrics.add_multicall_start_jobs_result(
                             successful_started_jobs.len(),
-                            failed_start_sequences.len()
+                            failed_start_sequences.len(),
                         );
                     }
                 }
@@ -264,12 +271,12 @@ impl MulticallProcessor {
                     "Batch multicall failed: {} (tx: {:?})",
                     error_msg, tx_digest_opt
                 );
-                
+
                 // Report failed multicall metrics
                 if let Some(ref metrics) = self.metrics {
                     metrics.increment_multicall_batch_failed();
                 }
-                
+
                 return Err(CoordinatorError::Other(anyhow::anyhow!(
                     "Batch multicall failed: {}",
                     error_msg
@@ -295,53 +302,56 @@ impl MulticallProcessor {
 
             // Take operations one by one until we hit the limit
 
-            // Start jobs - sort by sequence
-            if operations_count < max_operations && !requests.start_jobs.is_empty() {
-                requests
-                    .start_jobs
-                    .sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
+            // Create merge jobs
+            while operations_count < max_operations && !requests.create_merge_jobs.is_empty() {
+                let merge_req = requests.create_merge_jobs.remove(0);
+                taken_operations.create_merge_jobs.push((
+                    merge_req.block_number,
+                    merge_req.sequences,
+                    merge_req.sequences1,
+                    merge_req.sequences2,
+                    merge_req.job_description,
+                ));
+                operations_count += 1;
+            }
 
-                // Take start jobs with validation
-                let mut validated_start_jobs = Vec::new();
-                let mut remaining_start_jobs = Vec::new();
+            // Submit proofs
+            while operations_count < max_operations && !requests.submit_proofs.is_empty() {
+                let proof_req = requests.submit_proofs.remove(0);
+                taken_operations.submit_proofs.push((
+                    proof_req.block_number,
+                    proof_req.sequences,
+                    proof_req.merged_sequences_1,
+                    proof_req.merged_sequences_2,
+                    proof_req.job_id,
+                    proof_req.da_hash,
+                    proof_req.cpu_cores,
+                    proof_req.prover_architecture,
+                    proof_req.prover_memory,
+                    proof_req.cpu_time,
+                ));
+                operations_count += 1;
+                info!(
+                    "Added submit proof to batch: block {}",
+                    proof_req.block_number
+                );
+            }
 
-                for start_job in requests.start_jobs.drain(..) {
-                    if operations_count >= max_operations {
-                        remaining_start_jobs.push(start_job);
-                        continue;
-                    }
-
-                    // Validate settlement jobs by checking chain
-                    let is_valid = true;
-                    if let Ok(Some(_chain)) =
-                        sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                            &app_instance,
-                            start_job.job_sequence,
-                        )
-                        .await
-                    {
-                        info!(
-                            " Settlement start_job {} for app_instance {} - validated",
-                            start_job.job_sequence, app_instance
-                        );
-                    }
-
-                    if is_valid {
-                        taken_operations
-                            .start_job_sequences
-                            .push(start_job.job_sequence);
-                        taken_operations
-                            .start_job_memory_requirements
-                            .push(start_job.memory_requirement);
-                        operations_count += 1;
-                        validated_start_jobs.push(start_job);
-                    } else {
-                        remaining_start_jobs.push(start_job);
-                    }
-                }
-
-                // Put remaining jobs back
-                requests.start_jobs = remaining_start_jobs;
+            // Update state operations
+            while operations_count < max_operations
+                && !requests.update_state_for_sequences.is_empty()
+            {
+                let update_req = requests.update_state_for_sequences.remove(0);
+                taken_operations.update_state_for_sequences.push((
+                    update_req.sequence,
+                    update_req.new_state_data,
+                    update_req.new_data_availability_hash,
+                ));
+                operations_count += 1;
+                info!(
+                    "Added update state operation to batch: {}",
+                    update_req.sequence
+                );
             }
 
             // Complete jobs
@@ -378,43 +388,138 @@ impl MulticallProcessor {
                 );
             }
 
-            // Update state operations
-            while operations_count < max_operations
-                && !requests.update_state_for_sequences.is_empty()
-            {
-                let update_req = requests.update_state_for_sequences.remove(0);
-                taken_operations.update_state_for_sequences.push((
-                    update_req.sequence,
-                    update_req.new_state_data,
-                    update_req.new_data_availability_hash,
-                ));
-                operations_count += 1;
-                info!(
-                    "Added update state operation to batch: {}",
-                    update_req.sequence
-                );
-            }
+            // Start jobs - sort by sequence
+            if operations_count < max_operations && !requests.start_jobs.is_empty() {
+                requests
+                    .start_jobs
+                    .sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
 
-            // Submit proofs
-            while operations_count < max_operations && !requests.submit_proofs.is_empty() {
-                let proof_req = requests.submit_proofs.remove(0);
-                taken_operations.submit_proofs.push((
-                    proof_req.block_number,
-                    proof_req.sequences,
-                    proof_req.merged_sequences_1,
-                    proof_req.merged_sequences_2,
-                    proof_req.job_id,
-                    proof_req.da_hash,
-                    proof_req.cpu_cores,
-                    proof_req.prover_architecture,
-                    proof_req.prover_memory,
-                    proof_req.cpu_time,
-                ));
-                operations_count += 1;
-                info!(
-                    "Added submit proof to batch: block {}",
-                    proof_req.block_number
-                );
+                // Take start jobs with validation
+                let mut validated_start_jobs = Vec::new();
+                let mut remaining_start_jobs = Vec::new();
+
+                for start_job in requests.start_jobs.drain(..) {
+                    if operations_count >= max_operations {
+                        remaining_start_jobs.push(start_job);
+                        continue;
+                    }
+
+                    // Fetch fresh app instance and job from blockchain to validate
+                    let mut is_valid = false;
+                    let mut is_error = false;
+
+                    match sui::fetch::fetch_app_instance(&app_instance).await {
+                        Ok(fresh_app_instance) => {
+                            if let Some(jobs) = fresh_app_instance.jobs {
+                                // Fetch the job from blockchain
+                                match sui::fetch::fetch_job_by_id(
+                                    &jobs.jobs_table_id,
+                                    start_job.job_sequence,
+                                )
+                                .await
+                                {
+                                    Ok(Some(fresh_job)) => {
+                                        // Check if job status is Pending
+                                        if fresh_job.status == sui::fetch::JobStatus::Pending {
+                                            // Check if it's a settlement job (contains "settle" in method name)
+                                            let is_settlement_job =
+                                                fresh_job.app_instance_method == "settle";
+
+                                            // Fetch settlement chain for this job
+                                            match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
+                                                &app_instance,
+                                                start_job.job_sequence,
+                                            ).await {
+                                                Ok(Some(chain)) => {
+                                                    // Has settlement chain - validate if it's a settlement job
+                                                    if is_settlement_job {
+                                                        is_valid = true;
+                                                        info!(
+                                                            "Settlement job {} for chain {} validated (status: Pending)",
+                                                            start_job.job_sequence, chain
+                                                        );
+                                                    } else {
+                                                        warn!(
+                                                            "Job {} has settlement_chain {} but is not a settlement job (method: {}) - skipping",
+                                                            start_job.job_sequence, chain, fresh_job.app_instance_method
+                                                        );
+                                                    }
+                                                }
+                                                Ok(None) => {
+                                                    // No settlement chain - validate if it's NOT a settlement job
+                                                    if !is_settlement_job {
+                                                        is_valid = true;
+                                                        info!(
+                                                            "Regular job {} validated (status: Pending)",
+                                                            start_job.job_sequence
+                                                        );
+                                                    } else {
+                                                        warn!(
+                                                            "Settlement job {} has no settlement_chain (method: {}) - skipping",
+                                                            start_job.job_sequence, fresh_job.agent_method
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        "Failed to check settlement chain for job {}: {}",
+                                                        start_job.job_sequence, e
+                                                    );
+                                                    is_error = true;
+                                                }
+                                            }
+                                        } else {
+                                            info!(
+                                                "Job {} has status {:?}, not Pending - skipping",
+                                                start_job.job_sequence, fresh_job.status
+                                            );
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        warn!(
+                                            "Job {} not found in blockchain",
+                                            start_job.job_sequence
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to fetch job {} from blockchain: {}",
+                                            start_job.job_sequence, e
+                                        );
+                                        is_error = true;
+                                    }
+                                }
+                            } else {
+                                warn!("App instance {} has no jobs object", app_instance);
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch app instance {} from blockchain: {}",
+                                app_instance, e
+                            );
+                        }
+                    }
+
+                    if is_valid {
+                        taken_operations
+                            .start_job_sequences
+                            .push(start_job.job_sequence);
+                        taken_operations
+                            .start_job_memory_requirements
+                            .push(start_job.memory_requirement);
+                        operations_count += 1;
+                        validated_start_jobs.push(start_job);
+                    } else {
+                        info!("Job {} is not valid - skipping", start_job.job_sequence);
+                        if is_error {
+                            remaining_start_jobs.push(start_job);
+                        }
+                    }
+                }
+
+                // Put remaining jobs back
+                requests.start_jobs = remaining_start_jobs;
             }
 
             // Create app jobs - validate settlement jobs
@@ -432,7 +537,7 @@ impl MulticallProcessor {
                     if create_req.method_name == "settle" {
                         if create_req.settlement_chain.is_some() {
                             info!(
-                                " Settlement create_job for app_instance {} - validated",
+                                " Settlement create_job for app_instance {} - validated",
                                 app_instance
                             );
                             taken_operations.create_jobs.push((
@@ -451,7 +556,7 @@ impl MulticallProcessor {
                             validated_create_jobs.push(create_req);
                         } else {
                             error!(
-                                "=� Settlement create_job for app_instance {} has no settlement_chain - SKIPPING",
+                                "⚠️ Settlement create_job for app_instance {} has no settlement_chain - SKIPPING",
                                 app_instance
                             );
                         }
@@ -478,15 +583,21 @@ impl MulticallProcessor {
                 requests.create_app_jobs = remaining_create_jobs;
             }
 
-            // Create merge jobs
-            while operations_count < max_operations && !requests.create_merge_jobs.is_empty() {
-                let merge_req = requests.create_merge_jobs.remove(0);
-                taken_operations.create_merge_jobs.push((
-                    merge_req.block_number,
-                    merge_req.sequences,
-                    merge_req.sequences1,
-                    merge_req.sequences2,
-                    merge_req.job_description,
+            // Create jobs - direct create_jobs field
+            while operations_count < max_operations && !requests.create_jobs.is_empty() {
+                let create_job = requests.create_jobs.remove(0);
+                // Convert CreateJobRequest to tuple format for create_jobs
+                taken_operations.create_jobs.push((
+                    create_job.app_instance_method.clone(),
+                    None, // job_description
+                    create_job.creation_block,
+                    None, // sequences
+                    None, // sequences1
+                    None, // sequences2
+                    create_job.input_data.clone(),
+                    None, // interval_ms
+                    None, // next_scheduled_at
+                    None, // settlement_chain
                 ));
                 operations_count += 1;
             }
