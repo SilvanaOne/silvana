@@ -10,7 +10,7 @@ use tokio::time::Instant;
 use tracing::{debug, error, info};
 
 /// Normalize app instance ID to always have 0x prefix
-fn normalize_app_instance_id(app_instance: &str) -> String {
+pub fn normalize_app_instance_id(app_instance: &str) -> String {
     if app_instance.starts_with("0x") {
         app_instance.to_string()
     } else {
@@ -908,5 +908,10 @@ impl SharedState {
     pub async fn get_seconds_since_last_multicall(&self) -> u64 {
         let timestamp = self.last_multicall_timestamp.lock().await;
         timestamp.elapsed().as_secs()
+    }
+
+    /// Get mutable access to multicall requests (for advanced batching operations)
+    pub async fn get_multicall_requests_mut(&self) -> tokio::sync::MutexGuard<'_, HashMap<String, MulticallRequests>> {
+        self.multicall_requests.lock().await
     }
 }

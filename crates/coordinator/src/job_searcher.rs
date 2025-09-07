@@ -1064,210 +1064,314 @@ impl JobSearcher {
             return Ok(());
         }
 
-        // Get multicall limits
         let max_operations = sui::get_max_operations_per_multicall();
         
-        // Collect all operations from all app instances
-        let mut all_operations = Vec::new();
-        let mut all_started_jobs = Vec::new(); // For buffer management
+        // Instead of collecting all operations, build batches incrementally
+        loop {
+            let mut current_batch_operations = Vec::new();
+            let mut current_batch_started_jobs = Vec::new();
+            let mut current_operation_count = 0;
+            let mut has_operations = false;
 
-        for app_instance in app_instances {
-            if let Some(requests) = self.state.take_multicall_requests(&app_instance).await {
-                // Get available memory with coefficient (consistent with job selection logic)
-                let raw_available_memory_gb = get_available_memory_gb();
-                let available_memory_with_coefficient_gb = raw_available_memory_gb as f64 * JOB_BUFFER_MEMORY_COEFFICIENT;
-                let available_memory_bytes = (available_memory_with_coefficient_gb * 1024.0 * 1024.0 * 1024.0) as u64;
-
-                // Prepare all operations for this app instance
-                let all_start_jobs = requests.start_jobs;
-                let all_complete_jobs = requests.complete_jobs;
-                let all_fail_jobs = requests.fail_jobs;
-                let all_terminate_jobs = requests.terminate_jobs;
-                let all_update_state_for_sequences = requests.update_state_for_sequences;
-                let all_submit_proofs = requests.submit_proofs;
-                let all_create_app_jobs = requests.create_app_jobs;
-                let all_create_merge_jobs = requests.create_merge_jobs;
-
-                // Validate settlement jobs and log chain information
-                // Check start_jobs for settlement jobs by looking up their sequences
-                let mut valid_start_jobs = Vec::new();
-                for start_job in all_start_jobs.into_iter() {
-                    // Check if this job sequence corresponds to a settlement job
-                    match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&app_instance, start_job.job_sequence).await {
-                        Ok(Some(chain)) => {
-                            // This is a settlement job with a valid chain
-                            info!("✅ Settlement start_job {} for app_instance {} - chain: '{}'", start_job.job_sequence, app_instance, chain);
-                            valid_start_jobs.push(start_job);
+            // Try to fill a batch by taking operations from each app instance
+            for app_instance in &app_instances {
+                if current_operation_count >= max_operations {
+                    break; // Batch is full
+                }
+                
+                // Try to get some operations from this app instance (without taking all)
+                if let Some(operations) = self.take_partial_multicall_operations(&app_instance, max_operations - current_operation_count).await {
+                    let operation_count = operations.total_operations();
+                    if operation_count > 0 {
+                        has_operations = true;
+                        current_operation_count += operation_count;
+                        
+                        // Collect started jobs for buffer management
+                        for (i, sequence) in operations.start_job_sequences.iter().enumerate() {
+                            let memory_req = operations.start_job_memory_requirements.get(i).copied().unwrap_or(0);
+                            current_batch_started_jobs.push((app_instance.clone(), *sequence, memory_req));
                         }
-                        Ok(None) => {
-                            // This is either not a settlement job, or a settlement job without chain
-                            // We need to determine which case this is - let's assume non-settlement jobs and include them
-                            // Settlement jobs without chain will be caught and terminated in gRPC layer
-                            valid_start_jobs.push(start_job);
-                        }
-                        Err(e) => {
-                            // Failed to lookup - include the job but log the error
-                            warn!("Failed to lookup chain for start_job {} in app_instance {}: {} - including anyway", start_job.job_sequence, app_instance, e);
-                            valid_start_jobs.push(start_job);
-                        }
+                        
+                        info!(
+                            "Added {} operations from app_instance {} to batch (batch total: {})",
+                            operation_count,
+                            app_instance,
+                            current_operation_count
+                        );
+                        
+                        current_batch_operations.push(operations);
                     }
                 }
+            }
+            
+            // If no operations were collected, we're done
+            if !has_operations {
+                debug!("No more operations to process");
+                break;
+            }
+            
+            // Execute this batch
+            info!(
+                "Executing multicall batch with {} operations from {} app instances",
+                current_operation_count, current_batch_operations.len()
+            );
+            
+            let mut sui_interface = sui::SilvanaSuiInterface::new();
+            match sui_interface
+                .multicall_job_operations(current_batch_operations, None)
+                .await
+            {
+                Ok(result) => {
+                    info!(
+                        "Successfully executed batch multicall with {} operations (tx: {})",
+                        current_operation_count, result.tx_digest
+                    );
 
-                // Check create_app_jobs for settlement jobs
-                let mut valid_create_app_jobs = Vec::new();
-                for create_job in all_create_app_jobs.into_iter() {
-                    // Check if this is a settlement job
-                    if create_job.method_name == "settle" {
-                        if let Some(ref chain) = create_job.settlement_chain {
-                            info!("✅ Settlement create_job for app_instance {} - chain: '{}'", app_instance, chain);
-                            valid_create_app_jobs.push(create_job);
-                        } else {
-                            error!("🚨 Settlement create_job for app_instance {} has no settlement_chain - SKIPPING", app_instance);
-                        }
-                    } else {
-                        valid_create_app_jobs.push(create_job);
+                    // Add only successfully started jobs to buffer for container launching
+                    let successful_start_sequences = result.successful_start_jobs();
+                    let failed_start_sequences = result.failed_start_jobs();
+                    
+                    if !failed_start_sequences.is_empty() {
+                        warn!("Some start jobs failed: {:?}", failed_start_sequences);
                     }
+                    
+                    // Filter started jobs to only include successful ones
+                    let successful_started_jobs: Vec<_> = current_batch_started_jobs
+                        .into_iter()
+                        .filter(|(_, sequence, _)| successful_start_sequences.contains(sequence))
+                        .collect();
+                    
+                    for (app_instance, sequence, memory_req) in successful_started_jobs.iter() {
+                        self.state.add_started_jobs(vec![crate::state::StartedJob {
+                            app_instance: app_instance.clone(),
+                            job_sequence: *sequence,
+                            memory_requirement: *memory_req,
+                        }]).await;
+                    }
+
+                    info!(
+                        "Added {} successfully started jobs to container launch buffer (out of {} attempted)",
+                        successful_started_jobs.len(), 
+                        successful_start_sequences.len() + failed_start_sequences.len()
+                    );
+
+                    // Update the last multicall timestamp after successful execution
+                    self.state.update_last_multicall_timestamp().await;
                 }
-
-                // Use validated collections
-                let all_start_jobs = valid_start_jobs;
-                let all_create_app_jobs = valid_create_app_jobs;
-
-                // Calculate total operations for this app instance
-                let total_operations = all_start_jobs.len()
-                    + all_complete_jobs.len()
-                    + all_fail_jobs.len()
-                    + all_terminate_jobs.len()
-                    + all_update_state_for_sequences.len()
-                    + all_submit_proofs.len()
-                    + all_create_app_jobs.len()
-                    + all_create_merge_jobs.len();
-
-                if total_operations == 0 {
+                Err((error_msg, tx_digest_opt)) => {
+                    error!(
+                        "Batch multicall failed: {} (tx: {:?})",
+                        error_msg, tx_digest_opt
+                    );
+                    // Continue with next batch instead of failing completely
                     continue;
                 }
-
-                info!(
-                    "Collecting {} operations from app_instance {}",
-                    total_operations, app_instance
-                );
-
-                // Convert to MulticallOperations struct
-                let start_sequences: Vec<u64> = all_start_jobs.iter().map(|job| job.job_sequence).collect();
-                let start_memory: Vec<u64> = all_start_jobs.iter().map(|job| job.memory_requirement).collect();
-                let complete_sequences: Vec<u64> = all_complete_jobs.iter().map(|job| job.job_sequence).collect();
-                let (fail_sequences, fail_errors): (Vec<u64>, Vec<String>) = all_fail_jobs.into_iter().map(|job| (job.job_sequence, job.error)).unzip();
-                let terminate_sequences: Vec<u64> = all_terminate_jobs.iter().map(|job| job.job_sequence).collect();
-
-                let operations = sui::MulticallOperations {
-                    app_instance: app_instance.clone(),
-                    complete_job_sequences: complete_sequences,
-                    fail_job_sequences: fail_sequences,
-                    fail_errors,
-                    terminate_job_sequences: terminate_sequences,
-                    start_job_sequences: start_sequences.clone(),
-                    start_job_memory_requirements: start_memory.clone(),
-                    available_memory: available_memory_bytes,
-                    update_state_for_sequences: all_update_state_for_sequences.into_iter().map(|req| (req.sequence, req.new_state_data, req.new_data_availability_hash)).collect(),
-                    submit_proofs: all_submit_proofs.into_iter().map(|req| (req.block_number, req.sequences, req.merged_sequences_1, req.merged_sequences_2, req.job_id, req.da_hash, req.cpu_cores, req.prover_architecture, req.prover_memory, req.cpu_time)).collect(),
-                    create_jobs: all_create_app_jobs.into_iter().map(|req| (req.method_name, req.job_description, req.block_number, req.sequences, req.sequences1, req.sequences2, req.data, req.interval_ms, req.next_scheduled_at, req.settlement_chain)).collect(),
-                    create_merge_jobs: all_create_merge_jobs.into_iter().map(|req| (req.block_number, req.sequences, req.sequences1, req.sequences2, req.job_description)).collect(),
-                };
-
-                all_operations.push(operations);
-
-                // Collect started jobs for buffer management
-                for (i, sequence) in start_sequences.iter().enumerate() {
-                    let memory_req = start_memory.get(i).copied().unwrap_or(0);
-                    
-                    // Check for duplicates before adding
-                    if all_started_jobs.iter().any(|(_, seq, _)| seq == sequence) {
-                        warn!("Duplicate job sequence {} detected for app_instance {} - skipping", sequence, app_instance);
-                        continue;
-                    }
-                    
-                    all_started_jobs.push((app_instance.clone(), *sequence, memory_req));
-                }
-            }
-        }
-
-        if all_operations.is_empty() {
-            debug!("No operations collected from any app instances");
-            return Ok(());
-        }
-
-        // Calculate total operations across all app instances
-        let total_operations: usize = all_operations.iter().map(|op| op.total_operations()).sum();
-        
-        if total_operations > max_operations {
-            info!(
-                "Total operations ({}) exceeds maximum allowed per multicall ({}). Will be automatically batched by the sui interface.",
-                total_operations, max_operations
-            );
-        }
-
-        info!(
-            "Executing SINGLE multicall for {} app instances with {} total operations",
-            all_operations.len(), total_operations
-        );
-
-        // Execute single multicall with all operations
-        let mut sui_interface = sui::SilvanaSuiInterface::new();
-        let total_operations = all_operations.len();
-        match sui_interface
-            .multicall_job_operations(all_operations, None)
-            .await
-        {
-            Ok(result) => {
-                info!(
-                    "Successfully executed batch multicall for {} app instances (tx: {})",
-                    total_operations, result.tx_digest
-                );
-
-                // Add only successfully started jobs to buffer for container launching
-                let successful_start_sequences = result.successful_start_jobs();
-                let failed_start_sequences = result.failed_start_jobs();
-                
-                if !failed_start_sequences.is_empty() {
-                    warn!("Some start jobs failed: {:?}", failed_start_sequences);
-                }
-                
-                // Filter all_started_jobs to only include successful ones
-                let successful_started_jobs: Vec<_> = all_started_jobs
-                    .into_iter()
-                    .filter(|(_, sequence, _)| successful_start_sequences.contains(sequence))
-                    .collect();
-                
-                for (app_instance, sequence, memory_req) in successful_started_jobs.iter() {
-                    self.state.add_started_jobs(vec![crate::state::StartedJob {
-                        app_instance: app_instance.clone(),
-                        job_sequence: *sequence,
-                        memory_requirement: *memory_req,
-                    }]).await;
-                }
-
-                info!(
-                    "Added {} successfully started jobs to container launch buffer (out of {} attempted)",
-                    successful_started_jobs.len(), 
-                    successful_start_sequences.len() + failed_start_sequences.len()
-                );
-
-                // Update the last multicall timestamp after successful execution
-                self.state.update_last_multicall_timestamp().await;
-            }
-            Err((error_msg, tx_digest_opt)) => {
-                error!(
-                    "Batch multicall failed: {} (tx: {:?})",
-                    error_msg, tx_digest_opt
-                );
-                return Err(CoordinatorError::Other(anyhow::anyhow!(
-                    "Batch multicall failed: {}",
-                    error_msg
-                )));
             }
         }
 
         Ok(())
+    }
+
+    /// Take partial operations from an app instance up to the specified limit
+    async fn take_partial_multicall_operations(&self, app_instance: &str, max_operations: usize) -> Option<sui::MulticallOperations> {
+        let app_instance = crate::state::normalize_app_instance_id(app_instance);
+        let mut requests_lock = self.state.get_multicall_requests_mut().await;
+        
+        if let Some(requests) = requests_lock.get_mut(&app_instance) {
+            let mut operations_count = 0;
+            let mut taken_operations = sui::MulticallOperations::new(app_instance.clone(), 0);
+            
+            // Take operations one by one until we hit the limit
+            
+            // Start jobs - but sort them first: settlement jobs first, then merge jobs by sequence, then other jobs by sequence
+            if operations_count < max_operations && !requests.start_jobs.is_empty() {
+                // Sort start jobs: settlement first, then merge by sequence, then others by sequence
+                requests.start_jobs.sort_by(|a, b| {
+                    // We need to determine job types by looking up the job sequences
+                    // For now, let's sort by job sequence and handle settlement validation below
+                    a.job_sequence.cmp(&b.job_sequence)
+                });
+                
+                // Take start jobs with validation
+                let mut validated_start_jobs = Vec::new();
+                let mut remaining_start_jobs = Vec::new();
+                
+                for start_job in requests.start_jobs.drain(..) {
+                    if operations_count >= max_operations {
+                        remaining_start_jobs.push(start_job);
+                        continue;
+                    }
+                    
+                    // Validate settlement jobs by checking chain
+                    let is_valid = true;
+                    if let Ok(Some(_chain)) = sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&app_instance, start_job.job_sequence).await {
+                        info!("✅ Settlement start_job {} for app_instance {} - validated", start_job.job_sequence, app_instance);
+                    } else if let Err(e) = sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&app_instance, start_job.job_sequence).await {
+                        warn!("Failed to lookup chain for start_job {} in app_instance {}: {} - including anyway", start_job.job_sequence, app_instance, e);
+                    }
+                    
+                    if is_valid {
+                        taken_operations.start_job_sequences.push(start_job.job_sequence);
+                        taken_operations.start_job_memory_requirements.push(start_job.memory_requirement);
+                        operations_count += 1;
+                        validated_start_jobs.push(start_job);
+                    } else {
+                        remaining_start_jobs.push(start_job);
+                    }
+                }
+                
+                // Put remaining jobs back
+                requests.start_jobs = remaining_start_jobs;
+            }
+            
+            // Complete jobs
+            while operations_count < max_operations && !requests.complete_jobs.is_empty() {
+                let complete_job = requests.complete_jobs.remove(0);
+                taken_operations.complete_job_sequences.push(complete_job.job_sequence);
+                operations_count += 1;
+            }
+            
+            // Fail jobs
+            while operations_count < max_operations && !requests.fail_jobs.is_empty() {
+                let fail_job = requests.fail_jobs.remove(0);
+                taken_operations.fail_job_sequences.push(fail_job.job_sequence);
+                taken_operations.fail_errors.push(fail_job.error);
+                operations_count += 1;
+            }
+            
+            // Terminate jobs
+            while operations_count < max_operations && !requests.terminate_jobs.is_empty() {
+                let terminate_job = requests.terminate_jobs.remove(0);
+                taken_operations.terminate_job_sequences.push(terminate_job.job_sequence);
+                operations_count += 1;
+            }
+            
+            // Update state operations
+            while operations_count < max_operations && !requests.update_state_for_sequences.is_empty() {
+                let update_req = requests.update_state_for_sequences.remove(0);
+                taken_operations.update_state_for_sequences.push((
+                    update_req.sequence,
+                    update_req.new_state_data,
+                    update_req.new_data_availability_hash
+                ));
+                operations_count += 1;
+            }
+            
+            // Submit proofs
+            while operations_count < max_operations && !requests.submit_proofs.is_empty() {
+                let proof_req = requests.submit_proofs.remove(0);
+                taken_operations.submit_proofs.push((
+                    proof_req.block_number,
+                    proof_req.sequences,
+                    proof_req.merged_sequences_1,
+                    proof_req.merged_sequences_2,
+                    proof_req.job_id,
+                    proof_req.da_hash,
+                    proof_req.cpu_cores,
+                    proof_req.prover_architecture,
+                    proof_req.prover_memory,
+                    proof_req.cpu_time
+                ));
+                operations_count += 1;
+            }
+            
+            // Create app jobs - validate settlement jobs
+            if operations_count < max_operations && !requests.create_app_jobs.is_empty() {
+                let mut validated_create_jobs = Vec::new();
+                let mut remaining_create_jobs = Vec::new();
+                
+                for create_req in requests.create_app_jobs.drain(..) {
+                    if operations_count >= max_operations {
+                        remaining_create_jobs.push(create_req);
+                        continue;
+                    }
+                    
+                    // Check if this is a settlement job
+                    if create_req.method_name == "settle" {
+                        if create_req.settlement_chain.is_some() {
+                            info!("✅ Settlement create_job for app_instance {} - validated", app_instance);
+                            taken_operations.create_jobs.push((
+                                create_req.method_name.clone(),
+                                create_req.job_description.clone(),
+                                create_req.block_number,
+                                create_req.sequences.clone(),
+                                create_req.sequences1.clone(),
+                                create_req.sequences2.clone(),
+                                create_req.data.clone(),
+                                create_req.interval_ms,
+                                create_req.next_scheduled_at,
+                                create_req.settlement_chain.clone()
+                            ));
+                            operations_count += 1;
+                            validated_create_jobs.push(create_req);
+                        } else {
+                            error!("🚨 Settlement create_job for app_instance {} has no settlement_chain - SKIPPING", app_instance);
+                            // Don't add this to taken operations or remaining - skip it entirely
+                        }
+                    } else {
+                        // Non-settlement job, include it
+                        taken_operations.create_jobs.push((
+                            create_req.method_name.clone(),
+                            create_req.job_description.clone(),
+                            create_req.block_number,
+                            create_req.sequences.clone(),
+                            create_req.sequences1.clone(),
+                            create_req.sequences2.clone(),
+                            create_req.data.clone(),
+                            create_req.interval_ms,
+                            create_req.next_scheduled_at,
+                            create_req.settlement_chain.clone()
+                        ));
+                        operations_count += 1;
+                        validated_create_jobs.push(create_req);
+                    }
+                }
+                
+                // Put remaining jobs back
+                requests.create_app_jobs = remaining_create_jobs;
+            }
+            
+            // Create merge jobs
+            while operations_count < max_operations && !requests.create_merge_jobs.is_empty() {
+                let merge_req = requests.create_merge_jobs.remove(0);
+                taken_operations.create_merge_jobs.push((
+                    merge_req.block_number,
+                    merge_req.sequences,
+                    merge_req.sequences1,
+                    merge_req.sequences2,
+                    merge_req.job_description
+                ));
+                operations_count += 1;
+            }
+            
+            // Get available memory (consistent with previous logic)
+            let raw_available_memory_gb = get_available_memory_gb();
+            let available_memory_with_coefficient_gb = raw_available_memory_gb as f64 * JOB_BUFFER_MEMORY_COEFFICIENT;
+            let available_memory_bytes = (available_memory_with_coefficient_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+            taken_operations.available_memory = available_memory_bytes;
+            
+            // Remove app instance from map if no operations remain
+            if requests.create_jobs.is_empty()
+                && requests.start_jobs.is_empty()
+                && requests.complete_jobs.is_empty()
+                && requests.fail_jobs.is_empty()
+                && requests.terminate_jobs.is_empty()
+                && requests.update_state_for_sequences.is_empty()
+                && requests.submit_proofs.is_empty()
+                && requests.create_app_jobs.is_empty()
+                && requests.create_merge_jobs.is_empty()
+            {
+                requests_lock.remove(&app_instance);
+            }
+            
+            if operations_count > 0 {
+                Some(taken_operations)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
 
