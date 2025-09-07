@@ -79,7 +79,6 @@ public struct ProofRejectedEvent has copy, drop {
     verifier: address,
 }
 
-
 public struct BlockProofEvent has copy, drop {
     block_number: u64,
     start_sequence: u64,
@@ -317,15 +316,28 @@ fun reserve_proof(
     isBlockProof: bool,
     clock: &Clock,
     ctx: &TxContext,
-) {
-    assert!(
-        proof.status == PROOF_STATUS_CALCULATED || (isBlockProof && (proof.status == PROOF_STATUS_USED || proof.status == PROOF_STATUS_RESERVED)),
-        EProofNotCalculated,
-    );
+): bool {
+    if (
+        !(
+            proof.status == PROOF_STATUS_CALCULATED || (isBlockProof && (proof.status == PROOF_STATUS_USED || proof.status == PROOF_STATUS_RESERVED)),
+        )
+    ) {
+        multicall::emit_operation_failed(
+            string::utf8(b"reserve_proof"),
+            string::utf8(b"proof"),
+            0,
+            EProofNotCalculated.to_string(),
+            ctx.sender(),
+            sui::clock::timestamp_ms(clock),
+            option::none(),
+        );
+        return false
+    };
 
     proof.status = PROOF_STATUS_RESERVED;
     proof.timestamp = sui::clock::timestamp_ms(clock);
     proof.user = option::some(ctx.sender());
+    true
 }
 
 public(package) fun start_proving(
@@ -456,7 +468,9 @@ public(package) fun start_proving(
             &mut proof_calculation.proofs,
             sorted_sequence1.borrow(),
         );
-        reserve_proof(proof1, isBlockProof, clock, ctx);
+        if (!reserve_proof(proof1, isBlockProof, clock, ctx)) {
+            return false
+        };
         event::emit(ProofReservedEvent {
             block_number: proof_calculation.block_number,
             sequences: *sorted_sequence1.borrow(),
@@ -470,7 +484,9 @@ public(package) fun start_proving(
             &mut proof_calculation.proofs,
             sorted_sequence2.borrow(),
         );
-        reserve_proof(proof2, isBlockProof, clock, ctx);
+        if (!reserve_proof(proof2, isBlockProof, clock, ctx)) {
+            return false
+        };
         event::emit(ProofReservedEvent {
             block_number: proof_calculation.block_number,
             sequences: *sorted_sequence2.borrow(),
