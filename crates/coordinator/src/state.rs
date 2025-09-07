@@ -249,27 +249,32 @@ impl SharedState {
                 "Clearing current agent: {}/{}/{} (session: {})",
                 agent.developer, agent.agent, agent.agent_method, session_id
             );
-            
+
             // Find any pending jobs for this agent and return them to the started_jobs_buffer
-            let pending_jobs = self.agent_job_db
+            let pending_jobs = self
+                .agent_job_db
                 .cleanup_pending_jobs_for_agent(&agent.developer, &agent.agent, &agent.agent_method)
                 .await;
-            
+
             if !pending_jobs.is_empty() {
                 debug!(
-                    "Returning {} pending job(s) to started_jobs_buffer for agent {}/{}/{}", 
-                    pending_jobs.len(), agent.developer, agent.agent, agent.agent_method
+                    "Returning {} pending job(s) to started_jobs_buffer for agent {}/{}/{}",
+                    pending_jobs.len(),
+                    agent.developer,
+                    agent.agent,
+                    agent.agent_method
                 );
-                
+
                 // Convert AgentJob back to StartedJob format and add to buffer
-                let started_jobs: Vec<StartedJob> = pending_jobs.into_iter()
+                let started_jobs: Vec<StartedJob> = pending_jobs
+                    .into_iter()
                     .map(|agent_job| StartedJob {
                         app_instance: agent_job.app_instance,
                         job_sequence: agent_job.job_sequence,
                         memory_requirement: agent_job.memory_requirement,
                     })
                     .collect();
-                
+
                 self.add_started_jobs(started_jobs).await;
             }
         }
@@ -917,8 +922,11 @@ impl SharedState {
                 Ok(app_instance) => {
                     if let Some(ref jobs) = app_instance.jobs {
                         // Fetch job details from blockchain
-                        match sui::fetch::jobs::fetch_job_by_id(&jobs.id, started_job.job_sequence)
-                            .await
+                        match sui::fetch::jobs::fetch_job_by_id(
+                            &jobs.jobs_table_id,
+                            started_job.job_sequence,
+                        )
+                        .await
                         {
                             Ok(Some(pending_job)) => {
                                 // Check if this job matches the requested agent

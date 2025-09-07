@@ -205,8 +205,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
             };
 
             // Get the jobs table ID
-            let jobs_table = match &app_instance.jobs {
-                Some(jobs) => &jobs.id,
+            let jobs_table_id = match &app_instance.jobs {
+                Some(jobs) => &jobs.jobs_table_id,
                 None => {
                     error!(
                         "App instance {} has no jobs table (this should not happen)",
@@ -221,7 +221,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             };
 
             // Fetch the full job details from blockchain using the jobs table
-            match sui::fetch::jobs::fetch_job_by_id(jobs_table, started_job.job_sequence).await {
+            match sui::fetch::jobs::fetch_job_by_id(jobs_table_id, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
                     // Store in agent database for tracking

@@ -480,7 +480,7 @@ mod tests {
         let state = create_test_state();
         let pending_job = create_test_pending_job();
 
-        let agent_job = AgentJob::new(pending_job, &state);
+        let agent_job = AgentJob::new(pending_job, &state, 1024 * 1024 * 1024);
 
         assert!(agent_job.job_id.starts_with("sn"));
         assert_eq!(agent_job.job_sequence, 1);
@@ -494,7 +494,7 @@ mod tests {
         let state = create_test_state();
         let pending_job = create_test_pending_job();
 
-        let agent_job = AgentJob::new(pending_job, &state);
+        let agent_job = AgentJob::new(pending_job, &state, 1024 * 1024 * 1024);
         let job_id = agent_job.job_id.clone();
 
         // Add session job for testing
@@ -533,7 +533,7 @@ mod tests {
         let state = create_test_state();
         let pending_job = create_test_pending_job();
 
-        let agent_job = AgentJob::new(pending_job, &state);
+        let agent_job = AgentJob::new(pending_job, &state, 1024 * 1024 * 1024);
 
         // Add and retrieve job to make it pending
         db.add_session_job("test_session".to_string(), agent_job).await;
@@ -558,7 +558,7 @@ mod tests {
         let state = create_test_state();
         let pending_job = create_test_pending_job();
 
-        let agent_job = AgentJob::new(pending_job, &state);
+        let agent_job = AgentJob::new(pending_job, &state, 1024 * 1024 * 1024);
         let job_id = agent_job.job_id.clone();
         let session_id = "test_session_123";
 
@@ -599,7 +599,7 @@ mod tests {
         let state = create_test_state();
         let pending_job = create_test_pending_job();
 
-        let agent_job = AgentJob::new(pending_job, &state);
+        let agent_job = AgentJob::new(pending_job, &state, 1024 * 1024 * 1024);
 
         // Add job as session job
         db.add_session_job("test_session".to_string(), agent_job).await;
@@ -617,7 +617,7 @@ mod tests {
 
         // Add another ready job (simulating a new job arriving)
         let pending_job2 = create_test_pending_job();
-        let agent_job2 = AgentJob::new(pending_job2, &state);
+        let agent_job2 = AgentJob::new(pending_job2, &state, 2048 * 1024 * 1024);
         db.add_session_job("test_session2".to_string(), agent_job2).await;
 
         // Check stats: should have 1 ready, 1 pending
