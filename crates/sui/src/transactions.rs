@@ -1443,12 +1443,10 @@ where
             tb.move_call(func, args);
         }
 
-        // Finalize and sign
-        let tx = tb.finish()?;
-        let sig = sk.sign_transaction(&tx)?;
-
         // Perform dry run if gas estimation is needed
         if needs_gas_estimation && retry_count == 0 {
+            // Build temporary transaction for gas estimation
+            let temp_tx = tb.clone().finish()?;
             let num_operations = operations.len();
             debug!(
                 "Performing gas estimation dry run for {} Move call(s): {}",
@@ -1464,7 +1462,7 @@ where
             // Try gas estimation once - no retries
             let mut live_data = client.live_data_client();
             let simulate_req = SimulateTransactionRequest {
-                transaction: Some(tx.clone().into()),
+                transaction: Some(temp_tx.clone().into()),
                 read_mask: Some(FieldMask {
                     paths: vec![
                         "transaction.effects.status".into(),
@@ -1513,7 +1511,7 @@ where
                                                     "Gas estimation returned invalid value: {} MIST, using fallback budget of 0.5 SUI",
                                                     final_budget
                                                 );
-                                                gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
+                                                gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
                                                 gas_budget
                                             } else {
                                                 warn!(
@@ -1581,16 +1579,10 @@ where
                                                 gas_budget as f64 / 1_000_000_000.0
                                             );
 
-                                            // Release the gas coin and retry with new budget
-                                            if let Some(old_guard) = gas_guard.take() {
-                                                debug!(
-                                                    "Releasing gas coin {} to retry with new budget",
-                                                    old_guard.coin_id()
-                                                );
-                                                drop(old_guard);
-                                                sleep(Duration::from_millis(100)).await;
-                                            }
-                                            continue; // Retry the loop with new gas budget
+                                            // Set the new gas budget on the transaction builder
+                                            tb.set_gas_budget(gas_budget);
+                                            
+                                            debug!("Gas budget updated on transaction builder");
                                         } else {
                                             debug!(
                                                 "Gas estimation result: using estimated budget {} MIST ({:.4} SUI)",
@@ -1599,28 +1591,38 @@ where
                                             );
                                         }
                                     } else {
-                                        warn!("Dry run succeeded but no gas cost summary available, using fallback budget of 1.0 SUI");
-                                        gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
+                                        warn!("Dry run succeeded but no gas cost summary available, using fallback budget of 0.1 SUI");
+                                        gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
+                                        // Update transaction builder with fallback gas budget
+                                        tb.set_gas_budget(gas_budget);
                                     }
                                 } else {
                                     // Simulation failed
                                     if let Some(ref error) = status.error {
-                                        warn!("Dry run failed with error: {:?}, using fallback budget of 1.0 SUI", error);
+                                        warn!("Dry run failed with error: {:?}, using fallback budget of 0.1 SUI", error);
                                     } else {
-                                        warn!("Dry run failed with unknown error, using fallback budget of 1.0 SUI");
+                                        warn!("Dry run failed with unknown error, using fallback budget of 0.1 SUI");
                                     }
-                                    gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
+                                    gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
+                                    // Update transaction builder with fallback gas budget
+                                    tb.set_gas_budget(gas_budget);
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to perform dry run: {}, using fallback budget of 1.0 SUI", e);
-                    gas_budget = 1_000_000_000; // 1.0 SUI fallback for complex multicalls
+                    warn!("Failed to perform dry run: {}, using fallback budget of 0.1 SUI", e);
+                    gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
+                    // Update transaction builder with fallback gas budget
+                    tb.set_gas_budget(gas_budget);
                 }
             }
         }
+
+        // Finalize and sign transaction with the final gas budget
+        let tx = tb.finish()?;
+        let sig = sk.sign_transaction(&tx)?;
 
         // Log final gas budget before execution
         info!(

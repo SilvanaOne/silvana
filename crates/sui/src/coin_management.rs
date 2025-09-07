@@ -24,10 +24,10 @@ pub struct CoinPoolConfig {
 impl Default for CoinPoolConfig {
     fn default() -> Self {
         Self {
-            target_gas_coins: 20,
-            target_coin_balance: 200_000_000, // 0.2 SUI per coin
+            target_gas_coins: 9,
+            target_coin_balance: 1_000_000_000, // 1.0 SUI per coin
             min_coin_balance: 100_000_000,    // 0.1 SUI minimum
-            min_faucet_coin_balance: 4_100_000_000, // 5 SUI minimum for splitting
+            min_faucet_coin_balance: 9_100_000_000, // 5 SUI minimum for splitting
         }
     }
 }
