@@ -339,13 +339,6 @@ impl SharedState {
         );
     }
 
-    /// Remove a completed or failed job (no longer tracking individual jobs)
-    pub async fn remove_job(&self, _job_sequence: u64) {
-        // No longer tracking individual jobs, only app_instances
-        // The reconciliation process will handle removing app_instances with no pending jobs
-        debug!("Job completion/failure noted (individual jobs not tracked)");
-    }
-
     /// Remove an app_instance when it has no pending jobs
     #[allow(dead_code)]
     pub async fn remove_app_instance(&self, app_instance_id: &str) {

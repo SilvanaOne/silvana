@@ -1,8 +1,8 @@
+use crate::constants::RETRY_MAX_DELAY_SECS;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use crate::constants::RETRY_MAX_DELAY_SECS;
 use tracing::debug;
 
 /// Job status in cache
@@ -49,30 +49,37 @@ impl JobsCache {
     pub async fn add_failed_job(&self, app_instance: String, job_sequence: u64) {
         let mut cache = self.cache.write().await;
         let key = (app_instance.clone(), job_sequence);
-        cache.insert(key, JobCacheEntry {
-            status: JobCacheStatus::Failed,
-            timestamp: Instant::now(),
-        });
-        debug!("Added failed job {} from app_instance {} to cache (5 min expiry)", job_sequence, app_instance);
-        
+        cache.insert(
+            key,
+            JobCacheEntry {
+                status: JobCacheStatus::Failed,
+                timestamp: Instant::now(),
+            },
+        );
+        debug!(
+            "Added failed job {} from app_instance {} to cache (5 min expiry)",
+            job_sequence, app_instance
+        );
+
         // Clean up expired entries while we have the write lock
         self.cleanup_expired_internal(&mut cache);
     }
-
 
     /// Check if a job is recently failed (within the cache expiry time)
     #[allow(dead_code)]
     pub async fn is_recently_failed(&self, app_instance: &str, job_sequence: u64) -> bool {
         let cache = self.cache.read().await;
         let key = (app_instance.to_string(), job_sequence);
-        
+
         if let Some(entry) = cache.get(&key) {
             if matches!(entry.status, JobCacheStatus::Failed) {
                 let elapsed = entry.timestamp.elapsed();
                 if elapsed < self.failed_expiry {
                     debug!(
                         "Job {} from app_instance {} was recently failed ({:.1}s ago)",
-                        job_sequence, app_instance, elapsed.as_secs_f64()
+                        job_sequence,
+                        app_instance,
+                        elapsed.as_secs_f64()
                     );
                     return true;
                 }
@@ -80,7 +87,6 @@ impl JobsCache {
         }
         false
     }
-
 
     /// Clean up expired entries
     pub async fn cleanup_expired(&self) {
@@ -93,7 +99,7 @@ impl JobsCache {
         let now = Instant::now();
         cache.retain(|key, entry| {
             let elapsed = now.duration_since(entry.timestamp);
-            
+
             if elapsed >= self.failed_expiry {
                 debug!(
                     "Removing expired failed job {} from app_instance {} from cache",
@@ -118,16 +124,6 @@ impl JobsCache {
     pub async fn clear(&self) {
         let mut cache = self.cache.write().await;
         cache.clear();
-    }
-
-    /// Remove a specific job from the cache (useful when job completes successfully)
-    #[allow(dead_code)]
-    pub async fn remove_job(&self, app_instance: &str, job_sequence: u64) {
-        let mut cache = self.cache.write().await;
-        let key = (app_instance.to_string(), job_sequence);
-        if cache.remove(&key).is_some() {
-            debug!("Removed job {} from app_instance {} from cache", job_sequence, app_instance);
-        }
     }
 }
 

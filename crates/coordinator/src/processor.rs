@@ -284,16 +284,6 @@ impl EventProcessor {
                     {
                         if let Some(job_details) = parse_jobs_event_with_contents(&full_event) {
                             info!("Jobs Event Details:\n{}", job_details);
-
-                            // Extract job_sequence and remove from tracking
-                            if let Some(job_sequence_str) =
-                                extract_field(&job_details, "job_sequence: ")
-                            {
-                                if let Ok(job_sequence) = job_sequence_str.parse::<u64>() {
-                                    self.state.remove_job(job_sequence).await;
-                                    info!("Removed deleted job {} from tracking", job_sequence);
-                                }
-                            }
                         }
                     }
                 } else if event.event_type.contains("Job") {
