@@ -1361,103 +1361,10 @@ impl JobSearcher {
         }
     }
 
-    /// Retrieve secrets for a job from the secrets storage (old version, no longer used)
-    #[allow(dead_code)]
-    async fn retrieve_secrets_for_job_old(
-        secrets_client: &mut SecretsClient,
-        job: &Job,
-    ) -> Result<HashMap<String, String>> {
-        let mut secrets = HashMap::new();
-
-        // TODO: Replace with actual signature - for now using empty signature as placeholder
-        let placeholder_signature = vec![];
-
-        // Try to retrieve secrets at different scopes, from most specific to least specific
-        let secret_attempts = vec![
-            // Most specific: developer + agent + app + app_instance + name
-            (Some("secret"), Some(job.app_instance.as_str())),
-            // Developer + agent + app + app_instance (general secret)
-            (None, Some(job.app_instance.as_str())),
-            // Developer + agent + app (app-level secret)
-            (None, None),
-        ];
-
-        for (name, app_instance) in secret_attempts {
-            match secrets_client
-                .retrieve_secret(
-                    &job.developer,
-                    &job.agent,
-                    Some(&job.agent), // Using agent as app for now
-                    app_instance,
-                    name,
-                    &placeholder_signature,
-                )
-                .await
-            {
-                Ok(secret_value) => {
-                    let key = match (name, app_instance) {
-                        (Some(n), Some(_)) => format!("{}_{}", n, "instance"),
-                        (None, Some(_)) => "instance".to_string(),
-                        _ => "app".to_string(),
-                    };
-                    debug!("Retrieved secret '{}' for job {}", key, job.job_sequence);
-                    secrets.insert(key, secret_value);
-                }
-                Err(secrets_client::SecretsClientError::SecretNotFound) => {
-                    // Secret not found at this scope, try next one
-                    continue;
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to retrieve secret for job {}: {}",
-                        job.job_sequence, e
-                    );
-                    // Continue trying other secrets
-                }
-            }
-        }
-
-        Ok(secrets)
-    }
-
     /// Get the current container ID and job info for shutdown logging
     #[allow(dead_code)]
     pub async fn get_current_container_info(&self) -> Option<(String, Job)> {
         self.current_job_info.read().await.clone()
-    }
-
-    /// Fetch logs from current container if any
-    #[allow(dead_code)]
-    pub async fn fetch_current_container_logs(&self) -> Option<String> {
-        if let Some((container_id, job)) = self.get_current_container_info().await {
-            info!(
-                "Fetching logs for container {} (job {})",
-                &container_id[..12.min(container_id.len())],
-                job.job_sequence
-            );
-
-            // Use the safe method that returns Option
-            let logs = self
-                .docker_manager
-                .get_container_logs_safe(&container_id)
-                .await;
-
-            if let Some(ref log_content) = logs {
-                info!(
-                    "Retrieved {} bytes of logs from container",
-                    log_content.len()
-                );
-            } else {
-                warn!(
-                    "Failed to retrieve logs from container {}",
-                    &container_id[..12.min(container_id.len())]
-                );
-            }
-
-            logs
-        } else {
-            None
-        }
     }
 }
 

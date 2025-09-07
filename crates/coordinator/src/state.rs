@@ -152,7 +152,6 @@ pub struct MulticallRequests {
     pub submit_proofs: Vec<SubmitProofRequest>,
     pub create_app_jobs: Vec<CreateAppJobRequest>,
     pub create_merge_jobs: Vec<CreateMergeJobRequest>,
-    pub last_execution: Instant,
 }
 
 #[derive(Clone)]
@@ -457,7 +456,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         // Check for duplicate job based on key identifying fields and replace if found
@@ -501,7 +499,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         // Check if job with same sequence already exists and replace it
@@ -552,7 +549,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         entry.complete_jobs.push(CompleteJobRequest {
@@ -588,7 +584,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         // Check if fail job with same sequence already exists and replace it
@@ -661,7 +656,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         entry.terminate_jobs.push(TerminateJobRequest {
@@ -696,7 +690,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         entry.update_state_for_sequences.push(request);
@@ -728,7 +721,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         entry.submit_proofs.push(request);
@@ -760,7 +752,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         // For settlement jobs, check for duplicates with same chain and replace them
@@ -816,7 +807,6 @@ impl SharedState {
                 submit_proofs: Vec::new(),
                 create_app_jobs: Vec::new(),
                 create_merge_jobs: Vec::new(),
-                last_execution: Instant::now(),
             });
 
         // Check for duplicate merge job based on block_number and sequences and replace if found
@@ -856,16 +846,6 @@ impl SharedState {
             })
             .map(|(app_instance, _)| app_instance.clone())
             .collect()
-    }
-
-    /// Update last execution time for an app instance
-    #[allow(dead_code)]
-    pub async fn update_multicall_execution_time(&self, app_instance: &str) {
-        let app_instance = normalize_app_instance_id(app_instance);
-        let mut requests = self.multicall_requests.lock().await;
-        if let Some(entry) = requests.get_mut(&app_instance) {
-            entry.last_execution = Instant::now();
-        }
     }
 
     /// Add started jobs to the buffer
