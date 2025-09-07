@@ -1,8 +1,6 @@
-use crate::block::settle;
 use crate::constants::{
-    PROOF_MERGE_MAX_ATTEMPTS, PROOF_STARTED_TIMEOUT_MS, PROOF_RESERVED_TIMEOUT_MS,
-    MERGE_RETRY_DELAY_MS, 
-    BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS
+    BLOCK_CREATION_CHECK_INTERVAL_SECS, MERGE_RETRY_DELAY_MS, PROOF_ANALYSIS_INTERVAL_SECS,
+    PROOF_MERGE_MAX_ATTEMPTS, PROOF_RESERVED_TIMEOUT_MS, PROOF_STARTED_TIMEOUT_MS,
 };
 use anyhow::Result;
 use sui::fetch::fetch_proof_calculation;
@@ -12,7 +10,6 @@ use tracing::{debug, error, info, warn};
 pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     proof_calc: &ProofCalculation,
     app_instance: &str,
-    da_hash: &str,
     state: &crate::state::SharedState,
 ) -> Result<()> {
     debug!(
@@ -29,45 +26,38 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     let app_instance_obj = match sui::fetch::fetch_app_instance(app_instance).await {
         Ok(app_inst) => app_inst,
         Err(e) => {
-            error!(
-                "❌ Failed to fetch AppInstance {}: {}",
-                app_instance, e
-            );
+            error!("❌ Failed to fetch AppInstance {}: {}", app_instance, e);
             return Err(anyhow::anyhow!("Failed to fetch AppInstance: {}", e));
         }
     };
-    
+
     // Fetch existing ProofCalculation for this block to get full info including start_sequence, end_sequence, is_finished
-    let existing_proof_calculation = match fetch_proof_calculation(
-        &app_instance_obj,
-        proof_calc.block_number,
-    )
-    .await
-    {
-        Ok(Some(pc_info)) => {
-            debug!(
-                "🧮 Fetched ProofCalculation for block {}: {} proofs, finished={}",
-                proof_calc.block_number,
-                pc_info.proofs.len(),
-                pc_info.is_finished
-            );
-            Some(pc_info)
-        }
-        Ok(None) => {
-            debug!(
-                "📋 No existing ProofCalculation found for block {}",
-                proof_calc.block_number
-            );
-            None
-        }
-        Err(e) => {
-            error!(
-                "❌ Failed to fetch ProofCalculation for block {}: {}",
-                proof_calc.block_number, e
-            );
-            None
-        }
-    };
+    let existing_proof_calculation =
+        match fetch_proof_calculation(&app_instance_obj, proof_calc.block_number).await {
+            Ok(Some(pc_info)) => {
+                debug!(
+                    "🧮 Fetched ProofCalculation for block {}: {} proofs, finished={}",
+                    proof_calc.block_number,
+                    pc_info.proofs.len(),
+                    pc_info.is_finished
+                );
+                Some(pc_info)
+            }
+            Ok(None) => {
+                debug!(
+                    "📋 No existing ProofCalculation found for block {}",
+                    proof_calc.block_number
+                );
+                None
+            }
+            Err(e) => {
+                error!(
+                    "❌ Failed to fetch ProofCalculation for block {}: {}",
+                    proof_calc.block_number, e
+                );
+                None
+            }
+        };
 
     // Get the ProofCalculation info for this block if it exists
     // Otherwise use default values
@@ -84,8 +74,13 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 .copied()
                 .unwrap_or(proof_calc.start_sequence)
         });
-    let end_sequence = existing_proof_calculation.as_ref().and_then(|p| p.end_sequence);
-    let is_finished = existing_proof_calculation.as_ref().map(|p| p.is_finished).unwrap_or(false);
+    let end_sequence = existing_proof_calculation
+        .as_ref()
+        .and_then(|p| p.end_sequence);
+    let is_finished = existing_proof_calculation
+        .as_ref()
+        .map(|p| p.is_finished)
+        .unwrap_or(false);
 
     debug!(
         "📦 Using ProofCalculation info: block_number={}, start_sequence={}, end_sequence={:?}, is_finished={}",
@@ -126,20 +121,25 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         block_proofs.proofs.len(),
         proof_calc.is_finished
     );
-    
+
     // Debug: Print detailed proof list with sequences and statuses
     if !block_proofs.proofs.is_empty() {
-        debug!("📝 Detailed proof list for block {}:", proof_calc.block_number);
+        debug!(
+            "📝 Detailed proof list for block {}:",
+            proof_calc.block_number
+        );
         for (idx, proof) in block_proofs.proofs.iter().enumerate() {
             let sequences_str = if proof.sequences.len() <= 10 {
                 format!("{:?}", proof.sequences)
             } else {
-                format!("[{} sequences: {}..{}]", 
+                format!(
+                    "[{} sequences: {}..{}]",
                     proof.sequences.len(),
                     proof.sequences.first().unwrap_or(&0),
-                    proof.sequences.last().unwrap_or(&0))
+                    proof.sequences.last().unwrap_or(&0)
+                )
             };
-            
+
             debug!(
                 "   Proof #{}: sequences={}, status={:?}, da_hash={}, timestamp={}",
                 idx + 1,
@@ -170,15 +170,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 proof_calc.block_number, block_proofs.start_sequence, end_seq
             );
 
-            // Call settle for the complete block with the DA hash
-            // This will create settlement jobs for all configured chains
-            settle(
-                app_instance,
-                proof_calc.block_number,
-                da_hash.to_string(),
-            )
-            .await?;
-
             return Ok(());
         }
     } else {
@@ -195,109 +186,108 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     for attempt in 1..=PROOF_MERGE_MAX_ATTEMPTS {
         // Refetch ProofCalculations on each attempt to get the latest state
         // This is important because other coordinators might have updated them
-        let current_block_proofs =
-            if attempt > 1 {
-                debug!(
-                    "🔄 Refetching ProofCalculations to get latest state (attempt {})",
-                    attempt
-                );
+        let current_block_proofs = if attempt > 1 {
+            debug!(
+                "🔄 Refetching ProofCalculations to get latest state (attempt {})",
+                attempt
+            );
 
-                // Fetch existing ProofCalculation for this block again
-                let updated_proof_calculation =
-                    match fetch_proof_calculation(&app_instance_obj, proof_calc.block_number)
-                        .await
-                    {
-                        Ok(Some(pc)) => {
-                            debug!(
-                                "📊 Refetched ProofCalculation for block {}",
-                                proof_calc.block_number
-                            );
-                            Some(pc)
-                        }
-                        Ok(None) => {
-                            debug!(
-                                "📋 Still no ProofCalculation found for block {}",
-                                proof_calc.block_number
-                            );
-                            None
-                        }
-                        Err(e) => {
-                            error!(
-                                "❌ Failed to refetch ProofCalculation for block {}: {}",
-                                proof_calc.block_number, e
-                            );
-                            None
-                        }
-                    };
-
-                // Rebuild proof_infos with updated data (only from blockchain)
-                let mut updated_proof_infos = Vec::new();
-
-                // Only add existing proofs from refetched data with their actual status
-                if let Some(existing_proof_calc) = &updated_proof_calculation {
-                    for existing_proof in &existing_proof_calc.proofs {
-                        updated_proof_infos.push(existing_proof.clone());
-                    }
-                }
-
-                // Use the most recent ProofCalculation's start_sequence and end_sequence
-                // If no updated calculations exist, use the current one's values
-                let (latest_start_seq, latest_end_seq, latest_is_finished, latest_block_proof) =
-                    if let Some(ref latest) = updated_proof_calculation {
-                        (
-                            latest.start_sequence,
-                            latest.end_sequence,
-                            latest.is_finished,
-                            latest.block_proof.clone(),
-                        )
-                    } else {
-                        (
-                            start_sequence,
-                            end_sequence,
-                            is_finished,
-                            proof_calc.block_proof.clone(),
-                        )
-                    };
-
-                let updated_block_proofs = ProofCalculation {
-                    id: updated_proof_calculation
-                        .as_ref()
-                        .map(|p| p.id.clone())
-                        .unwrap_or_else(|| String::new()),
-                    block_number: proof_calc.block_number,
-                    start_sequence: latest_start_seq,
-                    end_sequence: latest_end_seq,
-                    proofs: updated_proof_infos,
-                    block_proof: latest_block_proof,
-                    is_finished: latest_is_finished,
-                };
-                
-                // Debug: Print updated proof list after refetch
-                if !updated_block_proofs.proofs.is_empty() {
-                    debug!("📝 Updated proof list after refetch (attempt {}):", attempt);
-                    for (idx, proof) in updated_block_proofs.proofs.iter().enumerate() {
-                        let sequences_str = if proof.sequences.len() <= 10 {
-                            format!("{:?}", proof.sequences)
-                        } else {
-                            format!("[{} sequences: {}..{}]", 
-                                proof.sequences.len(),
-                                proof.sequences.first().unwrap_or(&0),
-                                proof.sequences.last().unwrap_or(&0))
-                        };
-                        
+            // Fetch existing ProofCalculation for this block again
+            let updated_proof_calculation =
+                match fetch_proof_calculation(&app_instance_obj, proof_calc.block_number).await {
+                    Ok(Some(pc)) => {
                         debug!(
-                            "   Proof #{}: sequences={}, status={:?}",
-                            idx + 1,
-                            sequences_str,
-                            proof.status
+                            "📊 Refetched ProofCalculation for block {}",
+                            proof_calc.block_number
                         );
+                        Some(pc)
                     }
+                    Ok(None) => {
+                        debug!(
+                            "📋 Still no ProofCalculation found for block {}",
+                            proof_calc.block_number
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        error!(
+                            "❌ Failed to refetch ProofCalculation for block {}: {}",
+                            proof_calc.block_number, e
+                        );
+                        None
+                    }
+                };
+
+            // Rebuild proof_infos with updated data (only from blockchain)
+            let mut updated_proof_infos = Vec::new();
+
+            // Only add existing proofs from refetched data with their actual status
+            if let Some(existing_proof_calc) = &updated_proof_calculation {
+                for existing_proof in &existing_proof_calc.proofs {
+                    updated_proof_infos.push(existing_proof.clone());
                 }
-                
-                updated_block_proofs
-            } else {
-                block_proofs.clone()
+            }
+
+            // Use the most recent ProofCalculation's start_sequence and end_sequence
+            // If no updated calculations exist, use the current one's values
+            let (latest_start_seq, latest_end_seq, latest_is_finished, latest_block_proof) =
+                if let Some(ref latest) = updated_proof_calculation {
+                    (
+                        latest.start_sequence,
+                        latest.end_sequence,
+                        latest.is_finished,
+                        latest.block_proof.clone(),
+                    )
+                } else {
+                    (
+                        start_sequence,
+                        end_sequence,
+                        is_finished,
+                        proof_calc.block_proof.clone(),
+                    )
+                };
+
+            let updated_block_proofs = ProofCalculation {
+                id: updated_proof_calculation
+                    .as_ref()
+                    .map(|p| p.id.clone())
+                    .unwrap_or_else(|| String::new()),
+                block_number: proof_calc.block_number,
+                start_sequence: latest_start_seq,
+                end_sequence: latest_end_seq,
+                proofs: updated_proof_infos,
+                block_proof: latest_block_proof,
+                is_finished: latest_is_finished,
             };
+
+            // Debug: Print updated proof list after refetch
+            if !updated_block_proofs.proofs.is_empty() {
+                debug!("📝 Updated proof list after refetch (attempt {}):", attempt);
+                for (idx, proof) in updated_block_proofs.proofs.iter().enumerate() {
+                    let sequences_str = if proof.sequences.len() <= 10 {
+                        format!("{:?}", proof.sequences)
+                    } else {
+                        format!(
+                            "[{} sequences: {}..{}]",
+                            proof.sequences.len(),
+                            proof.sequences.first().unwrap_or(&0),
+                            proof.sequences.last().unwrap_or(&0)
+                        )
+                    };
+
+                    debug!(
+                        "   Proof #{}: sequences={}, status={:?}",
+                        idx + 1,
+                        sequences_str,
+                        proof.status
+                    );
+                }
+            }
+
+            updated_block_proofs
+        } else {
+            block_proofs.clone()
+        };
 
         // Find proofs that can be merged, excluding already attempted ones
         if let Some(merge_request) =
@@ -310,19 +300,22 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 .find(|p| p.sequences == merge_request.sequences1)
                 .map(|p| format!("status={:?}", p.status))
                 .unwrap_or_else(|| "not found".to_string());
-                
+
             let proof2_details = current_block_proofs
                 .proofs
                 .iter()
                 .find(|p| p.sequences == merge_request.sequences2)
                 .map(|p| format!("status={:?}", p.status))
                 .unwrap_or_else(|| "not found".to_string());
-            
+
             debug!(
                 "✨ Attempt {}/{}: Found merge opportunity - Sequences1: {:?} ({}), Sequences2: {:?} ({}), Is block proof: {}",
-                attempt, PROOF_MERGE_MAX_ATTEMPTS, 
-                merge_request.sequences1, proof1_details,
-                merge_request.sequences2, proof2_details,
+                attempt,
+                PROOF_MERGE_MAX_ATTEMPTS,
+                merge_request.sequences1,
+                proof1_details,
+                merge_request.sequences2,
+                proof2_details,
                 merge_request.block_proof
             );
 
@@ -385,16 +378,24 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                         debug!("   → Looking for other merge opportunities...");
                         // Add a small delay before retrying to allow other coordinators to complete
                         if attempt < PROOF_MERGE_MAX_ATTEMPTS {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(MERGE_RETRY_DELAY_MS)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                MERGE_RETRY_DELAY_MS,
+                            ))
+                            .await;
                         }
                         // Continue to next iteration to try another merge opportunity
-                    } else if error_str.contains("already Started and not timed out") 
+                    } else if error_str.contains("already Started and not timed out")
                         || error_str.contains("Cannot merge")
                         || error_str.contains("Combined proof already exists")
-                        || error_str.contains("Cannot reserve proofs - likely taken by another coordinator")
-                        || error_str.contains("Proofs not in reservable state") {
+                        || error_str
+                            .contains("Cannot reserve proofs - likely taken by another coordinator")
+                        || error_str.contains("Proofs not in reservable state")
+                    {
                         // These are expected conditions in a concurrent environment, not errors
-                        debug!("   → Expected condition, will try other opportunities: {}", e);
+                        debug!(
+                            "   → Expected condition, will try other opportunities: {}",
+                            e
+                        );
                     } else {
                         warn!("   → Unexpected error, will try other opportunities: {}", e);
                     }
@@ -425,25 +426,12 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
     Ok(())
 }
 
-// Main entry point - always use blockchain data
-#[allow(dead_code)]
-pub async fn analyze_and_create_merge_jobs(
-    proof_calc: &ProofCalculation,
-    app_instance: &str,
-    da_hash: &str,
-    state: &crate::state::SharedState,
-) -> Result<()> {
-    analyze_and_create_merge_jobs_with_blockchain_data(proof_calc, app_instance, da_hash, state)
-        .await
-}
-
 #[derive(Debug, Clone)]
 pub struct MergeRequest {
     pub sequences1: Vec<u64>,
     pub sequences2: Vec<u64>,
     pub block_proof: bool,
 }
-
 
 fn find_proofs_to_merge_excluding(
     block_proofs: &ProofCalculation,
@@ -481,13 +469,15 @@ fn find_proofs_to_merge_excluding(
                 // For block proofs: check CALCULATED, USED, or RESERVED (if timed out)
                 // The Move contract allows RESERVED for block proofs
                 let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
-                let proof1_available = proof1.status == ProofStatus::Calculated 
+                let proof1_available = proof1.status == ProofStatus::Calculated
                     || proof1.status == ProofStatus::Used
-                    || (proof1.status == ProofStatus::Reserved && current_time > proof1.timestamp + PROOF_RESERVED_TIMEOUT_MS);
-                let proof2_available = proof2.status == ProofStatus::Calculated 
+                    || (proof1.status == ProofStatus::Reserved
+                        && current_time > proof1.timestamp + PROOF_RESERVED_TIMEOUT_MS);
+                let proof2_available = proof2.status == ProofStatus::Calculated
                     || proof2.status == ProofStatus::Used
-                    || (proof2.status == ProofStatus::Reserved && current_time > proof2.timestamp + PROOF_RESERVED_TIMEOUT_MS);
-                
+                    || (proof2.status == ProofStatus::Reserved
+                        && current_time > proof2.timestamp + PROOF_RESERVED_TIMEOUT_MS);
+
                 if proof1_available && proof2_available {
                     debug!(
                         "Merging proofs to create block proof: sequences1={:?}, sequences2={:?}",
@@ -681,133 +671,192 @@ async fn create_merge_job(
     // Step 2: Check if proofs can be reserved before attempting
     // Fetch fresh proof calculation state to check if proofs are available
     debug!("🔍 Fetching fresh proof calculation state before reservation attempt");
-    let fresh_app_instance = match sui::fetch::app_instance::fetch_app_instance(app_instance).await {
+    let fresh_app_instance = match sui::fetch::app_instance::fetch_app_instance(app_instance).await
+    {
         Ok(instance) => instance,
         Err(e) => {
             warn!("Failed to fetch fresh app instance: {}", e);
             return Err(anyhow::anyhow!("Failed to fetch app instance: {}", e));
         }
     };
-    
-    let fresh_proof_calc = match sui::fetch::prover::fetch_proof_calculation(&fresh_app_instance, block_number).await {
+
+    let fresh_proof_calc = match sui::fetch::prover::fetch_proof_calculation(
+        &fresh_app_instance,
+        block_number,
+    )
+    .await
+    {
         Ok(Some(calc)) => calc,
         Ok(None) => {
-            debug!("No proof calculation found for block {} - cannot reserve", block_number);
-            return Err(anyhow::anyhow!("No proof calculation found for block {}", block_number));
+            debug!(
+                "No proof calculation found for block {} - cannot reserve",
+                block_number
+            );
+            return Err(anyhow::anyhow!(
+                "No proof calculation found for block {}",
+                block_number
+            ));
         }
         Err(e) => {
             warn!("Failed to fetch fresh proof calculation: {}", e);
             return Err(anyhow::anyhow!("Failed to fetch proof calculation: {}", e));
         }
     };
-    
+
     // Check the combined proof status - if it exists, it must be REJECTED to proceed
-    let combined_proof = fresh_proof_calc.proofs.iter().find(|p| arrays_equal(&p.sequences, &combined_sequences));
+    let combined_proof = fresh_proof_calc
+        .proofs
+        .iter()
+        .find(|p| arrays_equal(&p.sequences, &combined_sequences));
     if let Some(proof) = combined_proof {
         if proof.status != ProofStatus::Rejected {
-            debug!("❌ Combined proof (sequences {:?}) already exists with status {:?} - cannot start", combined_sequences, proof.status);
-            return Err(anyhow::anyhow!("Combined proof already exists with status {:?}", proof.status));
+            debug!(
+                "❌ Combined proof (sequences {:?}) already exists with status {:?} - cannot start",
+                combined_sequences, proof.status
+            );
+            return Err(anyhow::anyhow!(
+                "Combined proof already exists with status {:?}",
+                proof.status
+            ));
         }
         debug!("✅ Combined proof exists but is REJECTED - can proceed");
     } else {
         debug!("✅ Combined proof does not exist yet - can create new");
     }
-    
+
     // Check that sequence1 and sequence2 proofs exist and are CALCULATED
-    let proof1 = fresh_proof_calc.proofs.iter().find(|p| arrays_equal(&p.sequences, &sequences1));
-    let proof2 = fresh_proof_calc.proofs.iter().find(|p| arrays_equal(&p.sequences, &sequences2));
-    
-    let is_block_proof = combined_sequences.len() == (fresh_proof_calc.end_sequence.unwrap_or(0) - fresh_proof_calc.start_sequence + 1) as usize;
-    
+    let proof1 = fresh_proof_calc
+        .proofs
+        .iter()
+        .find(|p| arrays_equal(&p.sequences, &sequences1));
+    let proof2 = fresh_proof_calc
+        .proofs
+        .iter()
+        .find(|p| arrays_equal(&p.sequences, &sequences2));
+
+    let is_block_proof = combined_sequences.len()
+        == (fresh_proof_calc.end_sequence.unwrap_or(0) - fresh_proof_calc.start_sequence + 1)
+            as usize;
+
     let can_reserve = match (proof1, proof2) {
         (Some(p1), Some(p2)) => {
             let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
-            
+
             // Move contract logic:
             // - For block proofs: CALCULATED, USED, or RESERVED (including timed out)
             // - For regular merges: CALCULATED or (RESERVED if timed out)
             let p1_ok = if is_block_proof {
                 // Block proofs: CALCULATED, USED, or RESERVED (Move contract allows RESERVED for block proofs)
-                p1.status == ProofStatus::Calculated || 
-                p1.status == ProofStatus::Used || 
-                p1.status == ProofStatus::Reserved
+                p1.status == ProofStatus::Calculated
+                    || p1.status == ProofStatus::Used
+                    || p1.status == ProofStatus::Reserved
             } else {
                 // Regular merges: CALCULATED or (RESERVED if timed out)
-                p1.status == ProofStatus::Calculated || 
-                (p1.status == ProofStatus::Reserved && current_time > p1.timestamp + PROOF_RESERVED_TIMEOUT_MS)
+                p1.status == ProofStatus::Calculated
+                    || (p1.status == ProofStatus::Reserved
+                        && current_time > p1.timestamp + PROOF_RESERVED_TIMEOUT_MS)
             };
-            
+
             let p2_ok = if is_block_proof {
                 // Block proofs: CALCULATED, USED, or RESERVED (Move contract allows RESERVED for block proofs)
-                p2.status == ProofStatus::Calculated || 
-                p2.status == ProofStatus::Used || 
-                p2.status == ProofStatus::Reserved
+                p2.status == ProofStatus::Calculated
+                    || p2.status == ProofStatus::Used
+                    || p2.status == ProofStatus::Reserved
             } else {
                 // Regular merges: CALCULATED or (RESERVED if timed out)
-                p2.status == ProofStatus::Calculated || 
-                (p2.status == ProofStatus::Reserved && current_time > p2.timestamp + PROOF_RESERVED_TIMEOUT_MS)
+                p2.status == ProofStatus::Calculated
+                    || (p2.status == ProofStatus::Reserved
+                        && current_time > p2.timestamp + PROOF_RESERVED_TIMEOUT_MS)
             };
-            
+
             if !p1_ok {
-                debug!("❌ Proof1 (sequences {:?}) cannot be reserved - status: {:?}, is_block_proof: {}", 
-                    sequences1, p1.status, is_block_proof);
+                debug!(
+                    "❌ Proof1 (sequences {:?}) cannot be reserved - status: {:?}, is_block_proof: {}",
+                    sequences1, p1.status, is_block_proof
+                );
                 if p1.status == ProofStatus::Reserved {
                     let time_since = current_time.saturating_sub(p1.timestamp);
-                    debug!("   Reserved time: {}ms, timeout: {}ms", time_since, PROOF_RESERVED_TIMEOUT_MS);
+                    debug!(
+                        "   Reserved time: {}ms, timeout: {}ms",
+                        time_since, PROOF_RESERVED_TIMEOUT_MS
+                    );
                 }
             }
             if !p2_ok {
-                debug!("❌ Proof2 (sequences {:?}) cannot be reserved - status: {:?}, is_block_proof: {}", 
-                    sequences2, p2.status, is_block_proof);
+                debug!(
+                    "❌ Proof2 (sequences {:?}) cannot be reserved - status: {:?}, is_block_proof: {}",
+                    sequences2, p2.status, is_block_proof
+                );
                 if p2.status == ProofStatus::Reserved {
                     let time_since = current_time.saturating_sub(p2.timestamp);
-                    debug!("   Reserved time: {}ms, timeout: {}ms", time_since, PROOF_RESERVED_TIMEOUT_MS);
+                    debug!(
+                        "   Reserved time: {}ms, timeout: {}ms",
+                        time_since, PROOF_RESERVED_TIMEOUT_MS
+                    );
                 }
             }
-            
+
             p1_ok && p2_ok
         }
         (None, _) => {
-            debug!("❌ Proof1 (sequences {:?}) not found in proof calculation", sequences1);
+            debug!(
+                "❌ Proof1 (sequences {:?}) not found in proof calculation",
+                sequences1
+            );
             false
         }
         (_, None) => {
-            debug!("❌ Proof2 (sequences {:?}) not found in proof calculation", sequences2);
+            debug!(
+                "❌ Proof2 (sequences {:?}) not found in proof calculation",
+                sequences2
+            );
             false
         }
     };
-    
+
     if !can_reserve {
-        debug!("⚠️ Proofs cannot be reserved for merge job {} - skipping transaction", job_id);
-        return Err(anyhow::anyhow!("Proofs not in reservable state for sequences {:?} and {:?}", sequences1, sequences2));
+        debug!(
+            "⚠️ Proofs cannot be reserved for merge job {} - skipping transaction",
+            job_id
+        );
+        return Err(anyhow::anyhow!(
+            "Proofs not in reservable state for sequences {:?} and {:?}",
+            sequences1,
+            sequences2
+        ));
     }
-    
+
     // Step 3: Add the merge job creation request to the shared state for multicall processing
-    debug!("🔒 Proofs are reservable, adding merge job creation request to multicall queue: {}", job_id);
-    
+    debug!(
+        "🔒 Proofs are reservable, adding merge job creation request to multicall queue: {}",
+        job_id
+    );
+
     let job_description = Some(format!(
         "Merge proof job for block {} - merging sequences {:?} with {:?}",
         block_number, sequences1, sequences2
     ));
 
     // Add the request to the shared state for batch processing
-    state.add_create_merge_job_request(
-        app_instance.to_string(),
-        crate::state::CreateMergeJobRequest {
-            block_number,
-            sequences: combined_sequences.clone(),
-            sequences1: sequences1.clone(),
-            sequences2: sequences2.clone(),
-            job_description,
-            _timestamp: tokio::time::Instant::now(),
-        },
-    ).await;
+    state
+        .add_create_merge_job_request(
+            app_instance.to_string(),
+            crate::state::CreateMergeJobRequest {
+                block_number,
+                sequences: combined_sequences.clone(),
+                sequences1: sequences1.clone(),
+                sequences2: sequences2.clone(),
+                job_description,
+                _timestamp: tokio::time::Instant::now(),
+            },
+        )
+        .await;
 
     info!(
         "✅ Merge job creation request added to multicall queue: block={}, sequences={:?}+{:?}",
         block_number, sequences1, sequences2
     );
-    
+
     Ok(())
 }
 
@@ -871,121 +920,135 @@ mod tests {
 
 /// Start periodic block creation task
 pub async fn start_periodic_block_creation(state: crate::state::SharedState) {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use tokio::time::interval;
-    
+
     info!("📦 Starting periodic block creation task (runs every minute)");
-    
+
     let is_running = Arc::new(AtomicBool::new(false));
     let mut check_interval = interval(Duration::from_secs(BLOCK_CREATION_CHECK_INTERVAL_SECS));
     check_interval.tick().await; // Skip first immediate tick
-    
+
     loop {
         // Check for shutdown
         if state.is_shutting_down() {
             info!("Block creation task shutting down...");
             break;
         }
-        
+
         check_interval.tick().await;
-        
+
         if state.is_shutting_down() {
             break;
         }
-        
+
         // Skip if already running
         if is_running.load(Ordering::Acquire) {
             debug!("Block creation already in progress, skipping...");
             continue;
         }
-        
+
         is_running.store(true, Ordering::Release);
-        
+
         debug!("Running periodic block creation check...");
-        
+
         // Get all app instances
         let app_instances = state.get_app_instances().await;
-        
+
         if !app_instances.is_empty() {
-            debug!("Checking {} app instances for block creation", app_instances.len());
-            
+            debug!(
+                "Checking {} app instances for block creation",
+                app_instances.len()
+            );
+
             for app_instance_id in app_instances {
                 if state.is_shutting_down() {
                     break;
                 }
-                
+
                 // Try to create a block for this app instance
                 let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
                 match crate::block::try_create_block(&mut sui_interface, &app_instance_id).await {
                     Ok(Some((tx_digest, sequences, time_since))) => {
-                        info!("✅ Created block for app instance {} - tx: {}, sequences: {}, time since last: {}s", 
-                            app_instance_id, tx_digest, sequences, time_since);
+                        info!(
+                            "✅ Created block for app instance {} - tx: {}, sequences: {}, time since last: {}s",
+                            app_instance_id, tx_digest, sequences, time_since
+                        );
                     }
                     Ok(None) => {
                         debug!("No block needed for app instance {}", app_instance_id);
                     }
                     Err(e) => {
-                        error!("Failed to create block for app instance {}: {}", app_instance_id, e);
+                        error!(
+                            "Failed to create block for app instance {}: {}",
+                            app_instance_id, e
+                        );
                     }
                 }
             }
         }
-        
+
         is_running.store(false, Ordering::Release);
     }
 }
 
 /// Start periodic proof analysis task
 pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use tokio::time::interval;
-    
-    info!("🔬 Starting periodic proof analysis task (runs every {} minutes)", PROOF_ANALYSIS_INTERVAL_SECS / 60);
-    
+
+    info!(
+        "🔬 Starting periodic proof analysis task (runs every {} minutes)",
+        PROOF_ANALYSIS_INTERVAL_SECS / 60
+    );
+
     let is_running = Arc::new(AtomicBool::new(false));
     let mut check_interval = interval(Duration::from_secs(PROOF_ANALYSIS_INTERVAL_SECS));
     check_interval.tick().await; // Skip first immediate tick
-    
+
     loop {
         // Check for shutdown
         if state.is_shutting_down() {
             info!("Proof analysis task shutting down...");
             break;
         }
-        
+
         check_interval.tick().await;
-        
+
         if state.is_shutting_down() {
             break;
         }
-        
+
         // Skip if already running
         if is_running.load(Ordering::Acquire) {
             debug!("Proof analysis already in progress, skipping...");
             continue;
         }
-        
+
         is_running.store(true, Ordering::Release);
-        
+
         debug!("Running periodic proof completion analysis...");
-        
+
         // Get all app instances
         let app_instances = state.get_app_instances().await;
-        
+
         if !app_instances.is_empty() {
-            debug!("Analyzing proof completion for {} app instances", app_instances.len());
-            
+            debug!(
+                "Analyzing proof completion for {} app instances",
+                app_instances.len()
+            );
+
             let mut analyzed_count = 0;
-            
+
             for app_instance_id in app_instances {
                 if state.is_shutting_down() {
                     break;
                 }
-                
+
                 // Fetch the app instance first
                 match sui::fetch::fetch_app_instance(&app_instance_id).await {
                     Ok(app_instance) => {
@@ -993,10 +1056,16 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
                         match crate::proof::analyze_proof_completion(&app_instance, &state).await {
                             Ok(()) => {
                                 analyzed_count += 1;
-                                debug!("Completed proof analysis for app instance {}", app_instance_id);
+                                debug!(
+                                    "Completed proof analysis for app instance {}",
+                                    app_instance_id
+                                );
                             }
                             Err(e) => {
-                                error!("Failed to analyze proofs for app instance {}: {}", app_instance_id, e);
+                                error!(
+                                    "Failed to analyze proofs for app instance {}: {}",
+                                    app_instance_id, e
+                                );
                             }
                         }
                     }
@@ -1005,12 +1074,15 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
                     }
                 }
             }
-            
+
             if analyzed_count > 0 {
-                info!("✅ Proof analysis complete: {} instances analyzed", analyzed_count);
+                info!(
+                    "✅ Proof analysis complete: {} instances analyzed",
+                    analyzed_count
+                );
             }
         }
-        
+
         is_running.store(false, Ordering::Release);
     }
 }
