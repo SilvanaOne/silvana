@@ -16,6 +16,7 @@ use docker::DockerManager;
 use futures::future;
 use secrets_client::SecretsClient;
 use std::sync::Arc;
+use std::time::Instant;
 use sui::fetch::{AgentMethod, Job};
 use sui::fetch_agent_method;
 use tokio::sync::RwLock;
@@ -133,7 +134,13 @@ impl JobSearcher {
     /// Process jobs from the buffer by starting Docker containers
     async fn process_buffer_jobs(&self) -> Result<()> {
         // Check buffer and process jobs one by one until limits are reached
+        info!("Processing buffer jobs");
+        let mut count = 0;
         loop {
+            sleep(Duration::from_secs(1)).await;
+            count += 1;
+            info!("Processing buffer job {}", count);
+
             // Check current container counts
             let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
             let total_containers = loading_count + running_count;
@@ -706,17 +713,47 @@ impl JobSearcher {
                     total_operations,
                     sui::get_max_operations_per_multicall()
                 );
+                let mut count = 0;
 
-                if let Err(e) = self.execute_multicall_batches().await {
-                    error!("Failed to execute limit-triggered multicall: {}", e);
-                }
-
-                // Process newly buffered jobs from multicall
-                if let Err(e) = self.process_buffer_jobs().await {
-                    error!(
-                        "Failed to process buffer jobs after limit-triggered multicall: {}",
-                        e
+                while self.state.should_execute_multicall_by_limit().await {
+                    count += 1;
+                    let total_operations = self.state.get_total_operations_count().await;
+                    info!(
+                        "Step 3: Executing {} multicall due to operation limit: {} operations >= {} limit",
+                        count,
+                        total_operations,
+                        sui::get_max_operations_per_multicall()
                     );
+
+                    let start_time = Instant::now();
+                    if let Err(e) = self.execute_multicall_batches().await {
+                        error!("Failed to execute limit-triggered multicall: {}", e);
+                    }
+                    let end_time = Instant::now();
+                    let duration = end_time.duration_since(start_time);
+                    info!(
+                        "Multicall {} execution time: {} ms",
+                        count,
+                        duration.as_millis()
+                    );
+
+                    // Process newly buffered jobs from multicall
+                    let start_time = Instant::now();
+                    if let Err(e) = self.process_buffer_jobs().await {
+                        error!(
+                            "Failed to process buffer jobs after limit-triggered multicall: {}",
+                            e
+                        );
+                    }
+                    let end_time = Instant::now();
+                    let duration = end_time.duration_since(start_time);
+                    info!(
+                        "Buffer job {} processing time: {} ms",
+                        count,
+                        duration.as_millis()
+                    );
+                    info!("Step 3: Sleeping for 3 seconds before next multicall");
+                    sleep(Duration::from_secs(3)).await;
                 }
             } else if should_execute_by_time && total_operations > 0 {
                 info!(
@@ -1193,6 +1230,23 @@ impl JobSearcher {
                     );
                 }
 
+                // Update state operations
+                while operations_count < max_operations
+                    && !requests.update_state_for_sequences.is_empty()
+                {
+                    let update_req = requests.update_state_for_sequences.remove(0);
+                    taken_operations.update_state_for_sequences.push((
+                        update_req.sequence,
+                        update_req.new_state_data,
+                        update_req.new_data_availability_hash,
+                    ));
+                    operations_count += 1;
+                    info!(
+                        "Added update state operation to batch: {}",
+                        update_req.sequence
+                    );
+                }
+
                 // Submit proofs
                 while operations_count < max_operations && !requests.submit_proofs.is_empty() {
                     let proof_req = requests.submit_proofs.remove(0);
@@ -1267,19 +1321,6 @@ impl JobSearcher {
 
                 // Put remaining jobs back
                 requests.start_jobs = remaining_start_jobs;
-            }
-
-            // Update state operations
-            while operations_count < max_operations
-                && !requests.update_state_for_sequences.is_empty()
-            {
-                let update_req = requests.update_state_for_sequences.remove(0);
-                taken_operations.update_state_for_sequences.push((
-                    update_req.sequence,
-                    update_req.new_state_data,
-                    update_req.new_data_availability_hash,
-                ));
-                operations_count += 1;
             }
 
             // Create app jobs - validate settlement jobs
@@ -1375,7 +1416,7 @@ impl JobSearcher {
                 && requests.submit_proofs.is_empty()
                 && requests.create_app_jobs.is_empty()
                 && requests.create_merge_jobs.is_empty();
-            
+
             // Log remaining operations before potentially removing
             if !should_remove {
                 info!(
@@ -1390,7 +1431,7 @@ impl JobSearcher {
                     requests.create_merge_jobs.len()
                 );
             }
-            
+
             // Remove app instance from map if no operations remain
             if should_remove {
                 requests_lock.remove(&app_instance);
