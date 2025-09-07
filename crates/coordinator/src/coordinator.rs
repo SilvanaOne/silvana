@@ -331,18 +331,17 @@ pub async fn start_coordinator(
     });
     info!("💰 Started periodic balance check task (runs every 30 minutes)");
 
-    // 6. Start job searcher in a separate thread
+    // 6. Start job searcher in a separate thread (only collects jobs and adds to multicall queue)
     let job_searcher_state = state.clone();
     let job_searcher_metrics = metrics.clone();
     let job_searcher_handle = task::spawn(async move {
-        let mut job_searcher =
-            match JobSearcher::new(job_searcher_state, use_tee, container_timeout) {
-                Ok(searcher) => searcher,
-                Err(e) => {
-                    error!("Failed to create job searcher: {}", e);
-                    return;
-                }
-            };
+        let mut job_searcher = match JobSearcher::new(job_searcher_state) {
+            Ok(searcher) => searcher,
+            Err(e) => {
+                error!("Failed to create job searcher: {}", e);
+                return;
+            }
+        };
 
         // Set metrics reference
         job_searcher.set_metrics(job_searcher_metrics);
@@ -357,6 +356,44 @@ pub async fn start_coordinator(
         }
     });
     info!("🔍 Started job searcher thread");
+
+    // 7. Start multicall processor in a separate thread (processes multicall queue and executes batches)
+    let multicall_state = state.clone();
+    let multicall_handle = task::spawn(async move {
+        let mut multicall_processor = crate::multicall::MulticallProcessor::new(multicall_state);
+
+        // Delay multicall processor startup by 5 seconds
+        info!("Multicall processor waiting 5 seconds before starting...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        info!("Multicall processor starting now");
+
+        if let Err(e) = multicall_processor.run().await {
+            error!("Multicall processor error: {}", e);
+        }
+    });
+    info!("🚀 Started multicall processor thread");
+
+    // 8. Start docker buffer processor in a separate thread (processes started jobs buffer and launches containers)
+    let docker_state = state.clone();
+    let docker_handle = task::spawn(async move {
+        let mut docker_processor = match crate::docker::DockerBufferProcessor::new(docker_state, use_tee, container_timeout) {
+            Ok(processor) => processor,
+            Err(e) => {
+                error!("Failed to create docker buffer processor: {}", e);
+                return;
+            }
+        };
+
+        // Delay docker processor startup by 8 seconds
+        info!("Docker buffer processor waiting 8 seconds before starting...");
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        info!("Docker buffer processor starting now");
+
+        if let Err(e) = docker_processor.run().await {
+            error!("Docker buffer processor error: {}", e);
+        }
+    });
+    info!("🐳 Started docker buffer processor thread");
 
     // 7. Start event processor in main thread (processes events and updates shared state)
     let mut processor = EventProcessor::new(config, state.clone()).await?;
@@ -506,12 +543,30 @@ pub async fn start_coordinator(
     proof_analysis_handle.abort();
     balance_check_handle.abort();
 
-    // Give job_searcher a chance to cleanup
+    // Give job_searcher, multicall, and docker processor a chance to cleanup
     if !job_searcher_handle.is_finished() {
         // Wait a bit for job_searcher to finish gracefully
         let _ = tokio::time::timeout(
             Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
             job_searcher_handle,
+        )
+        .await;
+    }
+    
+    if !multicall_handle.is_finished() {
+        // Wait a bit for multicall processor to finish gracefully
+        let _ = tokio::time::timeout(
+            Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
+            multicall_handle,
+        )
+        .await;
+    }
+    
+    if !docker_handle.is_finished() {
+        // Wait a bit for docker processor to finish gracefully
+        let _ = tokio::time::timeout(
+            Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
+            docker_handle,
         )
         .await;
     }

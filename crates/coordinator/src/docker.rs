@@ -470,3 +470,300 @@ async fn retrieve_secrets_for_job(
 
     Ok(secrets)
 }
+
+use crate::constants::MAX_CONCURRENT_AGENT_CONTAINERS;
+use tokio::time::sleep;
+
+/// Docker buffer processor that monitors started_jobs_buffer and launches containers
+pub struct DockerBufferProcessor {
+    state: SharedState,
+    docker_manager: Arc<DockerManager>,
+    container_timeout_secs: u64,
+    secrets_client: Option<SecretsClient>,
+}
+
+impl DockerBufferProcessor {
+    pub fn new(state: SharedState, use_tee: bool, container_timeout_secs: u64) -> Result<Self> {
+        let docker_manager =
+            DockerManager::new(use_tee).map_err(|e| crate::error::CoordinatorError::DockerError(e))?;
+
+        Ok(Self {
+            state,
+            docker_manager: Arc::new(docker_manager),
+            container_timeout_secs,
+            secrets_client: None,
+        })
+    }
+
+    /// Main loop for the docker buffer processor
+    pub async fn run(&mut self) -> Result<()> {
+        info!("🐳 Docker buffer processor started");
+        
+        loop {
+            // Check for shutdown request
+            if self.state.is_shutting_down() {
+                info!("🛑 Docker buffer processor received shutdown signal");
+                
+                // Wait for running containers to complete if not force shutdown
+                if !self.state.is_force_shutdown() {
+                    let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
+                    if loading_count > 0 || running_count > 0 {
+                        warn!(
+                            "Waiting for {} loading and {} running containers to complete...",
+                            loading_count, running_count
+                        );
+                        sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                }
+                
+                return Ok(());
+            }
+
+            // Check current container counts
+            let (loading_count, running_count) = self.docker_manager.get_container_counts().await;
+            let total_containers = loading_count + running_count;
+
+            // Check if we've reached container limit
+            if total_containers >= MAX_CONCURRENT_AGENT_CONTAINERS {
+                debug!(
+                    "Container limit reached ({}/{}), waiting for containers to complete",
+                    total_containers, MAX_CONCURRENT_AGENT_CONTAINERS
+                );
+                sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+
+            // Get next job from buffer
+            let started_job = self.state.get_next_started_job().await;
+            if started_job.is_none() {
+                // No jobs in buffer, sleep briefly
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+
+            let started_job = started_job.unwrap();
+            info!(
+                "Processing buffered job: app_instance={}, sequence={}, memory={:.2} GB",
+                started_job.app_instance,
+                started_job.job_sequence,
+                started_job.memory_requirement as f64 / (1024.0 * 1024.0 * 1024.0)
+            );
+
+            // First fetch the app instance to get the jobs table ID
+            let job_result: std::result::Result<Option<sui::fetch::Job>, ()> =
+                match sui::fetch::fetch_app_instance(&started_job.app_instance).await {
+                    Ok(app_inst) => {
+                        if let Some(jobs_obj) = app_inst.jobs {
+                            // Try to fetch the job from the jobs table
+                            match sui::fetch::fetch_job_by_id(
+                                &jobs_obj.jobs_table_id,
+                                started_job.job_sequence,
+                            )
+                            .await
+                            {
+                                Ok(job) => Ok(job),
+                                Err(e) => {
+                                    error!("Failed to fetch job by ID: {}", e);
+                                    Ok(None)
+                                }
+                            }
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to fetch app instance: {}", e);
+                        Ok(None)
+                    }
+                };
+
+            match job_result {
+                Ok(Some(job)) => {
+                    // Check if job is still in a state we can process
+                    let can_process = matches!(job.status, sui::fetch::JobStatus::Running);
+
+                    debug!(
+                        "Buffered job {} status: {:?}, can_process: {}",
+                        started_job.job_sequence, job.status, can_process
+                    );
+
+                    if !can_process {
+                        warn!(
+                            "Buffered job {} from app_instance {} is in '{:?}' status, skipping",
+                            started_job.job_sequence, started_job.app_instance, job.status
+                        );
+                        continue;
+                    }
+                    
+                    // Fetch agent method configuration
+                    let agent_method =
+                        match sui::fetch_agent_method(&job.developer, &job.agent, &job.agent_method).await
+                        {
+                            Ok(method) => method,
+                            Err(e) => {
+                                error!(
+                                    "Failed to fetch agent method for buffered job {}: {}",
+                                    job.job_sequence, e
+                                );
+                                continue;
+                            }
+                        };
+
+                    // Check if we have sufficient resources
+                    match self.can_run_agent(&agent_method).await {
+                        Ok(true) => {
+                            // Resources available, continue
+                        }
+                        Ok(false) => {
+                            // Put job back in buffer (at the front) and wait
+                            self.state.add_started_jobs(vec![started_job]).await;
+                            warn!(
+                                "Insufficient resources for job {}, returned to buffer",
+                                job.job_sequence
+                            );
+                            sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
+                        Err(e) => {
+                            error!("Error checking resources: {}", e);
+                            // Put job back in buffer
+                            self.state.add_started_jobs(vec![started_job]).await;
+                            sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
+                    }
+
+                    // Try to acquire a lock for this job
+                    let lock_manager = crate::job_lock::get_job_lock_manager();
+                    let job_lock =
+                        match lock_manager.try_lock_job(&job.app_instance, job.job_sequence) {
+                            Some(lock) => lock,
+                            None => {
+                                warn!("Job {} already locked, skipping", job.job_sequence);
+                                continue;
+                            }
+                        };
+
+                    info!(
+                        "🐳 Starting Docker container for buffered job {}: {}/{}/{}",
+                        job.job_sequence, job.developer, job.agent, job.agent_method
+                    );
+
+                    // Clone necessary data for the spawned task
+                    let state_clone = self.state.clone();
+                    let docker_manager_clone = self.docker_manager.clone();
+                    let container_timeout_secs = self.container_timeout_secs;
+                    let secrets_client_clone = self.secrets_client.clone();
+
+                    // Spawn task to run Docker container
+                    tokio::spawn(async move {
+                        run_docker_container_task(
+                            job,
+                            agent_method,
+                            state_clone,
+                            docker_manager_clone,
+                            container_timeout_secs,
+                            secrets_client_clone,
+                            job_lock,
+                        )
+                        .await;
+                    });
+                }
+                Ok(None) => {
+                    warn!(
+                        "Buffered job {} from app_instance {} not found in blockchain (may have been deleted or completed)",
+                        started_job.job_sequence, started_job.app_instance
+                    );
+                    // Job doesn't exist or can't be fetched, don't put it back in buffer
+                }
+                _ => {
+                    // This shouldn't happen with our current logic
+                    error!(
+                        "Unexpected error fetching buffered job {} from blockchain",
+                        started_job.job_sequence
+                    );
+                }
+            }
+        }
+    }
+
+    /// Check if system has sufficient resources to run an agent
+    async fn can_run_agent(&self, agent_method: &sui::fetch::AgentMethod) -> Result<bool> {
+        use crate::constants::AGENT_MIN_MEMORY_REQUIREMENT_GB;
+        use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
+        
+        // Check TEE requirement
+        if agent_method.requires_tee {
+            debug!("Agent requires TEE but we don't run on TEE");
+            return Ok(false);
+        }
+
+        // Get hardware info
+        let hardware = get_hardware_info();
+
+        // Check CPU cores
+        if (hardware.cpu_cores as u16) < agent_method.min_cpu_cores {
+            debug!(
+                "Insufficient CPU cores: have {}, need {}",
+                hardware.cpu_cores, agent_method.min_cpu_cores
+            );
+            return Ok(false);
+        }
+
+        // Check concurrent agent limit
+        let current_agents = self.state.get_current_agent_count().await;
+        if current_agents >= MAX_CONCURRENT_AGENT_CONTAINERS {
+            debug!(
+                "Maximum concurrent agents ({}) reached",
+                MAX_CONCURRENT_AGENT_CONTAINERS
+            );
+            return Ok(false);
+        }
+
+        // Calculate total memory required by currently running agents
+        let running_agents = self.state.get_all_current_agents().await;
+        let mut total_memory_used_gb = 0u64;
+
+        for (_session_id, agent_info) in running_agents {
+            // Fetch agent method to get memory requirements
+            if let Ok(method) = sui::fetch_agent_method(
+                &agent_info.developer,
+                &agent_info.agent,
+                &agent_info.agent_method,
+            )
+            .await
+            {
+                total_memory_used_gb += method.min_memory_gb as u64;
+            }
+        }
+
+        // Add memory requirement for this new agent
+        let total_memory_needed_gb = total_memory_used_gb + agent_method.min_memory_gb as u64;
+
+        // Check against total system memory minus reserved
+        let total_memory_gb = get_total_memory_gb();
+        if total_memory_needed_gb > total_memory_gb.saturating_sub(AGENT_MIN_MEMORY_REQUIREMENT_GB) {
+            debug!(
+                "Insufficient total memory: need {} GB (including {} GB for new agent), have {} GB (minus {} GB reserved)",
+                total_memory_needed_gb,
+                agent_method.min_memory_gb,
+                total_memory_gb,
+                AGENT_MIN_MEMORY_REQUIREMENT_GB
+            );
+            return Ok(false);
+        }
+
+        // Check against available memory
+        let available_memory_gb = get_available_memory_gb();
+        if (agent_method.min_memory_gb as u64) > available_memory_gb {
+            debug!(
+                "Insufficient available memory: need {} GB, have {} GB available",
+                agent_method.min_memory_gb, available_memory_gb
+            );
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+}

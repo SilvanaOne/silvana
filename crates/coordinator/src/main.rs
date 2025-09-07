@@ -16,6 +16,7 @@ mod jobs;
 mod jobs_cache;
 mod merge;
 mod metrics;
+mod multicall;
 mod processor;
 mod proof;
 mod proofs_storage;
