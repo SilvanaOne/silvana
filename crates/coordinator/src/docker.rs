@@ -521,18 +521,38 @@ impl DockerBufferProcessor {
             if self.state.is_shutting_down() {
                 info!("🛑 Docker buffer processor received shutdown signal");
 
-                // Wait for running containers to complete if not force shutdown
+                // Process all buffered jobs and wait for running containers to complete if not force shutdown
                 if !self.state.is_force_shutdown() {
+                    // First, process all buffered jobs
+                    let buffer_size = self.state.get_started_jobs_buffer_size().await;
+                    if buffer_size > 0 {
+                        info!("📦 Processing {} buffered jobs before shutdown...", buffer_size);
+                        // Don't exit yet, continue loop to process buffered jobs
+                        // The loop will naturally process them as containers become available
+                    }
+                    
+                    // Check if we still have buffered jobs or running containers
                     let (loading_count, running_count) =
                         self.docker_manager.get_container_counts().await;
-                    if loading_count > 0 || running_count > 0 {
-                        warn!(
-                            "Waiting for {} loading and {} running containers to complete...",
-                            loading_count, running_count
-                        );
-                        sleep(Duration::from_secs(5)).await;
+                    let current_buffer_size = self.state.get_started_jobs_buffer_size().await;
+                    
+                    if current_buffer_size > 0 || loading_count > 0 || running_count > 0 {
+                        if current_buffer_size > 0 {
+                            debug!(
+                                "Shutdown: {} jobs in buffer, {} loading and {} running containers",
+                                current_buffer_size, loading_count, running_count
+                            );
+                        } else {
+                            debug!(
+                                "Shutdown: Waiting for {} loading and {} running containers to complete...",
+                                loading_count, running_count
+                            );
+                        }
+                        sleep(Duration::from_secs(2)).await;
                         continue;
                     }
+                    
+                    info!("✅ All buffered jobs processed and containers completed");
                 }
 
                 return Ok(());

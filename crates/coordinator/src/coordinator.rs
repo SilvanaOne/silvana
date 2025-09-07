@@ -435,13 +435,12 @@ pub async fn start_coordinator(
     }
 
     info!("🔄 Starting graceful shutdown sequence...");
-
-    // Phase 1: Stop accepting new jobs (already done by setting shutdown flag)
-    info!("  1️⃣ Stopping new job acceptance...");
-
-    // Phase 2: Wait for current jobs to complete (with timeout)
+    info!("    Shutdown order:");
+    info!("    1️⃣ Stop searching for new jobs");
+    info!("    2️⃣ Process all buffered jobs and wait for running containers");
+    info!("    3️⃣ Send all pending multicall operations to blockchain");
     info!(
-        "  2️⃣ Waiting for current jobs to complete (max {} minutes)...",
+        "    ⏱️  Maximum wait time: {} minutes",
         GRACEFUL_SHUTDOWN_TIMEOUT_SECS / 60
     );
     let mut wait_time = 0;
@@ -547,32 +546,67 @@ pub async fn start_coordinator(
     proof_analysis_handle.abort();
     balance_check_handle.abort();
 
-    // Give job_searcher, multicall, and docker processor a chance to cleanup
+    // Shutdown sequence:
+    // 1. Job searcher stops immediately (no new jobs)
+    // 2. Docker processor processes all buffered jobs and waits for containers
+    // 3. Multicall processor continues until docker is done, then processes final operations
+    
+    // Job searcher should stop immediately
     if !job_searcher_handle.is_finished() {
-        // Wait a bit for job_searcher to finish gracefully
+        info!("  ⏳ Waiting for job searcher to stop...");
         let _ = tokio::time::timeout(
             Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
             job_searcher_handle,
         )
         .await;
+        info!("  ✅ Job searcher stopped (no new jobs will be searched)");
     }
     
-    if !multicall_handle.is_finished() {
-        // Wait a bit for multicall processor to finish gracefully
-        let _ = tokio::time::timeout(
-            Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
-            multicall_handle,
-        )
-        .await;
+    // Docker and Multicall processors work together
+    // Docker processes buffered jobs and waits for containers
+    // Multicall continues processing requests from containers
+    let mut docker_done = false;
+    let mut multicall_done = false;
+    let shutdown_start = tokio::time::Instant::now();
+    
+    while (!docker_done || !multicall_done) && shutdown_start.elapsed().as_secs() < GRACEFUL_SHUTDOWN_TIMEOUT_SECS {
+        // Check docker status
+        if !docker_done && docker_handle.is_finished() {
+            docker_done = true;
+            info!("  ✅ Docker processor completed all jobs and containers");
+        }
+        
+        // Check multicall status
+        if !multicall_done && multicall_handle.is_finished() {
+            multicall_done = true;
+            info!("  ✅ Multicall processor completed all operations");
+        }
+        
+        // Show progress
+        if !docker_done || !multicall_done {
+            let buffer_size = state.get_started_jobs_buffer_size().await;
+            let current_agents = state.get_current_agent_count().await;
+            let pending_ops = state.get_total_operations_count().await;
+            
+            if shutdown_start.elapsed().as_secs() % 5 == 0 {
+                info!(
+                    "  ⏳ Shutdown progress: {} buffered jobs, {} containers, {} pending operations",
+                    buffer_size, current_agents, pending_ops
+                );
+            }
+        }
+        
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
     
-    if !docker_handle.is_finished() {
-        // Wait a bit for docker processor to finish gracefully
-        let _ = tokio::time::timeout(
-            Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
-            docker_handle,
-        )
-        .await;
+    // Force abort if timeout
+    if !docker_done {
+        warn!("  ⚠️ Docker processor timeout - forcing shutdown");
+        docker_handle.abort();
+    }
+    if !multicall_done {
+        warn!("  ⚠️ Multicall processor timeout - forcing shutdown");
+        multicall_handle.abort();
     }
 
     info!("✅ Graceful shutdown complete");

@@ -31,10 +31,42 @@ impl MulticallProcessor {
         info!("🚀 Multicall processor started");
 
         loop {
-            // Check for shutdown request
+            // Check for shutdown request - but don't exit immediately
+            // We need to keep processing until docker is done
             if self.state.is_shutting_down() {
-                info!("=� Multicall processor received shutdown signal");
-                return Ok(());
+                // Check if docker still has work
+                let buffer_size = self.state.get_started_jobs_buffer_size().await;
+                let current_agents = self.state.get_current_agent_count().await;
+                
+                if buffer_size == 0 && current_agents == 0 {
+                    // Docker is done, now process final multicall operations
+                    info!("🛑 Multicall processor: Docker completed, processing final operations...");
+                    
+                    let pending_operations = self.state.get_total_operations_count().await;
+                    if pending_operations > 0 {
+                        info!("📤 Processing {} final operations before shutdown...", pending_operations);
+                        
+                        // Execute all pending batches
+                        while self.state.get_total_operations_count().await > 0 {
+                            if let Err(e) = self.execute_multicall_batch().await {
+                                error!("Failed to execute shutdown multicall batch: {}", e);
+                                // Continue trying to process remaining operations
+                            }
+                        }
+                        
+                        info!("✅ All pending multicall operations processed");
+                    }
+                    
+                    return Ok(());
+                } else {
+                    // Docker still has work, continue processing multicalls normally
+                    if buffer_size > 0 || current_agents > 0 {
+                        debug!(
+                            "Multicall continuing during shutdown: {} jobs buffered, {} containers running",
+                            buffer_size, current_agents
+                        );
+                    }
+                }
             }
 
             // Check if we should execute multicall
