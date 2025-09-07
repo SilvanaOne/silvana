@@ -478,12 +478,17 @@ fn find_proofs_to_merge_excluding(
                 .find(|p| arrays_equal(&p.sequences, &sequence2));
 
             if let (Some(proof1), Some(proof2)) = (proof1, proof2) {
-                // For block proofs, only check CALCULATED or USED status (not RESERVED)
-                // This matches the TypeScript logic exactly
-                if (proof1.status == ProofStatus::Calculated || proof1.status == ProofStatus::Used)
-                    && (proof2.status == ProofStatus::Calculated
-                        || proof2.status == ProofStatus::Used)
-                {
+                // For block proofs, check CALCULATED, USED, or RESERVED (if timed out) status
+                // This aligns with the Move contract logic which allows RESERVED for block proofs
+                let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
+                let proof1_available = proof1.status == ProofStatus::Calculated 
+                    || proof1.status == ProofStatus::Used
+                    || (proof1.status == ProofStatus::Reserved && current_time > proof1.timestamp + PROOF_RESERVED_TIMEOUT_MS);
+                let proof2_available = proof2.status == ProofStatus::Calculated 
+                    || proof2.status == ProofStatus::Used
+                    || (proof2.status == ProofStatus::Reserved && current_time > proof2.timestamp + PROOF_RESERVED_TIMEOUT_MS);
+                    
+                if proof1_available && proof2_available {
                     debug!(
                         "Merging proofs to create block proof: sequences1={:?}, sequences2={:?}",
                         sequence1, sequence2
