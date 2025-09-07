@@ -2,7 +2,7 @@
 
 /// Maximum number of operations that can be passed to multicall_job_operations in a single call.
 /// This limit ensures the Move function doesn't exceed gas or computational limits.
-pub const MAX_OPERATIONS_PER_MULTICALL: usize = 8;
+pub const MAX_OPERATIONS_PER_MULTICALL: usize = 6;
 
 /// Get the maximum number of operations per multicall
 pub fn get_max_operations_per_multicall() -> usize {

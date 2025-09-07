@@ -1066,106 +1066,106 @@ impl JobSearcher {
 
         let max_operations = sui::get_max_operations_per_multicall();
         
-        // Instead of collecting all operations, build batches incrementally
-        loop {
-            let mut current_batch_operations = Vec::new();
-            let mut current_batch_started_jobs = Vec::new();
-            let mut current_operation_count = 0;
-            let mut has_operations = false;
+        // Build only ONE batch per call - don't loop through multiple batches
+        let mut current_batch_operations = Vec::new();
+        let mut current_batch_started_jobs = Vec::new();
+        let mut current_operation_count = 0;
+        let mut has_operations = false;
 
-            // Try to fill a batch by taking operations from each app instance
-            for app_instance in &app_instances {
-                if current_operation_count >= max_operations {
-                    break; // Batch is full
+        // Try to fill a single batch by taking operations from each app instance
+        for app_instance in &app_instances {
+            if current_operation_count >= max_operations {
+                break; // Batch is full
+            }
+            
+            // Try to get some operations from this app instance (without taking all)
+            if let Some(operations) = self.take_partial_multicall_operations(&app_instance, max_operations - current_operation_count).await {
+                let operation_count = operations.total_operations();
+                if operation_count > 0 {
+                    has_operations = true;
+                    current_operation_count += operation_count;
+                    
+                    // Collect started jobs for buffer management
+                    for (i, sequence) in operations.start_job_sequences.iter().enumerate() {
+                        let memory_req = operations.start_job_memory_requirements.get(i).copied().unwrap_or(0);
+                        current_batch_started_jobs.push((app_instance.clone(), *sequence, memory_req));
+                    }
+                    
+                    info!(
+                        "Added {} operations from app_instance {} to batch (batch total: {})",
+                        operation_count,
+                        app_instance,
+                        current_operation_count
+                    );
+                    
+                    current_batch_operations.push(operations);
+                }
+            }
+        }
+        
+        // If no operations were collected, we're done
+        if !has_operations {
+            debug!("No operations to process in this batch");
+            return Ok(());
+        }
+        
+        // Execute this single batch
+        info!(
+            "Executing multicall batch with {} operations from {} app instances",
+            current_operation_count, current_batch_operations.len()
+        );
+        
+        let mut sui_interface = sui::SilvanaSuiInterface::new();
+        match sui_interface
+            .multicall_job_operations(current_batch_operations, None)
+            .await
+        {
+            Ok(result) => {
+                info!(
+                    "Successfully executed batch multicall with {} operations (tx: {})",
+                    current_operation_count, result.tx_digest
+                );
+
+                // Add only successfully started jobs to buffer for container launching
+                let successful_start_sequences = result.successful_start_jobs();
+                let failed_start_sequences = result.failed_start_jobs();
+                
+                if !failed_start_sequences.is_empty() {
+                    warn!("Some start jobs failed: {:?}", failed_start_sequences);
                 }
                 
-                // Try to get some operations from this app instance (without taking all)
-                if let Some(operations) = self.take_partial_multicall_operations(&app_instance, max_operations - current_operation_count).await {
-                    let operation_count = operations.total_operations();
-                    if operation_count > 0 {
-                        has_operations = true;
-                        current_operation_count += operation_count;
-                        
-                        // Collect started jobs for buffer management
-                        for (i, sequence) in operations.start_job_sequences.iter().enumerate() {
-                            let memory_req = operations.start_job_memory_requirements.get(i).copied().unwrap_or(0);
-                            current_batch_started_jobs.push((app_instance.clone(), *sequence, memory_req));
-                        }
-                        
-                        info!(
-                            "Added {} operations from app_instance {} to batch (batch total: {})",
-                            operation_count,
-                            app_instance,
-                            current_operation_count
-                        );
-                        
-                        current_batch_operations.push(operations);
-                    }
+                // Filter started jobs to only include successful ones
+                let successful_started_jobs: Vec<_> = current_batch_started_jobs
+                    .into_iter()
+                    .filter(|(_, sequence, _)| successful_start_sequences.contains(sequence))
+                    .collect();
+                
+                for (app_instance, sequence, memory_req) in successful_started_jobs.iter() {
+                    self.state.add_started_jobs(vec![crate::state::StartedJob {
+                        app_instance: app_instance.clone(),
+                        job_sequence: *sequence,
+                        memory_requirement: *memory_req,
+                    }]).await;
                 }
+
+                info!(
+                    "Added {} successfully started jobs to container launch buffer (out of {} attempted)",
+                    successful_started_jobs.len(), 
+                    successful_start_sequences.len() + failed_start_sequences.len()
+                );
+
+                // Update the last multicall timestamp after successful execution
+                self.state.update_last_multicall_timestamp().await;
             }
-            
-            // If no operations were collected, we're done
-            if !has_operations {
-                debug!("No more operations to process");
-                break;
-            }
-            
-            // Execute this batch
-            info!(
-                "Executing multicall batch with {} operations from {} app instances",
-                current_operation_count, current_batch_operations.len()
-            );
-            
-            let mut sui_interface = sui::SilvanaSuiInterface::new();
-            match sui_interface
-                .multicall_job_operations(current_batch_operations, None)
-                .await
-            {
-                Ok(result) => {
-                    info!(
-                        "Successfully executed batch multicall with {} operations (tx: {})",
-                        current_operation_count, result.tx_digest
-                    );
-
-                    // Add only successfully started jobs to buffer for container launching
-                    let successful_start_sequences = result.successful_start_jobs();
-                    let failed_start_sequences = result.failed_start_jobs();
-                    
-                    if !failed_start_sequences.is_empty() {
-                        warn!("Some start jobs failed: {:?}", failed_start_sequences);
-                    }
-                    
-                    // Filter started jobs to only include successful ones
-                    let successful_started_jobs: Vec<_> = current_batch_started_jobs
-                        .into_iter()
-                        .filter(|(_, sequence, _)| successful_start_sequences.contains(sequence))
-                        .collect();
-                    
-                    for (app_instance, sequence, memory_req) in successful_started_jobs.iter() {
-                        self.state.add_started_jobs(vec![crate::state::StartedJob {
-                            app_instance: app_instance.clone(),
-                            job_sequence: *sequence,
-                            memory_requirement: *memory_req,
-                        }]).await;
-                    }
-
-                    info!(
-                        "Added {} successfully started jobs to container launch buffer (out of {} attempted)",
-                        successful_started_jobs.len(), 
-                        successful_start_sequences.len() + failed_start_sequences.len()
-                    );
-
-                    // Update the last multicall timestamp after successful execution
-                    self.state.update_last_multicall_timestamp().await;
-                }
-                Err((error_msg, tx_digest_opt)) => {
-                    error!(
-                        "Batch multicall failed: {} (tx: {:?})",
-                        error_msg, tx_digest_opt
-                    );
-                    // Continue with next batch instead of failing completely
-                    continue;
-                }
+            Err((error_msg, tx_digest_opt)) => {
+                error!(
+                    "Batch multicall failed: {} (tx: {:?})",
+                    error_msg, tx_digest_opt
+                );
+                return Err(CoordinatorError::Other(anyhow::anyhow!(
+                    "Batch multicall failed: {}",
+                    error_msg
+                )));
             }
         }
 
