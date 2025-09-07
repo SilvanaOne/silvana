@@ -21,7 +21,7 @@
             "id": "viz.markdown"
           },
           "rawConfiguration": {
-            "text": "# Silvana Coordinator Dashboard\n\n## Service Overview\nReal-time monitoring of the Silvana Coordinator service including job processing, container management, and system health."
+            "text": "# Silvana Coordinator Dashboard\n\n## Service Overview\nReal-time monitoring of the Silvana Coordinator service including job processing, container management, multicall batching, and system health."
           }
         },
         {
@@ -140,7 +140,7 @@
             "nrqlQueries": [
               {
                 "accountId": 7077955,
-                "query": "SELECT latest(silvana.docker.containers) AS 'Running Containers' FROM Metric WHERE service.name = 'silvana-coordinator' AND container.state = 'running' FACET service.instance.id AS 'Coordinator ID' SINCE 5 minutes ago LIMIT 50"
+                "query": "SELECT latest(silvana.docker.containers) AS 'Running Containers', latest(silvana.docker.buffer) AS 'Buffer Size' FROM Metric WHERE service.name = 'silvana-coordinator' AND container.state = 'running' FACET service.instance.id AS 'Coordinator ID' SINCE 5 minutes ago LIMIT 50"
               }
             ],
             "platformOptions": {
@@ -179,25 +179,28 @@
           }
         },
         {
-          "title": "Total Running Containers",
+          "title": "Docker Buffer Size",
           "layout": {
             "column": 1,
             "row": 10,
-            "width": 3,
+            "width": 4,
             "height": 3
           },
           "linkedEntityGuids": null,
           "visualization": {
-            "id": "viz.billboard"
+            "id": "viz.line"
           },
           "rawConfiguration": {
             "facet": {
               "showOtherSeries": false
             },
+            "legend": {
+              "enabled": false
+            },
             "nrqlQueries": [
               {
                 "accountId": 7077955,
-                "query": "SELECT sum(silvana.docker.containers) AS 'Total Running' FROM Metric WHERE service.name = 'silvana-coordinator' AND container.state = 'running' SINCE 5 minutes ago"
+                "query": "SELECT latest(silvana.docker.buffer) AS 'Buffer Size' FROM Metric WHERE service.name = 'silvana-coordinator' AND metric.type = 'buffer_size' SINCE 1 hour ago TIMESERIES AUTO"
               }
             ],
             "platformOptions": {
@@ -206,10 +209,157 @@
           }
         },
         {
-          "title": "Total Loading Containers",
+          "title": "Docker Jobs Processing",
           "layout": {
-            "column": 4,
+            "column": 5,
             "row": 10,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 7077955,
+                "query": "SELECT sum(silvana.docker.jobs) AS 'Jobs' FROM Metric WHERE service.name = 'silvana-coordinator' FACET job.status SINCE 1 hour ago TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Docker Container Operations",
+          "layout": {
+            "column": 9,
+            "row": 10,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 7077955,
+                "query": "SELECT sum(silvana.docker.container_operations) AS 'Operations' FROM Metric WHERE service.name = 'silvana-coordinator' FACET operation SINCE 30 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Docker Failures",
+          "layout": {
+            "column": 1,
+            "row": 13,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 7077955,
+                "query": "SELECT sum(silvana.docker.failures) FROM Metric WHERE service.name = 'silvana-coordinator' FACET failure.type SINCE 30 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Multicall Operations Queue",
+          "layout": {
+            "column": 5,
+            "row": 13,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.stacked-bar"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 7077955,
+                "query": "SELECT latest(silvana.multicall.operations) FROM Metric WHERE service.name = 'silvana-coordinator' AND operation.type != 'total' FACET operation.type SINCE 1 hour ago TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Multicall Batch Performance",
+          "layout": {
+            "column": 9,
+            "row": 13,
+            "width": 4,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "legend": {
+              "enabled": true
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 7077955,
+                "query": "SELECT latest(silvana.multicall.performance) FROM Metric WHERE service.name = 'silvana-coordinator' FACET metric.type SINCE 1 hour ago TIMESERIES AUTO"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
+          "title": "Multicall Batches",
+          "layout": {
+            "column": 1,
+            "row": 16,
             "width": 3,
             "height": 3
           },
@@ -224,19 +374,52 @@
             "nrqlQueries": [
               {
                 "accountId": 7077955,
-                "query": "SELECT sum(silvana.docker.containers) AS 'Total Loading' FROM Metric WHERE service.name = 'silvana-coordinator' AND container.state = 'loading' SINCE 5 minutes ago"
+                "query": "SELECT sum(silvana.multicall.batches) FROM Metric WHERE service.name = 'silvana-coordinator' FACET batch.status SINCE 30 minutes ago"
               }
             ],
             "platformOptions": {
               "ignoreTimeRange": false
             }
+          }
+        },
+        {
+          "title": "Multicall Start Jobs",
+          "layout": {
+            "column": 4,
+            "row": 16,
+            "width": 3,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 7077955,
+                "query": "SELECT sum(silvana.multicall.start_jobs) FROM Metric WHERE service.name = 'silvana-coordinator' FACET result SINCE 30 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            },
+            "thresholds": [
+              {
+                "alertSeverity": "WARNING",
+                "value": 5
+              }
+            ]
           }
         },
         {
           "title": "Job Selection Pool Size",
           "layout": {
             "column": 7,
-            "row": 10,
+            "row": 16,
             "width": 3,
             "height": 3
           },
@@ -266,7 +449,7 @@
           "title": "Jobs Filtered",
           "layout": {
             "column": 10,
-            "row": 10,
+            "row": 16,
             "width": 3,
             "height": 3
           },
@@ -296,7 +479,7 @@
           "title": "Job Pool Composition",
           "layout": {
             "column": 1,
-            "row": 13,
+            "row": 19,
             "width": 6,
             "height": 3
           },
@@ -326,7 +509,7 @@
           "title": "Job Queue States",
           "layout": {
             "column": 7,
-            "row": 13,
+            "row": 19,
             "width": 6,
             "height": 3
           },
@@ -353,10 +536,10 @@
           }
         },
         {
-          "title": "Has Pending Jobs",
+          "title": "Pending Jobs",
           "layout": {
             "column": 1,
-            "row": 16,
+            "row": 22,
             "width": 2,
             "height": 3
           },
@@ -383,7 +566,7 @@
           "title": "Active Agents",
           "layout": {
             "column": 3,
-            "row": 16,
+            "row": 22,
             "width": 2,
             "height": 3
           },
@@ -410,7 +593,7 @@
           "title": "App Instances",
           "layout": {
             "column": 5,
-            "row": 16,
+            "row": 22,
             "width": 2,
             "height": 3
           },
@@ -437,7 +620,7 @@
           "title": "Shutdown Status",
           "layout": {
             "column": 7,
-            "row": 16,
+            "row": 22,
             "width": 2,
             "height": 3
           },
@@ -452,7 +635,7 @@
             "nrqlQueries": [
               {
                 "accountId": 7077955,
-                "query": "SELECT latest(silvana.system.status) AS 'Shutdown' FROM Metric WHERE service.name = 'silvana-coordinator' AND status.type = 'shutdown' SINCE 5 minutes ago"
+                "query": "SELECT latest(silvana.system.status) AS 'Status' FROM Metric WHERE service.name = 'silvana-coordinator' FACET status.type SINCE 5 minutes ago"
               }
             ],
             "platformOptions": {
@@ -467,43 +650,10 @@
           }
         },
         {
-          "title": "Force Shutdown",
-          "layout": {
-            "column": 9,
-            "row": 16,
-            "width": 2,
-            "height": 3
-          },
-          "linkedEntityGuids": null,
-          "visualization": {
-            "id": "viz.billboard"
-          },
-          "rawConfiguration": {
-            "facet": {
-              "showOtherSeries": false
-            },
-            "nrqlQueries": [
-              {
-                "accountId": 7077955,
-                "query": "SELECT latest(silvana.system.status) AS 'Force' FROM Metric WHERE service.name = 'silvana-coordinator' AND status.type = 'force_shutdown' SINCE 5 minutes ago"
-              }
-            ],
-            "platformOptions": {
-              "ignoreTimeRange": false
-            },
-            "thresholds": [
-              {
-                "alertSeverity": "CRITICAL",
-                "value": 1
-              }
-            ]
-          }
-        },
-        {
           "title": "Container Utilization",
           "layout": {
-            "column": 11,
-            "row": 16,
+            "column": 9,
+            "row": 22,
             "width": 2,
             "height": 3
           },
@@ -537,10 +687,37 @@
           }
         },
         {
+          "title": "Total Containers",
+          "layout": {
+            "column": 11,
+            "row": 22,
+            "width": 2,
+            "height": 3
+          },
+          "linkedEntityGuids": null,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "facet": {
+              "showOtherSeries": false
+            },
+            "nrqlQueries": [
+              {
+                "accountId": 7077955,
+                "query": "SELECT sum(silvana.docker.containers) FROM Metric WHERE service.name = 'silvana-coordinator' FACET container.state SINCE 5 minutes ago"
+              }
+            ],
+            "platformOptions": {
+              "ignoreTimeRange": false
+            }
+          }
+        },
+        {
           "title": "CPU Utilization (%)",
           "layout": {
             "column": 1,
-            "row": 19,
+            "row": 25,
             "width": 4,
             "height": 3
           },
@@ -573,7 +750,7 @@
           "title": "Memory Usage (MB)",
           "layout": {
             "column": 5,
-            "row": 19,
+            "row": 25,
             "width": 4,
             "height": 3
           },
@@ -606,7 +783,7 @@
           "title": "Last Selected Jobs",
           "layout": {
             "column": 9,
-            "row": 19,
+            "row": 25,
             "width": 4,
             "height": 3
           },
@@ -633,7 +810,7 @@
           "title": "Job Processing by State",
           "layout": {
             "column": 1,
-            "row": 22,
+            "row": 28,
             "width": 6,
             "height": 3
           },
@@ -660,7 +837,7 @@
           "title": "Recent Errors",
           "layout": {
             "column": 7,
-            "row": 22,
+            "row": 28,
             "width": 6,
             "height": 3
           },
@@ -684,7 +861,7 @@
           "title": "Coordinator Uptime",
           "layout": {
             "column": 1,
-            "row": 25,
+            "row": 31,
             "width": 12,
             "height": 3
           },
