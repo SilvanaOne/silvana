@@ -1688,69 +1688,6 @@ async fn run_docker_container_task(
     // We assume the job was already started when added to the buffer
     let tx_digest = "started_via_multicall".to_string();
 
-    // Old individual start_job_tx code removed - jobs now started via multicall
-    /*
-    let tx_digest = match sui::transactions::start_job_tx(&job.app_instance, job.job_sequence).await
-    {
-        Ok(tx_digest) => {
-            debug!(
-                "Successfully started job {} on blockchain, tx: {}",
-                job.job_sequence, tx_digest
-            );
-            tx_digest
-        }
-        Err(e) => {
-            let error_str = e.to_string();
-
-            // Check if the error is because the job is not in pending state or not found
-            // This can happen if another coordinator already started it
-            if error_str.contains("Job is not in pending state") ||
-               error_str.contains("EJobNotPending") ||
-               error_str.contains("13906835325394878469") || // EJobNotPending abort code
-               error_str.contains("Job not found") ||
-               error_str.contains("EJobNotFound") ||
-               error_str.contains("13906835322940243973")
-            {
-                // EJobNotFound abort code
-                warn!(
-                    "Job {} cannot be started - likely already handled by another coordinator: {}",
-                    job.job_sequence, error_str
-                );
-
-                // Add to failed jobs cache so we don't try again for 5 minutes
-                jobs_cache
-                    .add_failed_job(job.app_instance.clone(), job.job_sequence)
-                    .await;
-
-                // Clear the agent state and return
-                state.clear_current_agent(&docker_session.session_id).await;
-                docker_manager
-                    .remove_container_tracking(&docker_session.session_id)
-                    .await;
-                return;
-            }
-
-            // This can happen due to race conditions even with our random delay
-            // Log as warning since it's expected in a multi-coordinator environment
-            info!(
-                "Failed to start job {} on blockchain: {}",
-                job.job_sequence, e
-            );
-
-            // For other blockchain errors, add to failed cache to avoid immediate retry
-            // This could be due to gas issues, network problems, etc.
-            jobs_cache
-                .add_failed_job(job.app_instance.clone(), job.job_sequence)
-                .await;
-            state.clear_current_agent(&docker_session.session_id).await;
-            docker_manager
-                .remove_container_tracking(&docker_session.session_id)
-                .await;
-            return;
-        }
-    };
-    */
-
     let start_elapsed = start_time.elapsed();
 
     // Add job to agent database as a session-specific job for Docker retrieval
