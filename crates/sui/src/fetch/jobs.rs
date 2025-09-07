@@ -798,7 +798,7 @@ pub async fn fetch_job_by_id(
                         }
                     },
                     Err(e) => {
-                        debug!("Failed to decode BCS for field name_value: {:?}, error: {}", name_value, e);
+                        warn!("Failed to decode BCS for field name_value: {:?}, error: {}", name_value, e);
                     }
                 }
             }
@@ -819,7 +819,7 @@ pub async fn fetch_job_by_id(
         }
     }
     
-    debug!("Job {} not found in jobs table {} after checking {} fields", 
+    warn!("Job {} not found in jobs table {} after checking {} fields", 
         job_sequence, jobs_table_id, total_fields_checked);
     Ok(None)
 }

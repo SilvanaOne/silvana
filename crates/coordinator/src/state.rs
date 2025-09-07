@@ -932,7 +932,7 @@ impl SharedState {
                                     "Job {} not found in app instance {}",
                                     started_job.job_sequence, started_job.app_instance
                                 );
-                                // Don't put back jobs that don't exist
+                                checked_jobs.push(started_job);
                             }
                             Err(e) => {
                                 warn!(
@@ -944,11 +944,11 @@ impl SharedState {
                             }
                         }
                     } else {
-                        warn!(
+                        error!(
                             "App instance {} has no jobs table",
                             started_job.app_instance
                         );
-                        // Don't put back jobs from instances with no jobs table
+                        checked_jobs.push(started_job);
                     }
                 }
                 Err(e) => {
