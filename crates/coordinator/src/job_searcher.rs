@@ -134,13 +134,6 @@ impl JobSearcher {
         })
     }
 
-    /// Set the secrets client for retrieving secrets during job execution
-    #[allow(dead_code)]
-    pub fn with_secrets_client(mut self, secrets_client: SecretsClient) -> Self {
-        self.secrets_client = Some(secrets_client);
-        self
-    }
-
     /// Set the metrics reporter
     pub fn set_metrics(&mut self, metrics: Arc<CoordinatorMetrics>) {
         self.metrics = Some(metrics);
@@ -1355,11 +1348,5 @@ impl JobSearcher {
         } else {
             None
         }
-    }
-
-    /// Get the current container ID and job info for shutdown logging
-    #[allow(dead_code)]
-    pub async fn get_current_container_info(&self) -> Option<(String, Job)> {
-        self.current_job_info.read().await.clone()
     }
 }
