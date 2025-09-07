@@ -9,6 +9,7 @@ use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memo
 use crate::job_lock::get_job_lock_manager;
 use crate::jobs_cache::JobsCache;
 use crate::metrics::CoordinatorMetrics;
+use crate::proof::analyze_proof_completion;
 use crate::settlement::{can_remove_app_instance, fetch_all_pending_jobs};
 use crate::state::SharedState;
 use docker::DockerManager;
@@ -446,6 +447,33 @@ impl JobSearcher {
 
             // Step 2: Collect new jobs
             info!("Step 2: Collecting new jobs");
+            // Analyze proof completion for all app instances
+            let app_instances = self.state.get_app_instances().await;
+            for app_instance_id in app_instances {
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(app_instance) => {
+                        if let Err(analysis_err) =
+                            analyze_proof_completion(&app_instance, &self.state.clone()).await
+                        {
+                            warn!(
+                                "Failed to analyze failed proof for merge opportunities: {}",
+                                analysis_err
+                            );
+                        } else {
+                            info!(
+                                "✅ Background merge analysis completed for app instance {}",
+                                app_instance_id
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to fetch AppInstance {} for merge analysis: {}",
+                            app_instance_id, e
+                        );
+                    }
+                }
+            }
 
             // Periodically clean up expired entries from the failed jobs cache
             self.jobs_cache.cleanup_expired().await;
@@ -681,63 +709,58 @@ impl JobSearcher {
             }
 
             // Step 3: Smart batching - check if we should execute multicall
-            if !self.state.is_shutting_down() {
-                let should_execute_by_limit = self.state.should_execute_multicall_by_limit().await;
-                let should_execute_by_time = self.state.should_execute_multicall_by_time().await;
-                let total_operations = self.state.get_total_operations_count().await;
+            let should_execute_by_limit = self.state.should_execute_multicall_by_limit().await;
+            let should_execute_by_time = self.state.should_execute_multicall_by_time().await;
+            let total_operations = self.state.get_total_operations_count().await;
 
-                if should_execute_by_limit {
-                    info!(
-                        "Step 3: Executing multicall due to operation limit: {} operations >= {} limit",
-                        total_operations,
-                        sui::get_max_operations_per_multicall()
-                    );
+            if should_execute_by_limit {
+                info!(
+                    "Step 3: Executing multicall due to operation limit: {} operations >= {} limit",
+                    total_operations,
+                    sui::get_max_operations_per_multicall()
+                );
 
-                    if let Err(e) = self.execute_multicall_batches().await {
-                        error!("Failed to execute limit-triggered multicall: {}", e);
-                    }
-
-                    // Process newly buffered jobs from multicall
-                    if let Err(e) = self.process_buffer_jobs().await {
-                        error!(
-                            "Failed to process buffer jobs after limit-triggered multicall: {}",
-                            e
-                        );
-                    }
-                } else if should_execute_by_time && total_operations > 0 {
-                    info!(
-                        "Step 3: Executing multicall due to time interval: {} seconds passed with {} operations",
-                        MULTICALL_INTERVAL_SECS, total_operations
-                    );
-
-                    if let Err(e) = self.execute_multicall_batches().await {
-                        error!("Failed to execute time-triggered multicall: {}", e);
-                    }
-
-                    // Process newly buffered jobs from multicall
-                    if let Err(e) = self.process_buffer_jobs().await {
-                        error!(
-                            "Failed to process buffer jobs after time-triggered multicall: {}",
-                            e
-                        );
-                    }
-                } else if should_execute_by_time {
-                    // Time passed but no operations - just update timestamp to reset the timer
-                    debug!("Step 3: Time interval passed but no operations to execute");
-                    self.state.update_last_multicall_timestamp().await;
-                } else if total_operations > 0 {
-                    debug!(
-                        "Step 3: {} operations pending, waiting {} more seconds ({}s elapsed since last multicall)",
-                        total_operations,
-                        MULTICALL_INTERVAL_SECS
-                            - self.state.get_seconds_since_last_multicall().await,
-                        self.state.get_seconds_since_last_multicall().await
-                    );
-                } else {
-                    debug!("Step 3: No operations to process");
+                if let Err(e) = self.execute_multicall_batches().await {
+                    error!("Failed to execute limit-triggered multicall: {}", e);
                 }
+
+                // Process newly buffered jobs from multicall
+                if let Err(e) = self.process_buffer_jobs().await {
+                    error!(
+                        "Failed to process buffer jobs after limit-triggered multicall: {}",
+                        e
+                    );
+                }
+            } else if should_execute_by_time && total_operations > 0 {
+                info!(
+                    "Step 3: Executing multicall due to time interval: {} seconds passed with {} operations",
+                    MULTICALL_INTERVAL_SECS, total_operations
+                );
+
+                if let Err(e) = self.execute_multicall_batches().await {
+                    error!("Failed to execute time-triggered multicall: {}", e);
+                }
+
+                // Process newly buffered jobs from multicall
+                if let Err(e) = self.process_buffer_jobs().await {
+                    error!(
+                        "Failed to process buffer jobs after time-triggered multicall: {}",
+                        e
+                    );
+                }
+            } else if should_execute_by_time {
+                // Time passed but no operations - just update timestamp to reset the timer
+                debug!("Step 3: Time interval passed but no operations to execute");
+                self.state.update_last_multicall_timestamp().await;
+            } else if total_operations > 0 {
+                debug!(
+                    "Step 3: {} operations pending, waiting {} more seconds ({}s elapsed since last multicall)",
+                    total_operations,
+                    MULTICALL_INTERVAL_SECS - self.state.get_seconds_since_last_multicall().await,
+                    self.state.get_seconds_since_last_multicall().await
+                );
             } else {
-                debug!("Step 3: Skipping multicall due to shutdown");
+                debug!("Step 3: No operations to process");
             }
 
             // Step 4: Sleep for 10 seconds before next cycle
@@ -1070,6 +1093,10 @@ impl JobSearcher {
                             memory_requirement: *memory_req,
                         }])
                         .await;
+                    info!(
+                        "Added successfully started job to buffer: app_instance={}, sequence={}",
+                        app_instance, sequence
+                    );
                 }
 
                 info!(

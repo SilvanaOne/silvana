@@ -1,5 +1,4 @@
 use crate::constants::{WALRUS_QUILT_BLOCK_INTERVAL, WALRUS_TEST};
-use crate::proof::analyze_proof_completion;
 use crate::proofs_storage::{ProofMetadata, ProofStorage};
 use crate::state::SharedState;
 use monitoring::coordinator_metrics;
@@ -61,7 +60,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Get buffer stats
         let buffer_count = self.state.get_started_jobs_count().await;
-        
+
         info!(
             developer = %req.developer,
             agent = %req.agent,
@@ -75,9 +74,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // First check for session-specific jobs (jobs reserved for this Docker session)
         // Session jobs should ALWAYS be returned, even during shutdown
         'job_search: loop {
-            if let Some(agent_job) = self.state
+            if let Some(agent_job) = self
+                .state
                 .get_agent_job_db()
-                .get_ready_job(&req.developer, &req.agent, &req.agent_method, Some(&req.session_id))
+                .get_ready_job(
+                    &req.developer,
+                    &req.agent,
+                    &req.agent_method,
+                    Some(&req.session_id),
+                )
                 .await
             {
                 debug!(
@@ -88,11 +93,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 // Determine settlement chain if this is a settlement job
                 let settlement_chain = if agent_job.pending_job.app_instance_method == "settle" {
                     // Use helper function to get chain by job sequence
-                    match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&agent_job.app_instance, agent_job.job_sequence).await {
+                    match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
+                        &agent_job.app_instance,
+                        agent_job.job_sequence,
+                    )
+                    .await
+                    {
                         Ok(chain) => chain,
                         Err(e) => {
-                            warn!("Failed to lookup settlement chain for job {} in app instance {}: {}", 
-                                agent_job.job_sequence, agent_job.app_instance, e);
+                            warn!(
+                                "Failed to lookup settlement chain for job {} in app instance {}: {}",
+                                agent_job.job_sequence, agent_job.app_instance, e
+                            );
                             None
                         }
                     }
@@ -101,18 +113,28 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 };
 
                 // If this is a settlement job with no associated chain, terminate it and look for next job
-                if agent_job.pending_job.app_instance_method == "settle" && settlement_chain.is_none() {
-                    error!("🚨 Settlement job {} has no associated chain - terminating and looking for next job", agent_job.job_sequence);
-                    
-                    // Add terminate request to multicall queue
-                    self.state.add_terminate_job_request(
-                        agent_job.app_instance.clone(), 
+                if agent_job.pending_job.app_instance_method == "settle"
+                    && settlement_chain.is_none()
+                {
+                    error!(
+                        "🚨 Settlement job {} has no associated chain - terminating and looking for next job",
                         agent_job.job_sequence
-                    ).await;
-                    
+                    );
+
+                    // Add terminate request to multicall queue
+                    self.state
+                        .add_terminate_job_request(
+                            agent_job.app_instance.clone(),
+                            agent_job.job_sequence,
+                        )
+                        .await;
+
                     // Remove this job from the agent database so we don't pick it again
-                    self.state.get_agent_job_db().terminate_job(&agent_job.job_id).await;
-                    
+                    self.state
+                        .get_agent_job_db()
+                        .terminate_job(&agent_job.job_id)
+                        .await;
+
                     // Continue to look for next job
                     continue 'job_search;
                 }
@@ -148,24 +170,32 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     }),
                 }));
             }
-            
+
             // No session-specific job found, break to check buffer
             break 'job_search;
         }
 
         // Fall back to checking the buffer for started jobs that match this agent
         // The buffer contains jobs that have been started on blockchain via multicall
-        if let Some(started_job) = self.state.get_started_job_for_agent(&req.developer, &req.agent, &req.agent_method).await {
+        if let Some(started_job) = self
+            .state
+            .get_started_job_for_agent(&req.developer, &req.agent, &req.agent_method)
+            .await
+        {
             debug!(
                 "Found matching started job in buffer: app_instance={}, sequence={}",
                 started_job.app_instance, started_job.job_sequence
             );
-            
+
             // Fetch the app instance to get the jobs table (we know this should work since get_started_job_for_agent already checked)
-            let app_instance = match sui::fetch::fetch_app_instance(&started_job.app_instance).await {
+            let app_instance = match sui::fetch::fetch_app_instance(&started_job.app_instance).await
+            {
                 Ok(instance) => instance,
                 Err(e) => {
-                    error!("Failed to fetch app instance {} (this should not happen): {}", started_job.app_instance, e);
+                    error!(
+                        "Failed to fetch app instance {} (this should not happen): {}",
+                        started_job.app_instance, e
+                    );
                     return Ok(Response::new(GetJobResponse {
                         success: true,
                         message: "Failed to fetch app instance".to_string(),
@@ -173,12 +203,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     }));
                 }
             };
-            
+
             // Get the jobs table ID
             let jobs_table = match &app_instance.jobs {
                 Some(jobs) => &jobs.id,
                 None => {
-                    error!("App instance {} has no jobs table (this should not happen)", started_job.app_instance);
+                    error!(
+                        "App instance {} has no jobs table (this should not happen)",
+                        started_job.app_instance
+                    );
                     return Ok(Response::new(GetJobResponse {
                         success: true,
                         message: "App instance has no jobs table".to_string(),
@@ -186,7 +219,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     }));
                 }
             };
-            
+
             // Fetch the full job details from blockchain using the jobs table
             match sui::fetch::jobs::fetch_job_by_id(jobs_table, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
@@ -205,13 +238,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         start_tx_sent: true, // Already sent via multicall
                         start_tx_hash: None, // Transaction was part of multicall
                     };
-                    
+
                     // Store in agent database
                     self.state
                         .get_agent_job_db()
                         .add_to_pending(agent_job.clone())
                         .await;
-                    
+
                     // Set current agent for this session
                     self.state
                         .set_current_agent(
@@ -221,34 +254,46 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             pending_job.agent_method.clone(),
                         )
                         .await;
-                    
+
                     // Track app_instance for this session
-                    
+
                     // Check if this is a settlement job
                     let settlement_chain = if pending_job.app_instance_method == "settle" {
                         // Use helper function to get chain by job sequence
-                        match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(&started_job.app_instance, started_job.job_sequence).await {
+                        match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
+                            &started_job.app_instance,
+                            started_job.job_sequence,
+                        )
+                        .await
+                        {
                             Ok(chain) => chain,
                             Err(e) => {
-                                warn!("Failed to lookup settlement chain for job {} in app instance {}: {}", 
-                                    started_job.job_sequence, started_job.app_instance, e);
+                                warn!(
+                                    "Failed to lookup settlement chain for job {} in app instance {}: {}",
+                                    started_job.job_sequence, started_job.app_instance, e
+                                );
                                 None
                             }
                         }
                     } else {
                         None
                     };
-                    
+
                     // If this is a settlement job with no associated chain, terminate it and return no job
                     if pending_job.app_instance_method == "settle" && settlement_chain.is_none() {
-                        error!("🚨 Settlement job {} (from buffer) has no associated chain - terminating", started_job.job_sequence);
-                        
-                        // Add terminate request to multicall queue
-                        self.state.add_terminate_job_request(
-                            started_job.app_instance.clone(), 
+                        error!(
+                            "🚨 Settlement job {} (from buffer) has no associated chain - terminating",
                             started_job.job_sequence
-                        ).await;
-                        
+                        );
+
+                        // Add terminate request to multicall queue
+                        self.state
+                            .add_terminate_job_request(
+                                started_job.app_instance.clone(),
+                                started_job.job_sequence,
+                            )
+                            .await;
+
                         // Don't put it back in buffer, just return no job available
                         return Ok(Response::new(GetJobResponse {
                             success: true,
@@ -256,7 +301,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             job: None,
                         }));
                     }
-                    
+
                     // Convert to protobuf Job
                     let job = Job {
                         job_sequence: started_job.job_sequence,
@@ -278,7 +323,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         updated_at: pending_job.updated_at,
                         chain: settlement_chain,
                     };
-                    
+
                     let elapsed = start_time.elapsed();
                     info!(
                         "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=buffer, time={:?}",
@@ -290,7 +335,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         pending_job.app_instance_method,
                         elapsed
                     );
-                    
+
                     return Ok(Response::new(GetJobResponse {
                         success: true,
                         message: format!("Job {} retrieved from buffer", started_job.job_sequence),
@@ -313,14 +358,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }
             }
         }
-        
+
         // If no session jobs and no buffer jobs, check if system is shutting down
         let elapsed = start_time.elapsed();
         let elapsed_ms = elapsed.as_millis() as f64;
-        
+
         // Record gRPC span for APM
         coordinator_metrics::record_grpc_span("GetJob", elapsed_ms, 200);
-        
+
         if self.state.is_shutting_down() {
             debug!("System is shutting down and no reserved/buffered jobs available");
             info!(
@@ -408,10 +453,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Add complete job request to batch instead of executing immediately
-        self.state.add_complete_job_request(
-            agent_job.app_instance.clone(),
-            agent_job.job_sequence
-        ).await;
+        self.state
+            .add_complete_job_request(agent_job.app_instance.clone(), agent_job.job_sequence)
+            .await;
 
         // Remove job from agent database
         let removed_job = self
@@ -419,7 +463,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .get_agent_job_db()
             .complete_job(&req.job_id)
             .await;
-        
+
         if removed_job.is_some() {
             let elapsed = start_time.elapsed();
             info!(
@@ -438,10 +482,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 message: format!("Job {} marked for completion", agent_job.job_sequence),
             }))
         } else {
-            warn!(
-                "Job {} not found in agent database",
-                req.job_id
-            );
+            warn!("Job {} not found in agent database", req.job_id);
             Ok(Response::new(CompleteJobResponse {
                 success: false,
                 message: format!("Job {} not found", req.job_id),
@@ -509,16 +550,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         // Add fail job request to batch instead of executing immediately
-        self.state.add_fail_job_request(
-            agent_job.app_instance.clone(),
-            agent_job.job_sequence,
-            req.error_message.clone()
-        ).await;
+        self.state
+            .add_fail_job_request(
+                agent_job.app_instance.clone(),
+                agent_job.job_sequence,
+                req.error_message.clone(),
+            )
+            .await;
 
         // Remove job from agent database
         self.state.get_agent_job_db().fail_job(&req.job_id).await;
 
-        info!("Job {} marked for failure (batched): {}", req.job_id, req.error_message);
+        info!(
+            "Job {} marked for failure (batched): {}",
+            req.job_id, req.error_message
+        );
         Ok(Response::new(FailJobResponse {
             success: true,
             message: format!("Job {} marked for failure", req.job_id),
@@ -769,24 +815,25 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // Fetch the real ProofCalculation from blockchain to get start_sequence and end_sequence
 
         // Add submit_proof request to shared state for multicall
-        self.state.add_submit_proof_request(
-            agent_job.app_instance.clone(),
-            crate::state::SubmitProofRequest {
-                block_number: req.block_number,
-                sequences: sequences.clone(),
-                merged_sequences_1,
-                merged_sequences_2,
-                job_id: req.job_id.clone(),
-                da_hash: descriptor.to_string(), // Use full descriptor (chain:network:hash) instead of just hash
-                cpu_cores: hardware_info.cpu_cores,
-                prover_architecture: hardware_info.prover_architecture.clone(),
-                prover_memory: hardware_info.prover_memory,
-                cpu_time: req.cpu_time,
-                _timestamp: Instant::now(),
-            },
-        )
-        .await;
-        
+        self.state
+            .add_submit_proof_request(
+                agent_job.app_instance.clone(),
+                crate::state::SubmitProofRequest {
+                    block_number: req.block_number,
+                    sequences: sequences.clone(),
+                    merged_sequences_1,
+                    merged_sequences_2,
+                    job_id: req.job_id.clone(),
+                    da_hash: descriptor.to_string(), // Use full descriptor (chain:network:hash) instead of just hash
+                    cpu_cores: hardware_info.cpu_cores,
+                    prover_architecture: hardware_info.prover_architecture.clone(),
+                    prover_memory: hardware_info.prover_memory,
+                    cpu_time: req.cpu_time,
+                    _timestamp: Instant::now(),
+                },
+            )
+            .await;
+
         // Return success immediately - the actual blockchain transaction will be sent via multicall
         let tx_result: Result<String, String> = Ok("".to_string());
 
@@ -812,39 +859,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     req.job_id, tx_hash
                 );
 
-                // Spawn merge analysis in background to not delay the response
-                let app_instance_id = agent_job.app_instance.clone();
-                let job_id_clone = req.job_id.clone();
-                let state_clone = self.state.clone();
-
-                tokio::spawn(async move {
-                    debug!(
-                        "🔄 Starting background merge analysis for job {}",
-                        job_id_clone
-                    );
-
-                    // Fetch the AppInstance first
-                    match sui::fetch::fetch_app_instance(&app_instance_id).await {
-                        Ok(app_instance) => {
-                            if let Err(e) = analyze_proof_completion(&app_instance, &state_clone).await {
-                                warn!("Failed to analyze proof completion in background: {}", e);
-                            } else {
-                                debug!(
-                                    "✅ Background merge analysis completed for job {}",
-                                    job_id_clone
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to fetch AppInstance {} for merge analysis: {}",
-                                app_instance_id, e
-                            );
-                        }
-                    }
-                });
-
-                // Return immediately without waiting for merge analysis
                 Ok(Response::new(SubmitProofResponse {
                     success: true,
                     message: "Proof submitted successfully".to_string(),
@@ -857,42 +871,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     "Failed to submit proof for job {} on blockchain: {}",
                     req.job_id, e
                 );
-
-                // Even after failure, spawn merge analysis in background
-                let app_instance_id = agent_job.app_instance.clone();
-                let job_id_clone = req.job_id.clone();
-                let state_clone = self.state.clone();
-
-                tokio::spawn(async move {
-                    info!(
-                        "🔄 Starting background merge analysis for failed job {}",
-                        job_id_clone
-                    );
-
-                    // Fetch the AppInstance first
-                    match sui::fetch::fetch_app_instance(&app_instance_id).await {
-                        Ok(app_instance) => {
-                            if let Err(analysis_err) = analyze_proof_completion(&app_instance, &state_clone).await
-                            {
-                                warn!(
-                                    "Failed to analyze failed proof for merge opportunities: {}",
-                                    analysis_err
-                                );
-                            } else {
-                                info!(
-                                    "✅ Background merge analysis completed for failed job {}",
-                                    job_id_clone
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to fetch AppInstance {} for merge analysis: {}",
-                                app_instance_id, e
-                            );
-                        }
-                    }
-                });
 
                 let elapsed = start_time.elapsed();
                 warn!(
@@ -1141,17 +1119,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
         };
 
         // Add update_state_for_sequence request to shared state for multicall
-        self.state.add_update_state_for_sequence_request(
-            agent_job.app_instance.clone(),
-            crate::state::UpdateStateForSequenceRequest {
-                sequence: req.sequence,
-                new_state_data: req.new_state_data,
-                new_data_availability_hash: da_descriptor.clone(),
-                _timestamp: Instant::now(),
-            },
-        )
-        .await;
-        
+        self.state
+            .add_update_state_for_sequence_request(
+                agent_job.app_instance.clone(),
+                crate::state::UpdateStateForSequenceRequest {
+                    sequence: req.sequence,
+                    new_state_data: req.new_state_data,
+                    new_data_availability_hash: da_descriptor.clone(),
+                    _timestamp: Instant::now(),
+                },
+            )
+            .await;
+
         // Return success immediately - the actual blockchain transaction will be sent via multicall
         let tx_result: Result<String, String> = Ok("".to_string());
 
