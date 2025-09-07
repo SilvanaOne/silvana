@@ -846,7 +846,7 @@ impl JobSearcher {
                 for job in pending_jobs {
                     // Skip if job is currently locked (being processed)
                     if lock_manager.is_locked(&job.app_instance, job.job_sequence) {
-                        debug!(
+                        warn!(
                             "Skipping job {} from app_instance {} (currently locked)",
                             job.job_sequence, job.app_instance
                         );
@@ -860,7 +860,7 @@ impl JobSearcher {
                         .is_recently_failed(&job.app_instance, job.job_sequence)
                         .await
                     {
-                        info!(
+                        warn!(
                             "Skipping job {} from app_instance {} (recently failed)",
                             job.job_sequence, job.app_instance
                         );
@@ -916,6 +916,31 @@ impl JobSearcher {
                         _ => other_jobs.push(job),
                     }
                 }
+
+                settlement_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
+                merge_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
+                other_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
+                info!(
+                    "Collected settlement jobs: {:?}",
+                    settlement_jobs
+                        .iter()
+                        .map(|j| j.job_sequence)
+                        .collect::<Vec<_>>()
+                );
+                info!(
+                    "Collected merge jobs: {:?}",
+                    merge_jobs
+                        .iter()
+                        .map(|j| j.job_sequence)
+                        .collect::<Vec<_>>()
+                );
+                info!(
+                    "Collected other jobs: {:?}",
+                    other_jobs
+                        .iter()
+                        .map(|j| j.job_sequence)
+                        .collect::<Vec<_>>()
+                );
 
                 // Build the job pool respecting pool size limit
                 let mut job_pool = Vec::new();
