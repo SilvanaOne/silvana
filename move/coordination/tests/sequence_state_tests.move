@@ -351,6 +351,7 @@ fun test_sequence_state_manager_operations() {
             new_state,
             new_da,
             &clock,
+            ts::ctx(&mut scenario)
         );
         
         let seq_state = borrow_sequence_state(&manager, 0u64);

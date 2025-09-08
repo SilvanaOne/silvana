@@ -7,7 +7,7 @@ use sui::clock::Clock;
 use sui::display;
 use sui::event;
 use sui::package;
-use sui::vec_map::{VecMap, contains, insert, get_mut, empty};
+use sui::vec_map::{Self, VecMap, contains, insert, get_mut, empty};
 
 public struct Proof has copy, drop, store {
     status: u8,
@@ -114,10 +114,9 @@ const PROOF_STATUS_REJECTED: u8 = 3;
 const PROOF_STATUS_RESERVED: u8 = 4;
 const PROOF_STATUS_USED: u8 = 5;
 
-// Timeout for reserved proofs in milliseconds (2 minutes)
-const PROOF_RESERVED_TIMEOUT_MS: u64 = 120000;
-// Timeout for used proofs before they can be merged again (5 minutes)
-const PROOF_USED_MERGE_TIMEOUT_MS: u64 = 300000;
+// Universal timeout for all proof statuses (5 minutes)
+// After this timeout, any proof can be restarted/reserved/merged regardless of status
+const PROOF_TIMEOUT_MS: u64 = 300000;
 
 // Error codes
 #[error]
@@ -323,17 +322,13 @@ fun reserve_proof(
     ctx: &TxContext,
 ): bool {
     let current_time = sui::clock::timestamp_ms(clock);
-    let is_reserved_timed_out = proof.status == PROOF_STATUS_RESERVED && 
-                                 current_time > proof.timestamp + PROOF_RESERVED_TIMEOUT_MS;
-    let is_used_timed_out = proof.status == PROOF_STATUS_USED && 
-                             current_time > proof.timestamp + PROOF_USED_MERGE_TIMEOUT_MS;
-    
+    let is_timed_out = current_time > proof.timestamp + PROOF_TIMEOUT_MS;
+
     if (
         !(
             proof.status == PROOF_STATUS_CALCULATED || 
-            is_reserved_timed_out ||  // Allow timed-out RESERVED proofs for regular merges
-            is_used_timed_out ||      // Allow timed-out USED proofs to prevent blocking
-            (isBlockProof && (proof.status == PROOF_STATUS_USED || proof.status == PROOF_STATUS_RESERVED))
+            is_timed_out ||  // Allow any timed-out proof to be reserved (5 minutes)
+            (isBlockProof && (proof.status == PROOF_STATUS_USED || proof.status == PROOF_STATUS_RESERVED)),
         )
     ) {
         multicall::emit_operation_failed(
@@ -423,8 +418,15 @@ public(package) fun start_proving(
                 &mut proof_calculation.proofs,
                 &sorted_sequences,
             );
-            // Check if proof can be restarted (must be rejected)
-            if (existing_proof.status != PROOF_STATUS_REJECTED) {
+            // Check if proof can be restarted
+            let current_time = sui::clock::timestamp_ms(clock);
+            let is_timed_out =
+                current_time > existing_proof.timestamp + PROOF_TIMEOUT_MS;
+
+            // Allow restart if: rejected OR timed-out (any status after 5 minutes)
+            if (
+                existing_proof.status != PROOF_STATUS_REJECTED && !is_timed_out
+            ) {
                 multicall::emit_operation_failed(
                     string::utf8(b"start_proving"),
                     string::utf8(b"proof"),
@@ -476,15 +478,63 @@ public(package) fun start_proving(
                 };
             }
         };
-    } else { insert(&mut proof_calculation.proofs, sorted_sequences, proof); };
+    } else {
+        // New proof - first check if we can reserve the sub-proofs before inserting
+        if (sorted_sequence1.is_some()) {
+            let proof1 = vec_map::get(
+                &proof_calculation.proofs,
+                sorted_sequence1.borrow(),
+            );
+            let current_time = sui::clock::timestamp_ms(clock);
+            let is_timed_out =
+                current_time > proof1.timestamp + PROOF_TIMEOUT_MS;
+
+            // Check if proof1 can be reserved
+            if (
+                !(
+                    proof1.status == PROOF_STATUS_CALCULATED || 
+                  is_timed_out ||  // Any status is OK after 5 minute timeout
+                  (isBlockProof && (proof1.status == PROOF_STATUS_USED || proof1.status == PROOF_STATUS_RESERVED)),
+                )
+            ) {
+                // Cannot reserve proof1 - don't insert new proof
+                return false
+            }
+        };
+
+        if (sorted_sequence2.is_some()) {
+            let proof2 = vec_map::get(
+                &proof_calculation.proofs,
+                sorted_sequence2.borrow(),
+            );
+            let current_time = sui::clock::timestamp_ms(clock);
+            let is_timed_out =
+                current_time > proof2.timestamp + PROOF_TIMEOUT_MS;
+
+            // Check if proof2 can be reserved
+            if (
+                !(
+                    proof2.status == PROOF_STATUS_CALCULATED || 
+                  is_timed_out ||  // Any status is OK after 5 minute timeout
+                  (isBlockProof && (proof2.status == PROOF_STATUS_USED || proof2.status == PROOF_STATUS_RESERVED)),
+                )
+            ) {
+                // Cannot reserve proof2 - don't insert new proof
+                return false
+            }
+        };
+
+        // Both sub-proofs can be reserved - now safe to insert the new proof
+        insert(&mut proof_calculation.proofs, sorted_sequences, proof);
+    };
+
+    // Now reserve the sub-proofs (we know this will succeed)
     if (sorted_sequence1.is_some()) {
         let proof1 = get_mut(
             &mut proof_calculation.proofs,
             sorted_sequence1.borrow(),
         );
-        if (!reserve_proof(proof1, isBlockProof, clock, ctx)) {
-            return false
-        };
+        reserve_proof(proof1, isBlockProof, clock, ctx);
         event::emit(ProofReservedEvent {
             block_number: proof_calculation.block_number,
             sequences: *sorted_sequence1.borrow(),
@@ -498,9 +548,7 @@ public(package) fun start_proving(
             &mut proof_calculation.proofs,
             sorted_sequence2.borrow(),
         );
-        if (!reserve_proof(proof2, isBlockProof, clock, ctx)) {
-            return false
-        };
+        reserve_proof(proof2, isBlockProof, clock, ctx);
         event::emit(ProofReservedEvent {
             block_number: proof_calculation.block_number,
             sequences: *sorted_sequence2.borrow(),

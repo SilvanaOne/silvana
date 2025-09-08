@@ -53,19 +53,15 @@ pub const PERIODIC_JOB_EXECUTION_BUFFER_MS: u64 = 10000; // 10 seconds
 // Proof Status Timeouts (in milliseconds)
 // =============================================================================
 
-/// Timeout for RESERVED proof status (in milliseconds).
-/// If a proof remains in RESERVED status longer than this timeout,
-/// it can be reassigned to another agent.
-pub const PROOF_RESERVED_TIMEOUT_MS: u64 = 2 * 60 * 1000; // 2 minutes
+/// Universal timeout for all proof statuses (in milliseconds).
+/// After this timeout, any proof can be restarted/reserved/merged regardless of status.
+/// This simplifies the logic and ensures no proof can block forever.
+pub const PROOF_TIMEOUT_MS: u64 = 5 * 60 * 1000; // 5 minutes
 
-/// Timeout for STARTED proof status (in milliseconds).
-/// If a proof remains in STARTED status longer than this timeout,
-/// it's considered stalled and will be rejected/reassigned.
-pub const PROOF_STARTED_TIMEOUT_MS: u64 = 10 * 60 * 1000; // 10 minutes
-
-/// Timeout for USED proof status before it becomes available for strategic merging (in milliseconds).
-/// Used proofs can be merged after this timeout to help create block proofs when necessary.
-pub const PROOF_USED_MERGE_TIMEOUT_MS: u64 = 5 * 60 * 1000; // 5 minutes
+// Keep the old constants for backward compatibility (all set to same value)
+pub const PROOF_RESERVED_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
+pub const PROOF_STARTED_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
+pub const PROOF_USED_MERGE_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
 
 // =============================================================================
 // Retry and Recovery Configuration

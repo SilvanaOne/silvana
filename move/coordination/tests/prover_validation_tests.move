@@ -295,7 +295,6 @@ fun test_start_proving_validation_fails() {
         sequences,
         option::none(),
         option::none(),
-        b"test_job_7".to_string(),
         &clock,
         ctx
     );
@@ -358,7 +357,6 @@ fun test_start_proving_validation_succeeds() {
         sequences,
         sequence1,
         sequence2,
-        b"test_job_8".to_string(),
         &clock,
         ctx
     );
@@ -386,7 +384,6 @@ fun test_reject_proof_validation_fails() {
         vector[15, 16],
         option::none(),
         option::none(),
-        b"test_job_9".to_string(),
         &clock,
         ctx
     );
