@@ -12,6 +12,9 @@ docker = { path = "../docker" }
 # Sui utilities
 sui = { path = "../sui" }
 
+# Mina utilities
+mina = { path = "../mina" }
+
 # RPC client
 rpc-client = { path = "../rpc-client" }
 

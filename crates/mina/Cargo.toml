@@ -1,0 +1,15 @@
+[package]
+name = "mina"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+rand.workspace = true
+bs58.workspace = true
+sha2.workspace = true
+anyhow.workspace = true
+mina-signer = { git = "https://github.com/o1-labs/proof-systems", package = "mina-signer" }
+mina-hasher = { git = "https://github.com/o1-labs/proof-systems", package = "mina-hasher" }
+o1-utils = { git = "https://github.com/o1-labs/proof-systems", package = "o1-utils" }

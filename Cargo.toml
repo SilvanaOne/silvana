@@ -53,6 +53,7 @@ bcs = "0.1"
 aws-config = "1.8"
 aws-sdk-s3 = "1.104.0"
 sha2 = "0.10"
+bs58 = "0.5"
 clap = { version = "4", features = ["derive", "env"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 base64 = "0.22"

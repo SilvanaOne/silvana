@@ -226,5 +226,7 @@ pub enum TransactionType {
 pub enum KeypairCommands {
     /// Generate a new Sui Ed25519 keypair
     Sui,
+    /// Generate a new Mina keypair
+    Mina,
 }
 

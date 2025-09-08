@@ -1339,12 +1339,44 @@ async fn main_impl() -> Result<()> {
                             println!("   • You will need this key to sign transactions");
                             println!();
                             println!("💡 To use this keypair:");
-                            println!("   export SUI_SECRET_KEY=\"{}\"", keypair.sui_private_key);
-                            println!("   export SUI_ADDRESS=\"{}\"", keypair.address);
+                            println!("   export SUI_SECRET_KEY={}", keypair.sui_private_key);
+                            println!("   export SUI_ADDRESS={}", keypair.address);
                         }
                         Err(e) => {
                             eprintln!("❌ Failed to generate keypair: {}", e);
                             return Err(anyhow::anyhow!("Keypair generation failed: {}", e).into());
+                        }
+                    }
+                }
+                
+                KeypairCommands::Mina => {
+                    println!("🔑 Generating new Mina keypair...");
+                    println!();
+                    
+                    match mina::generate_mina_keypair() {
+                        Ok(keypair) => {
+                            println!("✅ Mina Keypair Generated Successfully!");
+                            println!();
+                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!("🔐 PRIVATE KEY (Keep this secret!):");
+                            println!("   {}", keypair.private_key);
+                            println!();
+                            println!("📍 PUBLIC KEY (Address):");
+                            println!("   {}", keypair.public_key);
+                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!();
+                            println!("⚠️  IMPORTANT:");
+                            println!("   • Save your private key in a secure location");
+                            println!("   • Never share your private key with anyone");
+                            println!("   • You will need this key to sign transactions");
+                            println!();
+                            println!("💡 To use this keypair:");
+                            println!("   export MINA_PRIVATE_KEY={}", keypair.private_key);
+                            println!("   export MINA_PUBLIC_KEY={}", keypair.public_key);
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to generate Mina keypair: {}", e);
+                            return Err(anyhow::anyhow!("Mina keypair generation failed: {}", e).into());
                         }
                     }
                 }
