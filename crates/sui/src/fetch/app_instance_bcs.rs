@@ -476,6 +476,7 @@ pub async fn fetch_app_instance_bcs(
         jobs: Some(FetchJobs {
             id: to_hex(&raw.jobs.id.id),
             jobs_table_id: table_id_hex(&raw.jobs.jobs.id),
+            total_jobs_count: raw.jobs.jobs.size,
             failed_jobs_count: raw.jobs.failed_jobs_count,
             failed_jobs_index: raw.jobs.failed_jobs_index.contents,
             pending_jobs: raw.jobs.pending_jobs.contents,

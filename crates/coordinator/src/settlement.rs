@@ -22,25 +22,23 @@ pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
     let no_sequences_in_current = app_instance.previous_block_last_sequence + 1 == app_instance.sequence;
     
     // Check for pending jobs
-    let no_pending_jobs = app_instance.jobs.as_ref()
-        .map(|jobs| jobs.pending_jobs_count == 0)
-        .unwrap_or(true);
+    let pending_jobs_count = app_instance.jobs.as_ref()
+        .map(|jobs| jobs.pending_jobs_count)
+        .unwrap_or(0);
+    let no_pending_jobs = pending_jobs_count == 0;
     
-    // For running jobs, we need to check if there are jobs that are not in pending or failed state
-    // Since there's no direct running_jobs field, we'll rely on the fact that running jobs
-    // would still prevent removal through other checks
+    // Check for running jobs by comparing total jobs with accounted jobs
     let total_jobs = app_instance.jobs.as_ref()
-        .map(|jobs| jobs.next_job_sequence)
+        .map(|jobs| jobs.total_jobs_count)
         .unwrap_or(0);
     let failed_jobs = app_instance.jobs.as_ref()
         .map(|jobs| jobs.failed_jobs_count)
         .unwrap_or(0);
-    let pending_jobs = app_instance.jobs.as_ref()
-        .map(|jobs| jobs.pending_jobs_count)
-        .unwrap_or(0);
     
-    // If there are jobs that are neither pending nor failed, they might be running
-    let potentially_running = total_jobs > (failed_jobs + pending_jobs);
+    // Running jobs = total jobs - pending jobs - failed jobs
+    // If there are more total jobs than we can account for, they must be running
+    let running_jobs_count = total_jobs.saturating_sub(pending_jobs_count + failed_jobs);
+    let no_running_jobs = running_jobs_count == 0;
     
     // Check if there are any active settlement jobs
     let no_active_settlement_jobs = app_instance.settlements
@@ -55,20 +53,21 @@ pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
     };
     
     // Log detailed information about the decision
-    if !all_blocks_settled || !no_active_settlement_jobs || potentially_running {
+    if !all_blocks_settled || !no_active_settlement_jobs || !no_pending_jobs || !no_running_jobs {
         info!(
-            "App instance {} CANNOT be removed: settled={}, proved={}, blocks_behind={}, has_settlement_jobs={}, pending_jobs={}, potentially_running_jobs={}",
+            "App instance {} CANNOT be removed: settled={}, proved={}, blocks_behind={}, has_settlement_jobs={}, pending_jobs={}, running_jobs={}, total_jobs={}",
             app_instance.id,
             last_settled_block_number,
             app_instance.last_proved_block_number,
             blocks_behind,
             !no_active_settlement_jobs,
-            pending_jobs,
-            potentially_running
+            pending_jobs_count,
+            running_jobs_count,
+            total_jobs
         );
     }
     
-    if all_blocks_settled && at_block_start && no_sequences_in_current && no_pending_jobs && !potentially_running && no_active_settlement_jobs {
+    if all_blocks_settled && at_block_start && no_sequences_in_current && no_pending_jobs && no_running_jobs && no_active_settlement_jobs {
         info!(
             "App instance {} can be safely removed: all blocks settled ({}), at block start, no current sequences, no jobs",
             app_instance.id,
@@ -84,7 +83,7 @@ pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
             at_block_start,
             no_sequences_in_current,
             no_pending_jobs,
-            !potentially_running,
+            no_running_jobs,
             no_active_settlement_jobs
         );
         false

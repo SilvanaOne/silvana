@@ -202,11 +202,18 @@ async fn main() -> Result<()> {
                         println!("    jobs: Some(Jobs {{");
                         println!("        id: \"{}\",", jobs.id);
                         println!("        jobs_table_id: \"{}\",", jobs.jobs_table_id);
+                        println!("        total_jobs_count: {}, // Total jobs in ObjectTable (pending + running + failed)", jobs.total_jobs_count);
                         // Note: failed_jobs_table_id no longer exists - failed jobs are in main jobs table
                         println!("        failed_jobs_count: {},", jobs.failed_jobs_count);
                         println!("        failed_jobs_index: {:?},", jobs.failed_jobs_index);
                         println!("        pending_jobs: {:?},", jobs.pending_jobs);
                         println!("        pending_jobs_count: {},", jobs.pending_jobs_count);
+                        
+                        // Calculate and display running jobs count
+                        let running_jobs_count = jobs.total_jobs_count.saturating_sub(
+                            jobs.pending_jobs_count + jobs.failed_jobs_count
+                        );
+                        println!("        running_jobs_count: {}, // Calculated: total - pending - failed", running_jobs_count);
 
                         // Display pending_jobs_indexes in a readable format
                         println!("        pending_jobs_indexes: {{");
