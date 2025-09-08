@@ -1054,6 +1054,43 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+                
+                TransactionType::RejectProof { instance, block, sequences, gas: _ } => {
+                    // Parse the sequences string into a vector of u64
+                    let seq_vec: Vec<u64> = sequences
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| {
+                            s.parse::<u64>()
+                                .map_err(|e| anyhow::anyhow!("Invalid sequence number '{}': {}", s, e))
+                        })
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    
+                    if seq_vec.is_empty() {
+                        println!("❌ No sequences provided");
+                        println!("Expected comma-separated numbers, e.g., '1,2,3' or '1430,1431,1432'");
+                        return Err(anyhow::anyhow!("No sequences provided").into());
+                    }
+                    
+                    println!(
+                        "Rejecting proof for block {} with sequences {:?} in instance {}",
+                        block, seq_vec, instance
+                    );
+
+                    match interface.reject_proof(&instance, block, seq_vec.clone()).await {
+                        Ok(tx_digest) => {
+                            println!("✅ Transaction executed successfully");
+                            println!("Transaction digest: {}", tx_digest);
+                            println!("Proof for sequences {:?} in block {} has been rejected", seq_vec, block);
+                        }
+                        Err(e) => {
+                            println!("❌ Transaction execution failed");
+                            println!("Error: {}", e);
+                            return Err(anyhow::anyhow!("Transaction failed").into());
+                        }
+                    }
+                }
             }
 
             Ok(())

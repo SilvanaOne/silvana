@@ -197,5 +197,21 @@ pub enum TransactionType {
         #[arg(long, default_value = "1.0")]
         gas: f64,
     },
+    
+    /// Reject a proof (mark it as failed)
+    RejectProof {
+        /// The app instance ID
+        instance: String,
+        
+        /// The block number containing the proof
+        block: u64,
+        
+        /// The sequences to reject (comma-separated, e.g., "1,2,3")
+        sequences: String,
+        
+        /// Gas budget in SUI (e.g., 0.1 for 0.1 SUI)
+        #[arg(long, default_value = "0.1")]
+        gas: f64,
+    },
 }
 
