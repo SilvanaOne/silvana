@@ -151,9 +151,9 @@ build: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
 	@echo "🔄 Touching user-data.sh to trigger Pulumi redeploy..."
 	@touch infra/pulumi-rpc/user-data.sh
 
-build-ubuntu: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
+build-arm: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
 	@echo "🐳 Building Silvana for Ubuntu Linux ARM64..."
-	@mkdir -p docker/coordinator/release
+	@mkdir -p docker/coordinator/release/arm
 	@echo "🔨 Building Docker image for ARM64, compiling coordinator..."
 	@DOCKER_BUILDKIT=1 docker build \
 		--platform linux/arm64 \
@@ -163,12 +163,31 @@ build-ubuntu: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
 		.
 	@echo "📦 Extracting binary from Docker image..."
 	@docker create --name coordinator-extract coordinator-builder:arm64
-	@docker cp coordinator-extract:/output/silvana docker/coordinator/release/silvana
+	@docker cp coordinator-extract:/output/silvana docker/coordinator/release/arm/silvana
 	@docker rm coordinator-extract
 	@echo "🧹 Cleaning up Docker image..."
 	@docker rmi coordinator-builder:arm64 2>/dev/null || true
 	@echo "✅ Silvana built successfully for ARM64"
-	@echo "📦 Binary location: docker/coordinator/release/silvana"
+	@echo "📦 Binary location: docker/coordinator/release/arm/silvana"
+
+build-x86: ## Build coordinator for Ubuntu Linux x86_64 (amd64) using Docker
+	@echo "🐳 Building Silvana for Ubuntu Linux x86_64..."
+	@mkdir -p docker/coordinator/release/x86
+	@echo "🔨 Building Docker image for x86_64, compiling coordinator..."
+	@DOCKER_BUILDKIT=1 docker build \
+		--platform linux/amd64 \
+		-f docker/coordinator/Dockerfile \
+		-t coordinator-builder:amd64 \
+		--progress=plain \
+		.
+	@echo "📦 Extracting binary from Docker image..."
+	@docker create --name coordinator-extract coordinator-builder:amd64
+	@docker cp coordinator-extract:/output/silvana docker/coordinator/release/x86/silvana
+	@docker rm coordinator-extract
+	@echo "🧹 Cleaning up Docker image..."
+	@docker rmi coordinator-builder:amd64 2>/dev/null || true
+	@echo "✅ Silvana built successfully for x86_64"
+	@echo "📦 Binary location: docker/coordinator/release/x86/silvana"
 
 
 regen: check-database-url check-tools setup proto2entities apply-ddl ## Complete regeneration: proto → DDL+entities → DB
