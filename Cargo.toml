@@ -12,6 +12,8 @@ members = [
     "crates/nats",
     "crates/indexed-merkle-map",
     "crates/sui",
+    "crates/mina",
+    "crates/ethereum",
     "crates/kms",
     "crates/db",
     "crates/secrets-client",

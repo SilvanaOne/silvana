@@ -1209,6 +1209,53 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
+                
+                BalanceCommands::Ethereum { address, network } => {
+                    println!("📊 Checking balance for {} on {}", address, network);
+                    println!();
+                    
+                    // Get network configuration to display native currency
+                    let network_config = ethereum::EthereumNetwork::get_network(&network);
+                    let symbol = network_config
+                        .map(|n| n.native_currency.symbol.clone())
+                        .unwrap_or_else(|| "ETH".to_string());
+                    
+                    // Fetch balance
+                    match ethereum::get_balance(&address, &network).await {
+                        Ok(balance) => {
+                            println!("💰 Balance: {} {}", balance, symbol);
+                            
+                            // Also fetch account info for more details
+                            match ethereum::get_account_info(&address, &network).await {
+                                Ok(info) => {
+                                    println!("   Nonce: {}", info.nonce);
+                                    println!("   Network: {}", info.network);
+                                }
+                                Err(_) => {
+                                    // Ignore error, we already have the balance
+                                }
+                            }
+                            
+                            // Show explorer link if available
+                            if let Some(network_config) = network_config {
+                                if let Some(explorer_url) = &network_config.explorer {
+                                    println!();
+                                    println!("🔍 View on explorer:");
+                                    println!("   {}/address/{}", explorer_url, address);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to fetch balance: {}", e);
+                            eprintln!();
+                            eprintln!("   Available networks:");
+                            for net in ethereum::EthereumNetwork::list_networks() {
+                                eprintln!("   • {}", net);
+                            }
+                            return Err(e.into());
+                        }
+                    }
+                }
             }
 
             Ok(())
@@ -1507,6 +1554,38 @@ async fn main_impl() -> Result<()> {
                         Err(e) => {
                             eprintln!("❌ Failed to generate Mina keypair: {}", e);
                             return Err(anyhow::anyhow!("Mina keypair generation failed: {}", e).into());
+                        }
+                    }
+                }
+                
+                KeypairCommands::Ethereum => {
+                    println!("🔑 Generating new Ethereum keypair...");
+                    println!();
+                    
+                    match ethereum::generate_ethereum_keypair() {
+                        Ok(keypair) => {
+                            println!("✅ Ethereum Keypair Generated Successfully!");
+                            println!();
+                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!("🔐 PRIVATE KEY (Keep this secret!):");
+                            println!("   {}", keypair.private_key);
+                            println!();
+                            println!("📍 ADDRESS:");
+                            println!("   {}", keypair.address);
+                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!();
+                            println!("⚠️  IMPORTANT:");
+                            println!("   • Save your private key in a secure location");
+                            println!("   • Never share your private key with anyone");
+                            println!("   • You will need this key to sign transactions");
+                            println!();
+                            println!("💡 To use this keypair:");
+                            println!("   export ETH_PRIVATE_KEY={}", keypair.private_key);
+                            println!("   export ETH_ADDRESS={}", keypair.address);
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to generate Ethereum keypair: {}", e);
+                            return Err(anyhow::anyhow!("Ethereum keypair generation failed: {}", e).into());
                         }
                     }
                 }

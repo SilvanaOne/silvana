@@ -81,6 +81,9 @@ reqwest.workspace = true
 # For parallel coin management (used by sui crate)
 parking_lot.workspace = true
 
+# Blockchain crates
+ethereum = { path = "../ethereum" }
+
 [build-dependencies]
 tonic-build.workspace = true
 

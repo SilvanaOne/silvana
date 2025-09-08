@@ -220,6 +220,8 @@ pub enum KeypairCommands {
     Sui,
     /// Generate a new Mina keypair
     Mina,
+    /// Generate a new Ethereum keypair
+    Ethereum,
 }
 
 #[derive(Subcommand)]
@@ -265,6 +267,16 @@ pub enum BalanceCommands {
         
         /// Network (mina:devnet, zeko:testnet, mina:mainnet, etc.)
         #[arg(long, default_value = "mina:mainnet")]
+        network: String,
+    },
+    /// Check Ethereum balance
+    Ethereum {
+        /// Address to check balance for
+        #[arg(long)]
+        address: String,
+        
+        /// Network (mainnet, sepolia, arbitrum, optimism, base, polygon, etc.)
+        #[arg(long, default_value = "mainnet")]
         network: String,
     },
 }
