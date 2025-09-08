@@ -135,11 +135,8 @@ pub enum Commands {
     
     /// Check balance
     Balance {
-        #[arg(long, env = "SUI_RPC_URL")]
-        rpc_url: Option<String>,
-        
-        /// Address to check balance for (defaults to SUI_ADDRESS env var)
-        address: Option<String>,
+        #[command(subcommand)]
+        subcommand: BalanceCommands,
     },
     
     /// Split coins to maintain gas coin pool
@@ -240,10 +237,34 @@ pub enum FaucetCommands {
     /// Request MINA tokens from the devnet faucet
     Mina {
         /// Address to fund (Mina public key)
+        #[arg(long)]
         address: String,
         
         /// Network (mina:devnet or zeko:testnet, also accepts devnet or zeko)
         #[arg(long, default_value = "mina:devnet")]
+        network: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum BalanceCommands {
+    /// Check SUI balance
+    Sui {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: Option<String>,
+        
+        /// Address to check balance for (defaults to SUI_ADDRESS env var)
+        #[arg(long, env = "SUI_ADDRESS")]
+        address: Option<String>,
+    },
+    /// Check MINA balance
+    Mina {
+        /// Address to check balance for (Mina public key)
+        #[arg(long)]
+        address: String,
+        
+        /// Network (mina:devnet, zeko:testnet, mina:mainnet, etc.)
+        #[arg(long, default_value = "mina:mainnet")]
         network: String,
     },
 }
