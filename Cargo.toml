@@ -14,6 +14,7 @@ members = [
     "crates/sui",
     "crates/mina",
     "crates/ethereum",
+    "crates/avs-operator",
     "crates/kms",
     "crates/db",
     "crates/secrets-client",

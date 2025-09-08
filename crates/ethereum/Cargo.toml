@@ -14,3 +14,4 @@ hex.workspace = true
 once_cell.workspace = true
 alloy = { version = "1", features = ["full"] }
 rand.workspace = true
+chrono.workspace = true
