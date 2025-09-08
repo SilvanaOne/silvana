@@ -37,13 +37,14 @@ impl S3Client {
     pub async fn new(bucket_name: String) -> Result<Self> {
         // Initialize AWS client if not already initialized
         if AWS_S3_CLIENT.get().is_none() {
-            Self::init_aws_client().await?;
+            // Ignore error if client was already initialized (happens in parallel tests)
+            let _ = Self::init_aws_client().await;
         }
 
         let client = AWS_S3_CLIENT
             .get()
             .cloned()
-            .expect("AWS client should be initialized");
+            .ok_or_else(|| anyhow!("Failed to initialize AWS S3 client"))?;
 
         Ok(Self {
             client,
