@@ -83,6 +83,7 @@ parking_lot.workspace = true
 
 # Blockchain crates
 ethereum = { path = "../ethereum" }
+avs-operator = { path = "../avs-operator" }
 
 [build-dependencies]
 tonic-build.workspace = true

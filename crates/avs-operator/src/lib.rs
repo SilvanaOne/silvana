@@ -4,6 +4,7 @@ pub mod register;
 pub mod task;
 pub mod monitor;
 pub mod status;
+pub mod cli;
 
 pub use config::{Config, DeploymentAddresses, load_deployment_data, load_abi};
 pub use error::{AvsOperatorError, Result};

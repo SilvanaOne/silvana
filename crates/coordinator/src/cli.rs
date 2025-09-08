@@ -156,6 +156,12 @@ pub enum Commands {
         #[command(subcommand)]
         subcommand: FaucetCommands,
     },
+    
+    /// AVS Operator commands for managing EigenLayer AVS operations
+    Avs {
+        #[command(subcommand)]
+        subcommand: avs_operator::cli::AvsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -275,8 +281,8 @@ pub enum BalanceCommands {
         #[arg(long)]
         address: String,
         
-        /// Network (mainnet, sepolia, arbitrum, optimism, base, polygon, etc.)
-        #[arg(long, default_value = "mainnet")]
+        /// Network (mainnet, sepolia, holesky, arbitrum, optimism, base, polygon, etc.)
+        #[arg(long, default_value = "holesky")]
         network: String,
     },
 }
