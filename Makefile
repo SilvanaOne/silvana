@@ -189,6 +189,50 @@ build-x86: ## Build coordinator for Ubuntu Linux x86_64 (amd64) using Docker
 	@echo "✅ Silvana built successfully for x86_64"
 	@echo "📦 Binary location: docker/coordinator/release/x86/silvana"
 
+build-all: build-arm build-x86 ## Build coordinator for both ARM64 and x86_64
+	@echo "✅ Built Silvana for all architectures"
+
+release-archives: build-all ## Build and create release archives for all architectures
+	@echo "📦 Creating release archives..."
+	@mkdir -p docker/coordinator/release/github
+	@echo "📦 Creating ARM64 archive..."
+	@cd docker/coordinator/release/arm && tar -czf ../github/silvana-arm64-linux.tar.gz silvana
+	@echo "📦 Creating x86_64 archive..."
+	@cd docker/coordinator/release/x86 && tar -czf ../github/silvana-x86_64-linux.tar.gz silvana
+	@echo "📦 Calculating checksums..."
+	@cd docker/coordinator/release/github && shasum -a 256 *.tar.gz > checksums.txt
+	@echo "✅ Release archives created in 'docker/coordinator/release/github/' directory:"
+	@ls -lh docker/coordinator/release/github/
+	@echo ""
+	@echo "📝 To create a GitHub release manually:"
+	@echo "  1. Go to: https://github.com/SilvanaOne/silvana/releases/new"
+	@echo "  2. Upload the files from 'docker/coordinator/release/github/'"
+	@echo "  3. Include the checksums.txt for verification"
+
+# Usage: make github-release VERSION=v1.0.0
+github-release: release-archives ## Create a GitHub release using gh CLI
+	@if [ -z "$(VERSION)" ]; then \
+		echo "❌ Error: VERSION is required"; \
+		echo "Usage: make github-release VERSION=v1.0.0"; \
+		exit 1; \
+	fi
+	@echo "🚀 Creating GitHub release $(VERSION)"
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "❌ Error: GitHub CLI (gh) is not installed"; \
+		echo "Install from: https://cli.github.com/"; \
+		exit 1; \
+	fi
+	@echo "📌 Creating git tag $(VERSION) if it doesn't exist..."
+	@git tag -a $(VERSION) -m "Release $(VERSION)" 2>/dev/null || echo "Tag already exists"
+	@git push origin $(VERSION) 2>/dev/null || echo "Tag already pushed"
+	@echo "📦 Creating GitHub release..."
+	@gh release create $(VERSION) \
+		--title "Silvana $(VERSION)" \
+		--generate-notes \
+		docker/coordinator/release/github/silvana-arm64-linux.tar.gz \
+		docker/coordinator/release/github/silvana-x86_64-linux.tar.gz \
+		docker/coordinator/release/github/checksums.txt
+	@echo "✅ Release $(VERSION) created successfully!"
 
 regen: check-database-url check-tools setup proto2entities apply-ddl ## Complete regeneration: proto → DDL+entities → DB
 	@echo "🎉 Regeneration complete!"
