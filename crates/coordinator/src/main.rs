@@ -31,7 +31,7 @@ use dotenvy::dotenv;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
-use crate::cli::{Cli, Commands, TransactionType, KeypairCommands};
+use crate::cli::{Cli, Commands, TransactionType, KeypairCommands, FaucetCommands};
 use crate::error::{Result, CoordinatorError};
 use anyhow::anyhow;
 
@@ -1208,102 +1208,162 @@ async fn main_impl() -> Result<()> {
             Ok(())
         }
 
-        Commands::Faucet { address, amount } => {
+        Commands::Faucet { subcommand } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
                 .with(tracing_subscriber::fmt::layer())
                 .init();
+            
+            match subcommand {
+                FaucetCommands::Sui { address, amount } => {
+                    // Get the chain from environment
+                    let chain = std::env::var("SUI_CHAIN")
+                        .unwrap_or_else(|_| "devnet".to_string())
+                        .to_lowercase();
 
-            // Get the chain from environment
-            let chain = std::env::var("SUI_CHAIN")
-                .unwrap_or_else(|_| "devnet".to_string())
-                .to_lowercase();
+                    // Check if mainnet (no faucet available)
+                    if chain == "mainnet" {
+                        eprintln!("❌ Error: Faucet is not available for mainnet");
+                        eprintln!("   Please acquire SUI tokens through an exchange or other means");
+                        return Err(anyhow!("Faucet not available for mainnet").into());
+                    }
 
-            // Check if mainnet (no faucet available)
-            if chain == "mainnet" {
-                eprintln!("❌ Error: Faucet is not available for mainnet");
-                eprintln!("   Please acquire SUI tokens through an exchange or other means");
-                return Err(anyhow!("Faucet not available for mainnet").into());
-            }
+                    // Validate amount
+                    if amount > 10.0 {
+                        eprintln!("❌ Error: Amount exceeds maximum of 10 SUI");
+                        eprintln!("   Maximum faucet amount is 10 SUI per request");
+                        return Err(anyhow!("Amount exceeds maximum of 10 SUI").into());
+                    }
 
-            // Validate amount
-            if amount > 10.0 {
-                eprintln!("❌ Error: Amount exceeds maximum of 10 SUI");
-                eprintln!("   Maximum faucet amount is 10 SUI per request");
-                return Err(anyhow!("Amount exceeds maximum of 10 SUI").into());
-            }
+                    if amount <= 0.0 {
+                        eprintln!("❌ Error: Amount must be greater than 0");
+                        return Err(anyhow!("Invalid amount").into());
+                    }
 
-            if amount <= 0.0 {
-                eprintln!("❌ Error: Amount must be greater than 0");
-                return Err(anyhow!("Invalid amount").into());
-            }
+                    // Get the address to fund
+                    let target_address = address.unwrap_or_else(|| {
+                        std::env::var("SUI_ADDRESS").unwrap_or_else(|_| {
+                            eprintln!("❌ Error: No address provided and SUI_ADDRESS not set");
+                            std::process::exit(1);
+                        })
+                    });
 
-            // Get the address to fund
-            let target_address = address.unwrap_or_else(|| {
-                std::env::var("SUI_ADDRESS").unwrap_or_else(|_| {
-                    eprintln!("❌ Error: No address provided and SUI_ADDRESS not set");
-                    std::process::exit(1);
-                })
-            });
+                    // Validate address format
+                    if !target_address.starts_with("0x") || target_address.len() != 66 {
+                        eprintln!("❌ Error: Invalid SUI address format: {}", target_address);
+                        eprintln!("   Address should start with '0x' and be 66 characters long");
+                        return Err(anyhow!("Invalid address format").into());
+                    }
 
-            // Validate address format
-            if !target_address.starts_with("0x") || target_address.len() != 66 {
-                eprintln!("❌ Error: Invalid SUI address format: {}", target_address);
-                eprintln!("   Address should start with '0x' and be 66 characters long");
-                return Err(anyhow!("Invalid address format").into());
-            }
+                    println!("💧 Requesting {} SUI from {} faucet...", amount, chain);
+                    println!("📍 Target address: {}", target_address);
 
-            println!("💧 Requesting {} SUI from {} faucet...", amount, chain);
-            println!("📍 Target address: {}", target_address);
+                    // Get RPC URL based on chain using the resolver
+                    let rpc_url = sui::resolve_rpc_url(None, Some(chain.clone()))?;
 
-            // Get RPC URL based on chain using the resolver
-            let rpc_url = sui::resolve_rpc_url(None, Some(chain.clone()))?;
-
-            // Initialize Sui connection to check balance
-            sui::SharedSuiState::initialize(&rpc_url).await
-                .map_err(CoordinatorError::Other)?;
-
-            // Check balance before faucet
-            println!("\n📊 Balance before faucet:");
-            let balance_before = sui::get_balance_in_sui(&target_address).await
-                .map_err(CoordinatorError::Other)?;
-            println!("   {:.4} SUI", balance_before);
-
-            // Call the faucet
-            println!("\n🚰 Calling faucet...");
-            let faucet_result =
-                sui::request_tokens_from_faucet(&chain, &target_address, Some(amount)).await;
-
-            match faucet_result {
-                Ok(tx_digest) => {
-                    println!("✅ Faucet successful!");
-                    println!("   Transaction: {}", tx_digest);
-
-                    // Wait for transaction to be processed
-                    println!(
-                        "\n⏳ Waiting {} seconds for transaction to be processed...",
-                        constants::CLI_TRANSACTION_WAIT_SECS
-                    );
-                    tokio::time::sleep(tokio::time::Duration::from_secs(
-                        constants::CLI_TRANSACTION_WAIT_SECS,
-                    ))
-                    .await;
-
-                    // Check balance after faucet
-                    println!("\n📊 Balance after faucet:");
-                    let balance_after = sui::get_balance_in_sui(&target_address).await
+                    // Initialize Sui connection to check balance
+                    sui::SharedSuiState::initialize(&rpc_url).await
                         .map_err(CoordinatorError::Other)?;
-                    println!("   {:.4} SUI", balance_after);
 
-                    let received = balance_after - balance_before;
-                    if received > 0.0 {
-                        println!("\n💰 Received: {:.4} SUI", received);
+                    // Check balance before faucet
+                    println!("\n📊 Balance before faucet:");
+                    let balance_before = sui::get_balance_in_sui(&target_address).await
+                        .map_err(CoordinatorError::Other)?;
+                    println!("   {:.4} SUI", balance_before);
+
+                    // Call the faucet
+                    println!("\n🚰 Calling faucet...");
+                    let faucet_result =
+                        sui::request_tokens_from_faucet(&chain, &target_address, Some(amount)).await;
+
+                    match faucet_result {
+                        Ok(tx_digest) => {
+                            println!("✅ Faucet successful!");
+                            println!("   Transaction: {}", tx_digest);
+
+                            // Wait for transaction to be processed
+                            println!(
+                                "\n⏳ Waiting {} seconds for transaction to be processed...",
+                                constants::CLI_TRANSACTION_WAIT_SECS
+                            );
+                            tokio::time::sleep(tokio::time::Duration::from_secs(
+                                constants::CLI_TRANSACTION_WAIT_SECS,
+                            ))
+                            .await;
+
+                            // Check balance after faucet
+                            println!("\n📊 Balance after faucet:");
+                            let balance_after = sui::get_balance_in_sui(&target_address).await
+                                .map_err(CoordinatorError::Other)?;
+                            println!("   {:.4} SUI", balance_after);
+
+                            let received = balance_after - balance_before;
+                            if received > 0.0 {
+                                println!("\n💰 Received: {:.4} SUI", received);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Faucet failed: {}", e);
+                            return Err(e.into());
+                        }
                     }
                 }
-                Err(e) => {
-                    eprintln!("❌ Faucet failed: {}", e);
-                    return Err(e.into());
+                
+                FaucetCommands::Mina { address, network } => {
+                    // Validate the address format
+                    if !mina::validate_mina_address(&address) {
+                        eprintln!("❌ Error: Invalid Mina address format");
+                        eprintln!("   Mina addresses should start with 'B62' and be at least 55 characters");
+                        return Err(anyhow!("Invalid Mina address format").into());
+                    }
+                    
+                    // Validate network - the network module will handle validation
+                    if mina::MinaNetwork::get_network(&network).is_none() {
+                        eprintln!("❌ Error: Invalid network '{}'", network);
+                        eprintln!("   Supported networks: mina:devnet, zeko:testnet (or devnet, zeko for short)");
+                        return Err(anyhow!("Invalid network").into());
+                    }
+                    
+                    println!("💧 Requesting MINA from {} faucet...", network);
+                    println!("📍 Target address: {}", address);
+                    
+                    // Call the Mina faucet
+                    match mina::request_mina_from_faucet(&address, &network).await {
+                        Ok(response) => {
+                            if let Some(status) = &response.status {
+                                if status == "rate-limit" {
+                                    eprintln!("⚠️  Rate limited by faucet");
+                                    eprintln!("   Please wait 30 minutes before trying again");
+                                    return Err(anyhow!("Rate limited by faucet").into());
+                                }
+                            }
+                            
+                            if let Some(error) = &response.error {
+                                eprintln!("❌ Faucet error: {}", error);
+                                return Err(anyhow!("Faucet error: {}", error).into());
+                            }
+                            
+                            println!("✅ Faucet request successful!");
+                            if let Some(message) = &response.message {
+                                println!("   Response: {}", message);
+                            }
+                            
+                            println!("\n⏳ Note: It may take a few minutes for the funds to appear in your account");
+                            
+                            // Get explorer URL from network config
+                            if let Some(network_config) = mina::MinaNetwork::get_network(&network) {
+                                if let Some(explorer_url) = network_config.explorer_account_url {
+                                    println!("   Check your balance at:");
+                                    println!("   {}{}", explorer_url, address);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Faucet request failed: {}", e);
+                            return Err(e.into());
+                        }
+                    }
                 }
             }
 

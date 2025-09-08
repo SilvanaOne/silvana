@@ -2937,7 +2937,11 @@ dependencies = [
  "mina-signer",
  "o1-utils",
  "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
  "sha2",
+ "tokio",
 ]
 
 [[package]]

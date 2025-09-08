@@ -156,13 +156,8 @@ pub enum Commands {
     
     /// Request tokens from the faucet
     Faucet {
-        /// Address to fund (defaults to SUI_ADDRESS env var)
-        #[arg(long, env = "SUI_ADDRESS")]
-        address: Option<String>,
-        
-        /// Amount of SUI to request (e.g., 10.0 for 10 SUI)
-        #[arg(long, default_value = "10.0")]
-        amount: f64,
+        #[command(subcommand)]
+        subcommand: FaucetCommands,
     },
 }
 
@@ -228,5 +223,28 @@ pub enum KeypairCommands {
     Sui,
     /// Generate a new Mina keypair
     Mina,
+}
+
+#[derive(Subcommand)]
+pub enum FaucetCommands {
+    /// Request SUI tokens from the faucet
+    Sui {
+        /// Address to fund (defaults to SUI_ADDRESS env var)
+        #[arg(long, env = "SUI_ADDRESS")]
+        address: Option<String>,
+        
+        /// Amount of SUI to request (e.g., 10.0 for 10 SUI)
+        #[arg(long, default_value = "10.0")]
+        amount: f64,
+    },
+    /// Request MINA tokens from the devnet faucet
+    Mina {
+        /// Address to fund (Mina public key)
+        address: String,
+        
+        /// Network (mina:devnet or zeko:testnet, also accepts devnet or zeko)
+        #[arg(long, default_value = "mina:devnet")]
+        network: String,
+    },
 }
 
