@@ -3,8 +3,11 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::{Tag, Tagging};
 use once_cell::sync::OnceCell;
+use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 static AWS_S3_CLIENT: OnceCell<Arc<Client>> = OnceCell::new();
@@ -305,5 +308,175 @@ impl S3Client {
                 }
             }
         }
+    }
+
+    /// Write binary data to S3 with SHA256 verification
+    ///
+    /// # Arguments
+    /// * `data` - The binary data to store
+    /// * `file_name` - The S3 object key/filename
+    /// * `mime_type` - The MIME type of the content
+    /// * `expected_sha256` - Optional expected SHA256 hash for verification
+    ///
+    /// # Returns
+    /// The SHA256 hash of the stored file or an error if verification fails
+    pub async fn write_binary(
+        &self,
+        data: Vec<u8>,
+        file_name: &str,
+        mime_type: &str,
+        expected_sha256: Option<String>,
+    ) -> Result<String> {
+        debug!(
+            "Writing binary to S3 bucket {} with key: {}, size: {} bytes",
+            self.bucket_name, file_name, data.len()
+        );
+
+        // Calculate SHA256 hash of the data
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        let calculated_hash = format!("{:x}", hasher.finalize());
+
+        // Verify hash if provided
+        if let Some(ref expected) = expected_sha256 {
+            if &calculated_hash != expected {
+                return Err(anyhow!(
+                    "SHA256 hash mismatch: expected {}, calculated {}",
+                    expected,
+                    calculated_hash
+                ));
+            }
+        }
+
+        // Upload to S3
+        match self.client
+            .put_object()
+            .bucket(&self.bucket_name)
+            .key(file_name)
+            .body(data.into())
+            .content_type(mime_type)
+            .metadata("sha256", calculated_hash.clone())
+            .send()
+            .await {
+            Ok(_) => {},
+            Err(e) => {
+                error!("S3 PUT failed - Bucket: {}, Key: {}, Error: {:?}", 
+                    self.bucket_name, file_name, e);
+                return Err(anyhow!("Failed to write binary to S3: {}", e));
+            }
+        }
+
+        // Wait for the object to be available (with retries)
+        let max_retries = 10;
+        let retry_delay = Duration::from_millis(500);
+        
+        for attempt in 1..=max_retries {
+            debug!("Checking if object is available (attempt {}/{})", attempt, max_retries);
+            
+            match self.exists(file_name).await {
+                Ok(true) => {
+                    debug!("Object is available after {} attempts", attempt);
+                    break;
+                }
+                Ok(false) if attempt < max_retries => {
+                    debug!("Object not yet available, retrying...");
+                    sleep(retry_delay).await;
+                }
+                Ok(false) => {
+                    return Err(anyhow!("Object not available after {} retries", max_retries));
+                }
+                Err(e) if attempt < max_retries => {
+                    warn!("Error checking object existence: {}, retrying...", e);
+                    sleep(retry_delay).await;
+                }
+                Err(e) => {
+                    return Err(anyhow!("Failed to verify object availability: {}", e));
+                }
+            }
+        }
+
+        // Read back and verify
+        let (read_data, read_hash) = self.read_binary(file_name).await?;
+        
+        // Verify the stored data matches
+        if read_hash != calculated_hash {
+            return Err(anyhow!(
+                "Verification failed: stored file hash {} doesn't match original {}",
+                read_hash,
+                calculated_hash
+            ));
+        }
+
+        // Additional verification: check data integrity
+        let mut verify_hasher = Sha256::new();
+        verify_hasher.update(&read_data);
+        let verify_hash = format!("{:x}", verify_hasher.finalize());
+        
+        if verify_hash != calculated_hash {
+            return Err(anyhow!(
+                "Data integrity check failed: read data hash {} doesn't match original {}",
+                verify_hash,
+                calculated_hash
+            ));
+        }
+
+        info!(
+            "Successfully wrote binary to S3 bucket {} with key: {}, SHA256: {}",
+            self.bucket_name, file_name, calculated_hash
+        );
+
+        Ok(calculated_hash)
+    }
+
+    /// Read binary data from S3 and calculate its SHA256 hash
+    ///
+    /// # Arguments
+    /// * `file_name` - The S3 object key/filename to read
+    ///
+    /// # Returns
+    /// A tuple of (binary data, SHA256 hash)
+    pub async fn read_binary(&self, file_name: &str) -> Result<(Vec<u8>, String)> {
+        debug!(
+            "Reading binary from S3 bucket {} with key: {}",
+            self.bucket_name, file_name
+        );
+
+        let get_object_output = match self
+            .client
+            .get_object()
+            .bucket(&self.bucket_name)
+            .key(file_name)
+            .send()
+            .await {
+            Ok(output) => output,
+            Err(e) => {
+                error!("S3 GET failed - Bucket: {}, Key: {}, Error: {:?}", 
+                    self.bucket_name, file_name, e);
+                if let Some(service_error) = e.as_service_error() {
+                    error!("S3 Service Error Details: {:?}", service_error);
+                }
+                return Err(anyhow!("Failed to read binary from S3: {}", e));
+            }
+        };
+
+        // Collect the binary data
+        let body = get_object_output
+            .body
+            .collect()
+            .await
+            .map_err(|e| anyhow!("Failed to collect body: {}", e))?;
+        let data = body.to_vec();
+
+        // Calculate SHA256 hash
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        let calculated_hash = format!("{:x}", hasher.finalize());
+
+        info!(
+            "Successfully read binary from S3 bucket {} with key: {}, size: {} bytes, SHA256: {}",
+            self.bucket_name, file_name, data.len(), calculated_hash
+        );
+
+        Ok((data, calculated_hash))
     }
 }
