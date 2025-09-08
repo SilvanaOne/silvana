@@ -30,46 +30,47 @@ impl MulticallProcessor {
         info!("🚀 Multicall processor started");
 
         loop {
-            // Check for shutdown request - but don't exit immediately
-            // We need to keep processing until docker is done
+            // Check for shutdown request
             if self.state.is_shutting_down() {
-                // Check if docker still has work
+                // During shutdown, continue processing all operations
+                let pending_operations = self.state.get_total_operations_count().await;
                 let buffer_size = self.state.get_started_jobs_buffer_size().await;
                 let current_agents = self.state.get_current_agent_count().await;
 
-                if buffer_size == 0 && current_agents == 0 {
-                    // Docker is done, now process final multicall operations
-                    info!(
-                        "🛑 Multicall processor: Docker completed, processing final operations..."
-                    );
-
-                    let pending_operations = self.state.get_total_operations_count().await;
-                    if pending_operations > 0 {
-                        info!(
-                            "📤 Processing {} final operations before shutdown...",
-                            pending_operations
+                // Only exit when both multicall operations AND docker work are done
+                if pending_operations == 0 && buffer_size == 0 && current_agents == 0 {
+                    // Everything appears done - but wait 1 second and double-check
+                    // in case new operations were just added
+                    info!("Multicall operations appear complete, waiting 1 second to verify...");
+                    sleep(Duration::from_secs(1)).await;
+                    
+                    // Final check after delay
+                    let final_operations = self.state.get_total_operations_count().await;
+                    let final_buffer_size = self.state.get_started_jobs_buffer_size().await;
+                    let final_agents = self.state.get_current_agent_count().await;
+                    
+                    if final_operations > 0 || final_buffer_size > 0 || final_agents > 0 {
+                        // Race condition detected - new work appeared
+                        debug!(
+                            "Race condition detected: {} new operations, {} buffered jobs, {} agents - continuing",
+                            final_operations, final_buffer_size, final_agents
                         );
-
-                        // Execute all pending batches
-                        while self.state.get_total_operations_count().await > 0 {
-                            if let Err(e) = self.execute_multicall_batch().await {
-                                error!("Failed to execute shutdown multicall batch: {}", e);
-                                // Continue trying to process remaining operations
-                            }
-                        }
-
-                        info!("✅ All pending multicall operations processed");
+                        continue; // Go back to processing
                     }
-
+                    
+                    // Really done now
+                    info!("🛑 Multicall processor received shutdown signal");
+                    info!("✅ All multicall operations processed and docker completed");
                     return Ok(());
                 } else {
-                    // Docker still has work, continue processing multicalls normally
-                    if buffer_size > 0 || current_agents > 0 {
+                    // Continue processing during shutdown
+                    if pending_operations > 0 || buffer_size > 0 || current_agents > 0 {
                         debug!(
-                            "Multicall continuing during shutdown: {} jobs buffered, {} containers running",
-                            buffer_size, current_agents
+                            "Multicall continuing during shutdown: {} operations, {} jobs buffered, {} containers running",
+                            pending_operations, buffer_size, current_agents
                         );
                     }
+                    // Don't return - continue the loop to process operations
                 }
             }
 

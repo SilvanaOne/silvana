@@ -519,18 +519,8 @@ impl DockerBufferProcessor {
         loop {
             // Check for shutdown request
             if self.state.is_shutting_down() {
-                info!("🛑 Docker buffer processor received shutdown signal");
-
                 // Process all buffered jobs and wait for running containers to complete if not force shutdown
                 if !self.state.is_force_shutdown() {
-                    // First, process all buffered jobs
-                    let buffer_size = self.state.get_started_jobs_buffer_size().await;
-                    if buffer_size > 0 {
-                        info!("📦 Processing {} buffered jobs before shutdown...", buffer_size);
-                        // Don't exit yet, continue loop to process buffered jobs
-                        // The loop will naturally process them as containers become available
-                    }
-                    
                     // Check if we still have buffered jobs or running containers
                     let (loading_count, running_count) =
                         self.docker_manager.get_container_counts().await;
@@ -539,7 +529,7 @@ impl DockerBufferProcessor {
                     if current_buffer_size > 0 || loading_count > 0 || running_count > 0 {
                         if current_buffer_size > 0 {
                             debug!(
-                                "Shutdown: {} jobs in buffer, {} loading and {} running containers",
+                                "Shutdown: {} jobs in buffer, {} loading and {} running containers - continuing to process",
                                 current_buffer_size, loading_count, running_count
                             );
                         } else {
@@ -548,14 +538,37 @@ impl DockerBufferProcessor {
                                 loading_count, running_count
                             );
                         }
-                        sleep(Duration::from_secs(2)).await;
-                        continue;
+                        // Continue processing during shutdown - don't exit yet
+                        // The loop will continue and process buffered jobs
+                    } else {
+                        // Everything appears done - but wait 1 second and double-check
+                        // in case multicall just added something to the buffer
+                        info!("Docker buffer appears empty, waiting 1 second to verify...");
+                        sleep(Duration::from_secs(1)).await;
+                        
+                        // Final check after delay
+                        let (final_loading, final_running) = self.docker_manager.get_container_counts().await;
+                        let final_buffer_size = self.state.get_started_jobs_buffer_size().await;
+                        
+                        if final_buffer_size > 0 || final_loading > 0 || final_running > 0 {
+                            // Race condition detected - new work appeared
+                            debug!(
+                                "Race condition detected: {} new buffered jobs, {} loading, {} running - continuing",
+                                final_buffer_size, final_loading, final_running
+                            );
+                            continue; // Go back to processing
+                        }
+                        
+                        // Really done now
+                        info!("🛑 Docker buffer processor received shutdown signal");
+                        info!("✅ All buffered jobs processed and containers completed");
+                        return Ok(());
                     }
-                    
-                    info!("✅ All buffered jobs processed and containers completed");
+                } else {
+                    // Force shutdown - exit immediately
+                    info!("🛑 Docker buffer processor received force shutdown signal");
+                    return Ok(());
                 }
-
-                return Ok(());
             }
 
             // Report buffer size metric
