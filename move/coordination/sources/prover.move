@@ -105,6 +105,16 @@ public struct ProofCalculationFinishedEvent has copy, drop {
     timestamp: u64,
 }
 
+public struct ProofCalculationDeletedEvent has copy, drop {
+    block_number: u64,
+    start_sequence: u64,
+    end_sequence: Option<u64>,
+    proofs: VecMap<vector<u64>, Proof>,
+    block_proof: Option<String>,
+    is_finished: bool,
+    timestamp: u64,
+}
+
 public struct PROVER has drop {}
 
 // Constants
@@ -292,6 +302,15 @@ public(package) fun delete_proof_calculation(
         ),
         is_finished,
         proofs_count,
+        timestamp,
+    });
+    event::emit(ProofCalculationDeletedEvent {
+        block_number,
+        start_sequence,
+        end_sequence,
+        proofs,
+        block_proof,
+        is_finished,
         timestamp,
     });
 
