@@ -5,6 +5,7 @@ use serde_json;
 use tracing::{debug, error, warn};
 
 use crate::database::EventDatabase;
+use crate::storage::S3Storage;
 use buffer::EventBuffer;
 use db::secrets_storage::SecureSecretsStorage;
 use monitoring::record_grpc_request;
@@ -12,10 +13,12 @@ use proto::{
     AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
     Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
-    GetProofRequest, GetProofResponse, RetrieveSecretRequest, RetrieveSecretResponse,
+    GetProofRequest, GetProofResponse, ReadBinaryRequest, ReadBinaryResponse,
+    RetrieveSecretRequest, RetrieveSecretResponse,
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
     StoreSecretRequest, StoreSecretResponse, SubmitEventRequest, SubmitEventResponse,
     SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest, SubmitProofResponse,
+    WriteBinaryRequest, WriteBinaryResponse,
     silvana_events_service_server::SilvanaEventsService,
 };
 use storage::ProofsCache;
@@ -25,6 +28,7 @@ pub struct SilvanaEventsServiceImpl {
     database: Arc<EventDatabase>,
     secrets_storage: Option<Arc<SecureSecretsStorage>>,
     proofs_cache: Option<Arc<ProofsCache>>,
+    s3_storage: Option<Arc<S3Storage>>,
 }
 
 impl SilvanaEventsServiceImpl {
@@ -34,6 +38,7 @@ impl SilvanaEventsServiceImpl {
             database,
             secrets_storage: None,
             proofs_cache: None,
+            s3_storage: None,
         }
     }
 
@@ -44,6 +49,11 @@ impl SilvanaEventsServiceImpl {
 
     pub fn with_proofs_cache(mut self, proofs_cache: Arc<ProofsCache>) -> Self {
         self.proofs_cache = Some(proofs_cache);
+        self
+    }
+
+    pub fn with_s3_storage(mut self, s3_storage: Arc<S3Storage>) -> Self {
+        self.s3_storage = Some(s3_storage);
         self
     }
 }
@@ -759,6 +769,151 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                     error!("Failed to retrieve proof: {}", e);
                     record_grpc_request("get_proof", "error", start_time.elapsed().as_secs_f64());
                     Err(Status::internal("Failed to retrieve proof"))
+                }
+            }
+        }
+    }
+
+    async fn write_binary(
+        &self,
+        request: Request<WriteBinaryRequest>,
+    ) -> Result<Response<WriteBinaryResponse>, Status> {
+        let start_time = Instant::now();
+        
+        // Check if S3 storage is configured
+        let s3_storage = self.s3_storage.as_ref().ok_or_else(|| {
+            error!("S3 storage not configured");
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            Status::unimplemented("S3 storage not configured")
+        })?;
+
+        let req = request.into_inner();
+        
+        // Validate input
+        if req.data.is_empty() {
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("Data cannot be empty"));
+        }
+        
+        if req.file_name.is_empty() {
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("File name cannot be empty"));
+        }
+        
+        if req.mime_type.is_empty() {
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("MIME type cannot be empty"));
+        }
+
+        debug!(
+            "Writing binary to S3: file_name={}, size={} bytes, mime_type={}",
+            req.file_name,
+            req.data.len(),
+            req.mime_type
+        );
+
+        // Call S3 storage to write binary
+        match s3_storage
+            .write_binary(req.data, &req.file_name, &req.mime_type, req.expected_sha256)
+            .await
+        {
+            Ok((sha256, s3_url)) => {
+                debug!(
+                    "Successfully wrote binary to S3: file_name={}, sha256={}",
+                    req.file_name, sha256
+                );
+                
+                record_grpc_request("write_binary", "success", start_time.elapsed().as_secs_f64());
+                
+                Ok(Response::new(WriteBinaryResponse {
+                    success: true,
+                    message: "Binary data written successfully".to_string(),
+                    sha256,
+                    s3_url,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to write binary to S3: {}", e);
+                record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+                
+                // Check for specific error types
+                let error_string = e.to_string();
+                if error_string.contains("SHA256 hash mismatch") {
+                    Err(Status::invalid_argument(format!("Hash verification failed: {}", e)))
+                } else {
+                    Err(Status::internal(format!("Failed to write binary: {}", e)))
+                }
+            }
+        }
+    }
+
+    async fn read_binary(
+        &self,
+        request: Request<ReadBinaryRequest>,
+    ) -> Result<Response<ReadBinaryResponse>, Status> {
+        let start_time = Instant::now();
+        
+        // Check if S3 storage is configured
+        let s3_storage = self.s3_storage.as_ref().ok_or_else(|| {
+            error!("S3 storage not configured");
+            record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
+            Status::unimplemented("S3 storage not configured")
+        })?;
+
+        let req = request.into_inner();
+        
+        // Validate input
+        if req.file_name.is_empty() {
+            record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("File name cannot be empty"));
+        }
+
+        debug!("Reading binary from S3: file_name={}", req.file_name);
+
+        // Call S3 storage to read binary
+        match s3_storage.read_binary(&req.file_name).await {
+            Ok((data, sha256)) => {
+                debug!(
+                    "Successfully read binary from S3: file_name={}, size={} bytes, sha256={}",
+                    req.file_name,
+                    data.len(),
+                    sha256
+                );
+                
+                record_grpc_request("read_binary", "success", start_time.elapsed().as_secs_f64());
+                
+                // For now, we'll infer MIME type from file extension
+                // In a production system, you might want to store this as metadata
+                let mime_type = match req.file_name.split('.').last() {
+                    Some("png") => "image/png",
+                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                    Some("pdf") => "application/pdf",
+                    Some("json") => "application/json",
+                    Some("txt") => "text/plain",
+                    Some("bin") => "application/octet-stream",
+                    _ => "application/octet-stream",
+                }
+                .to_string();
+                
+                Ok(Response::new(ReadBinaryResponse {
+                    success: true,
+                    message: "Binary data read successfully".to_string(),
+                    data,
+                    sha256,
+                    mime_type,
+                    metadata: std::collections::HashMap::new(), // Can be extended to include S3 metadata
+                }))
+            }
+            Err(e) => {
+                error!("Failed to read binary from S3: {}", e);
+                record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
+                
+                // Check if file doesn't exist
+                let error_string = e.to_string();
+                if error_string.contains("not found") || error_string.contains("NoSuchKey") {
+                    Err(Status::not_found(format!("File not found: {}", req.file_name)))
+                } else {
+                    Err(Status::internal(format!("Failed to read binary: {}", e)))
                 }
             }
         }

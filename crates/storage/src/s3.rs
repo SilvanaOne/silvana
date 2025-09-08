@@ -10,6 +10,8 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
+use crate::constants::{S3_AVAILABILITY_MAX_RETRIES, S3_AVAILABILITY_RETRY_DELAY_MS};
+
 static AWS_S3_CLIENT: OnceCell<Arc<Client>> = OnceCell::new();
 
 pub struct S3Client {
@@ -368,8 +370,8 @@ impl S3Client {
         }
 
         // Wait for the object to be available (with retries)
-        let max_retries = 10;
-        let retry_delay = Duration::from_millis(500);
+        let max_retries = S3_AVAILABILITY_MAX_RETRIES;
+        let retry_delay = Duration::from_millis(S3_AVAILABILITY_RETRY_DELAY_MS);
         
         for attempt in 1..=max_retries {
             debug!("Checking if object is available (attempt {}/{})", attempt, max_retries);

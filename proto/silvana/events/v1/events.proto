@@ -294,6 +294,36 @@ message GetProofResponse {
   repeated QuiltPiece quilt_pieces = 6;  // If is_quilt=true, contains the pieces
 }
 
+// Binary storage messages for S3
+
+message WriteBinaryRequest {
+  bytes data = 1;                    // Binary data to store
+  string file_name = 2;               // S3 object key/filename
+  string mime_type = 3;               // MIME type of the content
+  optional string expected_sha256 = 4; // Optional expected SHA256 for verification
+  map<string, string> metadata = 5;    // Optional metadata
+}
+
+message WriteBinaryResponse {
+  bool success = 1;
+  string message = 2;
+  string sha256 = 3;                   // SHA256 hash of the stored file
+  string s3_url = 4;                   // S3 URL/path of the stored file
+}
+
+message ReadBinaryRequest {
+  string file_name = 1;                // S3 object key/filename to read
+}
+
+message ReadBinaryResponse {
+  bool success = 1;
+  string message = 2;
+  bytes data = 3;                      // Binary data retrieved
+  string sha256 = 4;                   // SHA256 hash of the data
+  string mime_type = 5;                // MIME type if available
+  map<string, string> metadata = 6;    // Associated metadata
+}
+
 // Secrets storage messages
 message SecretReference {
   string developer = 1;
@@ -344,4 +374,8 @@ service SilvanaEventsService {
   // Secrets storage methods
   rpc StoreSecret(StoreSecretRequest) returns (StoreSecretResponse);
   rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
+  
+  // Binary storage methods
+  rpc WriteBinary(WriteBinaryRequest) returns (WriteBinaryResponse);
+  rpc ReadBinary(ReadBinaryRequest) returns (ReadBinaryResponse);
 } 

@@ -15,6 +15,7 @@ use proto::Event;
 use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
 use rpc::SilvanaEventsServiceImpl;
 use rpc::database::EventDatabase;
+use rpc::storage::S3Storage;
 use db::secrets_storage::SecureSecretsStorage;
 use storage::ProofsCache;
 
@@ -193,6 +194,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!("⚠️  Proofs cache not configured - PROOFS_CACHE_BUCKET environment variable not set");
         warn!("⚠️  Proofs API endpoints will return 'not available' errors");
     }
+
+    // Initialize S3 storage for binary operations
+    let s3_bucket = env::var("S3_BINARY_BUCKET").unwrap_or_else(|_| "silvana-distribution".to_string());
+    info!("🗄️  Initializing S3 storage with bucket: {}", s3_bucket);
+    let s3_storage = S3Storage::new(s3_bucket);
+    events_service = events_service.with_s3_storage(Arc::new(s3_storage));
+    info!("✅ S3 storage initialized for binary operations");
 
     // Create gRPC service with Prometheus metrics layer
     let grpc_service = SilvanaEventsServiceServer::new(events_service);

@@ -20,8 +20,13 @@ hex.workspace = true
 once_cell.workspace = true
 base64.workspace = true
 chrono.workspace = true
+tar.workspace = true
+zstd.workspace = true
+ignore.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
 tokio-test = "0.4"
 dotenvy.workspace = true
 tracing-subscriber.workspace = true
+tempfile = "3.8"

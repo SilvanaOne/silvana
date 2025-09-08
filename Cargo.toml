@@ -67,6 +67,12 @@ sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
 sui-crypto = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", features = ["ed25519"] }
 sui-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
 
+# Archive and compression dependencies
+tar = "0.4"
+zstd = "0.13"
+ignore = "0.4"
+walkdir = "2.4"
+
 # Build dependencies
 tonic-build = "0.13"
 prost-reflect-build = "0.15.2"

@@ -67,7 +67,7 @@ help: ## Show this help message
 	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🏗️  BUILD & DEPLOYMENT:"
-	@grep -E '^(build|build-ubuntu):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-rpc|build-arm|build-x86|build-mac):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -133,7 +133,7 @@ setup: ## Create necessary directories
 	@mkdir -p $(ENTITY_DIR)
 	@echo "✅ Directories created"
 
-build: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
+build-rpc: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
 	@echo "🐳 Building RPC and creating deployment archive for Amazon Linux 2023 ARM64..."
 	@mkdir -p build
 	@echo "🔨 Building Docker image for ARM64 (Graviton), compiling RPC, and creating tar archive..."
@@ -410,4 +410,9 @@ validate-schema: check-database-url check-tools ## Validate that database schema
 		--database-url "$$DB_URL"
 
 check-schema: check-database-url check-tools ## Quick schema validation check
-	@./infra/tidb/check_schema.sh 
+	@./infra/tidb/check_schema.sh
+
+# Test targets
+example-archive: ## Test packing and unpacking examples/add folder to S3
+	@echo "📦 Testing archive functionality with examples/add folder..."
+	@cargo test -p storage test_pack_examples_add_folder -- --nocapture 
