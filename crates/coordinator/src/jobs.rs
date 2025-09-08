@@ -183,64 +183,82 @@ impl JobsTracker {
         let mut skipped_updated = 0;
         
         for (app_instance_id, original_timestamp) in &instances_to_check {
-            // First check if the AppInstance is ready for removal
-            // (all sequences are in blocks, all blocks are proved, and all proved blocks are settled)
-            match is_app_instance_ready_for_removal(app_instance_id).await {
-                Ok(ready_for_removal) => {
-                    if !ready_for_removal {
-                        // AppInstance has pending sequences, unproved blocks, or unsettled blocks, keep it
-                        debug!("App_instance {} has pending sequences, unproved blocks, or unsettled blocks, keeping", app_instance_id);
-                        instances_with_jobs += 1;
-                        continue;
-                    }
-                    
-                    // AppInstance is ready for removal, now check if it has pending jobs
-                    match fetch_pending_jobs_count_from_app_instance(app_instance_id).await {
-                        Ok(count) => {
-                            if count == 0 {
-                                // Check if the timestamp has changed (new events arrived)
-                                let should_remove = {
-                                    let instances = self.app_instances_with_jobs.read().await;
-                                    instances
-                                        .get(app_instance_id)
-                                        .map(|info| info.updated_at == *original_timestamp)
-                                        .unwrap_or(false)
-                                };
-                                
-                                if should_remove {
-                                    debug!("App_instance {} is ready for removal (all blocks settled and proved) and has 0 pending jobs, removing", app_instance_id);
-                                    self.remove_app_instance(app_instance_id).await;
-                                    removed_count += 1;
-                                } else {
-                                    debug!("App_instance {} is ready for removal but was updated during reconciliation, keeping", app_instance_id);
-                                    skipped_updated += 1;
-                                }
-                            } else {
-                                debug!("App_instance {} has {} pending jobs", app_instance_id, count);
-                                instances_with_jobs += 1;
-                            }
-                        }
-                        Err(e) => {
-                            // Handle errors from fetch_pending_jobs_count
-                            if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                                debug!("Jobs object for app_instance {} not found, removing from tracker", app_instance_id);
-                                self.remove_app_instance(app_instance_id).await;
-                                removed_count += 1;
-                            } else {
-                                warn!("Failed to fetch pending_jobs_count for {}: {}", app_instance_id, e);
-                                instances_with_errors += 1;
-                            }
-                        }
-                    }
-                }
+            // Fetch the app instance to check its state
+            let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+                Ok(app_inst) => app_inst,
                 Err(e) => {
-                    // Handle errors from is_app_instance_ready_for_removal
                     if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
                         debug!("App_instance {} not found on chain (likely deleted), removing from tracker", app_instance_id);
                         self.remove_app_instance(app_instance_id).await;
                         removed_count += 1;
                     } else {
-                        warn!("Error checking app_instance {} state: {}", app_instance_id, e);
+                        error!("Failed to fetch app_instance {}: {}", app_instance_id, e);
+                        instances_with_errors += 1;
+                    }
+                    continue;
+                }
+            };
+            
+            // Use the comprehensive can_remove_app_instance check from settlement.rs
+            // This checks: settlement complete, no active settlement jobs, no pending sequences, etc.
+            if !crate::settlement::can_remove_app_instance(&app_instance) {
+                debug!(
+                    "App_instance {} cannot be removed per settlement checks (unsettled blocks or active jobs)",
+                    app_instance_id
+                );
+                instances_with_jobs += 1;
+                continue;
+            }
+            
+            // AppInstance passed settlement checks, now check if it has pending or running jobs
+            match fetch_pending_jobs_count_from_app_instance(app_instance_id).await {
+                Ok(count) => {
+                    if count == 0 {
+                        // Also check for running jobs before removing
+                        let has_running_jobs = match check_for_running_jobs(app_instance_id).await {
+                            Ok(has_running) => has_running,
+                            Err(e) => {
+                                debug!("Error checking for running jobs in {}: {}, keeping instance", app_instance_id, e);
+                                true // Assume there might be running jobs on error
+                            }
+                        };
+                        
+                        if has_running_jobs {
+                            debug!("App_instance {} has running jobs, keeping", app_instance_id);
+                            instances_with_jobs += 1;
+                            continue;
+                        }
+                        
+                        // Check if the timestamp has changed (new events arrived)
+                        let should_remove = {
+                            let instances = self.app_instances_with_jobs.read().await;
+                            instances
+                                .get(app_instance_id)
+                                .map(|info| info.updated_at == *original_timestamp)
+                                .unwrap_or(false)
+                        };
+                        
+                        if should_remove {
+                            info!("App_instance {} passed all removal checks (settlement complete, no jobs), removing from tracking", app_instance_id);
+                            self.remove_app_instance(app_instance_id).await;
+                            removed_count += 1;
+                        } else {
+                            debug!("App_instance {} is ready for removal but was updated during reconciliation, keeping", app_instance_id);
+                            skipped_updated += 1;
+                        }
+                    } else {
+                        debug!("App_instance {} has {} pending jobs", app_instance_id, count);
+                        instances_with_jobs += 1;
+                    }
+                }
+                Err(e) => {
+                    // Handle errors from fetch_pending_jobs_count
+                    if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
+                        debug!("Jobs object for app_instance {} not found, removing from tracker", app_instance_id);
+                        self.remove_app_instance(app_instance_id).await;
+                        removed_count += 1;
+                    } else {
+                        warn!("Failed to fetch pending_jobs_count for {}: {}", app_instance_id, e);
                         instances_with_errors += 1;
                     }
                 }
@@ -548,39 +566,6 @@ pub struct TrackerStats {
     pub agent_methods_count: usize,
 }
 
-/// Helper function to check if AppInstance is ready for removal
-/// Returns true if all sequences are in blocks and all blocks are proved
-async fn is_app_instance_ready_for_removal(app_instance_id: &str) -> Result<bool> {
-    // Use the fetch_app_instance function from sui crate
-    let app_instance = sui::fetch::fetch_app_instance(app_instance_id).await
-        .map_err(|e| anyhow::anyhow!("Failed to fetch AppInstance {}: {}", app_instance_id, e))?;
-    
-    // Check conditions using the fetched AppInstance:
-    // 1. sequence == previous_block_last_sequence + 1 (no new sequences not in blocks)
-    // 2. last_proved_block_number + 1 == block_number (all blocks are proved)
-    // 3. last_settled_block_number >= last_proved_block_number (all proved blocks are settled)
-    let no_pending_sequences = app_instance.sequence == app_instance.previous_block_last_sequence + 1;
-    let all_blocks_proved = app_instance.last_proved_block_number + 1 == app_instance.block_number;
-    let all_blocks_settled = app_instance.last_settled_block_number >= app_instance.last_proved_block_number;
-    
-    // Calculate blocks behind for logging
-    let blocks_behind = if app_instance.last_proved_block_number > app_instance.last_settled_block_number {
-        app_instance.last_proved_block_number - app_instance.last_settled_block_number
-    } else {
-        0
-    };
-    
-    debug!(
-        "AppInstance {} state: sequence={}, prev_block_last_seq={}, last_proved_block={}, last_settled_block={}, block_number={}, blocks_behind={} -> ready_for_removal={}",
-        app_instance_id, app_instance.sequence, app_instance.previous_block_last_sequence, 
-        app_instance.last_proved_block_number, app_instance.last_settled_block_number,
-        app_instance.block_number, blocks_behind,
-        no_pending_sequences && all_blocks_proved && all_blocks_settled
-    );
-    
-    // Only ready for removal if all conditions are met
-    Ok(no_pending_sequences && all_blocks_proved && all_blocks_settled)
-}
 
 /// Helper function to fetch pending_jobs_count from embedded Jobs in AppInstance
 async fn fetch_pending_jobs_count_from_app_instance(app_instance_id: &str) -> Result<u64> {
@@ -593,6 +578,34 @@ async fn fetch_pending_jobs_count_from_app_instance(app_instance_id: &str) -> Re
         Ok(jobs.pending_jobs_count)
     } else {
         Ok(0) // No jobs struct means no pending jobs
+    }
+}
+
+/// Helper function to check if there are any running jobs for an app instance
+async fn check_for_running_jobs(app_instance_id: &str) -> Result<bool> {
+    // Use the fetch_app_instance function from sui crate
+    let app_instance = sui::fetch::fetch_app_instance(app_instance_id).await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch AppInstance {}: {}", app_instance_id, e))?;
+    
+    // Fetch all jobs and check for Running status
+    match sui::fetch::fetch_all_jobs_from_app_instance(&app_instance).await {
+        Ok(jobs) => {
+            let running_count = jobs.iter()
+                .filter(|job| matches!(job.status, sui::fetch::JobStatus::Running))
+                .count();
+            
+            if running_count > 0 {
+                debug!("App instance {} has {} running job(s)", app_instance_id, running_count);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        Err(e) => {
+            // If we can't fetch jobs, assume there might be running jobs to be safe
+            debug!("Failed to fetch jobs for {}: {}", app_instance_id, e);
+            Ok(true)
+        }
     }
 }
 
