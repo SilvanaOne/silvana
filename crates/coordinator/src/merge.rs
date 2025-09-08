@@ -513,20 +513,7 @@ fn find_proofs_to_merge_excluding(
     if let Some(end_seq) = block_proofs.end_sequence {
         let start_seq = block_proofs.start_sequence;
         
-        // Temporary info logging for block 180
-        if block_proofs.block_number == 180 {
-            info!("🔍 Block 180: Looking for strategic merges (sequences {}-{})", start_seq, end_seq);
-            info!("🔍 Block 180: Current time: {}, PROOF_USED_MERGE_TIMEOUT_MS: {}", 
-                  current_time, PROOF_USED_MERGE_TIMEOUT_MS);
-            
-            // Log all existing proofs and their statuses
-            for proof in &block_proofs.proofs {
-                let time_since = current_time.saturating_sub(proof.timestamp);
-                let available = is_proof_available(proof, current_time);
-                info!("🔍 Block 180: Proof sequences {:?}, status: {:?}, timestamp: {}, time_since: {}ms, available: {}", 
-                      proof.sequences, proof.status, proof.timestamp, time_since, available);
-            }
-        }
+
         
         debug!("Looking for strategic merges for block {} (sequences {}-{})", 
                block_proofs.block_number, start_seq, end_seq);
