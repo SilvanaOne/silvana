@@ -78,8 +78,20 @@ impl MulticallProcessor {
             let should_execute_by_limit = self.state.should_execute_multicall_by_limit().await;
             let should_execute_by_time = self.state.should_execute_multicall_by_time().await;
             let total_operations = self.state.get_total_operations_count().await;
+            
+            // For settlement nodes, check if we have any settle jobs to process immediately
+            let should_execute_settle_immediately = if self.state.is_settle_only() {
+                self.state.has_settle_jobs_pending().await
+            } else {
+                false
+            };
 
-            if should_execute_by_limit {
+            if should_execute_settle_immediately {
+                debug!("Executing multicall immediately for settlement job (settle mode)");
+                if let Err(e) = self.execute_multicall_batch().await {
+                    error!("Failed to execute settlement multicall: {}", e);
+                }
+            } else if should_execute_by_limit {
                 info!(
                     "Executing multicall due to operation limit: {} operations >= {} limit",
                     total_operations,

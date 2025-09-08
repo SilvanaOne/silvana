@@ -11,7 +11,8 @@ use tokio::time::Instant;
 /// 1. All proved blocks are settled (last_settled_block_number == last_proved_block_number)
 /// 2. We're at the start of the next block (last_proved_block_number + 1 == current_block_number)
 /// 3. No sequences processed in current block (previous_block_last_sequence + 1 == current_sequence)
-/// 4. No pending jobs
+/// 4. No pending or running jobs
+/// 5. No active settlement jobs
 pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
     // Check if all conditions are met
     // Use the AppInstance's last_settled_block_number which is already the minimum across all chains
@@ -19,22 +20,73 @@ pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
     let all_blocks_settled = last_settled_block_number == app_instance.last_proved_block_number;
     let at_block_start = app_instance.last_proved_block_number + 1 == app_instance.block_number;
     let no_sequences_in_current = app_instance.previous_block_last_sequence + 1 == app_instance.sequence;
+    
+    // Check for pending jobs
     let no_pending_jobs = app_instance.jobs.as_ref()
         .map(|jobs| jobs.pending_jobs_count == 0)
         .unwrap_or(true);
     
-    if all_blocks_settled && at_block_start && no_sequences_in_current && no_pending_jobs {
-        debug!(
-            "App instance {} can be removed: settled={}, proved={}, current_block={}, prev_seq={}, current_seq={}, pending_jobs=0",
+    // For running jobs, we need to check if there are jobs that are not in pending or failed state
+    // Since there's no direct running_jobs field, we'll rely on the fact that running jobs
+    // would still prevent removal through other checks
+    let total_jobs = app_instance.jobs.as_ref()
+        .map(|jobs| jobs.next_job_sequence)
+        .unwrap_or(0);
+    let failed_jobs = app_instance.jobs.as_ref()
+        .map(|jobs| jobs.failed_jobs_count)
+        .unwrap_or(0);
+    let pending_jobs = app_instance.jobs.as_ref()
+        .map(|jobs| jobs.pending_jobs_count)
+        .unwrap_or(0);
+    
+    // If there are jobs that are neither pending nor failed, they might be running
+    let potentially_running = total_jobs > (failed_jobs + pending_jobs);
+    
+    // Check if there are any active settlement jobs
+    let no_active_settlement_jobs = app_instance.settlements
+        .iter()
+        .all(|(_, settlement)| settlement.settlement_job.is_none());
+    
+    // Calculate blocks behind for logging
+    let blocks_behind = if app_instance.last_proved_block_number > last_settled_block_number {
+        app_instance.last_proved_block_number - last_settled_block_number
+    } else {
+        0
+    };
+    
+    // Log detailed information about the decision
+    if !all_blocks_settled || !no_active_settlement_jobs || potentially_running {
+        info!(
+            "App instance {} CANNOT be removed: settled={}, proved={}, blocks_behind={}, has_settlement_jobs={}, pending_jobs={}, potentially_running_jobs={}",
             app_instance.id,
             last_settled_block_number,
             app_instance.last_proved_block_number,
-            app_instance.block_number,
-            app_instance.previous_block_last_sequence,
-            app_instance.sequence
+            blocks_behind,
+            !no_active_settlement_jobs,
+            pending_jobs,
+            potentially_running
+        );
+    }
+    
+    if all_blocks_settled && at_block_start && no_sequences_in_current && no_pending_jobs && !potentially_running && no_active_settlement_jobs {
+        info!(
+            "App instance {} can be safely removed: all blocks settled ({}), at block start, no current sequences, no jobs",
+            app_instance.id,
+            last_settled_block_number
         );
         true
     } else {
+        debug!(
+            "App instance {} cannot be removed: settled={} (need {}), at_start={}, no_seq={}, no_pending={}, no_running={}, no_settlement_jobs={}",
+            app_instance.id,
+            last_settled_block_number,
+            app_instance.last_proved_block_number,
+            at_block_start,
+            no_sequences_in_current,
+            no_pending_jobs,
+            !potentially_running,
+            no_active_settlement_jobs
+        );
         false
     }
 }

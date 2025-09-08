@@ -307,7 +307,13 @@ impl JobSearcher {
             }
 
             // Sleep before next cycle
-            sleep(Duration::from_secs(5)).await;
+            // Settlement nodes check more frequently (5 seconds) vs regular nodes (15 seconds)
+            let sleep_duration = if self.state.is_settle_only() {
+                Duration::from_secs(5)
+            } else {
+                Duration::from_secs(15)
+            };
+            sleep(sleep_duration).await;
         }
     }
 

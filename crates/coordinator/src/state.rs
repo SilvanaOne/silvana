@@ -437,6 +437,24 @@ impl SharedState {
     pub fn is_settle_only(&self) -> bool {
         self.settle_only.load(Ordering::Acquire)
     }
+    
+    /// Check if there are any settle jobs pending in the multicall requests
+    pub async fn has_settle_jobs_pending(&self) -> bool {
+        let requests = self.multicall_requests.lock().await;
+        for (_app_instance, req) in requests.iter() {
+            // Check if any create_app_jobs are settle jobs
+            for create_job in &req.create_app_jobs {
+                if create_job.method_name == "settle" {
+                    return true;
+                }
+            }
+            // In settle mode, any start jobs should be settlement-related
+            if self.is_settle_only() && !req.start_jobs.is_empty() {
+                return true;
+            }
+        }
+        false
+    }
 
     /// Add a create job request to the batch
     #[allow(dead_code)]
