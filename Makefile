@@ -189,16 +189,27 @@ build-x86: ## Build coordinator for Ubuntu Linux x86_64 (amd64) using Docker
 	@echo "✅ Silvana built successfully for x86_64"
 	@echo "📦 Binary location: docker/coordinator/release/x86/silvana"
 
-build-all: build-arm build-x86 ## Build coordinator for both ARM64 and x86_64
-	@echo "✅ Built Silvana for all architectures"
+build-mac: ## Build coordinator for macOS Apple Silicon (M1/M2/M3) natively
+	@echo "🍎 Building Silvana for macOS Apple Silicon..."
+	@mkdir -p docker/coordinator/release/mac
+	@echo "🔨 Building with cargo for Apple Silicon..."
+	@cargo build --release --bin silvana
+	@cp target/release/silvana docker/coordinator/release/mac/silvana
+	@echo "✅ Silvana built successfully for macOS Apple Silicon"
+	@echo "📦 Binary location: docker/coordinator/release/mac/silvana"
 
-release-archives: build-all ## Build and create release archives for all architectures
+build-all: build-arm build-x86 build-mac ## Build coordinator for all platforms (Linux ARM64, x86_64, macOS Silicon)
+	@echo "✅ Built Silvana for all platforms"
+
+release-archives: build-all ## Build and create release archives for all platforms
 	@echo "📦 Creating release archives..."
 	@mkdir -p docker/coordinator/release/github
-	@echo "📦 Creating ARM64 archive..."
+	@echo "📦 Creating ARM64 Linux archive..."
 	@cd docker/coordinator/release/arm && tar -czf ../github/silvana-arm64-linux.tar.gz silvana
-	@echo "📦 Creating x86_64 archive..."
+	@echo "📦 Creating x86_64 Linux archive..."
 	@cd docker/coordinator/release/x86 && tar -czf ../github/silvana-x86_64-linux.tar.gz silvana
+	@echo "📦 Creating macOS Apple Silicon archive..."
+	@cd docker/coordinator/release/mac && tar -czf ../github/silvana-macos-silicon.tar.gz silvana
 	@echo "📦 Calculating checksums..."
 	@cd docker/coordinator/release/github && shasum -a 256 *.tar.gz > checksums.txt
 	@echo "✅ Release archives created in 'docker/coordinator/release/github/' directory:"
@@ -210,7 +221,7 @@ release-archives: build-all ## Build and create release archives for all archite
 	@echo "  3. Include the checksums.txt for verification"
 
 # Usage: make github-release VERSION=v1.0.0
-github-release: release-archives ## Create a GitHub release using gh CLI
+github-release: release-archives ## Create a GitHub release using gh CLI (all platforms)
 	@if [ -z "$(VERSION)" ]; then \
 		echo "❌ Error: VERSION is required"; \
 		echo "Usage: make github-release VERSION=v1.0.0"; \
@@ -231,6 +242,7 @@ github-release: release-archives ## Create a GitHub release using gh CLI
 		--generate-notes \
 		docker/coordinator/release/github/silvana-arm64-linux.tar.gz \
 		docker/coordinator/release/github/silvana-x86_64-linux.tar.gz \
+		docker/coordinator/release/github/silvana-macos-silicon.tar.gz \
 		docker/coordinator/release/github/checksums.txt
 	@echo "✅ Release $(VERSION) created successfully!"
 
