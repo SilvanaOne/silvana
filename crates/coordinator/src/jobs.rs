@@ -184,12 +184,12 @@ impl JobsTracker {
         
         for (app_instance_id, original_timestamp) in &instances_to_check {
             // First check if the AppInstance is ready for removal
-            // (all sequences are in blocks and all blocks are proved)
+            // (all sequences are in blocks, all blocks are proved, and all proved blocks are settled)
             match is_app_instance_ready_for_removal(app_instance_id).await {
                 Ok(ready_for_removal) => {
                     if !ready_for_removal {
-                        // AppInstance has pending sequences or unproved blocks, keep it
-                        debug!("App_instance {} has pending sequences or unproved blocks, keeping", app_instance_id);
+                        // AppInstance has pending sequences, unproved blocks, or unsettled blocks, keep it
+                        debug!("App_instance {} has pending sequences, unproved blocks, or unsettled blocks, keeping", app_instance_id);
                         instances_with_jobs += 1;
                         continue;
                     }
@@ -208,7 +208,7 @@ impl JobsTracker {
                                 };
                                 
                                 if should_remove {
-                                    debug!("App_instance {} is ready for removal (no pending sequences/blocks) and has 0 pending jobs, removing", app_instance_id);
+                                    debug!("App_instance {} is ready for removal (all blocks settled and proved) and has 0 pending jobs, removing", app_instance_id);
                                     self.remove_app_instance(app_instance_id).await;
                                     removed_count += 1;
                                 } else {
@@ -558,17 +558,28 @@ async fn is_app_instance_ready_for_removal(app_instance_id: &str) -> Result<bool
     // Check conditions using the fetched AppInstance:
     // 1. sequence == previous_block_last_sequence + 1 (no new sequences not in blocks)
     // 2. last_proved_block_number + 1 == block_number (all blocks are proved)
+    // 3. last_settled_block_number >= last_proved_block_number (all proved blocks are settled)
     let no_pending_sequences = app_instance.sequence == app_instance.previous_block_last_sequence + 1;
     let all_blocks_proved = app_instance.last_proved_block_number + 1 == app_instance.block_number;
+    let all_blocks_settled = app_instance.last_settled_block_number >= app_instance.last_proved_block_number;
+    
+    // Calculate blocks behind for logging
+    let blocks_behind = if app_instance.last_proved_block_number > app_instance.last_settled_block_number {
+        app_instance.last_proved_block_number - app_instance.last_settled_block_number
+    } else {
+        0
+    };
     
     debug!(
-        "AppInstance {} state: sequence={}, prev_block_last_seq={}, last_proved_block={}, block_number={} -> ready_for_removal={}",
+        "AppInstance {} state: sequence={}, prev_block_last_seq={}, last_proved_block={}, last_settled_block={}, block_number={}, blocks_behind={} -> ready_for_removal={}",
         app_instance_id, app_instance.sequence, app_instance.previous_block_last_sequence, 
-        app_instance.last_proved_block_number, app_instance.block_number,
-        no_pending_sequences && all_blocks_proved
+        app_instance.last_proved_block_number, app_instance.last_settled_block_number,
+        app_instance.block_number, blocks_behind,
+        no_pending_sequences && all_blocks_proved && all_blocks_settled
     );
     
-    Ok(no_pending_sequences && all_blocks_proved)
+    // Only ready for removal if all conditions are met
+    Ok(no_pending_sequences && all_blocks_proved && all_blocks_settled)
 }
 
 /// Helper function to fetch pending_jobs_count from embedded Jobs in AppInstance
