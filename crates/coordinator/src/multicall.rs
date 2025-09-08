@@ -1,10 +1,9 @@
 use crate::constants::MULTICALL_INTERVAL_SECS;
 use crate::error::{CoordinatorError, Result};
 use crate::metrics::CoordinatorMetrics;
-use crate::state::{SharedState, StartedJob};
+use crate::state::{SharedState, StartedJob, TerminateJobRequest};
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::time::{Duration, sleep};
+use tokio::time::{Duration, sleep, Instant};
 use tracing::{debug, error, info, warn};
 
 /// Multicall processor that monitors multicall_requests and executes batched operations
@@ -454,10 +453,15 @@ impl MulticallProcessor {
                                                             start_job.job_sequence
                                                         );
                                                     } else {
-                                                        info!(
-                                                            "Settlement job {} has no settlement_chain (method: {}) - skipping",
+                                                        warn!(
+                                                            "🧹 Orphaned settlement job {} detected (method: {}) - adding to terminate queue",
                                                             start_job.job_sequence, fresh_job.app_instance_method
                                                         );
+
+                                                        requests.terminate_jobs.push(TerminateJobRequest {
+                                                            job_sequence: start_job.job_sequence,
+                                                            _timestamp: Instant::now(),
+                                                        });
                                                     }
                                                 }
                                                 Err(e) => {

@@ -1130,6 +1130,41 @@ public fun create_app_job(
     };
     let method = vec_map::get(&app_instance.methods, &method_name);
 
+    // If this is a settlement job, validate BEFORE creating the job to avoid orphans
+    if (option::is_some(&settlement_chain)) {
+        let chain = *option::borrow(&settlement_chain);
+        if (!vec_map::contains(&app_instance.settlements, &chain)) {
+            multicall::emit_operation_failed(
+                string::utf8(b"create_job"),
+                string::utf8(b"app_instance"),
+                0, // Using 0 as entity_id since we don't have a job sequence yet
+                string::utf8(ESettlementChainNotFound),
+                ctx.sender(),
+                timestamp_ms(clock),
+                option::some(method_name.into_bytes()),
+            );
+            return option::none()
+        };
+        
+        // Check that there's no existing settlement job for this chain BEFORE creating job
+        let settlement = vec_map::get(&app_instance.settlements, &chain);
+        let existing_job = settlement::get_settlement_job(settlement);
+        if (option::is_some(&existing_job)) {
+            multicall::emit_operation_failed(
+                string::utf8(b"create_job"),
+                string::utf8(b"app_instance"),
+                0, // Using 0 as entity_id since we don't have a job sequence yet
+                string::utf8(ESettlementJobAlreadyExists),
+                ctx.sender(),
+                timestamp_ms(clock),
+                option::some(method_name.into_bytes()),
+            );
+            // Return early - no job created, no orphans
+            return option::none()
+        };
+    };
+
+    // Now create the job after all validation passes
     let (success, job_id) = jobs::create_job(
         &mut app_instance.jobs,
         job_description,
@@ -1154,44 +1189,13 @@ public fun create_app_job(
         return option::none()
     };
 
-    // If this is a settlement job, update the settlement_job field in the Settlement struct
+    // If this is a settlement job, update the settlement_job field in the Settlement struct  
     if (option::is_some(&settlement_chain)) {
         let chain = *option::borrow(&settlement_chain);
-        if (!vec_map::contains(&app_instance.settlements, &chain)) {
-            multicall::emit_operation_failed(
-                string::utf8(b"create_job"),
-                string::utf8(b"app_instance"),
-                0, // Using 0 as entity_id since we don't have a job sequence yet
-                string::utf8(ESettlementChainNotFound),
-                ctx.sender(),
-                timestamp_ms(clock),
-                option::some(method_name.into_bytes()),
-            );
-            // Note: Job was created but settlement chain not found
-            // We should probably fail the job here, but keeping it for now
-            return option::none()
-        };
         let settlement = vec_map::get_mut(
             &mut app_instance.settlements,
             &chain,
         );
-
-        // Check that there's no existing settlement job for this chain
-        let existing_job = settlement::get_settlement_job(settlement);
-        if (option::is_some(&existing_job)) {
-            multicall::emit_operation_failed(
-                string::utf8(b"create_job"),
-                string::utf8(b"app_instance"),
-                0, // Using 0 as entity_id since we don't have a job sequence yet
-                string::utf8(ESettlementJobAlreadyExists),
-                ctx.sender(),
-                timestamp_ms(clock),
-                option::some(method_name.into_bytes()),
-            );
-            // Note: Job was created but settlement job already exists
-            return option::none()
-        };
-
         settlement::set_settlement_job(settlement, option::some(job_id));
     };
 
