@@ -127,6 +127,12 @@ pub enum Commands {
         tx_type: TransactionType,
     },
     
+    /// Generate keypairs for different blockchains
+    Keypair {
+        #[command(subcommand)]
+        subcommand: KeypairCommands,
+    },
+    
     /// Check balance
     Balance {
         #[arg(long, env = "SUI_RPC_URL")]
@@ -213,5 +219,12 @@ pub enum TransactionType {
         #[arg(long, default_value = "0.1")]
         gas: f64,
     },
+    
+}
+
+#[derive(Subcommand)]
+pub enum KeypairCommands {
+    /// Generate a new Sui Ed25519 keypair
+    Sui,
 }
 

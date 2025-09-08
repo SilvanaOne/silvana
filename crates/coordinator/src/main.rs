@@ -31,12 +31,16 @@ use dotenvy::dotenv;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
-use crate::cli::{Cli, Commands, TransactionType};
-use crate::error::Result;
+use crate::cli::{Cli, Commands, TransactionType, KeypairCommands};
+use crate::error::{Result, CoordinatorError};
 use anyhow::anyhow;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    main_impl().await
+}
+
+async fn main_impl() -> Result<()> {
     // Load .env file from current directory
     dotenv().ok();
 
@@ -65,6 +69,7 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Process commands
     match cli.command {
         Commands::Start {
             rpc_url,
@@ -77,9 +82,11 @@ async fn main() -> Result<()> {
             settle,
         } => {
             // Resolve the RPC URL using the helper from sui crate
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
             // Initialize logging with New Relic tracing layer
-            monitoring::init_logging_with_newrelic().await?;
+            monitoring::init_logging_with_newrelic().await
+                .map_err(CoordinatorError::Other)?;
             info!("✅ Logging initialized with New Relic support");
 
             // Initialize New Relic OpenTelemetry exporters
@@ -91,7 +98,8 @@ async fn main() -> Result<()> {
             }
 
             // Initialize monitoring system
-            monitoring::init_monitoring()?;
+            monitoring::init_monitoring()
+                .map_err(CoordinatorError::Other)?;
 
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -116,8 +124,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Fetch and display the app instance
             match sui::fetch::fetch_app_instance(&instance).await {
@@ -329,8 +339,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Fetch and display the raw object
             match sui::fetch::fetch_object(&object).await {
@@ -361,8 +373,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
             let app_instance = match sui::fetch::fetch_app_instance(&instance).await {
@@ -544,8 +558,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
             let app_instance = match sui::fetch::fetch_app_instance(&instance).await {
@@ -663,8 +679,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
             let app_instance = match sui::fetch::fetch_app_instance(&instance).await {
@@ -812,8 +830,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
             let app_instance = match sui::fetch::fetch_app_instance(&instance).await {
@@ -943,7 +963,8 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve RPC URL and initialize Sui connection with optional private key
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
             match sui::SharedSuiState::initialize_with_optional_key(
                 &rpc_url,
                 private_key.as_deref(),
@@ -1111,11 +1132,14 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Show the balance, passing the optional address
-            sui::print_balance_info(address.as_deref()).await?;
+            sui::print_balance_info(address.as_deref()).await
+                .map_err(CoordinatorError::Other)?;
 
             Ok(())
         }
@@ -1128,8 +1152,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             println!("Checking gas coin pool and splitting if needed...");
 
@@ -1139,7 +1165,8 @@ async fn main() -> Result<()> {
 
                     // Show updated balance info
                     println!("\nUpdated balance:");
-                    sui::print_balance_info(None).await?;
+                    sui::print_balance_info(None).await
+                        .map_err(CoordinatorError::Other)?;
                 }
                 Err(e) => {
                     error!("Failed to manage gas coin pool: {}", e);
@@ -1158,8 +1185,10 @@ async fn main() -> Result<()> {
                 .init();
 
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())?;
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
+                .map_err(CoordinatorError::Other)?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             let network_name = sui::get_network_name();
             let address = sui::get_current_address();
@@ -1232,11 +1261,13 @@ async fn main() -> Result<()> {
             let rpc_url = sui::resolve_rpc_url(None, Some(chain.clone()))?;
 
             // Initialize Sui connection to check balance
-            sui::SharedSuiState::initialize(&rpc_url).await?;
+            sui::SharedSuiState::initialize(&rpc_url).await
+                .map_err(CoordinatorError::Other)?;
 
             // Check balance before faucet
             println!("\n📊 Balance before faucet:");
-            let balance_before = sui::get_balance_in_sui(&target_address).await?;
+            let balance_before = sui::get_balance_in_sui(&target_address).await
+                .map_err(CoordinatorError::Other)?;
             println!("   {:.4} SUI", balance_before);
 
             // Call the faucet
@@ -1261,7 +1292,8 @@ async fn main() -> Result<()> {
 
                     // Check balance after faucet
                     println!("\n📊 Balance after faucet:");
-                    let balance_after = sui::get_balance_in_sui(&target_address).await?;
+                    let balance_after = sui::get_balance_in_sui(&target_address).await
+                        .map_err(CoordinatorError::Other)?;
                     println!("   {:.4} SUI", balance_after);
 
                     let received = balance_after - balance_before;
@@ -1275,6 +1307,49 @@ async fn main() -> Result<()> {
                 }
             }
 
+            Ok(())
+        }
+        
+        Commands::Keypair { subcommand } => {
+            
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::fmt::layer())
+                .with(tracing_subscriber::EnvFilter::from_default_env())
+                .init();
+            
+            match subcommand {
+                KeypairCommands::Sui => {
+                    println!("🔑 Generating new Sui Ed25519 keypair...\n");
+                    
+                    match sui::keypair::generate_ed25519() {
+                        Ok(keypair) => {
+                            println!("✅ Sui Keypair Generated Successfully!\n");
+                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!("🔐 PRIVATE KEY (Keep this secret!):");
+                            println!("   {}", keypair.sui_private_key);
+                            println!();
+                            println!("📍 ADDRESS:");
+                            println!("   {}", keypair.address);
+                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!();
+                            println!("⚠️  IMPORTANT:");
+                            println!("   • Save your private key in a secure location");
+                            println!("   • Never share your private key with anyone");
+                            println!("   • You will need this key to sign transactions");
+                            println!();
+                            println!("💡 To use this keypair:");
+                            println!("   export SUI_SECRET_KEY=\"{}\"", keypair.sui_private_key);
+                            println!("   export SUI_ADDRESS=\"{}\"", keypair.address);
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to generate keypair: {}", e);
+                            return Err(anyhow::anyhow!("Keypair generation failed: {}", e).into());
+                        }
+                    }
+                }
+            }
+            
             Ok(())
         }
     }
