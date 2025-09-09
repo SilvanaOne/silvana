@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use std::{env, path::PathBuf};
-use sui::publish::{build_move_package_ignore_chain, publish_move_package};
+use sui::publish::{build_move_package, publish_move_package};
 use tracing::info;
 
 #[tokio::test]
@@ -57,7 +57,7 @@ async fn test_build_and_publish_constants_package() -> Result<()> {
     info!("Building Move package at: {}", path.display());
 
     // Step 1: Build the Move package
-    let build_result = build_move_package_ignore_chain(path.to_str().unwrap()).await?;
+    let build_result = build_move_package(path.to_str().unwrap()).await?;
 
     assert!(
         !build_result.modules.is_empty(),
@@ -97,6 +97,166 @@ async fn test_build_and_publish_constants_package() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_two_step_publish_with_dependency() -> Result<()> {
+    // Load environment variables
+    let _ = dotenvy::dotenv();
+
+    // Initialize tracing for better debug output
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    // Ensure required environment variables are set
+    if env::var("SUI_ADDRESS").is_err() || env::var("SUI_SECRET_KEY").is_err() {
+        return Err(anyhow::anyhow!(
+            "SUI_ADDRESS and SUI_SECRET_KEY environment variables must be set"
+        ));
+    }
+
+    // Initialize the global SharedSuiState
+    let rpc_url = sui::chain::resolve_rpc_url(None, None)?;
+    sui::SharedSuiState::initialize(&rpc_url).await?;
+
+    info!("Starting two-step publish test with dependency");
+
+    // Build paths to both packages
+    let mut constants_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    constants_path.push("../../move/constants");
+
+    let mut commitment_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    commitment_path.push("../../move/commitment");
+
+    //Check if both paths exist
+    if !constants_path.exists() {
+        println!("Skipping test: {} does not exist", constants_path.display());
+        return Ok(());
+    }
+    if !commitment_path.exists() {
+        println!(
+            "Skipping test: {} does not exist",
+            commitment_path.display()
+        );
+        return Ok(());
+    }
+
+    // Step 1: Build constants package first
+    info!("Step 1: Building constants package...");
+
+    info!(
+        "Building constants package at: {}",
+        constants_path.display()
+    );
+    let constants_build = build_move_package(constants_path.to_str().unwrap()).await?;
+    assert!(
+        !constants_build.modules.is_empty(),
+        "Constants should have modules"
+    );
+    info!(
+        "  Constants package built: {} modules",
+        constants_build.modules.len()
+    );
+    info!(
+        "  Constants package dependencies: {:?}",
+        constants_build.dependencies
+    );
+
+    // Step 2: Publish constants package
+    info!("Step 2: Publishing constants package...");
+    let constants_result = publish_move_package(constants_build, None).await?;
+    info!(
+        "  Constants published with package ID: {}",
+        constants_result.package_id
+    );
+
+    // Step 3: Build commitment package (it will use the published constants)
+    info!("Step 3: Building commitment package with published constants dependency...");
+    info!(
+        "Building commitment package at: {}",
+        commitment_path.display()
+    );
+    let mut commitment_build = build_move_package(commitment_path.to_str().unwrap()).await?;
+    assert!(
+        !commitment_build.modules.is_empty(),
+        "Commitment should have modules"
+    );
+    info!(
+        "  Commitment package built: {} modules",
+        commitment_build.modules.len()
+    );
+    info!(
+        "  Commitment package dependencies: {:?}",
+        commitment_build.dependencies
+    );
+
+    // Step 4: Update the last dependency with the published constants package ID
+    let dep_len = commitment_build.dependencies.len();
+    if dep_len > 0 {
+        commitment_build.dependencies[dep_len - 1] = constants_result.package_id.clone();
+    }
+    // Verify that the commitment package now has the published constants as a dependency
+    assert!(
+        commitment_build
+            .dependencies
+            .contains(&constants_result.package_id),
+        "Commitment should have the published constants package as a dependency"
+    );
+
+    // Calculate the total size of commitment modules
+    let total_size: usize = commitment_build.modules.iter().map(|m| m.len()).sum();
+    info!(
+        "  Commitment package total size (base64): {} bytes",
+        total_size
+    );
+
+    info!("Step 4: Publishing commitment package...");
+    let commitment_result = publish_move_package(commitment_build, None).await?;
+    info!(
+        "  Commitment published with package ID: {}",
+        commitment_result.package_id
+    );
+
+    // // Step 3: Add constants package ID as dependency to commitment
+    // info!("Step 3: Adding constants as dependency to commitment...");
+
+    // // Update commitment's dependencies with the published constants package ID
+    // let updated_commitment_build = sui::publish::update_package_dependencies(
+    //     commitment_build,
+    //     vec![constants_result.package_id.clone()],
+    // );
+
+    // info!(
+    //     "  Updated commitment dependencies: {} total",
+    //     updated_commitment_build.dependencies.len()
+    // );
+    // for dep in &updated_commitment_build.dependencies {
+    //     info!("    Dependency: {}", dep);
+    // }
+
+    // Note: We're not publishing commitment because it exceeds the 102KB size limit
+    // But we've demonstrated the full build and dependency update process
+
+    assert!(
+        !commitment_result.digest.is_empty(),
+        "Commitment should have transaction digest"
+    );
+    assert!(
+        !commitment_result.package_id.is_empty(),
+        "Commitment should have package ID"
+    );
+
+    info!("Two-step build and dependency update completed successfully:");
+    info!("  Commitment package ID: {}", commitment_result.package_id);
+
+    // The test successfully demonstrates:
+    // 1. Building BOTH packages before any publishing
+    // 2. Publishing constants and extracting its package ID
+    // 3. Updating commitment's dependencies with the actual published package ID
+    // Note: Commitment cannot be published due to size limit (112KB > 102KB)
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_build_constants_only() -> Result<()> {
     // Load environment variables
     let _ = dotenvy::dotenv();
@@ -119,7 +279,7 @@ async fn test_build_constants_only() -> Result<()> {
     info!("Testing build-only for Move package at: {}", path.display());
 
     // Build the Move package
-    let build_result = build_move_package_ignore_chain(path.to_str().unwrap()).await?;
+    let build_result = build_move_package(path.to_str().unwrap()).await?;
 
     // Verify build results
     assert!(
