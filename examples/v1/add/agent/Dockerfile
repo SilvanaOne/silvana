@@ -9,6 +9,9 @@ COPY cache ./cache
 COPY node_modules ./node_modules
 COPY dist ./dist
 RUN npm --version
-RUN npm run build    
+#RUN npm config set strict-ssl false
+#RUN npm install --force --verbose
+RUN npm run build
+#RUN npm run build        
 RUN echo "✅ Build completed"
 CMD ["npm", "run", "agent"]

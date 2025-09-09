@@ -23,7 +23,7 @@ import {
   updateBlockSettlementTxHash,
   updateBlockSettlementTxIncludedInBlock,
   rejectProof,
-} from "@silvana-one/agent";
+} from "./grpc.js";
 
 interface SettleParams {
   privateKey?: string; // Optional - will use secret if not provided

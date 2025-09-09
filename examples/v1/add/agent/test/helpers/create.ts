@@ -3,9 +3,9 @@ import {
   executeTx,
   waitTx,
   createTestRegistry,
-  getSuiAddress,
 } from "@silvana-one/coordination";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { getSuiAddress } from "./key.js";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
 const developerName = "AddDeveloper";

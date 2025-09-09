@@ -25,6 +25,11 @@ describe("Batch", async () => {
         }s - Total TX: ${totalTransactions} - TPS: ${tps}`
       );
       for (let i = 0; i < 10; i++) {
+        // console.log(
+        //   `[${new Date().toISOString()}] Batch ${batchIteration}, action ${
+        //     i + 1
+        //   }/10 - Sending add action`
+        // );
         try {
           await action({
             action: "add",
@@ -36,8 +41,17 @@ describe("Batch", async () => {
         }
         totalTransactions++;
         const sleepTime = Math.floor(Math.random() * maxDelay) + 2000;
+        // console.log(
+        //   `[${new Date().toISOString()}] Batch ${batchIteration}, action ${
+        //     i + 1
+        //   }/10 - Sleeping for ${sleepTime / 1000}s`
+        // );
         await sleep(sleepTime);
       }
+      // console.log(
+      //   `[${new Date().toISOString()}] Batch ${batchIteration} complete - Sleeping for 1 minute before next batch`
+      // );
+      // await sleep(1 * 60 * 1000);
     }
   });
 });

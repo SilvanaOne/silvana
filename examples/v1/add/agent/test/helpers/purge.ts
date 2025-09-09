@@ -1,17 +1,18 @@
 import { Transaction } from "@mysten/sui/transactions";
-import { executeTx, waitTx, getSuiAddress } from "@silvana-one/coordination";
+import { executeTx, waitTx } from "@silvana-one/coordination";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
+import { getSuiAddress } from "./key.js";
 
 export async function purge(params: {
   proved_sequence: number;
   appID?: string;
   appInstanceID?: string;
 }) {
-  const {
-    proved_sequence,
+  const { 
+    proved_sequence, 
     appID = process.env.APP_OBJECT_ID,
-    appInstanceID = process.env.APP_INSTANCE_ID,
+    appInstanceID = process.env.APP_INSTANCE_ID
   } = params;
   const suiSecretKey: string = process.env.SUI_SECRET_KEY!;
 
@@ -38,10 +39,10 @@ export async function purge(params: {
   const tx = new Transaction();
   // public fun purge_rollback_records(app: &mut App, instance: &mut AppInstance, proved_sequence: u64, clock: &Clock)
   const args = [
-    tx.object(appID),
+    tx.object(appID), 
     tx.object(appInstanceID),
     tx.pure.u64(proved_sequence),
-    tx.object(SUI_CLOCK_OBJECT_ID),
+    tx.object(SUI_CLOCK_OBJECT_ID)
   ];
 
   tx.moveCall({

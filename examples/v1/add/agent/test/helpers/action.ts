@@ -1,7 +1,7 @@
 import { Transaction } from "@mysten/sui/transactions";
 import { executeTx, waitTx } from "@silvana-one/coordination";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { getSuiAddress } from "@silvana-one/coordination";
+import { getSuiAddress } from "./key.js";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
 interface JobCreatedEvent {
@@ -45,12 +45,12 @@ export async function action(params: {
   appID?: string;
   appInstanceID?: string;
 }): Promise<ActionResult> {
-  const {
-    action,
-    value,
-    index,
+  const { 
+    action, 
+    value, 
+    index, 
     appID = process.env.APP_OBJECT_ID,
-    appInstanceID = process.env.APP_INSTANCE_ID,
+    appInstanceID = process.env.APP_INSTANCE_ID 
   } = params;
   const suiSecretKey: string = process.env.SUI_SECRET_KEY!;
 
@@ -66,7 +66,7 @@ export async function action(params: {
   if (!appID) {
     throw new Error("APP_OBJECT_ID is not set");
   }
-
+  
   if (!appInstanceID) {
     throw new Error("APP_INSTANCE_ID is not set");
   }
@@ -81,10 +81,10 @@ export async function action(params: {
   // public fun multiply(app: &mut App, instance: &mut AppInstance, index: u32, value: u256, clock: &Clock, ctx: &mut TxContext)
   const args = [
     tx.object(appID),
-    tx.object(appInstanceID),
-    tx.pure.u32(index),
+    tx.object(appInstanceID), 
+    tx.pure.u32(index), 
     tx.pure.u256(value),
-    tx.object(SUI_CLOCK_OBJECT_ID),
+    tx.object(SUI_CLOCK_OBJECT_ID)
   ];
 
   tx.moveCall({
@@ -117,17 +117,17 @@ export async function action(params: {
     throw new Error("No events found");
   }
   //console.log("Events:", events);
-
+  
   let actionResult: ActionResult | null = null;
   let jobCreatedEvent: JobCreatedEvent | null = null;
-
+  
   for (const event of events) {
     if (
       event.type.endsWith("::main::ValueAddedEvent") ||
       event.type.endsWith("::main::ValueMultipliedEvent")
     ) {
       const json = event.parsedJson as any;
-
+      
       // Updated for nested CommitmentData structure
       actionResult = {
         index: json.index,
@@ -136,39 +136,27 @@ export async function action(params: {
         new_value: BigInt(json.new_value),
         old_sum: BigInt(json.old_sum),
         old_value: BigInt(json.old_value),
-        old_actions_commitment: convertCommitment(
-          json.old_commitment?.actions_commitment
-        ),
-        new_actions_commitment: convertCommitment(
-          json.new_commitment?.actions_commitment
-        ),
-        old_state_commitment: convertCommitment(
-          json.old_commitment?.state_commitment
-        ),
-        new_state_commitment: convertCommitment(
-          json.new_commitment?.state_commitment
-        ),
-        old_actions_sequence: BigInt(
-          json.old_commitment?.actions_sequence || 0
-        ),
-        new_actions_sequence: BigInt(
-          json.new_commitment?.actions_sequence || 0
-        ),
+        old_actions_commitment: convertCommitment(json.old_commitment?.actions_commitment),
+        new_actions_commitment: convertCommitment(json.new_commitment?.actions_commitment),
+        old_state_commitment: convertCommitment(json.old_commitment?.state_commitment),
+        new_state_commitment: convertCommitment(json.new_commitment?.state_commitment),
+        old_actions_sequence: BigInt(json.old_commitment?.actions_sequence || 0),
+        new_actions_sequence: BigInt(json.new_commitment?.actions_sequence || 0),
       };
     } else if (event.type.endsWith("::jobs::JobCreatedEvent")) {
       jobCreatedEvent = event.parsedJson as JobCreatedEvent;
     }
   }
-
+  
   if (!actionResult) {
     throw new Error("No ValueAddedEvent or ValueMultipliedEvent found");
   }
-
+  
   // Add JobCreatedEvent to the result if found
   if (jobCreatedEvent) {
     actionResult.jobCreatedEvent = jobCreatedEvent;
   }
-
+  
   return actionResult;
 }
 

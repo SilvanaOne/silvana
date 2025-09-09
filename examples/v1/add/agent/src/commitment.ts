@@ -1,12 +1,14 @@
-import { Field, UInt32, UInt64, Struct, Encoding, Poseidon } from "o1js";
 import {
-  Fr,
-  update,
-  digestStruct,
-  scalar,
-  R,
-  convertFieldToCanonicalElement,
-} from "@silvana-one/mina-utils";
+  Field,
+  UInt32,
+  UInt64,
+  Struct,
+  Encoding,
+  Provable,
+  Poseidon,
+} from "o1js";
+import { Fr, update, digestStruct, scalar, R } from "@silvana-one/mina-utils";
+import { convertFieldToCanonicalElement } from "./convert.js";
 
 const ADD_SCALAR = scalar(Encoding.stringToFields("add")[0].toBigInt());
 const MULTIPLY_SCALAR = scalar(

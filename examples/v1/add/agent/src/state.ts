@@ -6,7 +6,7 @@ import {
   AddProgramProof,
 } from "./circuit.js";
 import { AddProgramCommitment } from "./commitment.js";
-import { readDataAvailability, rejectProof } from "@silvana-one/agent";
+import { readDataAvailability, rejectProof } from "./grpc.js";
 import {
   UInt32,
   Field,
@@ -54,12 +54,12 @@ export async function merge(params: {
     { serialized: proof1Serialized, sequences: sequences1, name: "proof 1" },
     { serialized: proof2Serialized, sequences: sequences2, name: "proof 2" },
   ];
-
+  
   const proofs: AddProgramProof[] = [];
-
+  
   for (const { serialized, sequences, name } of proofData) {
     let proof: AddProgramProof;
-
+    
     // Deserialize the proof
     try {
       console.log(`Deserializing ${name}...`);
@@ -76,7 +76,7 @@ export async function merge(params: {
       }
       throw error;
     }
-
+    
     // Verify the proof
     console.log(`Verifying ${name}...`);
     try {
@@ -88,17 +88,15 @@ export async function merge(params: {
       console.error(`Error verifying ${name}:`, error);
       const rejectProofResponse = await rejectProof(blockNumber, sequences);
       if (!rejectProofResponse.success) {
-        throw new Error(
-          `Failed to reject ${name}: ${rejectProofResponse.message}`
-        );
+        throw new Error(`Failed to reject ${name}: ${rejectProofResponse.message}`);
       }
       throw error;
     }
     console.log(`${name} verified`);
-
+    
     proofs.push(proof);
   }
-
+  
   const [proof1, proof2] = proofs;
 
   // Merge the proofs

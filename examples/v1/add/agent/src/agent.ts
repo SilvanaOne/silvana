@@ -7,7 +7,7 @@ import {
   submitState,
   getProof,
   getBlockProof,
-} from "@silvana-one/agent";
+} from "./grpc.js";
 import { deserializeTransitionData } from "./transition.js";
 import { getStateAndProof, SequenceState, merge } from "./state.js";
 import { serializeProofAndState, serializeState } from "./proof.js";
@@ -40,14 +40,12 @@ async function agent() {
           // Check if this is a settle job by app_instance_method
           if (response.job.appInstanceMethod === "settle") {
             console.log("⚖️ SETTLE JOB DETECTED");
-
+            
             // Verify chain is provided for settle jobs
             if (!response.job.chain) {
-              throw new Error(
-                "Settlement job received without chain parameter. Chain is required for settle jobs."
-              );
+              throw new Error("Settlement job received without chain parameter. Chain is required for settle jobs.");
             }
-
+            
             // Print all job details
             console.log("=== SETTLE JOB DETAILS ===");
             console.log(`Job Sequence: ${response.job.jobSequence}`);
