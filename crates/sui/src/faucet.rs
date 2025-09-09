@@ -13,10 +13,23 @@ const DEFAULT_DEVNET_FAUCET_URL: &str = "https://faucet.devnet.sui.io/v2/gas";
 /// Response from the devnet faucet service
 #[derive(Debug, Deserialize)]
 struct FaucetResponse {
+    #[allow(dead_code)]
+    status: Option<String>,
     error: Option<String>,
     task: Option<String>,
     #[serde(rename = "txDigests")]
     tx_digests: Option<Vec<String>>,
+    coins_sent: Option<Vec<CoinsSent>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoinsSent {
+    #[allow(dead_code)]
+    amount: u64,
+    #[allow(dead_code)]
+    id: String,
+    #[serde(rename = "transferTxDigest")]
+    transfer_tx_digest: String,
 }
 
 /// Response from the testnet faucet service (Silvana/StakeTab)
@@ -120,9 +133,10 @@ async fn request_tokens_from_devnet(address: sui::Address) -> Result<String> {
             if let Some(err) = faucet_resp.error {
                 return Err(anyhow!("Devnet faucet request was unsuccessful: {}", err));
             } else {
-                // Extract transaction digest
-                let tx_digest = faucet_resp.tx_digests
-                    .and_then(|digests| digests.first().cloned())
+                // Extract transaction digest - try multiple fields based on response format
+                let tx_digest = faucet_resp.coins_sent
+                    .and_then(|coins| coins.first().map(|c| c.transfer_tx_digest.clone()))
+                    .or_else(|| faucet_resp.tx_digests.and_then(|digests| digests.first().cloned()))
                     .or(faucet_resp.task)
                     .unwrap_or_else(|| "unknown".to_string());
                 

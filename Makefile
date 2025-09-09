@@ -358,7 +358,7 @@ store-secret: ## Store a secret via gRPC (requires: DEVELOPER, AGENT, NAME, SECR
 	@if [ -z "$(AGENT)" ]; then echo "❌ ERROR: AGENT is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
 	@if [ -z "$(NAME)" ]; then echo "❌ ERROR: NAME is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
 	@if [ -z "$(SECRET)" ]; then echo "❌ ERROR: SECRET is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
-	@COMMAND="cargo xtask store-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME) --secret '$(SECRET)'"; \
+	@COMMAND="cargo x store-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME) --secret '$(SECRET)'"; \
 	if [ -n "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	if [ -n "$(APP)" ]; then COMMAND="$$COMMAND --app $(APP)"; fi; \
 	if [ -n "$(APP_INSTANCE)" ]; then COMMAND="$$COMMAND --app-instance $(APP_INSTANCE)"; fi; \
@@ -369,7 +369,7 @@ retrieve-secret: ## Retrieve a secret via gRPC (requires: DEVELOPER, AGENT, NAME
 	@if [ -z "$(DEVELOPER)" ]; then echo "❌ ERROR: DEVELOPER is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
 	@if [ -z "$(AGENT)" ]; then echo "❌ ERROR: AGENT is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
 	@if [ -z "$(NAME)" ]; then echo "❌ ERROR: NAME is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
-	@COMMAND="cargo xtask retrieve-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME)"; \
+	@COMMAND="cargo x retrieve-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME)"; \
 	if [ -n "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	if [ -n "$(APP)" ]; then COMMAND="$$COMMAND --app $(APP)"; fi; \
 	if [ -n "$(APP_INSTANCE)" ]; then COMMAND="$$COMMAND --app-instance $(APP_INSTANCE)"; fi; \
@@ -381,7 +381,7 @@ write-config: ## Write configuration to RPC server (requires: CHAIN=[devnet|test
 	@if [ "$(CHAIN)" != "devnet" ] && [ "$(CHAIN)" != "testnet" ] && [ "$(CHAIN)" != "mainnet" ]; then \
 		echo "❌ ERROR: CHAIN must be devnet, testnet, or mainnet. Got: $(CHAIN)"; exit 1; \
 	fi
-	@COMMAND="cargo xtask write-config --chain $(CHAIN)"; \
+	@COMMAND="cargo x write-config --chain $(CHAIN)"; \
 	if [ ! -z "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	echo "🔧 Running: $$COMMAND"; \
 	eval $$COMMAND
@@ -392,7 +392,7 @@ read-config: ## Read configuration from RPC server (requires: CHAIN=[devnet|test
 	@if [ "$(CHAIN)" != "devnet" ] && [ "$(CHAIN)" != "testnet" ] && [ "$(CHAIN)" != "mainnet" ]; then \
 		echo "❌ ERROR: CHAIN must be devnet, testnet, or mainnet. Got: $(CHAIN)"; exit 1; \
 	fi
-	@COMMAND="cargo xtask read-config --chain $(CHAIN)"; \
+	@COMMAND="cargo x read-config --chain $(CHAIN)"; \
 	if [ ! -z "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	echo "🔧 Running: $$COMMAND"; \
 	eval $$COMMAND
@@ -439,4 +439,4 @@ check-schema: check-database-url check-tools ## Quick schema validation check
 # Example targets
 example-archive: ## Prepare archive with example project (examples/add)
 	@echo "📦 Packing examples/add folder to S3..."
-	@cargo xtask example-archive 
+	@cargo x example-archive 

@@ -7,6 +7,7 @@ mod coordinator;
 mod docker;
 mod error;
 mod events;
+mod example;
 mod grpc;
 mod hardware;
 mod job_id;
@@ -196,14 +197,14 @@ async fn main_impl() -> Result<()> {
                 .into());
             }
 
-            println!("🚀 Creating new Silvana project: {}", name);
+            info!("🚀 Creating new Silvana project: {}", name);
 
             // Create the project directory
             if !project_path.exists() {
                 std::fs::create_dir(&project_path)
                     .map_err(|e| anyhow::anyhow!("Failed to create project directory: {}", e))?;
             } else if force {
-                println!("⚠️  Overwriting existing folder: {}", name);
+                warn!("⚠️  Overwriting existing folder: {}", name);
                 // Clean the existing directory
                 std::fs::remove_dir_all(&project_path)
                     .map_err(|e| anyhow::anyhow!("Failed to remove existing directory: {}", e))?;
@@ -211,7 +212,7 @@ async fn main_impl() -> Result<()> {
                     .map_err(|e| anyhow::anyhow!("Failed to recreate project directory: {}", e))?;
             }
 
-            println!("📥 Downloading project template...");
+            info!("📥 Downloading project template...");
 
             // Initialize S3 client
             let s3_client = storage::S3Client::new("silvana-distribution".to_string())
@@ -231,19 +232,37 @@ async fn main_impl() -> Result<()> {
             .await
             {
                 Ok(_) => {
-                    println!("✅ Project created successfully!");
-                    println!("");
-                    println!("📁 Project structure:");
-                    println!("   {}/", name);
-                    println!("   ├── agent/     # TypeScript agent implementation");
-                    println!("   └── move/      # Move smart contracts");
-                    println!("");
-                    println!("🚀 Next steps:");
-                    println!("   cd {}", name);
-                    println!("   cd agent && npm install  # Install agent dependencies");
-                    println!("   cd move && sui move build  # Build Move contracts");
-                    println!("");
-                    println!("📖 Check the README file for more information.");
+                    info!("✅ Template downloaded successfully!");
+
+                    // Setup the example project (generate keys, fund accounts, etc.)
+                    match example::setup_example_project(&project_path, &name).await {
+                        Ok(_) => {
+                            info!("");
+                            info!("🎉 Project '{}' is ready!", name);
+                            info!("");
+                            info!("📁 Project structure:");
+                            info!("   {}/", name);
+                            info!("   ├── agent/     # TypeScript agent implementation");
+                            info!("   ├── move/      # Move smart contracts");
+                            info!("   └── silvana/   # Silvana coordinator configuration");
+                            info!("");
+                            info!("🚀 Next steps:");
+                            info!("   cd {}", name);
+                            info!("   cd agent && npm install    # Install agent dependencies");
+                            info!("   cd move && sui move build  # Build Move contracts");
+                            info!("");
+                            info!("📖 Check the README file for more information.");
+                        }
+                        Err(e) => {
+                            warn!("Failed to complete project setup: {}", e);
+                            warn!("");
+                            warn!("⚠️  Project template was downloaded but setup is incomplete.");
+                            warn!("   Error: {}", e);
+                            warn!("");
+                            warn!("   You can manually set up keys and funding later.");
+                            warn!("   Check the README file for instructions.");
+                        }
+                    }
                 }
                 Err(e) => {
                     // Clean up on failure
@@ -1572,42 +1591,40 @@ async fn main_impl() -> Result<()> {
 
                     // Check if mainnet (no faucet available)
                     if chain == "mainnet" {
-                        eprintln!("❌ Error: Faucet is not available for mainnet");
-                        eprintln!(
-                            "   Please acquire SUI tokens through an exchange or other means"
-                        );
+                        error!("❌ Faucet is not available for mainnet");
+                        error!("   Please acquire SUI tokens through an exchange or other means");
                         return Err(anyhow!("Faucet not available for mainnet").into());
                     }
 
                     // Validate amount
                     if amount > 10.0 {
-                        eprintln!("❌ Error: Amount exceeds maximum of 10 SUI");
-                        eprintln!("   Maximum faucet amount is 10 SUI per request");
+                        error!("❌ Amount exceeds maximum of 10 SUI");
+                        error!("   Maximum faucet amount is 10 SUI per request");
                         return Err(anyhow!("Amount exceeds maximum of 10 SUI").into());
                     }
 
                     if amount <= 0.0 {
-                        eprintln!("❌ Error: Amount must be greater than 0");
+                        error!("❌ Amount must be greater than 0");
                         return Err(anyhow!("Invalid amount").into());
                     }
 
                     // Get the address to fund
                     let target_address = address.unwrap_or_else(|| {
                         std::env::var("SUI_ADDRESS").unwrap_or_else(|_| {
-                            eprintln!("❌ Error: No address provided and SUI_ADDRESS not set");
+                            error!("❌ No address provided and SUI_ADDRESS not set");
                             std::process::exit(1);
                         })
                     });
 
                     // Validate address format
                     if !target_address.starts_with("0x") || target_address.len() != 66 {
-                        eprintln!("❌ Error: Invalid SUI address format: {}", target_address);
-                        eprintln!("   Address should start with '0x' and be 66 characters long");
+                        error!("❌ Invalid SUI address format: {}", target_address);
+                        error!("   Address should start with '0x' and be 66 characters long");
                         return Err(anyhow!("Invalid address format").into());
                     }
 
-                    println!("💧 Requesting {} SUI from {} faucet...", amount, chain);
-                    println!("📍 Target address: {}", target_address);
+                    info!("💧 Requesting {} SUI from {} faucet...", amount, chain);
+                    info!("📍 Target address: {}", target_address);
 
                     // Get RPC URL based on chain using the resolver
                     let rpc_url = sui::resolve_rpc_url(None, Some(chain.clone()))?;
@@ -1618,26 +1635,39 @@ async fn main_impl() -> Result<()> {
                         .map_err(CoordinatorError::Other)?;
 
                     // Check balance before faucet
-                    println!("\n📊 Balance before faucet:");
+                    info!("📊 Balance before faucet:");
                     let balance_before = sui::get_balance_in_sui(&target_address)
                         .await
                         .map_err(CoordinatorError::Other)?;
-                    println!("   {:.4} SUI", balance_before);
+                    info!("   {:.4} SUI", balance_before);
 
                     // Call the faucet
-                    println!("\n🚰 Calling faucet...");
+                    info!("🚰 Calling faucet...");
                     let faucet_result =
                         sui::request_tokens_from_faucet(&chain, &target_address, Some(amount))
                             .await;
 
                     match faucet_result {
                         Ok(tx_digest) => {
-                            println!("✅ Faucet successful!");
-                            println!("   Transaction: {}", tx_digest);
+                            info!("✅ Faucet request sent!");
+
+                            // Handle the case where transaction digest is not immediately available
+                            if tx_digest != "unknown" {
+                                info!("   Transaction: {}", tx_digest);
+                                info!(
+                                    "   🔗 Explorer: https://suiscan.xyz/{}/tx/{}",
+                                    chain, tx_digest
+                                );
+                            } else {
+                                info!(
+                                    "   🔗 Explorer: https://suiscan.xyz/{}/account/{}",
+                                    chain, target_address
+                                );
+                            }
 
                             // Wait for transaction to be processed
-                            println!(
-                                "\n⏳ Waiting {} seconds for transaction to be processed...",
+                            info!(
+                                "⏳ Waiting {} seconds for transaction to be processed...",
                                 constants::CLI_TRANSACTION_WAIT_SECS
                             );
                             tokio::time::sleep(tokio::time::Duration::from_secs(
@@ -1646,19 +1676,19 @@ async fn main_impl() -> Result<()> {
                             .await;
 
                             // Check balance after faucet
-                            println!("\n📊 Balance after faucet:");
+                            info!("📊 Balance after faucet:");
                             let balance_after = sui::get_balance_in_sui(&target_address)
                                 .await
                                 .map_err(CoordinatorError::Other)?;
-                            println!("   {:.4} SUI", balance_after);
+                            info!("   {:.4} SUI", balance_after);
 
                             let received = balance_after - balance_before;
                             if received > 0.0 {
-                                println!("\n💰 Received: {:.4} SUI", received);
+                                info!("💰 Received: {:.4} SUI", received);
                             }
                         }
                         Err(e) => {
-                            eprintln!("❌ Faucet failed: {}", e);
+                            error!("❌ Faucet failed: {}", e);
                             return Err(e.into());
                         }
                     }
@@ -1667,8 +1697,8 @@ async fn main_impl() -> Result<()> {
                 FaucetCommands::Mina { address, network } => {
                     // Validate the address format
                     if !mina::validate_mina_address(&address) {
-                        eprintln!("❌ Error: Invalid Mina address format");
-                        eprintln!(
+                        error!("❌ Invalid Mina address format");
+                        error!(
                             "   Mina addresses should start with 'B62' and be at least 55 characters"
                         );
                         return Err(anyhow!("Invalid Mina address format").into());
@@ -1676,51 +1706,51 @@ async fn main_impl() -> Result<()> {
 
                     // Validate network - the network module will handle validation
                     if mina::MinaNetwork::get_network(&network).is_none() {
-                        eprintln!("❌ Error: Invalid network '{}'", network);
-                        eprintln!(
+                        error!("❌ Invalid network '{}'", network);
+                        error!(
                             "   Supported networks: mina:devnet, zeko:testnet (or devnet, zeko for short)"
                         );
                         return Err(anyhow!("Invalid network").into());
                     }
 
-                    println!("💧 Requesting MINA from {} faucet...", network);
-                    println!("📍 Target address: {}", address);
+                    info!("💧 Requesting MINA from {} faucet...", network);
+                    info!("📍 Target address: {}", address);
 
                     // Call the Mina faucet
                     match mina::request_mina_from_faucet(&address, &network).await {
                         Ok(response) => {
                             if let Some(status) = &response.status {
                                 if status == "rate-limit" {
-                                    eprintln!("⚠️  Rate limited by faucet");
-                                    eprintln!("   Please wait 30 minutes before trying again");
+                                    error!("⚠️  Rate limited by faucet");
+                                    error!("   Please wait 30 minutes before trying again");
                                     return Err(anyhow!("Rate limited by faucet").into());
                                 }
                             }
 
                             if let Some(error) = &response.error {
-                                eprintln!("❌ Faucet error: {}", error);
+                                error!("❌ Faucet error: {}", error);
                                 return Err(anyhow!("Faucet error: {}", error).into());
                             }
 
-                            println!("✅ Faucet request successful!");
+                            info!("✅ Faucet request successful!");
                             if let Some(message) = &response.message {
-                                println!("   Response: {}", message);
+                                info!("   Response: {}", message);
                             }
 
-                            println!(
-                                "\n⏳ Note: It may take a few minutes for the funds to appear in your account"
+                            info!(
+                                "⏳ Note: It may take a few minutes for the funds to appear in your account"
                             );
 
                             // Get explorer URL from network config
                             if let Some(network_config) = mina::MinaNetwork::get_network(&network) {
                                 if let Some(explorer_url) = network_config.explorer_account_url {
-                                    println!("   Check your balance at:");
-                                    println!("   {}{}", explorer_url, address);
+                                    info!("   Check your balance at:");
+                                    info!("   {}{}", explorer_url, address);
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("❌ Faucet request failed: {}", e);
+                            error!("❌ Faucet request failed: {}", e);
                             return Err(e.into());
                         }
                     }
