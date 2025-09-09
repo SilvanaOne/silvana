@@ -42,6 +42,7 @@ pub mod keypair;
 pub mod network_info;
 pub mod object_lock;
 pub mod parse;
+pub mod publish;
 pub mod registry;
 pub mod state;
 pub mod transactions;
@@ -76,6 +77,7 @@ pub use network_info::{
     get_service_info_full, print_network_info, verify_chain_config,
 };
 pub use object_lock::{ObjectLockGuard, ObjectLockManager, get_object_lock_manager};
+pub use publish::{BuildResult, build_move_package, build_move_package_ignore_chain};
 pub use state::SharedSuiState;
 pub use transactions::{fetch_transaction_events, fetch_transaction_events_as_json};
 // Re-export selected fetch utilities for convenient access at crate root
