@@ -271,14 +271,24 @@ pub struct TransactionBlockResult {
     pub created_objects: Vec<String>,
 }
 
+/// Options for publishing Move modules
+pub struct PublishOptions {
+    /// Base64-encoded compiled modules
+    pub modules: Vec<String>,
+    /// Dependencies (usually addresses)
+    pub dependencies: Vec<String>,
+}
+
 /// Execute multiple transactions in a single transaction block
 /// Each operation is a tuple of (object_ids, module_name, function_name, args_builder)
 /// Operations can use different objects and share clock objects
 /// object_ids can be empty for functions that don't need object arguments (like create_registry)
+/// If publish_options is provided, the modules will be published first
 pub(crate) async fn execute_transaction_block<F>(
     package_id: sui::Address,
     operations: Vec<(Vec<String>, String, String, F)>, // object_ids, module_name, function_name, args_builder
     custom_gas_budget: Option<u64>,
+    publish_options: Option<PublishOptions>,
 ) -> Result<String>
 where
     F: Fn(
@@ -290,8 +300,8 @@ where
     const MAX_RETRIES: u32 = 3;
     let mut retry_count = 0;
 
-    if operations.is_empty() {
-        return Err(anyhow!("No operations provided"));
+    if operations.is_empty() && publish_options.is_none() {
+        return Err(anyhow!("No operations or publish options provided"));
     }
 
     let function_names: Vec<String> = operations.iter().map(|(_, _, name, _)| name.clone()).collect();
@@ -459,6 +469,46 @@ where
             sui_transaction_builder::unresolved::Input::shared(clock_object_id, 1, false);
         let clock_arg = tb.input(clock_input);
 
+        // If publish options are provided, publish the modules first
+        let published_package = if let Some(ref publish_opts) = publish_options {
+            debug!("Publishing {} modules with {} dependencies", 
+                publish_opts.modules.len(), 
+                publish_opts.dependencies.len());
+            
+            // Decode base64 modules
+            use base64::{engine::general_purpose::STANDARD, Engine};
+            let mut decoded_modules = Vec::new();
+            for module_b64 in &publish_opts.modules {
+                let decoded = STANDARD.decode(module_b64)
+                    .map_err(|e| anyhow!("Failed to decode module: {}", e))?;
+                decoded_modules.push(decoded);
+            }
+            
+            // Parse dependencies as addresses
+            let mut parsed_deps = Vec::new();
+            for dep in &publish_opts.dependencies {
+                debug!("Parsing dependency: {}", dep);
+                // Use the same pattern as get_object_id - ensure 0x prefix
+                let dep_with_prefix = if dep.starts_with("0x") {
+                    dep.to_string()
+                } else {
+                    format!("0x{}", dep)
+                };
+                
+                let addr = sui::Address::from_str(&dep_with_prefix)
+                    .map_err(|e| anyhow!("Failed to parse dependency address {}: {}", dep, e))?;
+                parsed_deps.push(addr);
+                debug!("Successfully parsed dependency: {} -> {}", dep, addr);
+            }
+            
+            // Call tb.publish to publish the modules
+            let published = tb.publish(decoded_modules, parsed_deps);
+            debug!("Published package, result argument: {:?}", published);
+            Some(published)
+        } else {
+            None
+        };
+
         // Add all function calls to the transaction
         for (object_ids_for_op, module_name, function_name, build_args) in &operations {
             // Collect the object arguments for this operation
@@ -485,6 +535,13 @@ where
                 vec![],
             );
             tb.move_call(func, args);
+        }
+
+        // If we published a package, transfer it to the sender
+        if let Some(published) = published_package {
+            debug!("Transferring published package to sender: {}", sender);
+            let sender_arg = tb.input(sui_transaction_builder::Serialized(&sender));
+            tb.transfer_objects(vec![published], sender_arg);
         }
 
         // Perform dry run if gas estimation is needed

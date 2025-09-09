@@ -399,7 +399,7 @@ pub(crate) async fn multicall_job_operations_tx(
     }
 
     // Use the updated execute_transaction_block for multiple move calls across multiple app instances
-    execute_transaction_block(package_id, tx_operations, gas_budget).await
+    execute_transaction_block(package_id, tx_operations, gas_budget, None).await
 }
 
 /// Create and submit a transaction to restart failed jobs (with optional specific job sequences)
@@ -1066,6 +1066,7 @@ where
             build_args,
         )],
         custom_gas_budget,
+        None,
     )
     .await
 }

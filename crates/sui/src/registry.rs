@@ -50,6 +50,7 @@ where
             build_args,
         )],
         None, // Use default gas budget
+        None, // No modules to publish
     )
     .await
 }
@@ -102,6 +103,7 @@ pub(crate) async fn create_registry(
             },
         )],
         None, // Use default gas budget
+        None, // No modules to publish
     )
     .await?;
 
