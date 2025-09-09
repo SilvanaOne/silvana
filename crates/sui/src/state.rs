@@ -7,14 +7,16 @@ use sui_crypto::ed25519::Ed25519PrivateKey;
 use tracing::info;
 use crate::chain::load_sender_from_env_or_key;
 use anyhow::Result;
+use tokio::sync::Mutex;
 
 // Global static values initialized once from environment variables
 static COORDINATOR_ID: OnceLock<String> = OnceLock::new();
 static CHAIN: OnceLock<String> = OnceLock::new();
 static COORDINATION_PACKAGE_ID: OnceLock<sui::Address> = OnceLock::new();
 
-// Global static SharedSuiState instance
+// Global static SharedSuiState instance with initialization lock
 static SHARED_SUI_STATE: OnceLock<Arc<SharedSuiState>> = OnceLock::new();
+static INIT_LOCK: OnceLock<Arc<Mutex<()>>> = OnceLock::new();
 
 pub struct SharedSuiState {
     sui_client: Client,  // Sui client (cloneable)
@@ -24,6 +26,11 @@ pub struct SharedSuiState {
 }
 
 impl SharedSuiState {
+    /// Check if SharedSuiState is already initialized
+    pub fn is_initialized() -> bool {
+        SHARED_SUI_STATE.get().is_some()
+    }
+    
     /// Initialize the global SharedSuiState instance
     /// If private_key_str is provided, it will be used instead of loading from environment
     pub async fn initialize(rpc_url: &str) -> Result<()> {
@@ -32,6 +39,22 @@ impl SharedSuiState {
     
     /// Initialize the global SharedSuiState instance with an optional private key
     pub async fn initialize_with_optional_key(rpc_url: &str, private_key_str: Option<&str>) -> Result<()> {
+        // Return early if already initialized
+        if Self::is_initialized() {
+            return Ok(());
+        }
+        
+        // Get or create initialization lock
+        let init_lock = INIT_LOCK.get_or_init(|| Arc::new(Mutex::new(())));
+        
+        // Acquire lock to ensure only one thread initializes at a time
+        let _guard = init_lock.lock().await;
+        
+        // Double-check after acquiring lock (another thread might have initialized)
+        if Self::is_initialized() {
+            return Ok(());
+        }
+        
         info!("Initializing SharedSuiState with RPC URL: {}", rpc_url);
         
         // Create Sui client
@@ -62,8 +85,9 @@ impl SharedSuiState {
             coordination_package_id,
         });
         
+        // Set the state - this should succeed since we checked twice under lock
         SHARED_SUI_STATE.set(state)
-            .map_err(|_| anyhow::anyhow!("SharedSuiState already initialized"))?;
+            .map_err(|_| anyhow::anyhow!("Failed to set SharedSuiState - this should not happen"))?;
         
         Ok(())
     }

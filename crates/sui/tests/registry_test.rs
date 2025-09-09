@@ -3,11 +3,7 @@ mod tests {
     use anyhow::Result;
     use rand::Rng;
     use std::env;
-    use sui::{
-        create_registry, add_developer, update_developer, remove_developer,
-        add_agent, update_agent, remove_agent,
-        add_app, update_app, remove_app,
-    };
+    use sui::SilvanaSuiInterface;
     use tracing::info;
 
     /// Generate a random string with given prefix for testing
@@ -70,12 +66,16 @@ mod tests {
     async fn test_registry_operations() -> Result<()> {
         init_test().await?;
 
+        // Create interface instance
+        let mut interface = SilvanaSuiInterface::new();
+
         // Step 1: Create a new registry for testing
         info!("=== Step 1: Creating test registry ===");
         let registry_name = generate_test_name("test_registry");
         info!("Creating registry with name: {}", registry_name);
 
-        let create_result = create_registry(registry_name.clone(), None).await?;
+        let create_result = interface.create_silvana_registry(registry_name.clone(), None).await
+            .map_err(|e| anyhow::anyhow!(e))?;
         info!("Registry created successfully!");
         info!("  Registry ID: {}", create_result.registry_id);
         info!("  Transaction: {}", create_result.tx_digest);
@@ -93,27 +93,27 @@ mod tests {
         let github_username = generate_test_name("github");
         info!("Adding developer: {}", developer_name);
         
-        let add_dev_tx = add_developer(
+        let add_dev_tx = interface.add_developer_to_registry(
             &registry_id,
             developer_name.clone(),
             github_username.clone(),
             Some("https://example.com/image.png".to_string()),
             Some("Test developer description".to_string()),
             Some("https://example.com".to_string()),
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("Developer added, tx: {}", add_dev_tx);
         wait_tx(&add_dev_tx).await?;
 
         // Update developer
         info!("Updating developer: {}", developer_name);
-        let update_dev_tx = update_developer(
+        let update_dev_tx = interface.update_developer_in_registry(
             &registry_id,
             developer_name.clone(),
             github_username.clone(),
             Some("https://example.com/new-image.png".to_string()),
             Some("Updated developer description".to_string()),
             Some("https://newsite.com".to_string()),
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("Developer updated, tx: {}", update_dev_tx);
         wait_tx(&update_dev_tx).await?;
 
@@ -124,7 +124,7 @@ mod tests {
         let agent_name = generate_test_name("agent");
         info!("Adding agent: {} to developer: {}", agent_name, developer_name);
         
-        let add_agent_tx = add_agent(
+        let add_agent_tx = interface.add_agent_to_developer(
             &registry_id,
             developer_name.clone(),
             agent_name.clone(),
@@ -132,13 +132,13 @@ mod tests {
             Some("Test agent description".to_string()),
             Some("https://agent.example.com".to_string()),
             vec!["ethereum".to_string(), "polygon".to_string()],
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("Agent added, tx: {}", add_agent_tx);
         wait_tx(&add_agent_tx).await?;
 
         // Update agent
         info!("Updating agent: {}", agent_name);
-        let update_agent_tx = update_agent(
+        let update_agent_tx = interface.update_agent_in_registry(
             &registry_id,
             developer_name.clone(),
             agent_name.clone(),
@@ -146,7 +146,7 @@ mod tests {
             Some("Updated agent description".to_string()),
             Some("https://agent-new.example.com".to_string()),
             vec!["ethereum".to_string(), "polygon".to_string(), "arbitrum".to_string()],
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("Agent updated, tx: {}", update_agent_tx);
         wait_tx(&update_agent_tx).await?;
 
@@ -157,21 +157,21 @@ mod tests {
         let app_name = generate_test_name("app");
         info!("Adding app: {}", app_name);
         
-        let add_app_tx = add_app(
+        let add_app_tx = interface.add_app_to_registry(
             &registry_id,
             app_name.clone(),
             Some("Test application description".to_string()),
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("App added, tx: {}", add_app_tx);
         wait_tx(&add_app_tx).await?;
 
         // Update app
         info!("Updating app: {}", app_name);
-        let update_app_tx = update_app(
+        let update_app_tx = interface.update_app_in_registry(
             &registry_id,
             app_name.clone(),
             Some("Updated application description".to_string()),
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("App updated, tx: {}", update_app_tx);
         wait_tx(&update_app_tx).await?;
 
@@ -180,30 +180,30 @@ mod tests {
         
         // Remove agent
         info!("Removing agent: {}", agent_name);
-        let remove_agent_tx = remove_agent(
+        let remove_agent_tx = interface.remove_agent_from_developer(
             &registry_id,
             developer_name.clone(),
             agent_name.clone(),
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("Agent removed, tx: {}", remove_agent_tx);
         wait_tx(&remove_agent_tx).await?;
 
         // Remove app
         info!("Removing app: {}", app_name);
-        let remove_app_tx = remove_app(
+        let remove_app_tx = interface.remove_app_from_registry(
             &registry_id,
             app_name.clone(),
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("App removed, tx: {}", remove_app_tx);
         wait_tx(&remove_app_tx).await?;
 
         // Remove developer (must provide agent names that need to be removed)
         info!("Removing developer: {}", developer_name);
-        let remove_dev_tx = remove_developer(
+        let remove_dev_tx = interface.remove_developer_from_registry(
             &registry_id,
             developer_name.clone(),
             vec![], // No agents left to remove
-        ).await?;
+        ).await.map_err(|e| anyhow::anyhow!(e))?;
         info!("Developer removed, tx: {}", remove_dev_tx);
         wait_tx(&remove_dev_tx).await?;
 
@@ -215,12 +215,16 @@ mod tests {
     async fn test_registry_with_multiple_entities() -> Result<()> {
         init_test().await?;
 
+        // Create interface instance
+        let mut interface = SilvanaSuiInterface::new();
+
         info!("=== Testing Registry with Multiple Entities ===");
         
         // Create registry
         let registry_name = generate_test_name("multi_test_registry");
         info!("Creating registry: {}", registry_name);
-        let create_result = create_registry(registry_name.clone(), None).await?;
+        let create_result = interface.create_silvana_registry(registry_name.clone(), None).await
+            .map_err(|e| anyhow::anyhow!(e))?;
         let registry_id = create_result.registry_id.clone();
         wait_tx(&create_result.tx_digest).await?;
 
@@ -231,14 +235,14 @@ mod tests {
             let github = generate_test_name(&format!("github_{}", i));
             info!("Adding developer {}: {}", i, dev_name);
             
-            let tx = add_developer(
+            let tx = interface.add_developer_to_registry(
                 &registry_id,
                 dev_name.clone(),
                 github.clone(),
                 None,
                 Some(format!("Developer {} description", i)),
                 None,
-            ).await?;
+            ).await.map_err(|e| anyhow::anyhow!(e))?;
             wait_tx(&tx).await?;
             developers.push((dev_name, github));
         }
@@ -250,7 +254,7 @@ mod tests {
             let agent_name = generate_test_name(&format!("agent_{}", i));
             info!("Adding agent {} to developer {}", agent_name, first_dev_name);
             
-            let tx = add_agent(
+            let tx = interface.add_agent_to_developer(
                 &registry_id,
                 first_dev_name.clone(),
                 agent_name.clone(),
@@ -258,7 +262,7 @@ mod tests {
                 Some(format!("Agent {} description", i)),
                 None,
                 vec!["ethereum".to_string()],
-            ).await?;
+            ).await.map_err(|e| anyhow::anyhow!(e))?;
             wait_tx(&tx).await?;
             agents.push(agent_name);
         }
@@ -269,11 +273,11 @@ mod tests {
             let app_name = generate_test_name(&format!("app_{}", i));
             info!("Adding app {}: {}", i, app_name);
             
-            let tx = add_app(
+            let tx = interface.add_app_to_registry(
                 &registry_id,
                 app_name.clone(),
                 Some(format!("App {} description", i)),
-            ).await?;
+            ).await.map_err(|e| anyhow::anyhow!(e))?;
             wait_tx(&tx).await?;
             apps.push(app_name);
         }
@@ -290,21 +294,24 @@ mod tests {
         // Remove all agents from first developer
         for agent_name in agents {
             info!("Removing agent: {}", agent_name);
-            let tx = remove_agent(&registry_id, first_dev_name.clone(), agent_name).await?;
+            let tx = interface.remove_agent_from_developer(&registry_id, first_dev_name.clone(), agent_name).await
+                .map_err(|e| anyhow::anyhow!(e))?;
             wait_tx(&tx).await?;
         }
 
         // Remove all apps
         for app_name in apps {
             info!("Removing app: {}", app_name);
-            let tx = remove_app(&registry_id, app_name).await?;
+            let tx = interface.remove_app_from_registry(&registry_id, app_name).await
+                .map_err(|e| anyhow::anyhow!(e))?;
             wait_tx(&tx).await?;
         }
 
         // Remove all developers
         for (dev_name, _) in developers {
             info!("Removing developer: {}", dev_name);
-            let tx = remove_developer(&registry_id, dev_name, vec![]).await?;
+            let tx = interface.remove_developer_from_registry(&registry_id, dev_name, vec![]).await
+                .map_err(|e| anyhow::anyhow!(e))?;
             wait_tx(&tx).await?;
         }
 
@@ -316,6 +323,9 @@ mod tests {
     async fn test_registry_with_env_package_id() -> Result<()> {
         init_test().await?;
 
+        // Create interface instance
+        let mut interface = SilvanaSuiInterface::new();
+
         // Test using SILVANA_REGISTRY_PACKAGE environment variable
         if let Ok(package_id) = env::var("SILVANA_REGISTRY_PACKAGE") {
             info!("=== Testing with SILVANA_REGISTRY_PACKAGE={} ===", package_id);
@@ -324,7 +334,8 @@ mod tests {
             info!("Creating registry with env package ID: {}", registry_name);
             
             // Should use the env var automatically
-            let create_result = create_registry(registry_name.clone(), None).await?;
+            let create_result = interface.create_silvana_registry(registry_name.clone(), None).await
+                .map_err(|e| anyhow::anyhow!(e))?;
             info!("Registry created with env package ID!");
             info!("  Registry ID: {}", create_result.registry_id);
             info!("  Transaction: {}", create_result.tx_digest);
@@ -337,14 +348,14 @@ mod tests {
             let github = generate_test_name("env_test_github");
             
             info!("Testing developer operation with env package registry");
-            let tx = add_developer(
+            let tx = interface.add_developer_to_registry(
                 &registry_id,
                 dev_name.clone(),
                 github,
                 None,
                 Some("Test with env package".to_string()),
                 None,
-            ).await?;
+            ).await.map_err(|e| anyhow::anyhow!(e))?;
             info!("Developer added to env package registry, tx: {}", tx);
             wait_tx(&tx).await?;
             
