@@ -197,7 +197,7 @@ fn get_clock_object_id() -> sui::Address {
 }
 
 /// Get the app instance object ID from the job data
-fn get_object_id(app_instance_str: &str) -> Result<sui::Address> {
+pub(crate) fn get_object_id(app_instance_str: &str) -> Result<sui::Address> {
     let app_instance_id = if app_instance_str.starts_with("0x") {
         app_instance_str.to_string()
     } else {

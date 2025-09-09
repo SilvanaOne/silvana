@@ -1,10 +1,9 @@
 use anyhow::{Context, Result, anyhow};
-use std::str::FromStr;
 use sui_sdk_types as sui;
 use tracing::{debug, info, warn};
 
 use crate::state::SharedSuiState;
-use crate::transactions::execute_transaction_block;
+use crate::transactions::{execute_transaction_block, get_object_id};
 
 /// Create and submit a transaction to start a job
 pub(crate) async fn start_job_tx(app_instance_str: &str, job_sequence: u64) -> Result<String> {
@@ -54,8 +53,8 @@ pub(crate) async fn fail_job_tx(
     );
 
     // Debug: Query current job state before attempting to fail it
-    let app_instance_id = get_app_instance_id(app_instance_str)
-        .context("Failed to parse app instance ID for debug query")?;
+    let app_instance_id =
+        get_object_id(app_instance_str).context("Failed to parse object ID for debug query")?;
     match query_job_status(app_instance_id, job_sequence).await {
         Ok(status) => {
             debug!(
