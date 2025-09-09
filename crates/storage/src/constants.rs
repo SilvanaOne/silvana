@@ -20,8 +20,8 @@ pub const MAX_COMPRESSED_ARCHIVE_SIZE: usize = 1_048_576; // 1 MB
 // =============================================================================
 
 /// Default compression level for zstd (range: 1-22).
-/// Level 3 provides a good balance between compression ratio and speed.
-pub const DEFAULT_COMPRESSION_LEVEL: i32 = 3;
+/// Level 22 provides maximum compression ratio for smallest archive size.
+pub const DEFAULT_COMPRESSION_LEVEL: i32 = 22;
 
 // =============================================================================
 // S3 Configuration

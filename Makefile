@@ -78,7 +78,7 @@ help: ## Show this help message
 	@echo "🔐 SECRET MANAGEMENT & CONFIG:"
 	@grep -E '^(store-secret|retrieve-secret|write-config|read-config):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "🧪 TESTING:"
+	@echo "📚 EXAMPLES:"
 	@grep -E '^(example-archive):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "💡 USAGE EXAMPLES:"
@@ -436,7 +436,7 @@ validate-schema: check-database-url check-tools ## Validate that database schema
 check-schema: check-database-url check-tools ## Quick schema validation check
 	@./infra/tidb/check_schema.sh
 
-# Test targets
-example-archive: ## Test packing and unpacking examples/add folder to S3
-	@echo "📦 Testing archive functionality with examples/add folder..."
-	@cargo test -p storage test_pack_examples_add_folder -- --nocapture 
+# Example targets
+example-archive: ## Prepare archive with example project (examples/add)
+	@echo "📦 Packing examples/add folder to S3..."
+	@cargo xtask example-archive 

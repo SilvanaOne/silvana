@@ -221,9 +221,9 @@ fn create_compressed_archive(folder_path: &Path, config: &ArchiveConfig) -> Resu
     }
     
     println!(
-        "Archive created: uncompressed={} bytes ({}MB), compressed={} bytes ({}KB), ratio={:.2}%",
+        "Archive created: uncompressed={} bytes ({}KB), compressed={} bytes ({}KB), ratio={:.2}%",
         tar_buffer.len(),
-        tar_buffer.len() / 1_048_576,
+        tar_buffer.len() / 1024,
         compressed.len(),
         compressed.len() / 1024,
         (compressed.len() as f64 / tar_buffer.len() as f64) * 100.0

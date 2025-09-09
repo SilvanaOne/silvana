@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use duct::cmd;
 use secrets_client::SecretsClient;
 use rpc_client::SilvanaRpcClient;
+use storage::{S3Client, pack_folder_to_s3};
 use std::collections::HashMap;
 use std::fs;
 
@@ -27,6 +28,8 @@ enum Cmd {
     DockerBuild,
     /// Wipe & re-apply TiDB migrations on the local dev container
     DbReset,
+    /// Pack examples/add folder and upload to S3 as examples/add.tar.zst
+    ExampleArchive,
     /// Store a secret via gRPC
     StoreSecret {
         /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
@@ -111,6 +114,9 @@ async fn main() -> anyhow::Result<()> {
                 "source /migrations/reset.sql"
             )
             .run()?;
+        }
+        Cmd::ExampleArchive => {
+            pack_examples_add().await?;
         }
         Cmd::StoreSecret {
             endpoint,
@@ -450,6 +456,46 @@ async fn read_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
             anyhow::bail!("Failed to read configuration: {}", e);
         }
     }
+    
+    Ok(())
+}
+
+async fn pack_examples_add() -> anyhow::Result<()> {
+    println!("📦 Packing examples/add folder to S3...");
+    
+    // Initialize S3 client
+    let s3_client = S3Client::new("silvana-distribution".to_string()).await?;
+    
+    // Get the examples/add folder path
+    let current_dir = std::env::current_dir()?;
+    let examples_add_path = current_dir.join("examples").join("add");
+    
+    // Verify source folder exists
+    if !examples_add_path.exists() {
+        anyhow::bail!("examples/add folder not found at {:?}", examples_add_path);
+    }
+    
+    println!("Source folder: {:?}", examples_add_path);
+    
+    // Use fixed S3 key for consistent retrieval
+    let s3_key = "examples/add.tar.zst";
+    
+    println!("Packing folder to S3: {}", s3_key);
+    
+    // Pack and upload to S3 with default config (1MB limit)
+    let archive_hash = pack_folder_to_s3(
+        &examples_add_path,
+        &s3_client,
+        &s3_key,
+        None, // Use default config
+    ).await?;
+    
+    println!("✅ Archive uploaded successfully!");
+    println!("   S3 Key: {}", s3_key);
+    println!("   Hash: {}", archive_hash);
+    println!("");
+    println!("📥 To download and unpack this archive later:");
+    println!("   Use the S3 key: {}", s3_key);
     
     Ok(())
 }
