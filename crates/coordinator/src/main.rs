@@ -160,6 +160,104 @@ async fn main_impl() -> Result<()> {
             .await
         }
 
+        Commands::New { name, force } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+
+            // Validate project name
+            if name.trim().is_empty() {
+                error!("Project name cannot be empty");
+                return Err(anyhow::anyhow!("Project name cannot be empty").into());
+            }
+
+            // Check for invalid characters in project name
+            if name.contains('/') || name.contains('\\') || name.contains("..") {
+                error!("Invalid project name: {}", name);
+                return Err(anyhow::anyhow!("Project name contains invalid characters").into());
+            }
+
+            let current_dir = std::env::current_dir()
+                .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+            let project_path = current_dir.join(&name);
+
+            // Check if folder exists
+            if project_path.exists() && !force {
+                error!(
+                    "Folder '{}' already exists. Use --force to overwrite.",
+                    name
+                );
+                return Err(anyhow::anyhow!(
+                    "Folder '{}' already exists. Use --force to overwrite.",
+                    name
+                )
+                .into());
+            }
+
+            println!("🚀 Creating new Silvana project: {}", name);
+
+            // Create the project directory
+            if !project_path.exists() {
+                std::fs::create_dir(&project_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to create project directory: {}", e))?;
+            } else if force {
+                println!("⚠️  Overwriting existing folder: {}", name);
+                // Clean the existing directory
+                std::fs::remove_dir_all(&project_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to remove existing directory: {}", e))?;
+                std::fs::create_dir(&project_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to recreate project directory: {}", e))?;
+            }
+
+            println!("📥 Downloading project template...");
+
+            // Initialize S3 client
+            let s3_client = storage::S3Client::new("silvana-distribution".to_string())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to initialize download client: {}", e))?;
+
+            // Fixed S3 key for the example archive
+            let s3_key = "examples/add.tar.zst";
+
+            // Download and unpack the template
+            match storage::unpack_from_s3(
+                &s3_client,
+                s3_key,
+                &project_path,
+                None, // No hash verification needed for template
+            )
+            .await
+            {
+                Ok(_) => {
+                    println!("✅ Project created successfully!");
+                    println!("");
+                    println!("📁 Project structure:");
+                    println!("   {}/", name);
+                    println!("   ├── agent/     # TypeScript agent implementation");
+                    println!("   └── move/      # Move smart contracts");
+                    println!("");
+                    println!("🚀 Next steps:");
+                    println!("   cd {}", name);
+                    println!("   cd agent && npm install  # Install agent dependencies");
+                    println!("   cd move && sui move build  # Build Move contracts");
+                    println!("");
+                    println!("📖 Check the README file for more information.");
+                }
+                Err(e) => {
+                    // Clean up on failure
+                    let _ = std::fs::remove_dir_all(&project_path);
+                    error!("Failed to download project template: {}", e);
+                    return Err(
+                        anyhow::anyhow!("Failed to download project template: {}", e).into(),
+                    );
+                }
+            }
+
+            Ok(())
+        }
+
         Commands::Instance { rpc_url, instance } => {
             // Initialize minimal logging
             tracing_subscriber::registry()

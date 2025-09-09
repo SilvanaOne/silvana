@@ -43,6 +43,16 @@ pub enum Commands {
         settle: bool,
     },
     
+    /// Create a new Silvana project from template
+    New {
+        /// Name of the project folder to create
+        name: String,
+        
+        /// Force overwrite if the folder already exists
+        #[arg(long, short, default_value = "false")]
+        force: bool,
+    },
+    
     /// Fetch and display an app instance by ID
     Instance {
         #[arg(long, env = "SUI_RPC_URL")]

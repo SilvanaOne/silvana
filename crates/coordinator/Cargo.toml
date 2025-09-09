@@ -21,7 +21,7 @@ rpc-client = { path = "../rpc-client" }
 # Secrets client  
 secrets-client = { path = "../secrets-client" }
 
-# Walrus data availability
+# Storage and archive utilities
 storage = { path = "../storage" }
 
 # Async runtime
