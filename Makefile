@@ -67,7 +67,7 @@ help: ## Show this help message
 	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🏗️  BUILD & DEPLOYMENT:"
-	@grep -E '^(build-rpc|build-arm|build-x86|build-mac):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -75,24 +75,26 @@ help: ## Show this help message
 	@echo "🔧 DEVELOPMENT & DEBUGGING:"
 	@grep -E '^(clean-dev|dev-reset|show-tables|show-schema|validate-schema|check-schema):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "🔐 SECRET MANAGEMENT:"
-	@grep -E '^(store-secret|retrieve-secret):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo "🔐 SECRET MANAGEMENT & CONFIG:"
+	@grep -E '^(store-secret|retrieve-secret|write-config|read-config):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "💡 SECRET MANAGEMENT EXAMPLES:"
-	@echo "  Store basic secret:"
+	@echo "🧪 TESTING:"
+	@grep -E '^(example-archive):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "💡 USAGE EXAMPLES:"
+	@echo ""
+	@echo "  Secret Management:"
 	@echo "    make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"
-	@echo ""
-	@echo "  Store with app context:"
 	@echo "    make store-secret DEVELOPER=bob AGENT=bot APP=trading NAME=db-pass SECRET=secret123"
-	@echo ""
-	@echo "  Store with full context:"
-	@echo "    make store-secret DEVELOPER=charlie AGENT=processor APP=analytics \\"
-	@echo "                      APP_INSTANCE=prod-123 NAME=redis-url \\"
-	@echo "                      SECRET='redis://user:pass@host:6379/0'"
-	@echo ""
-	@echo "  Retrieve secrets:"
 	@echo "    make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"
-	@echo "    make retrieve-secret DEVELOPER=bob AGENT=bot APP=trading NAME=db-pass"
+	@echo ""
+	@echo "  Configuration Management:"
+	@echo "    make write-config CHAIN=devnet"
+	@echo "    make read-config CHAIN=testnet ENDPOINT=http://localhost:8080"
+	@echo ""
+	@echo "  Build and Release:"
+	@echo "    make build-all                    # Build for all platforms"
+	@echo "    make github-release VERSION=v1.0.0 # Create GitHub release"
 	@echo ""
 	@echo "⚙️  CONFIGURATION:"
 	@echo "  .env              Contains DATABASE_URL (REQUIRED)"
