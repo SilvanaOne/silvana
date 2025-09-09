@@ -1,3 +1,35 @@
+silvana new myprogram
+cd myprogram
+cd move
+sui client switch --env devnet
+sui client addresses
+sui client faucet
+sui client balance
+sui move build
+sui client publish
+get
+PackageID: 0xf238cb13361d361c6324e069b99a2ebccbd69c3ac703b25c2f0ee41e7924736b
+write to APP_PACKAGE_ID in agent
+
+cd ../agent
+npm install
+npm run build
+npm run compile
+npm run compile
+
+wait for topup on Mina for MINA_PUBLIC_KEY from agent/.env
+silvana balance mina --network 'mina:devnet' --address B62qk11BSgji2ygYeYg7xFU1NdTz5MAxqviyMhyfqoFwhu5ksVghPBS`
+📊 Checking balance for B62qk11BSgji2ygYeYg7xFU1NdTz5MAxqviyMhyfqoFwhu5ksVghPBS on mina:devnet
+
+💰 Balance: 299 MINA
+Nonce: 0
+Token Symbol:
+
+🔍 View on explorer:
+https://minascan.io/devnet/account/B62qk11BSgji2ygYeYg7xFU1NdTz5MAxqviyMhyfqoFwhu5ksVghPBS
+
+npm run deploy
+
 generate keys
 topup keys
 npm install
@@ -21,86 +53,106 @@ amend docker name dockerImage: "docker.io/dfstio/add:latest", in create.ts
 check that Mina balance is positive by checking the links provided by silvana
 
 ```
-2025-09-09T20:38:24.903426Z  INFO silvana: 🚀 Creating new Silvana project: myprogram
-2025-09-09T20:38:24.903885Z  INFO silvana: 📥 Downloading project template...
-2025-09-09T20:38:25.529005Z  INFO silvana: ✅ Template downloaded successfully!
-2025-09-09T20:38:25.529032Z  INFO silvana::example: 🔑 Setting up project credentials...
-2025-09-09T20:38:25.529034Z  INFO silvana::example: 📍 Generating Sui keypairs...
-2025-09-09T20:38:25.529271Z  INFO silvana::example:    • Generating Sui user keypair...
-2025-09-09T20:38:25.530495Z  INFO silvana::example:      ✓ Sui user address: 0x214e7569eadfef6165ffcffa47ad2c58f080d2b3babc88d42d58c2c7e239a1be
-2025-09-09T20:38:25.530533Z  INFO silvana::example:    • Generating Sui coordinator keypair...
-2025-09-09T20:38:25.530551Z  INFO silvana::example:      ✓ Sui coordinator address: 0x3d28f1a0bb6c7f178ac022fee1ea7aa6491087a6a320614f3ee598d6d5162be7
-2025-09-09T20:38:25.530554Z  INFO silvana::example: 📍 Generating Mina keypairs...
-2025-09-09T20:38:25.530555Z  INFO silvana::example:    • Generating Mina app-admin keypair...
-2025-09-09T20:38:25.530674Z  INFO silvana::example:      ✓ Mina app-admin address: B62qpGo4th9YCPAsaPjVpnzdYXqHxcFvcqNt4SQRwGCdNdZ2s52SezL
-2025-09-09T20:38:25.530867Z  INFO silvana::example:    • Generating Mina user keypair...
-2025-09-09T20:38:25.530959Z  INFO silvana::example:      ✓ Mina user address: B62qjeKJuNSKuJQ8KvjcgDJSJSg3EyW3M1NCQLVv2U8pUjDenkdeXsR
-2025-09-09T20:38:25.530961Z  INFO silvana::example: 💰 Funding Sui accounts from devnet faucet...
-2025-09-09T20:38:25.530963Z  INFO silvana::example: Funding Sui user account: 0x214e7569eadfef6165ffcffa47ad2c58f080d2b3babc88d42d58c2c7e239a1be
-2025-09-09T20:38:25.531211Z  INFO sui::faucet: Requesting tokens from devnet faucet at https://faucet.devnet.sui.io/v2/gas for address 0x214e7569eadfef6165ffcffa47ad2c58f080d2b3babc88d42d58c2c7e239a1be
-2025-09-09T20:38:26.356056Z  INFO sui::faucet: ✅ Devnet faucet request successful for 0x214e7569eadfef6165ffcffa47ad2c58f080d2b3babc88d42d58c2c7e239a1be. Transaction: J1zUpd4jok4QkqCzwQiYAWovDidSE3yMqnJuurwPWWuw
-2025-09-09T20:38:26.356484Z  INFO silvana::example: ✓ Faucet request sent
-2025-09-09T20:38:26.356507Z  INFO silvana::example: 📄 Transaction: J1zUpd4jok4QkqCzwQiYAWovDidSE3yMqnJuurwPWWuw
-2025-09-09T20:38:26.356516Z  INFO silvana::example: 🔗 Explorer: https://suiscan.xyz/devnet/tx/J1zUpd4jok4QkqCzwQiYAWovDidSE3yMqnJuurwPWWuw
-2025-09-09T20:38:28.358834Z  INFO silvana::example: Funding Sui coordinator account: 0x3d28f1a0bb6c7f178ac022fee1ea7aa6491087a6a320614f3ee598d6d5162be7
-2025-09-09T20:38:28.358881Z  INFO sui::faucet: Requesting tokens from devnet faucet at https://faucet.devnet.sui.io/v2/gas for address 0x3d28f1a0bb6c7f178ac022fee1ea7aa6491087a6a320614f3ee598d6d5162be7
-2025-09-09T20:38:29.001197Z  INFO sui::faucet: ✅ Devnet faucet request successful for 0x3d28f1a0bb6c7f178ac022fee1ea7aa6491087a6a320614f3ee598d6d5162be7. Transaction: 3r5B4rYnsPPDwjRv1aeGMYZVbqmiimSR8uCkMgA7rR2j
-2025-09-09T20:38:29.001265Z  INFO silvana::example: ✓ Faucet request sent
-2025-09-09T20:38:29.001275Z  INFO silvana::example: 📄 Transaction: 3r5B4rYnsPPDwjRv1aeGMYZVbqmiimSR8uCkMgA7rR2j
-2025-09-09T20:38:29.001283Z  INFO silvana::example: 🔗 Explorer: https://suiscan.xyz/devnet/tx/3r5B4rYnsPPDwjRv1aeGMYZVbqmiimSR8uCkMgA7rR2j
-2025-09-09T20:38:29.001293Z  INFO silvana::example: 💰 Funding Mina accounts from devnet faucet...
-2025-09-09T20:38:29.001304Z  INFO silvana::example: Funding Mina app-admin account: B62qpGo4...SezL
-2025-09-09T20:38:29.001315Z  INFO mina::faucet: 🚰 Requesting MINA from Devnet faucet for address B62qpGo4th9YCPAsaPjVpnzdYXqHxcFvcqNt4SQRwGCdNdZ2s52SezL
-2025-09-09T20:38:30.034957Z  INFO silvana::example: ✓ Faucet request sent successfully
-2025-09-09T20:38:30.034986Z  INFO silvana::example: 📄 Response: {"status":"success","message":{"paymentID":"5JtnhcKbTvaRTbaeXnaM9gyjZJCCBCynraQkk2i3c7MW2ZmzUAAz"}}
-2025-09-09T20:38:30.034996Z  INFO silvana::example: 🔗 Explorer: https://minascan.io/devnet/account/B62qpGo4th9YCPAsaPjVpnzdYXqHxcFvcqNt4SQRwGCdNdZ2s52SezL
-2025-09-09T20:38:32.036817Z  INFO silvana::example: Funding Mina user account: B62qjeKJ...eXsR
-2025-09-09T20:38:32.036845Z  INFO mina::faucet: 🚰 Requesting MINA from Devnet faucet for address B62qjeKJuNSKuJQ8KvjcgDJSJSg3EyW3M1NCQLVv2U8pUjDenkdeXsR
-2025-09-09T20:38:32.680996Z  INFO silvana::example: ✓ Faucet request sent successfully
-2025-09-09T20:38:32.681032Z  INFO silvana::example: 📄 Response: {"status":"success","message":{"paymentID":"5JtfEKWDBT2ZL4rAq169pfBJBuodQ2ntGD4bkCNePX7rEXNSYZSQ"}}
-2025-09-09T20:38:32.681041Z  INFO silvana::example: 🔗 Explorer: https://minascan.io/devnet/account/B62qjeKJuNSKuJQ8KvjcgDJSJSg3EyW3M1NCQLVv2U8pUjDenkdeXsR
-2025-09-09T20:38:32.681052Z  INFO silvana::example: 📥 Fetching devnet configuration...
-2025-09-09T20:38:32.681134Z  INFO silvana::config: Fetching configuration for chain devnet from https://rpc.silvana.dev
-2025-09-09T20:38:32.681149Z  INFO rpc_client: Connecting to Silvana RPC service at: https://rpc.silvana.dev
-2025-09-09T20:38:32.868547Z  INFO rpc_client: Successfully connected to Silvana RPC service
-2025-09-09T20:38:32.942426Z  INFO silvana::config: Successfully fetched 16 configuration items for chain devnet
-2025-09-09T20:38:32.942464Z  INFO silvana::example: ✓ Fetched configuration successfully
-2025-09-09T20:38:32.942471Z  INFO silvana::example: 📝 Creating Silvana registry...
-2025-09-09T20:38:32.942566Z  INFO sui::state: Initializing SharedSuiState with RPC URL: https://rpc-devnet-grpc.suiscan.xyz:443
-2025-09-09T20:38:32.942936Z  INFO sui::state: Initialized SharedSuiState with address: 0x214e7569eadfef6165ffcffa47ad2c58f080d2b3babc88d42d58c2c7e239a1be
-2025-09-09T20:38:32.943207Z  INFO sui::registry: Creating registry 'myprogram'
-2025-09-09T20:38:34.551789Z  INFO sui::registry: Found registry ID from RegistryCreatedEvent: 0x859b56f6e47ef16f8b9db4b151591c38ef20f68857fb83c8c7787fe14ca42f4c
-2025-09-09T20:38:34.667382Z  INFO sui::registry: Registry created with ID: 0x859b56f6e47ef16f8b9db4b151591c38ef20f68857fb83c8c7787fe14ca42f4c (tx: 3ifKsvm8gtEFZmn1h29nWSQQBWMnLJxLmaqrHHz9hudb)
-2025-09-09T20:38:34.667439Z  INFO sui::interface: Successfully created registry 'myprogram' with ID: 0x859b56f6e47ef16f8b9db4b151591c38ef20f68857fb83c8c7787fe14ca42f4c (tx: 3ifKsvm8gtEFZmn1h29nWSQQBWMnLJxLmaqrHHz9hudb)
-2025-09-09T20:38:34.667448Z  INFO silvana::example:    ✓ Registry created successfully
-2025-09-09T20:38:34.667453Z  INFO silvana::example:    📄 Registry ID: 0x859b56f6e47ef16f8b9db4b151591c38ef20f68857fb83c8c7787fe14ca42f4c
-2025-09-09T20:38:34.667456Z  INFO silvana::example:    📄 Transaction: 3ifKsvm8gtEFZmn1h29nWSQQBWMnLJxLmaqrHHz9hudb
-2025-09-09T20:38:34.667459Z  INFO silvana::example:    🔗 Explorer: https://suiscan.xyz/devnet/tx/3ifKsvm8gtEFZmn1h29nWSQQBWMnLJxLmaqrHHz9hudb
-2025-09-09T20:38:34.669483Z  INFO silvana::example: ✅ Project setup complete!
-2025-09-09T20:38:34.669503Z  INFO silvana::example: 📋 Generated Credentials:
-2025-09-09T20:38:34.669510Z  INFO silvana::example:    ├── Sui:
-2025-09-09T20:38:34.669517Z  INFO silvana::example:    │   ├── User: 0x214e7569eadfef6165ffcffa47ad2c58f080d2b3babc88d42d58c2c7e239a1be
-2025-09-09T20:38:34.669525Z  INFO silvana::example:    │   └── Coordinator: 0x3d28f1a0bb6c7f178ac022fee1ea7aa6491087a6a320614f3ee598d6d5162be7
-2025-09-09T20:38:34.669532Z  INFO silvana::example:    ├── Mina:
-2025-09-09T20:38:34.669538Z  INFO silvana::example:    │   ├── App Admin: B62qpGo4th9YCPAsaPjVpnzdYXqHxcFvcqNt4SQRwGCdNdZ2s52SezL
-2025-09-09T20:38:34.669547Z  INFO silvana::example:    │   └── User: B62qjeKJuNSKuJQ8KvjcgDJSJSg3EyW3M1NCQLVv2U8pUjDenkdeXsR
-2025-09-09T20:38:34.669556Z  INFO silvana::example:    └── Registry: 0x859b56...2f4c
-2025-09-09T20:38:34.669562Z  INFO silvana::example: ⚙️  Environment files created:
-2025-09-09T20:38:34.669568Z  INFO silvana::example:    • agent/.env (from env.example template)
-2025-09-09T20:38:34.669575Z  INFO silvana::example:    • silvana/.env (coordinator configuration)
-2025-09-09T20:38:34.669597Z  INFO silvana:
-2025-09-09T20:38:34.669606Z  INFO silvana: 🎉 Project 'myprogram' is ready!
-2025-09-09T20:38:34.669614Z  INFO silvana:
-2025-09-09T20:38:34.669620Z  INFO silvana: 📁 Project structure:
-2025-09-09T20:38:34.669627Z  INFO silvana:    myprogram/
-2025-09-09T20:38:34.669635Z  INFO silvana:    ├── agent/     # TypeScript agent implementation
-2025-09-09T20:38:34.669642Z  INFO silvana:    ├── move/      # Move smart contracts
-2025-09-09T20:38:34.669649Z  INFO silvana:    └── silvana/   # Silvana coordinator configuration
-2025-09-09T20:38:34.669656Z  INFO silvana:
-2025-09-09T20:38:34.669663Z  INFO silvana: 🚀 Next steps:
-2025-09-09T20:38:34.669669Z  INFO silvana:    cd myprogram
-2025-09-09T20:38:34.669676Z  INFO silvana:    cd agent && npm install    # Install agent dependencies
-2025-09-09T20:38:34.669684Z  INFO silvana:    cd move && sui move build  # Build Move contracts
-2025-09-09T20:38:34.669690Z  INFO silvana:
-2025-09-09T20:38:34.669697Z  INFO silvana: 📖 Check the README file for more information.
+App initialized successfully
+✅ App created successfully!
+📦 App ID: 0x40deec126c7f08ce85135381646759533e6c7e1c5193674e4e71091052d18822
+📦 Registry: 0x5124fbb1d17eccccd42128233fbfbfc0657a5065aa878536f724aa1fe8d6f619
+💾 Configuration saved to .env.app
+App instance ID: 0xaacf350ac6ae669ebf9804b455b0bc75a71f28a34bdc48d87ca78f1f90ba0f3b
+Mina contract address: B62qoRvnY827gKNPy6yTWM9iwQJ9JGXu7MPDU9GCzSUpccELfThGRCE
+Mina admin address: B62qoiTzbVwoQorP4ys8YKtP5kYWk46BRzeoxwb6xSnx2kLzZJQrEnG
+```
+
+```
+2025-09-09T22:25:20.786997Z  INFO silvana: 🚀 Creating new Silvana project: myprogram
+2025-09-09T22:25:20.787266Z  INFO silvana: 📥 Downloading project template...
+2025-09-09T22:25:21.310632Z  INFO silvana: ✅ Template downloaded successfully!
+2025-09-09T22:25:21.310708Z  INFO silvana::example: 🔑 Setting up project credentials...
+2025-09-09T22:25:21.310736Z  INFO silvana::example: 📍 Generating Sui keypairs...
+2025-09-09T22:25:21.311021Z  INFO silvana::example:    • Generating Sui user keypair...
+2025-09-09T22:25:21.312435Z  INFO silvana::example:      ✓ Sui user address: 0x3f176926a223d730fea3998da1791f4c7517e73bf3472e233a316d8672275683
+2025-09-09T22:25:21.312490Z  INFO silvana::example:    • Generating Sui coordinator keypair...
+2025-09-09T22:25:21.312523Z  INFO silvana::example:      ✓ Sui coordinator address: 0x82d751f1182343a402e83868b6573856fbe64c87370471afab21f429490c9559
+2025-09-09T22:25:21.312530Z  INFO silvana::example: 📍 Generating Mina keypairs...
+2025-09-09T22:25:21.312533Z  INFO silvana::example:    • Generating Mina app-admin keypair...
+2025-09-09T22:25:21.312803Z  INFO silvana::example:      ✓ Mina app-admin address: B62qoiTzbVwoQorP4ys8YKtP5kYWk46BRzeoxwb6xSnx2kLzZJQrEnG
+2025-09-09T22:25:21.312807Z  INFO silvana::example:    • Generating Mina user keypair...
+2025-09-09T22:25:21.312995Z  INFO silvana::example:      ✓ Mina user address: B62qk11BSgji2ygYeYg7xFU1NdTz5MAxqviyMhyfqoFwhu5ksVghPBS
+2025-09-09T22:25:21.312999Z  INFO silvana::example: 💰 Funding Sui accounts from devnet faucet...
+2025-09-09T22:25:21.313002Z  INFO silvana::example: Funding Sui user account: 0x3f176926a223d730fea3998da1791f4c7517e73bf3472e233a316d8672275683
+2025-09-09T22:25:21.313333Z  INFO sui::faucet: Requesting tokens from devnet faucet at https://faucet.devnet.sui.io/v2/gas for address 0x3f176926a223d730fea3998da1791f4c7517e73bf3472e233a316d8672275683
+2025-09-09T22:25:22.223757Z  INFO sui::faucet: ✅ Devnet faucet request successful for 0x3f176926a223d730fea3998da1791f4c7517e73bf3472e233a316d8672275683. Transaction: GGRwF1ybif9nRsjiJEneBguQppzKLkWVzxSZmToj1mLH
+2025-09-09T22:25:22.224167Z  INFO silvana::example: ✓ Faucet request sent
+2025-09-09T22:25:22.224184Z  INFO silvana::example: 📄 Transaction: GGRwF1ybif9nRsjiJEneBguQppzKLkWVzxSZmToj1mLH
+2025-09-09T22:25:22.224188Z  INFO silvana::example: 🔗 Explorer: https://suiscan.xyz/devnet/tx/GGRwF1ybif9nRsjiJEneBguQppzKLkWVzxSZmToj1mLH
+2025-09-09T22:25:24.225869Z  INFO silvana::example: Funding Sui coordinator account: 0x82d751f1182343a402e83868b6573856fbe64c87370471afab21f429490c9559
+2025-09-09T22:25:24.225947Z  INFO sui::faucet: Requesting tokens from devnet faucet at https://faucet.devnet.sui.io/v2/gas for address 0x82d751f1182343a402e83868b6573856fbe64c87370471afab21f429490c9559
+2025-09-09T22:25:24.831360Z  INFO sui::faucet: ✅ Devnet faucet request successful for 0x82d751f1182343a402e83868b6573856fbe64c87370471afab21f429490c9559. Transaction: 81owAbnYmFEfm89L9DwR141yptQU7iR1BP2EnuapF9MK
+2025-09-09T22:25:24.831400Z  INFO silvana::example: ✓ Faucet request sent
+2025-09-09T22:25:24.831405Z  INFO silvana::example: 📄 Transaction: 81owAbnYmFEfm89L9DwR141yptQU7iR1BP2EnuapF9MK
+2025-09-09T22:25:24.831408Z  INFO silvana::example: 🔗 Explorer: https://suiscan.xyz/devnet/tx/81owAbnYmFEfm89L9DwR141yptQU7iR1BP2EnuapF9MK
+2025-09-09T22:25:24.831413Z  INFO silvana::example: 💰 Funding Mina accounts from devnet faucet...
+2025-09-09T22:25:24.831417Z  INFO silvana::example: Funding Mina app-admin account: B62qoiTz...rEnG
+2025-09-09T22:25:24.831423Z  INFO mina::faucet: 🚰 Requesting MINA from Devnet faucet for address B62qoiTzbVwoQorP4ys8YKtP5kYWk46BRzeoxwb6xSnx2kLzZJQrEnG
+2025-09-09T22:25:26.466052Z  INFO silvana::example: ✓ Faucet request sent successfully
+2025-09-09T22:25:26.466089Z  INFO silvana::example: 📄 Response: {"status":"success","message":{"paymentID":"5JtvA2fZrLqMyaisJwPW4QX3oYEJFebvKi6UJzTD6142iXSJ7qtd"}}
+2025-09-09T22:25:26.466098Z  INFO silvana::example: 🔗 Explorer: https://minascan.io/devnet/account/B62qoiTzbVwoQorP4ys8YKtP5kYWk46BRzeoxwb6xSnx2kLzZJQrEnG
+2025-09-09T22:25:28.467615Z  INFO silvana::example: Funding Mina user account: B62qk11B...hPBS
+2025-09-09T22:25:28.467650Z  INFO mina::faucet: 🚰 Requesting MINA from Devnet faucet for address B62qk11BSgji2ygYeYg7xFU1NdTz5MAxqviyMhyfqoFwhu5ksVghPBS
+2025-09-09T22:25:29.080061Z  INFO silvana::example: ✓ Faucet request sent successfully
+2025-09-09T22:25:29.080120Z  INFO silvana::example: 📄 Response: {"status":"success","message":{"paymentID":"5Ju9sfyp8afmA2kHXNCkfXBX3PQgtE7rBpNsXLAiBaieLaS2Baqt"}}
+2025-09-09T22:25:29.080129Z  INFO silvana::example: 🔗 Explorer: https://minascan.io/devnet/account/B62qk11BSgji2ygYeYg7xFU1NdTz5MAxqviyMhyfqoFwhu5ksVghPBS
+2025-09-09T22:25:29.080142Z  INFO silvana::example: 📥 Fetching devnet configuration...
+2025-09-09T22:25:29.080570Z  INFO silvana::config: Fetching configuration for chain devnet from https://rpc.silvana.dev
+2025-09-09T22:25:29.080963Z  INFO rpc_client: Connecting to Silvana RPC service at: https://rpc.silvana.dev
+2025-09-09T22:25:29.404632Z  INFO rpc_client: Successfully connected to Silvana RPC service
+2025-09-09T22:25:29.501012Z  INFO silvana::config: Successfully fetched 16 configuration items for chain devnet
+2025-09-09T22:25:29.501067Z  INFO silvana::example: ✓ Fetched configuration successfully
+2025-09-09T22:25:29.501080Z  INFO silvana::example: 📝 Creating Silvana registry...
+2025-09-09T22:25:29.501178Z  INFO sui::state: Initializing SharedSuiState with RPC URL: https://rpc-devnet-grpc.suiscan.xyz:443
+2025-09-09T22:25:29.502565Z  INFO sui::state: Initialized SharedSuiState with address: 0x3f176926a223d730fea3998da1791f4c7517e73bf3472e233a316d8672275683
+2025-09-09T22:25:29.502613Z  INFO sui::registry: Creating registry 'myprogram'
+2025-09-09T22:25:31.021327Z  INFO sui::registry: Found registry ID from RegistryCreatedEvent: 0x5124fbb1d17eccccd42128233fbfbfc0657a5065aa878536f724aa1fe8d6f619
+2025-09-09T22:25:31.143771Z  INFO sui::registry: Registry created with ID: 0x5124fbb1d17eccccd42128233fbfbfc0657a5065aa878536f724aa1fe8d6f619 (tx: DpYKyzZFW9H2NaS56eH7byTAVgh11KWcvoaf7zaDYFJ)
+2025-09-09T22:25:31.143840Z  INFO sui::interface: Successfully created registry 'myprogram' with ID: 0x5124fbb1d17eccccd42128233fbfbfc0657a5065aa878536f724aa1fe8d6f619 (tx: DpYKyzZFW9H2NaS56eH7byTAVgh11KWcvoaf7zaDYFJ)
+2025-09-09T22:25:31.143856Z  INFO silvana::example:    ✓ Registry created successfully
+2025-09-09T22:25:31.143865Z  INFO silvana::example:    📄 Registry ID: 0x5124fbb1d17eccccd42128233fbfbfc0657a5065aa878536f724aa1fe8d6f619
+2025-09-09T22:25:31.143873Z  INFO silvana::example:    📄 Transaction: DpYKyzZFW9H2NaS56eH7byTAVgh11KWcvoaf7zaDYFJ
+2025-09-09T22:25:31.143881Z  INFO silvana::example:    🔗 Explorer: https://suiscan.xyz/devnet/tx/DpYKyzZFW9H2NaS56eH7byTAVgh11KWcvoaf7zaDYFJ
+2025-09-09T22:25:31.143983Z  INFO silvana::example: 🔐 Storing agent private key in secure storage...
+2025-09-09T22:25:31.144017Z  INFO rpc_client: Connecting to Silvana RPC service at: https://rpc.silvana.dev
+2025-09-09T22:25:31.286128Z  INFO rpc_client: Successfully connected to Silvana RPC service
+2025-09-09T22:25:31.406582Z  INFO secrets_client: Successfully stored secret for AddDeveloper:AddAgent
+2025-09-09T22:25:31.406649Z  INFO silvana::example:    ✓ Agent private key stored securely
+2025-09-09T22:25:31.406673Z  INFO silvana::example:    📄 Secret name: sk_B62qoiTzbVwoQorP4ys8YKtP5kYWk46BRzeoxwb6xSnx2kLzZJQrEnG
+2025-09-09T22:25:31.406731Z  INFO silvana::example:    📄 Developer: AddDeveloper
+2025-09-09T22:25:31.406760Z  INFO silvana::example:    📄 Agent: AddAgent
+2025-09-09T22:25:31.409045Z  INFO silvana::example: ✅ Project setup complete!
+2025-09-09T22:25:31.409074Z  INFO silvana::example: 📋 Generated Credentials:
+2025-09-09T22:25:31.409089Z  INFO silvana::example:    ├── Sui:
+2025-09-09T22:25:31.409104Z  INFO silvana::example:    │   ├── User: 0x3f176926a223d730fea3998da1791f4c7517e73bf3472e233a316d8672275683
+2025-09-09T22:25:31.409168Z  INFO silvana::example:    │   └── Coordinator: 0x82d751f1182343a402e83868b6573856fbe64c87370471afab21f429490c9559
+2025-09-09T22:25:31.409201Z  INFO silvana::example:    ├── Mina:
+2025-09-09T22:25:31.409217Z  INFO silvana::example:    │   ├── App Admin: B62qoiTzbVwoQorP4ys8YKtP5kYWk46BRzeoxwb6xSnx2kLzZJQrEnG
+2025-09-09T22:25:31.409241Z  INFO silvana::example:    │   └── User: B62qk11BSgji2ygYeYg7xFU1NdTz5MAxqviyMhyfqoFwhu5ksVghPBS
+2025-09-09T22:25:31.409256Z  INFO silvana::example:    └── Registry: 0x5124fb...f619
+2025-09-09T22:25:31.409270Z  INFO silvana::example: ⚙️  Environment files created:
+2025-09-09T22:25:31.409286Z  INFO silvana::example:    • agent/.env (from env.example template)
+2025-09-09T22:25:31.409302Z  INFO silvana::example:    • agent/.env.app (empty, for app-specific configuration)
+2025-09-09T22:25:31.409319Z  INFO silvana::example:    • silvana/.env (coordinator configuration)
+2025-09-09T22:25:31.409341Z  INFO silvana:
+2025-09-09T22:25:31.409351Z  INFO silvana: 🎉 Project 'myprogram' is ready!
+2025-09-09T22:25:31.409364Z  INFO silvana:
+2025-09-09T22:25:31.409375Z  INFO silvana: 📁 Project structure:
+2025-09-09T22:25:31.409426Z  INFO silvana:    myprogram/
+2025-09-09T22:25:31.409439Z  INFO silvana:    ├── agent/     # TypeScript agent implementation
+2025-09-09T22:25:31.409452Z  INFO silvana:    ├── move/      # Move smart contracts
+2025-09-09T22:25:31.409473Z  INFO silvana:    └── silvana/   # Silvana coordinator configuration
+2025-09-09T22:25:31.409490Z  INFO silvana:
+2025-09-09T22:25:31.409501Z  INFO silvana: 🚀 Next steps:
+2025-09-09T22:25:31.409514Z  INFO silvana:    cd myprogram
+2025-09-09T22:25:31.409524Z  INFO silvana:    cd agent && npm install    # Install agent dependencies
+2025-09-09T22:25:31.409540Z  INFO silvana:    cd move && sui move build  # Build Move contracts
+2025-09-09T22:25:31.409556Z  INFO silvana:
+2025-09-09T22:25:31.409566Z  INFO silvana: 📖 Check the README file for more information.
 ```
