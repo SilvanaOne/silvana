@@ -192,6 +192,12 @@ pub enum Commands {
         #[command(subcommand)]
         subcommand: RegistryCommands,
     },
+    
+    /// Secret storage commands
+    Secrets {
+        #[command(subcommand)]
+        subcommand: SecretsCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -500,6 +506,67 @@ pub enum BalanceCommands {
         /// Network (mainnet, sepolia, holesky, arbitrum, optimism, base, polygon, etc.)
         #[arg(long, default_value = "holesky")]
         network: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SecretsCommands {
+    /// Store a secret in secure storage
+    Store {
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, env = "SILVANA_RPC_SERVER")]
+        endpoint: Option<String>,
+        
+        /// Developer identifier
+        #[arg(long)]
+        developer: String,
+        
+        /// Agent identifier
+        #[arg(long)]
+        agent: String,
+        
+        /// Secret name/key
+        #[arg(long)]
+        name: String,
+        
+        /// Secret value to store
+        #[arg(long)]
+        secret: String,
+        
+        /// Optional app identifier
+        #[arg(long)]
+        app: Option<String>,
+        
+        /// Optional app instance identifier
+        #[arg(long)]
+        app_instance: Option<String>,
+    },
+    
+    /// Retrieve a secret from secure storage
+    Retrieve {
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, env = "SILVANA_RPC_SERVER")]
+        endpoint: Option<String>,
+        
+        /// Developer identifier
+        #[arg(long)]
+        developer: String,
+        
+        /// Agent identifier
+        #[arg(long)]
+        agent: String,
+        
+        /// Secret name/key
+        #[arg(long)]
+        name: String,
+        
+        /// Optional app identifier
+        #[arg(long)]
+        app: Option<String>,
+        
+        /// Optional app instance identifier
+        #[arg(long)]
+        app_instance: Option<String>,
     },
 }
 

@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 /// - Funding all accounts from faucets
 /// - Fetching devnet config
 /// - Creating registry
+/// - Storing agent private key in secure storage
 /// - Writing configuration files
 pub async fn setup_example_project(project_path: &Path, project_name: &str) -> Result<()> {
     info!("🔑 Setting up project credentials...");
@@ -115,6 +116,36 @@ pub async fn setup_example_project(project_path: &Path, project_name: &str) -> R
         (None, None)
     };
 
+    // Store Mina agent private key in secure storage
+    info!("🔐 Storing agent private key in secure storage...");
+    let developer_name = "AddDeveloper";
+    let agent_name = "AddAgent";
+    let secret_name = format!("sk_{}", mina_app_admin_key.public_key);
+
+    match store_agent_secret(
+        &secret_name,
+        &mina_app_admin_key.private_key,
+        developer_name,
+        agent_name,
+    )
+    .await
+    {
+        Ok(()) => {
+            info!("   ✓ Agent private key stored securely");
+            info!("   📄 Secret name: {}", secret_name);
+            info!("   📄 Developer: {}", developer_name);
+            info!("   📄 Agent: {}", agent_name);
+        }
+        Err(e) => {
+            warn!("Failed to store agent private key: {}", e);
+            warn!("⚠️  You can manually store the secret later with:");
+            warn!(
+                "   silvana secrets store --developer {} --agent {} --name {} --secret <private_key>",
+                developer_name, agent_name, secret_name
+            );
+        }
+    }
+
     // Create .env files
     create_env_files(
         project_path,
@@ -181,12 +212,7 @@ fn generate_mina_keypair(name: &str) -> Result<MinaKeypair> {
 
     match mina::generate_mina_keypair() {
         Ok(keypair) => {
-            info!(
-                "     ✓ Mina {} address: {}...{}",
-                name,
-                &keypair.public_key[..8],
-                &keypair.public_key[keypair.public_key.len() - 4..]
-            );
+            info!("     ✓ Mina {} address: {}", name, &keypair.public_key);
             Ok(MinaKeypair {
                 private_key: keypair.private_key,
                 public_key: keypair.public_key,
@@ -352,6 +378,10 @@ fn create_env_files(
 
     fs::write(agent_env_path, agent_env)?;
 
+    // Create empty .env.app file in agent folder for app-specific configuration
+    let agent_env_app_path = project_path.join("agent").join(".env.app");
+    fs::write(agent_env_app_path, "")?;
+
     // Create silvana subfolder if it doesn't exist
     let silvana_dir = project_path.join("silvana");
     if !silvana_dir.exists() {
@@ -409,5 +439,33 @@ fn display_setup_summary(
     }
     info!("⚙️  Environment files created:");
     info!("   • agent/.env (from env.example template)");
+    info!("   • agent/.env.app (empty, for app-specific configuration)");
     info!("   • silvana/.env (coordinator configuration)");
+}
+
+/// Store agent secret to RPC server
+async fn store_agent_secret(name: &str, secret: &str, developer: &str, agent: &str) -> Result<()> {
+    // Get the default RPC endpoint
+    let endpoint = std::env::var("SILVANA_RPC_SERVER")
+        .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
+
+    // Connect to secrets client
+    let mut client = secrets_client::SecretsClient::new(&endpoint).await?;
+
+    // Store the secret (using empty signature for now)
+    let placeholder_signature = vec![];
+
+    client
+        .store_secret(
+            developer,
+            agent,
+            None, // app
+            None, // app_instance
+            Some(name),
+            secret,
+            &placeholder_signature,
+        )
+        .await?;
+
+    Ok(())
 }
