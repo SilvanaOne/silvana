@@ -151,6 +151,17 @@ pub enum Commands {
         rpc_url: Option<String>,
     },
     
+    /// Fetch and display configuration from RPC server
+    Config {
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, env = "SILVANA_RPC_SERVER")]
+        endpoint: Option<String>,
+        
+        /// Display raw JSON output instead of formatted table
+        #[arg(long, default_value = "false")]
+        json: bool,
+    },
+    
     /// Request tokens from the faucet
     Faucet {
         #[command(subcommand)]
