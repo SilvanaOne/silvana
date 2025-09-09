@@ -13,7 +13,7 @@ use prost_reflect::ReflectMessage;
 use proto::get_protobuf_full_name_from_instance;
 use std::env;
 use tokio::time::{Duration, timeout};
-use tracing::{debug, error, info};
+use tracing::{debug, info, error};
 
 /// NATS publisher for publishing events to NATS JetStream
 pub struct EventNatsPublisher {

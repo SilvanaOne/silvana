@@ -1,0 +1,29 @@
+[package]
+name = "docker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+bollard = "0.19"
+tokio.workspace = true
+futures-util = "0.3"
+bytes = "1"
+chrono.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+tee = ["libc"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2", optional = true }

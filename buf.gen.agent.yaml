@@ -1,0 +1,7 @@
+version: v2
+
+plugins:
+  # Generate TypeScript client for agent
+  - remote: buf.build/bufbuild/es
+    out: examples/add/agent/src/proto
+    opt: target=ts,js_import_style=module

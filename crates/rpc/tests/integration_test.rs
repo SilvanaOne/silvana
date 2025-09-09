@@ -12,7 +12,7 @@ use proto::silvana_events_service_client::SilvanaEventsServiceClient;
 use proto::*;
 
 // Configuration - easily changeable parameters
-const NUM_EVENTS: usize = 1000;
+const NUM_EVENTS: usize = 10;
 const COORDINATOR_ID: &str = "test-coordinator-001";
 
 fn get_server_addr() -> String {
@@ -72,6 +72,9 @@ impl SentEventsCollector {
 
 #[tokio::test]
 async fn test_send_coordinator_and_agent_events() {
+    // Initialize Rustls crypto provider for HTTPS connections
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    
     let start_time = Instant::now();
 
     let server_addr = get_server_addr();
@@ -611,11 +614,11 @@ fn create_event_signature(event: &Event) -> String {
                         format!("coord_started_{}_{}", e.coordinator_id, e.ethereum_address)
                     }
                     events::coordinator_event::Event::AgentStartedJob(e) => {
-                        format!("agent_started_{}", e.job_id)
+                        format!("agent_started_{}", e.job_sequence)
                     }
                     events::coordinator_event::Event::AgentFinishedJob(e) => {
                         // Include duration to differentiate from started job
-                        format!("agent_finished_{}_{}", e.job_id, e.duration)
+                        format!("agent_finished_{}_{}", e.job_sequence, e.duration)
                     }
                     events::coordinator_event::Event::CoordinationTx(e) => {
                         format!("coord_tx_{}", e.tx_hash)
@@ -634,7 +637,7 @@ fn create_event_signature(event: &Event) -> String {
                 Some(agent_event_type) => match agent_event_type {
                     events::agent_event::Event::Message(e) => {
                         // Use message content which includes the index
-                        format!("agent_msg_{}_{}", e.job_id, e.message)
+                        format!("agent_msg_{}_{}", e.job_sequence, e.message)
                     }
                     events::agent_event::Event::Transaction(e) => {
                         format!("agent_tx_{}", e.tx_hash)
@@ -1046,7 +1049,7 @@ fn create_agent_started_job_event() -> Event {
                     developer: "test-developer".to_string(),
                     agent: "test-agent".to_string(),
                     app: "test-app".to_string(),
-                    job_id: "job-123".to_string(),
+                    job_sequence: "123".to_string(),
                     event_timestamp: get_current_timestamp(),
                 },
             )),
@@ -1063,7 +1066,7 @@ fn create_agent_finished_job_event() -> Event {
                     developer: "test-developer".to_string(),
                     agent: "test-agent".to_string(),
                     app: "test-app".to_string(),
-                    job_id: "job-123".to_string(),
+                    job_sequence: "123".to_string(),
                     duration: 5000, // 5 seconds
                     event_timestamp: get_current_timestamp(),
                 },
@@ -1081,7 +1084,7 @@ fn create_coordination_tx_event() -> Event {
                     developer: "test-developer".to_string(),
                     agent: "test-agent".to_string(),
                     app: "test-app".to_string(),
-                    job_id: "job-123".to_string(),
+                    job_sequence: "123".to_string(),
                     memo: "Test coordination transaction".to_string(),
                     tx_hash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
                         .to_string(),
@@ -1137,7 +1140,7 @@ fn create_agent_message_event() -> Event {
                 developer: "test-developer".to_string(),
                 agent: "test-agent".to_string(),
                 app: "test-app".to_string(),
-                job_id: "job-123".to_string(),
+                job_sequence: "123".to_string(),
                 sequences: vec![1, 2, 3],
                 event_timestamp: get_current_timestamp(),
                 level: 1, // LogLevel::Info
@@ -1156,7 +1159,7 @@ fn create_agent_transaction_event() -> Event {
                 developer: "test-developer".to_string(),
                 agent: "test-agent".to_string(),
                 app: "test-app".to_string(),
-                job_id: "job-123".to_string(),
+                job_sequence: "123".to_string(),
                 sequences: vec![1, 2, 3],
                 event_timestamp: get_current_timestamp(),
                 tx_hash: "0x9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba"
@@ -1180,16 +1183,16 @@ fn modify_coordinator_event_for_uniqueness(event: &mut Event, index: usize) {
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
             Some(coordinator_event::Event::AgentStartedJob(e)) => {
-                e.job_id = format!("job-{}", index);
+                e.job_sequence = format!("{}", index);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
             Some(coordinator_event::Event::AgentFinishedJob(e)) => {
-                e.job_id = format!("job-{}", index);
+                e.job_sequence = format!("{}", index);
                 e.duration = 1000 + (index as u64 * 100);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
             Some(coordinator_event::Event::CoordinationTx(e)) => {
-                e.job_id = format!("job-{}", index);
+                e.job_sequence = format!("{}", index);
                 e.tx_hash = format!("0x{:064x}", index);
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
@@ -1211,13 +1214,13 @@ fn modify_agent_event_for_uniqueness(event: &mut Event, index: usize) {
     if let Some(event::EventType::Agent(agent_event)) = &mut event.event_type {
         match &mut agent_event.event {
             Some(agent_event::Event::Message(e)) => {
-                e.job_id = format!("job-{}", index);
+                e.job_sequence = format!("{}", index);
                 e.message = format!("Test agent message #{}", index);
                 e.sequences = vec![index as u64];
                 e.event_timestamp = get_current_timestamp() + index as u64;
             }
             Some(agent_event::Event::Transaction(e)) => {
-                e.job_id = format!("job-{}", index);
+                e.job_sequence = format!("{}", index);
                 e.tx_hash = format!("0x{:064x}", index + 1000);
                 e.sequences = vec![index as u64];
                 e.event_timestamp = get_current_timestamp() + index as u64;

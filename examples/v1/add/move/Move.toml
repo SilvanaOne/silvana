@@ -1,0 +1,20 @@
+[package]
+name = "add"
+version = "0.1.0"
+edition = "2024.beta" 
+license = "Apache 2.0"        
+authors = ["DFST"]      
+
+[dependencies]
+commitment = { local = "../../../move/commitment" }
+coordination = { local = "../../../move/coordination" }
+constants = { local = "../../../move/constants" }
+
+[addresses]
+add = "0x0"
+
+[dev-dependencies]
+
+[dev-addresses]
+
+

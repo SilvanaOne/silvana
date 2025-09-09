@@ -1,0 +1,49 @@
+[package]
+name = "sui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+tonic.workspace = true
+base64.workspace = true
+chrono.workspace = true
+base64ct = { version = "1.6", features = ["alloc"] }
+bech32 = "0.9"
+hex.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+
+# Sui dependencies
+sui-rpc.workspace = true
+sui-sdk-types.workspace = true
+sui-crypto.workspace = true
+sui-transaction-builder.workspace = true
+
+# For Move call
+bcs.workspace = true
+
+
+
+# For keypair generation
+blake2 = "0.10"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand.workspace = true
+tracing-subscriber.workspace = true
+# For parallel coin management
+parking_lot.workspace = true
+# For faucet requests
+reqwest.workspace = true
+
+[dev-dependencies]
+dotenvy.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rand = "0.8"
+tracing-subscriber = "0.3"

@@ -46,7 +46,7 @@ use std::time::Duration;
 use tonic::metadata::MetadataMap;
 use tonic::transport::Certificate;
 use tonic::transport::ClientTlsConfig;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn, error};
 
 /// Configuration for OpenTelemetry integration with BetterStack
 #[derive(Debug, Clone)]

@@ -1,22 +1,99 @@
 [package]
 name = "coordinator"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-# Monitoring system (reusable across services)
-monitoring = { path = "../monitoring" }
-# Buffer system for events
-buffer = { path = "../buffer" }
-# Async runtime
-tokio = { version = "1.46", features = ["full"] }
-# Logging
-tracing = "0.1"
-# Error handling
-anyhow = "1.0"
+# Docker management
+docker = { path = "../docker" }
 
-# Async trait
-async-trait = "0.1"
-# Logging subscriber
-# Date/time
-chrono = { version = "0.4" }
+# Sui utilities
+sui = { path = "../sui" }
+
+# Mina utilities
+mina = { path = "../mina" }
+
+# RPC client
+rpc-client = { path = "../rpc-client" }
+
+# Secrets client  
+secrets-client = { path = "../secrets-client" }
+
+# Walrus data availability
+storage = { path = "../storage" }
+
+# Async runtime
+tokio.workspace = true
+tokio-stream = "0.1"
+
+# Sui RPC SDK
+sui-rpc.workspace = true
+sui-sdk-types.workspace = true
+
+# gRPC and protobuf
+tonic.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+proto = { path = "../proto" }
+
+# Async utilities
+futures.workspace = true
+async-trait.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging and monitoring
+tracing.workspace = true
+tracing-subscriber.workspace = true
+monitoring = { path = "../monitoring" }
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+bcs.workspace = true
+
+# Utilities
+chrono.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+hex.workspace = true
+base64.workspace = true
+rustls.workspace = true
+
+# Cryptographic utilities
+sha2.workspace = true
+num-bigint = "0.4"
+
+# Hardware detection
+num_cpus = "1.0"
+sys-info = "0.9"
+
+# Random number generation
+rand.workspace = true
+
+# HTTP client for faucet requests
+reqwest.workspace = true
+
+# For parallel coin management (used by sui crate)
+parking_lot.workspace = true
+
+# Blockchain crates
+ethereum = { path = "../ethereum" }
+avs-operator = { path = "../avs-operator" }
+
+[build-dependencies]
+tonic-build.workspace = true
+
+[dev-dependencies]
+# For tests
+uuid = { version = "1.0", features = ["v4"] }
+dotenvy.workspace = true
+rustls.workspace = true
+
+[[bin]]
+name = "silvana"
+path = "src/main.rs"

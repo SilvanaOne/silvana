@@ -1,0 +1,529 @@
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package silvana.coordinator.v1;
+
+option go_package = "github.com/SilvanaOne/zk-tests/packages/avs/rpc/proto;coordinator";
+
+
+// Job message matching the partial Move struct
+message Job {
+  uint64 job_sequence = 1;
+  optional string description = 2;
+  // Metadata of the agent method to call
+  string developer = 3;
+  string agent =4 ;
+  string agent_method = 5;
+  // Metadata of the calling app instance
+  string app = 6;
+  string app_instance = 7;
+  string app_instance_method = 8;
+  optional uint64 block_number = 9;
+  repeated uint64 sequences = 10;
+  repeated uint64 sequences1 = 11;
+  repeated uint64 sequences2 = 12;
+  bytes data = 13;
+  // Generated unique job ID for agent reference
+  string job_id = 14;
+  // Metadata of the job
+  uint32 attempts = 15;
+  // Metadata of the job
+  uint64 created_at = 16;
+  uint64 updated_at = 17;
+  // Chain for settlement jobs
+  optional string chain = 18;
+}
+
+// Request message for getting a job
+message GetJobRequest {
+  string developer = 1;
+  string agent = 2;
+  string agent_method = 3;
+  string session_id = 4;
+}
+
+// Response message containing a job
+message GetJobResponse {
+  bool success = 1;
+  string message = 2;
+  optional Job job = 3;
+}
+
+// Request message for completing a job
+message CompleteJobRequest {
+  string job_id = 1;
+  string session_id = 2;
+}
+
+// Response message for job completion
+message CompleteJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Request message for failing a job
+message FailJobRequest {
+  string job_id = 1;
+  string error_message = 2;
+  string session_id = 3;
+}
+
+// Response message for job failure
+message FailJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Request message for terminating a job
+message TerminateJobRequest {
+  string session_id = 1;
+  string job_id = 2;
+}
+
+// Response message for terminating a job
+message TerminateJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Request message for submitting a proof
+message SubmitProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  repeated uint64 sequences = 3; // should be sorted
+  repeated uint64 merged_sequences_1 = 4; // optional
+  repeated uint64 merged_sequences_2 = 5; // optional
+  string job_id = 6;
+  string proof = 7;
+  uint64 cpu_time = 8; // in milliseconds
+}
+
+// Response message for proof submission
+message SubmitProofResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+  string da_hash = 4;
+}
+
+// Request message for rejecting a proof
+message RejectProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  repeated uint64 sequences = 3; // should be sorted
+  string job_id = 4;
+}
+
+// Response message for proof rejection
+message RejectProofResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for submitting state
+message SubmitStateRequest {
+  string session_id = 1;
+  uint64 sequence = 2;
+  string job_id = 3;
+  optional bytes new_state_data = 4; // raw state data (vector<u8>) for update_state_for_sequence
+  optional string serialized_state = 5; // serialized state data (string) to write to Walrus
+}
+
+// Response message for state submission
+message SubmitStateResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+  optional string da_hash = 4; // only present if serialized_state was provided
+}
+
+// Sequence state message matching the Move SequenceState struct
+message SequenceState {
+  uint64 sequence = 1;
+  optional bytes state = 2;
+  optional string data_availability = 3;
+  bytes optimistic_state = 4;
+  bytes transition_data = 5;
+}
+
+// Request message for querying sequence states
+message GetSequenceStatesRequest {
+  string session_id = 1;
+  string job_id = 2;
+  uint64 sequence = 3;
+}
+
+// Response message for sequence states query
+message GetSequenceStatesResponse {
+  bool success = 1;
+  string message = 2;
+  repeated SequenceState states = 3;
+}
+
+// Request message for reading data availability by hash
+message ReadDataAvailabilityRequest {
+  string da_hash = 1;
+  string session_id = 2;
+}
+
+// Response message for data availability read
+message ReadDataAvailabilityResponse {
+  optional string data = 1;
+  bool success = 2;
+  string message = 3;
+}
+
+// Request message for getting a proof
+message GetProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  repeated uint64 sequences = 3; // should be sorted
+  string job_id = 4;
+}
+
+// Response message for getting a proof
+message GetProofResponse {
+  bool success = 1;
+  optional string proof = 2; // available when success is true
+  string message = 3; // available when success is false
+}
+
+// Request message for getting a block proof
+message GetBlockProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  string job_id = 3;
+}
+
+// Response message for getting a block proof
+message GetBlockProofResponse {
+  bool success = 1;
+  optional string block_proof = 2; // available when success is true
+  string message = 3; // error message or status details
+}
+
+// Request message for retrieving a secret
+message RetrieveSecretRequest {
+  string job_id = 1;
+  string session_id = 2;
+  string name = 3;
+}
+
+// Response message for secret retrieval
+message RetrieveSecretResponse {
+  bool success = 1;
+  string message = 2;
+  optional string secret_value = 3; // Only returned if success is true
+}
+
+// Request message for setting a key-value pair
+message SetKVRequest {
+  string job_id = 1;
+  string session_id = 2;
+  string key = 3;
+  string value = 4;
+}
+
+// Response message for setting a key-value pair
+message SetKVResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for getting a key-value pair
+message GetKVRequest {
+  string job_id = 1;
+  string session_id = 2;
+  string key = 3;
+}
+
+// Response message for getting a key-value pair
+message GetKVResponse {
+  bool success = 1;
+  string message = 2;
+  optional string value = 3; // Only returned if success is true and key exists
+}
+
+// Request message for deleting a key-value pair
+message DeleteKVRequest {
+  string job_id = 1;
+  string session_id = 2;
+  string key = 3;
+}
+
+// Response message for deleting a key-value pair
+message DeleteKVResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for adding metadata (write-once)
+message AddMetadataRequest {
+  string job_id = 1;
+  string session_id = 2;
+  string key = 3;
+  string value = 4;
+}
+
+// Response message for adding metadata
+message AddMetadataResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for getting metadata
+message GetMetadataRequest {
+  string job_id = 1;
+  string session_id = 2;
+  optional string key = 3;
+}
+
+// Metadata message containing AppInstance information
+// Settlement info for a specific chain
+message SettlementInfo {
+  string chain = 1;
+  uint64 last_settled_block_number = 2;
+  optional string settlement_address = 3;
+  optional uint64 settlement_job = 4;
+}
+
+message Metadata {
+  optional string value = 1; // The metadata value if a key was requested
+  // AppInstance fields
+  string app_instance_id = 2;
+  string silvana_app_name = 3;
+  optional string description = 4;
+  uint64 sequence = 5;
+  string admin = 6;
+  uint64 block_number = 7;
+  uint64 previous_block_timestamp = 8;
+  uint64 previous_block_last_sequence = 9;
+  uint64 last_proved_block_number = 10;
+  bool is_paused = 11;
+  uint64 created_at = 12;
+  uint64 updated_at = 13;
+  // Multi-chain settlement support
+  map<string, SettlementInfo> settlements = 14; // key is chain identifier
+}
+
+// Response message for getting metadata
+message GetMetadataResponse {
+  bool success = 1;
+  string message = 2;
+  optional Metadata metadata = 3;
+}
+
+// Request message for trying to create a block
+message TryCreateBlockRequest {
+  string job_id = 1;
+  string session_id = 2;
+}
+
+// Response message for try create block
+message TryCreateBlockResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+  optional uint64 block_number = 4; // The block number if a block was created
+}
+
+// Request message for updating block state data availability
+message UpdateBlockStateDataAvailabilityRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  string state_data_availability = 4;
+}
+
+// Response message for updating block state data availability
+message UpdateBlockStateDataAvailabilityResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for updating block proof data availability
+message UpdateBlockProofDataAvailabilityRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  string proof_data_availability = 4;
+}
+
+// Response message for updating block proof data availability
+message UpdateBlockProofDataAvailabilityResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for updating block settlement tx hash
+message UpdateBlockSettlementTxHashRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  string settlement_tx_hash = 4;
+  string chain = 5; // Chain identifier for multi-chain settlement
+}
+
+// Response message for updating block settlement tx hash
+message UpdateBlockSettlementTxHashResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for updating block settlement tx included in block
+message UpdateBlockSettlementTxIncludedInBlockRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  uint64 settled_at = 4;
+  string chain = 5; // Chain identifier for multi-chain settlement
+}
+
+// Response message for updating block settlement tx included in block
+message UpdateBlockSettlementTxIncludedInBlockResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// Request message for creating an app job
+message CreateAppJobRequest {
+  string job_id = 1;
+  string session_id = 2;
+  string method_name = 3;
+  optional string job_description = 4;
+  optional uint64 block_number = 5;
+  repeated uint64 sequences = 6;
+  repeated uint64 sequences1 = 7;
+  repeated uint64 sequences2 = 8;
+  bytes data = 9;
+  optional uint64 interval_ms = 10;
+  optional uint64 next_scheduled_at = 11;
+  optional string settlement_chain = 12; // Chain identifier for settlement jobs
+}
+
+// Response message for creating an app job
+message CreateAppJobResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+  uint64 job_sequence = 4; // The sequence number of the created job
+}
+
+// Block message mirroring the Move Block struct
+message Block {
+  string id = 1;                                  // UID from Move
+  string name = 2;
+  uint64 block_number = 3;
+  uint64 start_sequence = 4;
+  uint64 end_sequence = 5;
+  bytes actions_commitment = 6;                   // Element<Scalar> as bytes
+  bytes state_commitment = 7;                     // Element<Scalar> as bytes
+  uint64 time_since_last_block = 8;
+  uint64 number_of_transactions = 9;
+  bytes start_actions_commitment = 10;            // Element<Scalar> as bytes
+  bytes end_actions_commitment = 11;              // Element<Scalar> as bytes
+  optional string state_data_availability = 12;
+  optional string proof_data_availability = 13;
+  // Settlement fields removed - now in Settlement per chain
+  uint64 created_at = 14;
+  optional uint64 state_calculated_at = 15;
+  optional uint64 proved_at = 16;
+}
+
+// Request message for getting a block
+message GetBlockRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+}
+
+// Response message for getting a block
+message GetBlockResponse {
+  bool success = 1;
+  string message = 2;
+  optional Block block = 3;
+}
+
+// BlockSettlement message for settlement info on a specific chain
+message BlockSettlement {
+  uint64 block_number = 1;
+  optional string settlement_tx_hash = 2;
+  bool settlement_tx_included_in_block = 3;
+  optional uint64 sent_to_settlement_at = 4;
+  optional uint64 settled_at = 5;
+}
+
+// Request message for getting block settlement info for a specific chain
+message GetBlockSettlementRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  string chain = 4; // Chain identifier
+}
+
+// Response message for getting block settlement info
+message GetBlockSettlementResponse {
+  bool success = 1;
+  string message = 2;
+  optional BlockSettlement block_settlement = 3;
+  string chain = 4;
+}
+
+// Request message for updating block settlement on a specific chain
+message UpdateBlockSettlementRequest {
+  string job_id = 1;
+  string session_id = 2;
+  uint64 block_number = 3;
+  string chain = 4;
+  optional string settlement_tx_hash = 5;
+  bool settlement_tx_included_in_block = 6;
+  optional uint64 sent_to_settlement_at = 7;
+  optional uint64 settled_at = 8;
+}
+
+// Response message for updating block settlement
+message UpdateBlockSettlementResponse {
+  bool success = 1;
+  string message = 2;
+  string tx_hash = 3;
+}
+
+// gRPC service definition
+service CoordinatorService {
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
+  rpc FailJob(FailJobRequest) returns (FailJobResponse);
+  rpc TerminateJob(TerminateJobRequest) returns (TerminateJobResponse);
+  rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc RejectProof(RejectProofRequest) returns (RejectProofResponse);
+  rpc SubmitState(SubmitStateRequest) returns (SubmitStateResponse);
+  rpc GetSequenceStates(GetSequenceStatesRequest) returns (GetSequenceStatesResponse);
+  rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);
+  rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  rpc GetBlockProof(GetBlockProofRequest) returns (GetBlockProofResponse);
+  rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
+  rpc SetKV(SetKVRequest) returns (SetKVResponse);
+  rpc GetKV(GetKVRequest) returns (GetKVResponse);
+  rpc DeleteKV(DeleteKVRequest) returns (DeleteKVResponse);
+  rpc AddMetadata(AddMetadataRequest) returns (AddMetadataResponse);
+  rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
+  rpc TryCreateBlock(TryCreateBlockRequest) returns (TryCreateBlockResponse);
+  rpc UpdateBlockStateDataAvailability(UpdateBlockStateDataAvailabilityRequest) returns (UpdateBlockStateDataAvailabilityResponse);
+  rpc UpdateBlockProofDataAvailability(UpdateBlockProofDataAvailabilityRequest) returns (UpdateBlockProofDataAvailabilityResponse);
+  rpc UpdateBlockSettlementTxHash(UpdateBlockSettlementTxHashRequest) returns (UpdateBlockSettlementTxHashResponse);
+  rpc UpdateBlockSettlementTxIncludedInBlock(UpdateBlockSettlementTxIncludedInBlockRequest) returns (UpdateBlockSettlementTxIncludedInBlockResponse);
+  rpc CreateAppJob(CreateAppJobRequest) returns (CreateAppJobResponse);
+  rpc GetBlock(GetBlockRequest) returns (GetBlockResponse);
+  // New BlockSettlement RPCs for multi-chain support
+  rpc GetBlockSettlement(GetBlockSettlementRequest) returns (GetBlockSettlementResponse);
+  rpc UpdateBlockSettlement(UpdateBlockSettlementRequest) returns (UpdateBlockSettlementResponse);
+}

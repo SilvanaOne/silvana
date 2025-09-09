@@ -1,0 +1,17 @@
+[package]
+name = "ethereum"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+once_cell.workspace = true
+alloy = { version = "1", features = ["full"] }
+rand.workspace = true
+chrono.workspace = true

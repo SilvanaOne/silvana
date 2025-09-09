@@ -1,0 +1,29 @@
+[package]
+name = "rpc-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Proto definitions
+proto = { path = "../proto" }
+
+# gRPC client
+tonic = { workspace = true, features = ["tls-webpki-roots"] }
+
+# TLS support for rustls crypto provider
+rustls.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Environment variables
+dotenvy.workspace = true

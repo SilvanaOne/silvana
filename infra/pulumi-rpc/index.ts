@@ -67,21 +67,180 @@ export = async () => {
     }
   );
 
-  // Create policy for S3 access (for certificates)
-  const s3Policy = new aws.iam.Policy("silvana-rpc-s3-policy", {
-    description: "Policy for accessing S3 bucket for SSL certificates",
-    policy: JSON.stringify({
-      Version: "2012-10-17",
-      Statement: [
-        {
-          Effect: "Allow",
-          Action: ["s3:GetObject", "s3:PutObject"],
-          Resource: "arn:aws:s3:::silvana-tee-images/*",
-        },
-      ],
-    }),
+
+  // -------------------------
+  // KMS Key for Secrets Encryption
+  // -------------------------
+  
+  const secretsKmsKey = new aws.kms.Key("silvana-secrets-encryption-key", {
+    description: "KMS key for encrypting Silvana secrets at rest",
+    keyUsage: "ENCRYPT_DECRYPT",
+    customerMasterKeySpec: "SYMMETRIC_DEFAULT",
     tags: {
-      Name: "silvana-rpc-s3-policy",
+      Name: "silvana-secrets-encryption",
+      Purpose: "Encrypt secrets at rest",
+      Project: "silvana-rpc",
+    },
+  });
+
+  const secretsKmsKeyAlias = new aws.kms.Alias("silvana-secrets-encryption-alias", {
+    name: "alias/silvana-secrets-encryption",
+    targetKeyId: secretsKmsKey.id,
+  });
+
+  // -------------------------
+  // DynamoDB Table for Secrets Storage
+  // -------------------------
+  
+  const secretsTable = new aws.dynamodb.Table("silvana-secrets", {
+    name: "silvana-secrets",
+    billingMode: "PAY_PER_REQUEST",
+    hashKey: "id", // Binary composite key (developer + agent + app + app_instance + name)
+    attributes: [
+      {
+        name: "id",
+        type: "B", // Binary
+      },
+    ],
+    pointInTimeRecovery: {
+      enabled: true,
+    },
+    tags: {
+      Name: "silvana-secrets",
+      Purpose: "Store encrypted secrets for developers and agents",
+      BackupEnabled: "true",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // -------------------------
+  // DynamoDB Table for Configuration Storage
+  // -------------------------
+  
+  const configTable = new aws.dynamodb.Table("silvana-config", {
+    name: "silvana-config",
+    billingMode: "PAY_PER_REQUEST",
+    hashKey: "chain",      // Partition key: chain identifier (testnet/devnet/mainnet)
+    rangeKey: "config_key", // Sort key: configuration key
+    attributes: [
+      {
+        name: "chain",
+        type: "S", // String
+      },
+      {
+        name: "config_key",
+        type: "S", // String
+      },
+    ],
+    pointInTimeRecovery: {
+      enabled: true,
+    },
+    tags: {
+      Name: "silvana-config",
+      Purpose: "Store configuration key-value pairs per chain",
+      BackupEnabled: "true",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // Create policy for DynamoDB and KMS access (for secrets and config storage)
+  const secretsPolicy = new aws.iam.Policy("silvana-rpc-secrets-policy", {
+    description: "Policy for accessing DynamoDB and KMS for secrets and config storage",
+    policy: pulumi.interpolate`{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:UpdateItem"
+          ],
+          "Resource": "${secretsTable.arn}"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:Query",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:PutItem",
+            "dynamodb:DeleteItem"
+          ],
+          "Resource": "${configTable.arn}"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "kms:Decrypt",
+            "kms:GenerateDataKey"
+          ],
+          "Resource": "${secretsKmsKey.arn}"
+        }
+      ]
+    }`,
+    tags: {
+      Name: "silvana-rpc-secrets-policy",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // -------------------------
+  // S3 Bucket for Proofs Cache
+  // -------------------------
+  const proofsCacheBucket = new aws.s3.Bucket("proofs-cache", {
+    bucket: "proofs-cache",
+    acl: "private",
+    lifecycleRules: [
+      {
+        enabled: true,
+        id: "expire-after-one-week",
+        expiration: {
+          days: 7,
+        },
+      },
+    ],
+    tags: {
+      Name: "proofs-cache",
+      Purpose: "Cache for proof data with automatic expiration",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // Update S3 policy to include proofs-cache bucket
+  const s3PolicyWithProofsCache = new aws.iam.Policy("silvana-rpc-s3-policy-with-proofs", {
+    description: "Policy for accessing S3 buckets for SSL certificates and proofs cache",
+    policy: pulumi.interpolate`{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": ["s3:GetObject", "s3:PutObject"],
+          "Resource": "arn:aws:s3:::silvana-tee-images/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:GetObjectTagging",
+            "s3:PutObjectTagging"
+          ],
+          "Resource": "${proofsCacheBucket.arn}/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:ListBucket",
+            "s3:GetBucketLocation"
+          ],
+          "Resource": "${proofsCacheBucket.arn}"
+        }
+      ]
+    }`,
+    tags: {
+      Name: "silvana-rpc-s3-policy-with-proofs",
       Project: "silvana-rpc",
     },
   });
@@ -99,7 +258,7 @@ export = async () => {
   // Attach S3 policy to the user so the generated API keys have upload permissions
   new aws.iam.UserPolicyAttachment("silvana-rpc-s3-uploader-attachment", {
     user: s3UploaderUser.name,
-    policyArn: s3Policy.arn,
+    policyArn: s3PolicyWithProofsCache.arn,
   });
 
   // Create an access key (AccessKeyId / SecretAccessKey) for the user
@@ -131,7 +290,12 @@ export = async () => {
 
   new aws.iam.RolePolicyAttachment("silvana-rpc-s3-attachment", {
     role: ec2Role.name,
-    policyArn: s3Policy.arn,
+    policyArn: s3PolicyWithProofsCache.arn,
+  });
+
+  new aws.iam.RolePolicyAttachment("silvana-rpc-secrets-attachment", {
+    role: ec2Role.name,
+    policyArn: secretsPolicy.arn,
   });
 
   // Create instance profile
@@ -152,11 +316,14 @@ export = async () => {
 
   // Read and store the .env.rpc file in Parameter Store
   const envContent = fs.readFileSync("./.env.rpc", "utf8");
+  
+  // Append the S3 bucket name and config table name to the environment variables
+  const envContentWithResources = pulumi.interpolate`${envContent}\nPROOFS_CACHE_BUCKET=${proofsCacheBucket.bucket}\nDYNAMODB_CONFIG_TABLE=${configTable.name}`;
 
   const envParameter = new aws.ssm.Parameter("silvana-rpc-env-dev", {
     name: "/silvana-rpc/dev/env",
     type: "SecureString",
-    value: envContent,
+    value: envContentWithResources,
     keyId: "alias/aws/ssm",
     description: "Silvana RPC environment variables for development",
     tags: {
@@ -310,5 +477,16 @@ export = async () => {
     parameterStoreArn: envParameter.arn,
     s3UploaderAccessKeyId: pulumi.secret(s3UploaderAccessKey.id),
     s3UploaderSecretAccessKey: pulumi.secret(s3UploaderAccessKey.secret),
+    // Secrets storage resources
+    secretsTableName: secretsTable.name,
+    secretsTableArn: secretsTable.arn,
+    secretsKmsKeyId: secretsKmsKey.id,
+    secretsKmsKeyAlias: secretsKmsKeyAlias.name,
+    // Config storage resources
+    configTableName: configTable.name,
+    configTableArn: configTable.arn,
+    // Proofs cache bucket
+    proofsCacheBucketName: proofsCacheBucket.bucket,
+    proofsCacheBucketArn: proofsCacheBucket.arn,
   };
 };

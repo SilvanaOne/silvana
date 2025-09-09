@@ -1,8 +1,10 @@
 target/
 **/target
 logs/
+data/
 
 .env
+.env.*
 
 # OSX
 .DS_Store

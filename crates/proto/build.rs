@@ -25,6 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ------------- configure tonic-build for gRPC services only ----------
     let mut config = Config::new();
+    config.protoc_arg("--experimental_allow_proto3_optional");
 
     prost_reflect_build::Builder::new()
         .descriptor_pool("crate::DESCRIPTOR_POOL")

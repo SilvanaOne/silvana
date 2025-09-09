@@ -46,7 +46,7 @@ public struct StateUpdateCreatedEvent has copy, drop {
     state_length: u64,
 }
 
-public struct ActionCommittedEvent has copy, drop {
+public struct StateActionCommittedEvent has copy, drop {
     app_state_id: address,
     action: Action,
     old_sequence: u64,
@@ -63,6 +63,12 @@ public struct StateElementUpdatedEvent has copy, drop {
     new_state: vector<u256>,
     previous_commitment: Element<Scalar>,
     new_commitment: Element<Scalar>,
+}
+
+public struct CommitmentData has copy, drop {
+    actions_commitment: Element<Scalar>,
+    actions_sequence: u64,
+    state_commitment: Element<Scalar>,
 }
 
 /// Create a new AppState
@@ -195,12 +201,11 @@ public fun commit_action(
             new_sequence,
             action,
             rollback_elements,
-            ctx,
         );
     app_state.sequence = new_sequence;
 
     // Emit event for the overall action commitment
-    event::emit(ActionCommittedEvent {
+    event::emit(StateActionCommittedEvent {
         app_state_id: app_state.id.to_address(),
         action,
         old_sequence,
@@ -254,4 +259,30 @@ public fun get_state_update_new_state(
     state_update: &StateUpdate,
 ): &vector<u256> {
     &state_update.new_state
+}
+
+public fun get_commitment_data(app_state: &AppState): CommitmentData {
+    CommitmentData {
+        actions_commitment: app_state.actions_commitment.get_commitment(),
+        actions_sequence: app_state.actions_commitment.get_sequence(),
+        state_commitment: app_state.state_commitment,
+    }
+}
+
+public fun get_commitment_data_actions_commitment(
+    commitment_data: &CommitmentData,
+): Element<Scalar> {
+    commitment_data.actions_commitment
+}
+
+public fun get_commitment_data_actions_sequence(
+    commitment_data: &CommitmentData,
+): u64 {
+    commitment_data.actions_sequence
+}
+
+public fun get_commitment_data_state_commitment(
+    commitment_data: &CommitmentData,
+): Element<Scalar> {
+    commitment_data.state_commitment
 }

@@ -8,13 +8,16 @@ use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tonic_reflection::server::Builder as ReflectionBuilder;
 use tonic_web::GrpcWebLayer;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{error, info, warn};
+use tracing::{info, warn, error};
 
 use monitoring::{init_monitoring, spawn_monitoring_tasks, start_metrics_server};
 use proto::Event;
 use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
 use rpc::SilvanaEventsServiceImpl;
 use rpc::database::EventDatabase;
+use rpc::storage::S3Storage;
+use db::secrets_storage::SecureSecretsStorage;
+use storage::ProofsCache;
 
 // Import buffer directly
 use buffer::EventBuffer;
@@ -24,6 +27,9 @@ use ::rpc::adapters::create_tidb_backend;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize Rustls crypto provider for TLS connections
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    
     dotenvy::dotenv().ok();
 
     println!("🚀 Starting Silvana RPC server");
@@ -145,8 +151,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start monitoring tasks
     spawn_monitoring_tasks(event_buffer.clone());
 
+    // Initialize secrets storage if configured
+    let mut events_service = SilvanaEventsServiceImpl::new(event_buffer, Arc::clone(&database));
+    
+    // Check if secrets storage is configured via environment variables
+    let secrets_table = env::var("SECRETS_TABLE_NAME").ok();
+    let kms_key_id = env::var("SECRETS_KMS_KEY_ID").ok();
+    
+    if let (Some(table_name), Some(key_id)) = (secrets_table, kms_key_id) {
+        info!("🔐 Initializing secrets storage with table: {} and KMS key: {}", table_name, key_id);
+        match SecureSecretsStorage::new(table_name, key_id).await {
+            Ok(storage) => {
+                events_service = events_service.with_secrets_storage(Arc::new(storage));
+                info!("✅ Secrets storage initialized successfully");
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize secrets storage: {}", e);
+                warn!("⚠️  Continuing without secrets storage - secrets API will return errors");
+            }
+        }
+    } else {
+        warn!("⚠️  Secrets storage not configured - SECRETS_TABLE_NAME and SECRETS_KMS_KEY_ID environment variables not set");
+        warn!("⚠️  Secrets API endpoints will return 'not available' errors");
+    }
+    
+    // Initialize proofs cache if configured
+    let proofs_cache_bucket = env::var("PROOFS_CACHE_BUCKET").ok();
+    
+    if proofs_cache_bucket.is_some() || env::var("PROOFS_CACHE_BUCKET").is_ok() {
+        info!("📦 Initializing proofs cache");
+        match ProofsCache::new(proofs_cache_bucket).await {
+            Ok(cache) => {
+                events_service = events_service.with_proofs_cache(Arc::new(cache));
+                info!("✅ Proofs cache initialized successfully");
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize proofs cache: {}", e);
+                warn!("⚠️  Continuing without proofs cache - proofs API will return errors");
+            }
+        }
+    } else {
+        warn!("⚠️  Proofs cache not configured - PROOFS_CACHE_BUCKET environment variable not set");
+        warn!("⚠️  Proofs API endpoints will return 'not available' errors");
+    }
+
+    // Initialize S3 storage for binary operations
+    let s3_bucket = env::var("S3_BINARY_BUCKET").unwrap_or_else(|_| "silvana-distribution".to_string());
+    info!("🗄️  Initializing S3 storage with bucket: {}", s3_bucket);
+    let s3_storage = S3Storage::new(s3_bucket);
+    events_service = events_service.with_s3_storage(Arc::new(s3_storage));
+    info!("✅ S3 storage initialized for binary operations");
+    
+    // Initialize config storage
+    let config_table = env::var("DYNAMODB_CONFIG_TABLE").unwrap_or_else(|_| "silvana-config".to_string());
+    if !config_table.is_empty() {
+        info!("🔧 Initializing config storage with table: {}", config_table);
+        match db::kv::ConfigStorage::new(config_table).await {
+            Ok(config_storage) => {
+                events_service = events_service.with_config_storage(Arc::new(config_storage));
+                info!("✅ Config storage initialized");
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize config storage: {}", e);
+                warn!("⚠️  Config endpoints will return 'not available' errors");
+            }
+        }
+    } else {
+        warn!("⚠️  Config storage not configured - config endpoints will return 'not available' errors");
+    }
+
     // Create gRPC service with Prometheus metrics layer
-    let events_service = SilvanaEventsServiceImpl::new(event_buffer, Arc::clone(&database));
     let grpc_service = SilvanaEventsServiceServer::new(events_service);
 
     // Create reflection service

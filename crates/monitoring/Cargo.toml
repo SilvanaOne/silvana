@@ -1,25 +1,27 @@
 [package]
 name = "monitoring"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
-anyhow = "1.0"
+anyhow.workspace = true
 axum = { version = "0.8", features = ["http1", "json", "query"] }
-chrono = "0.4"
+chrono.workspace = true
 prometheus = { version = "0.14", features = ["process"] }
 sysinfo = "0.35"
-tokio = { version = "1.46", features = ["full"] }
-tracing = "0.1"
+tokio.workspace = true
+tracing.workspace = true
 buffer = { path = "../buffer" }
 
 
 # Logging dependencies
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber.workspace = true
 tracing-appender = "0.2"
 
 # OpenTelemetry dependencies for BetterStack integration
-opentelemetry = "0.30"
-opentelemetry_sdk = { version = "0.30", features = ["rt-tokio", "logs", "metrics"] }
-opentelemetry-otlp = { version = "0.30", features = ["logs", "metrics", "grpc-tonic", "tls"] }
-tonic = { version = "0.13", features = ["tls-webpki-roots"] }
+opentelemetry = { version = "0.30", features = ["trace"] }
+opentelemetry_sdk = { version = "0.30", features = ["rt-tokio", "logs", "metrics", "trace"] }
+opentelemetry-otlp = { version = "0.30", features = ["logs", "metrics", "trace", "grpc-tonic", "http-proto", "tls"] }
+tonic = { workspace = true, features = ["tls-webpki-roots"] }

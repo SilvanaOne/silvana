@@ -1,23 +1,37 @@
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
+use serde_json;
 use tracing::{debug, error, warn};
 
 use crate::database::EventDatabase;
+use crate::storage::S3Storage;
 use buffer::EventBuffer;
+use db::secrets_storage::SecureSecretsStorage;
+use db::kv::ConfigStorage;
 use monitoring::record_grpc_request;
 use proto::{
     AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
     Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
+    GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
+    GetProofRequest, GetProofResponse, ReadBinaryRequest, ReadBinaryResponse,
+    RetrieveSecretRequest, RetrieveSecretResponse,
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
-    SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
+    StoreSecretRequest, StoreSecretResponse, SubmitEventRequest, SubmitEventResponse,
+    SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest, SubmitProofResponse,
+    WriteBinaryRequest, WriteBinaryResponse,
     silvana_events_service_server::SilvanaEventsService,
 };
+use storage::ProofsCache;
 
 pub struct SilvanaEventsServiceImpl {
     event_buffer: EventBuffer<Event>,
     database: Arc<EventDatabase>,
+    secrets_storage: Option<Arc<SecureSecretsStorage>>,
+    proofs_cache: Option<Arc<ProofsCache>>,
+    s3_storage: Option<Arc<S3Storage>>,
+    config_storage: Option<Arc<ConfigStorage>>,
 }
 
 impl SilvanaEventsServiceImpl {
@@ -25,7 +39,31 @@ impl SilvanaEventsServiceImpl {
         Self {
             event_buffer,
             database,
+            secrets_storage: None,
+            proofs_cache: None,
+            s3_storage: None,
+            config_storage: None,
         }
+    }
+
+    pub fn with_secrets_storage(mut self, secrets_storage: Arc<SecureSecretsStorage>) -> Self {
+        self.secrets_storage = Some(secrets_storage);
+        self
+    }
+
+    pub fn with_proofs_cache(mut self, proofs_cache: Arc<ProofsCache>) -> Self {
+        self.proofs_cache = Some(proofs_cache);
+        self
+    }
+
+    pub fn with_s3_storage(mut self, s3_storage: Arc<S3Storage>) -> Self {
+        self.s3_storage = Some(s3_storage);
+        self
+    }
+    
+    pub fn with_config_storage(mut self, config_storage: Arc<ConfigStorage>) -> Self {
+        self.config_storage = Some(config_storage);
+        self
     }
 }
 
@@ -173,7 +211,7 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                         developer: event.developer,
                         agent: event.agent,
                         app: event.app,
-                        job_id: event.job_id,
+                        job_sequence: event.job_sequence,
                         sequences: event.sequences,
                         event_timestamp: event.event_timestamp,
                         tx_hash: event.tx_hash,
@@ -264,7 +302,7 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                             developer: event.developer,
                             agent: event.agent,
                             app: event.app,
-                            job_id: event.job_id,
+                            job_sequence: event.job_sequence,
                             sequences: event.sequences,
                             event_timestamp: event.event_timestamp,
                             level: safe_level, // Safely converted to protobuf enum
@@ -388,6 +426,582 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
             Err(e) => {
                 error!("Failed to search coordinator message events: {}", e);
                 Err(Status::internal(format!("Full-text search failed: {}", e)))
+            }
+        }
+    }
+
+    async fn store_secret(
+        &self,
+        request: Request<StoreSecretRequest>,
+    ) -> Result<Response<StoreSecretResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+
+        debug!(
+            "Received store secret request for developer: {}, agent: {}",
+            req.reference
+                .as_ref()
+                .map(|r| &r.developer)
+                .unwrap_or(&"<missing>".to_string()),
+            req.reference
+                .as_ref()
+                .map(|r| &r.agent)
+                .unwrap_or(&"<missing>".to_string())
+        );
+
+        let secrets_storage = match &self.secrets_storage {
+            Some(storage) => storage,
+            None => {
+                error!("Secrets storage not configured");
+                return Err(Status::unavailable("Secrets storage not available"));
+            }
+        };
+
+        let reference = req
+            .reference
+            .ok_or_else(|| Status::invalid_argument("Missing secret reference"))?;
+
+        if reference.developer.is_empty() || reference.agent.is_empty() {
+            return Err(Status::invalid_argument("Developer and agent are required"));
+        }
+
+        if req.secret_value.is_empty() {
+            return Err(Status::invalid_argument("Secret value cannot be empty"));
+        }
+
+        // TODO: Validate signature (not implemented yet as per requirements)
+
+        match secrets_storage
+            .store_secret(
+                &reference.developer,
+                &reference.agent,
+                reference.app.as_deref(),
+                reference.app_instance.as_deref(),
+                reference.name.as_deref(),
+                &req.secret_value,
+            )
+            .await
+        {
+            Ok(()) => {
+                record_grpc_request(
+                    "store_secret",
+                    "success",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(StoreSecretResponse {
+                    success: true,
+                    message: "Secret stored successfully".to_string(),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to store secret: {}", e);
+                record_grpc_request("store_secret", "error", start_time.elapsed().as_secs_f64());
+                Err(Status::internal("Failed to store secret"))
+            }
+        }
+    }
+
+    async fn retrieve_secret(
+        &self,
+        request: Request<RetrieveSecretRequest>,
+    ) -> Result<Response<RetrieveSecretResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+
+        debug!(
+            "Received retrieve secret request for developer: {}, agent: {}",
+            req.reference
+                .as_ref()
+                .map(|r| &r.developer)
+                .unwrap_or(&"<missing>".to_string()),
+            req.reference
+                .as_ref()
+                .map(|r| &r.agent)
+                .unwrap_or(&"<missing>".to_string())
+        );
+
+        let secrets_storage = match &self.secrets_storage {
+            Some(storage) => storage,
+            None => {
+                error!("Secrets storage not configured");
+                return Err(Status::unavailable("Secrets storage not available"));
+            }
+        };
+
+        let reference = req
+            .reference
+            .ok_or_else(|| Status::invalid_argument("Missing secret reference"))?;
+
+        if reference.developer.is_empty() || reference.agent.is_empty() {
+            return Err(Status::invalid_argument("Developer and agent are required"));
+        }
+
+        // TODO: Validate signature (not implemented yet as per requirements)
+
+        match secrets_storage
+            .retrieve_secret(
+                &reference.developer,
+                &reference.agent,
+                reference.app.as_deref(),
+                reference.app_instance.as_deref(),
+                reference.name.as_deref(),
+            )
+            .await
+        {
+            Ok(Some(secret_value)) => {
+                record_grpc_request(
+                    "retrieve_secret",
+                    "success",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(RetrieveSecretResponse {
+                    success: true,
+                    message: "Secret retrieved successfully".to_string(),
+                    secret_value,
+                }))
+            }
+            Ok(None) => {
+                record_grpc_request(
+                    "retrieve_secret",
+                    "not_found",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(RetrieveSecretResponse {
+                    success: false,
+                    message: "Secret not found".to_string(),
+                    secret_value: String::new(),
+                }))
+            }
+            Err(e) => {
+                error!("Failed to retrieve secret: {}", e);
+                record_grpc_request(
+                    "retrieve_secret",
+                    "error",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Err(Status::internal("Failed to retrieve secret"))
+            }
+        }
+    }
+
+    async fn submit_proof(
+        &self,
+        request: Request<SubmitProofRequest>,
+    ) -> Result<Response<SubmitProofResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+
+        let proofs_cache = match &self.proofs_cache {
+            Some(cache) => cache,
+            None => {
+                error!("Proofs cache not configured");
+                return Err(Status::unavailable("Proofs cache not available"));
+            }
+        };
+
+        // Convert metadata from HashMap to Vec<(String, String)>
+        let metadata = if req.metadata.is_empty() {
+            None
+        } else {
+            Some(req.metadata.into_iter().collect::<Vec<_>>())
+        };
+
+        // Use provided expiration or None for default
+        let expires_at = req.expires_at;
+
+        // Handle both single proof and quilt submissions
+        let result = match req.data {
+            Some(proto::submit_proof_request::Data::ProofData(proof_data)) => {
+                debug!("Submitting single proof with {} bytes of data", proof_data.len());
+                
+                proofs_cache
+                    .submit_proof(proof_data, metadata, expires_at)
+                    .await
+                    .map(|hash| (hash, vec![]))
+            }
+            Some(proto::submit_proof_request::Data::QuiltData(quilt_data)) => {
+                let pieces: Vec<(String, String)> = quilt_data
+                    .pieces
+                    .into_iter()
+                    .map(|piece| (piece.identifier, piece.data))
+                    .collect();
+                
+                debug!("Submitting quilt with {} pieces", pieces.len());
+                
+                proofs_cache
+                    .submit_quilt(pieces, metadata, expires_at)
+                    .await
+            }
+            None => {
+                return Err(Status::invalid_argument("No proof data provided"));
+            }
+        };
+
+        match result {
+            Ok((proof_hash, quilt_piece_ids)) => {
+                record_grpc_request(
+                    "submit_proof",
+                    "success",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(SubmitProofResponse {
+                    success: true,
+                    message: if quilt_piece_ids.is_empty() {
+                        "Proof submitted successfully".to_string()
+                    } else {
+                        format!("Quilt submitted successfully with {} pieces", quilt_piece_ids.len())
+                    },
+                    proof_hash,
+                    quilt_piece_ids,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to submit proof to cache: {:?}", e);
+                record_grpc_request("submit_proof", "error", start_time.elapsed().as_secs_f64());
+                // Return more detailed error message
+                Err(Status::internal(format!("Failed to submit proof: {}", e)))
+            }
+        }
+    }
+
+    async fn get_proof(
+        &self,
+        request: Request<GetProofRequest>,
+    ) -> Result<Response<GetProofResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+
+        debug!("Received get proof request for hash: {}", req.proof_hash);
+
+        let proofs_cache = match &self.proofs_cache {
+            Some(cache) => cache,
+            None => {
+                error!("Proofs cache not configured");
+                return Err(Status::unavailable("Proofs cache not available"));
+            }
+        };
+
+        if req.proof_hash.is_empty() {
+            return Err(Status::invalid_argument("Proof hash is required"));
+        }
+
+        // First try to read as a regular proof
+        let result = match proofs_cache.read_proof(&req.proof_hash).await {
+            Ok(proof_data) => {
+                // Check if this is a quilt
+                let is_quilt = proof_data.metadata.get("quilts")
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                
+                if is_quilt && req.block_number.is_some() {
+                    // If it's a quilt and a specific block is requested, read the quilt
+                    match proofs_cache.read_quilt(&req.proof_hash, req.block_number.as_deref()).await {
+                        Ok(quilt_data) => Ok(quilt_data),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    // Return the proof data (which might be the full quilt JSON)
+                    Ok(proof_data)
+                }
+            }
+            Err(e) => {
+                // If regular proof read fails and block_number is provided, try reading as quilt
+                if req.block_number.is_some() {
+                    proofs_cache.read_quilt(&req.proof_hash, req.block_number.as_deref()).await
+                } else {
+                    Err(e)
+                }
+            }
+        };
+
+        match result {
+            Ok(proof_data) => {
+                record_grpc_request("get_proof", "success", start_time.elapsed().as_secs_f64());
+                
+                // Check if this is a quilt to build proper response
+                let is_quilt = proof_data.metadata.get("quilts")
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                
+                // Parse quilt pieces if this is a quilt
+                let quilt_pieces = if is_quilt && req.block_number.is_none() {
+                    // Parse the full quilt data to extract pieces
+                    if let Ok(quilt_data) = serde_json::from_str::<storage::proofs_cache::QuiltData>(&proof_data.data) {
+                        quilt_data.pieces.into_iter()
+                            .map(|p| proto::QuiltPiece {
+                                identifier: p.identifier,
+                                data: p.data,
+                            })
+                            .collect()
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+                
+                Ok(Response::new(GetProofResponse {
+                    success: true,
+                    message: if is_quilt {
+                        if req.block_number.is_some() {
+                            format!("Quilt piece retrieved successfully")
+                        } else {
+                            format!("Quilt retrieved successfully")
+                        }
+                    } else {
+                        "Proof retrieved successfully".to_string()
+                    },
+                    proof_data: proof_data.data,
+                    metadata: proof_data.metadata,
+                    is_quilt,
+                    quilt_pieces,
+                }))
+            }
+            Err(e) => {
+                // Check if it's a not found error
+                let error_message = e.to_string();
+                if error_message.contains("not found") || error_message.contains("NoSuchKey") {
+                    record_grpc_request(
+                        "get_proof",
+                        "not_found",
+                        start_time.elapsed().as_secs_f64(),
+                    );
+                    Ok(Response::new(GetProofResponse {
+                        success: false,
+                        message: "Proof not found".to_string(),
+                        proof_data: String::new(),
+                        metadata: std::collections::HashMap::new(),
+                        is_quilt: false,
+                        quilt_pieces: vec![],
+                    }))
+                } else {
+                    error!("Failed to retrieve proof: {}", e);
+                    record_grpc_request("get_proof", "error", start_time.elapsed().as_secs_f64());
+                    Err(Status::internal("Failed to retrieve proof"))
+                }
+            }
+        }
+    }
+
+    async fn write_binary(
+        &self,
+        request: Request<WriteBinaryRequest>,
+    ) -> Result<Response<WriteBinaryResponse>, Status> {
+        let start_time = Instant::now();
+        
+        // Check if S3 storage is configured
+        let s3_storage = self.s3_storage.as_ref().ok_or_else(|| {
+            error!("S3 storage not configured");
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            Status::unimplemented("S3 storage not configured")
+        })?;
+
+        let req = request.into_inner();
+        
+        // Validate input
+        if req.data.is_empty() {
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("Data cannot be empty"));
+        }
+        
+        if req.file_name.is_empty() {
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("File name cannot be empty"));
+        }
+        
+        if req.mime_type.is_empty() {
+            record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("MIME type cannot be empty"));
+        }
+
+        debug!(
+            "Writing binary to S3: file_name={}, size={} bytes, mime_type={}",
+            req.file_name,
+            req.data.len(),
+            req.mime_type
+        );
+
+        // Call S3 storage to write binary
+        match s3_storage
+            .write_binary(req.data, &req.file_name, &req.mime_type, req.expected_sha256)
+            .await
+        {
+            Ok((sha256, s3_url)) => {
+                debug!(
+                    "Successfully wrote binary to S3: file_name={}, sha256={}",
+                    req.file_name, sha256
+                );
+                
+                record_grpc_request("write_binary", "success", start_time.elapsed().as_secs_f64());
+                
+                Ok(Response::new(WriteBinaryResponse {
+                    success: true,
+                    message: "Binary data written successfully".to_string(),
+                    sha256,
+                    s3_url,
+                }))
+            }
+            Err(e) => {
+                error!("Failed to write binary to S3: {}", e);
+                record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
+                
+                // Check for specific error types
+                let error_string = e.to_string();
+                if error_string.contains("SHA256 hash mismatch") {
+                    Err(Status::invalid_argument(format!("Hash verification failed: {}", e)))
+                } else {
+                    Err(Status::internal(format!("Failed to write binary: {}", e)))
+                }
+            }
+        }
+    }
+
+    async fn read_binary(
+        &self,
+        request: Request<ReadBinaryRequest>,
+    ) -> Result<Response<ReadBinaryResponse>, Status> {
+        let start_time = Instant::now();
+        
+        // Check if S3 storage is configured
+        let s3_storage = self.s3_storage.as_ref().ok_or_else(|| {
+            error!("S3 storage not configured");
+            record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
+            Status::unimplemented("S3 storage not configured")
+        })?;
+
+        let req = request.into_inner();
+        
+        // Validate input
+        if req.file_name.is_empty() {
+            record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
+            return Err(Status::invalid_argument("File name cannot be empty"));
+        }
+
+        debug!("Reading binary from S3: file_name={}", req.file_name);
+
+        // Call S3 storage to read binary
+        match s3_storage.read_binary(&req.file_name).await {
+            Ok((data, sha256)) => {
+                debug!(
+                    "Successfully read binary from S3: file_name={}, size={} bytes, sha256={}",
+                    req.file_name,
+                    data.len(),
+                    sha256
+                );
+                
+                record_grpc_request("read_binary", "success", start_time.elapsed().as_secs_f64());
+                
+                // For now, we'll infer MIME type from file extension
+                // In a production system, you might want to store this as metadata
+                let mime_type = match req.file_name.split('.').last() {
+                    Some("png") => "image/png",
+                    Some("jpg") | Some("jpeg") => "image/jpeg",
+                    Some("pdf") => "application/pdf",
+                    Some("json") => "application/json",
+                    Some("txt") => "text/plain",
+                    Some("bin") => "application/octet-stream",
+                    _ => "application/octet-stream",
+                }
+                .to_string();
+                
+                Ok(Response::new(ReadBinaryResponse {
+                    success: true,
+                    message: "Binary data read successfully".to_string(),
+                    data,
+                    sha256,
+                    mime_type,
+                    metadata: std::collections::HashMap::new(), // Can be extended to include S3 metadata
+                }))
+            }
+            Err(e) => {
+                error!("Failed to read binary from S3: {}", e);
+                record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
+                
+                // Check if file doesn't exist
+                let error_string = e.to_string();
+                if error_string.contains("not found") || error_string.contains("NoSuchKey") {
+                    Err(Status::not_found(format!("File not found: {}", req.file_name)))
+                } else {
+                    Err(Status::internal(format!("Failed to read binary: {}", e)))
+                }
+            }
+        }
+    }
+    
+    async fn get_config(
+        &self,
+        request: Request<GetConfigRequest>,
+    ) -> Result<Response<GetConfigResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Getting config for chain: {}", req.chain);
+        
+        match &self.config_storage {
+            None => {
+                warn!("Config storage not configured");
+                record_grpc_request("get_config", "not_configured", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(GetConfigResponse {
+                    success: false,
+                    message: "Config storage not configured".to_string(),
+                    config: std::collections::HashMap::new(),
+                }))
+            }
+            Some(storage) => {
+                match storage.get_config(&req.chain).await {
+                    Ok(config) => {
+                        record_grpc_request("get_config", "success", start_time.elapsed().as_secs_f64());
+                        Ok(Response::new(GetConfigResponse {
+                            success: true,
+                            message: format!("Retrieved {} config items", config.len()),
+                            config,
+                        }))
+                    }
+                    Err(e) => {
+                        error!("Failed to get config: {}", e);
+                        record_grpc_request("get_config", "error", start_time.elapsed().as_secs_f64());
+                        Err(Status::internal(format!("Failed to get config: {}", e)))
+                    }
+                }
+            }
+        }
+    }
+    
+    async fn write_config(
+        &self,
+        request: Request<WriteConfigRequest>,
+    ) -> Result<Response<WriteConfigResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Writing config for chain: {} ({} items)", req.chain, req.config.len());
+        
+        match &self.config_storage {
+            None => {
+                warn!("Config storage not configured");
+                record_grpc_request("write_config", "not_configured", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(WriteConfigResponse {
+                    success: false,
+                    message: "Config storage not configured".to_string(),
+                    items_written: 0,
+                }))
+            }
+            Some(storage) => {
+                match storage.write_config(&req.chain, req.config).await {
+                    Ok(items_written) => {
+                        record_grpc_request("write_config", "success", start_time.elapsed().as_secs_f64());
+                        Ok(Response::new(WriteConfigResponse {
+                            success: true,
+                            message: format!("Successfully wrote {} config items", items_written),
+                            items_written,
+                        }))
+                    }
+                    Err(e) => {
+                        error!("Failed to write config: {}", e);
+                        record_grpc_request("write_config", "error", start_time.elapsed().as_secs_f64());
+                        Err(Status::internal(format!("Failed to write config: {}", e)))
+                    }
+                }
             }
         }
     }

@@ -31,7 +31,7 @@ message AgentStartedJobEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   uint64 event_timestamp = 6;
 }
 
@@ -40,7 +40,7 @@ message AgentFinishedJobEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   uint64 duration = 6;
   uint64 event_timestamp = 7;
 }
@@ -50,7 +50,7 @@ message CoordinationTxEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   string memo = 6 [ (silvana.options.v1.search) = true];
   string tx_hash = 7 [ (silvana.options.v1.search) = true];
   uint64 event_timestamp = 8;
@@ -94,7 +94,7 @@ message AgentMessageEvent {
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
   string app = 4 [ (silvana.options.v1.search) = true];
-  string job_id = 5 [ (silvana.options.v1.search) = true];
+  string job_sequence = 5 [ (silvana.options.v1.search) = true];
   repeated uint64 sequences = 6 [ (silvana.options.v1.sequences) = true];
   uint64 event_timestamp = 7;
   LogLevel level = 8;
@@ -108,7 +108,7 @@ message AgentTransactionEvent {
   string developer = 3 [ (silvana.options.v1.search) = true];
   string agent = 4 [ (silvana.options.v1.search) = true];
   string app = 5 [ (silvana.options.v1.search) = true];
-  string job_id = 6 [ (silvana.options.v1.search) = true];
+  string job_sequence = 6 [ (silvana.options.v1.search) = true];
   repeated uint64 sequences = 7 [ (silvana.options.v1.sequences) = true];
   uint64 event_timestamp = 8;
   string tx_hash = 9 [ (silvana.options.v1.search) = true];
@@ -174,7 +174,7 @@ message AgentTransactionEventWithId {
   string developer = 4;
   string agent = 5;
   string app = 6;
-  string job_id = 7;
+  string job_sequence = 7;
   repeated uint64 sequences = 8;    // All sequences for this event
   uint64 event_timestamp = 9;
   string tx_hash = 10;
@@ -210,7 +210,7 @@ message AgentMessageEventWithId {
   string developer = 3;
   string agent = 4;
   string app = 5;
-  string job_id = 6;
+  string job_sequence = 6;
   repeated uint64 sequences = 7;
   uint64 event_timestamp = 8;
   LogLevel level = 9;
@@ -252,6 +252,132 @@ message SearchCoordinatorMessageEventsResponse {
   uint32 returned_count = 5;             // Number of events in this response
 }
 
+// Proof cache messages
+
+// Quilt piece for bundling multiple proofs
+message QuiltPiece {
+  string identifier = 1;
+  string data = 2;
+}
+
+message SubmitProofRequest {
+  oneof data {
+    string proof_data = 1;           // Single proof data
+    QuiltData quilt_data = 4;        // Multiple proofs as a quilt
+  }
+  map<string, string> metadata = 2;
+  optional uint64 expires_at = 3;  // Unix timestamp in milliseconds
+}
+
+message QuiltData {
+  repeated QuiltPiece pieces = 1;
+}
+
+message SubmitProofResponse {
+  bool success = 1;
+  string message = 2;
+  string proof_hash = 3;  // The hash of the submitted proof or quilt
+  repeated string quilt_piece_ids = 4;  // Optional: IDs of individual quilt pieces
+}
+
+message GetProofRequest {
+  string proof_hash = 1;
+  optional string block_number = 2;  // Optional: for quilts, get specific block's proof
+}
+
+message GetProofResponse {
+  bool success = 1;
+  string message = 2;
+  string proof_data = 3;
+  map<string, string> metadata = 4;
+  bool is_quilt = 5;  // Indicates if this is a quilt
+  repeated QuiltPiece quilt_pieces = 6;  // If is_quilt=true, contains the pieces
+}
+
+// Configuration storage messages
+
+message GetConfigRequest {
+  string chain = 1;  // Chain identifier (testnet/devnet/mainnet)
+}
+
+message GetConfigResponse {
+  bool success = 1;
+  string message = 2;
+  map<string, string> config = 3;  // Key-value configuration pairs
+}
+
+message WriteConfigRequest {
+  string chain = 1;  // Chain identifier (testnet/devnet/mainnet)
+  map<string, string> config = 2;  // Key-value configuration pairs to write
+}
+
+message WriteConfigResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 items_written = 3;  // Number of configuration items written
+}
+
+// Binary storage messages for S3
+
+message WriteBinaryRequest {
+  bytes data = 1;                    // Binary data to store
+  string file_name = 2;               // S3 object key/filename
+  string mime_type = 3;               // MIME type of the content
+  optional string expected_sha256 = 4; // Optional expected SHA256 for verification
+  map<string, string> metadata = 5;    // Optional metadata
+}
+
+message WriteBinaryResponse {
+  bool success = 1;
+  string message = 2;
+  string sha256 = 3;                   // SHA256 hash of the stored file
+  string s3_url = 4;                   // S3 URL/path of the stored file
+}
+
+message ReadBinaryRequest {
+  string file_name = 1;                // S3 object key/filename to read
+}
+
+message ReadBinaryResponse {
+  bool success = 1;
+  string message = 2;
+  bytes data = 3;                      // Binary data retrieved
+  string sha256 = 4;                   // SHA256 hash of the data
+  string mime_type = 5;                // MIME type if available
+  map<string, string> metadata = 6;    // Associated metadata
+}
+
+// Secrets storage messages
+message SecretReference {
+  string developer = 1;
+  string agent = 2;
+  optional string app = 3;
+  optional string app_instance = 4;
+  optional string name = 5;
+}
+
+message StoreSecretRequest {
+  SecretReference reference = 1;
+  string secret_value = 2;
+  bytes signature = 3;  // Developer signature (not validated yet)
+}
+
+message StoreSecretResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RetrieveSecretRequest {
+  SecretReference reference = 1;
+  bytes signature = 2;  // Coordinator signature (not validated yet)
+}
+
+message RetrieveSecretResponse {
+  bool success = 1;
+  string message = 2;
+  string secret_value = 3;  // Only returned if success is true
+}
+
 // gRPC service definition
 service SilvanaEventsService {
   rpc SubmitEvents(SubmitEventsRequest) returns (SubmitEventsResponse);
@@ -263,4 +389,20 @@ service SilvanaEventsService {
   
   // Full-text search methods
   rpc SearchCoordinatorMessageEvents(SearchCoordinatorMessageEventsRequest) returns (SearchCoordinatorMessageEventsResponse);
+  
+  // Proof cache methods
+  rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  
+  // Secrets storage methods
+  rpc StoreSecret(StoreSecretRequest) returns (StoreSecretResponse);
+  rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
+  
+  // Binary storage methods
+  rpc WriteBinary(WriteBinaryRequest) returns (WriteBinaryResponse);
+  rpc ReadBinary(ReadBinaryRequest) returns (ReadBinaryResponse);
+  
+  // Configuration storage methods
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse);
 } 

@@ -1,15 +1,15 @@
 [package]
 name = "rpc"
-version = "0.1.0"
-edition = "2024"
-authors = ["DFST"]
-license = "Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 default-run = "rpc"
 
 [dependencies]
 # Proto definitions
 proto = { path = "../proto" }
-prost-reflect ={ version = "0.15.3", features = ["derive"] }
+prost-reflect.workspace = true
 # Database entities
 tidb = { path = "../tidb" }
 # Event buffering
@@ -18,37 +18,46 @@ buffer = { path = "../buffer" }
 monitoring = { path = "../monitoring" }
 # NATS messaging (optional backend)
 nats = { path = "../nats" }
+# Database and KMS for secrets storage
+db = { path = "../db" }
+kms = { path = "../kms" }
+# Storage for proofs cache
+storage = { path = "../storage" }
 
-tonic = { version = "0.13", features = [ "tls-webpki-roots"] }
+tonic = { workspace = true, features = [ "tls-webpki-roots"] }
 tonic-web = "0.13"
-tonic-reflection = "0.13"
-prost = "0.13"
-tokio = { version = "1.46", features = ["macros", "rt-multi-thread", "time"] }
+tonic-reflection.workspace = true
+prost.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tower-http = { version = "0.6", features = ["cors"] }
 
 
 # OpenTelemetry
 
 # Sea-ORM and Database
-sea-orm = { version = "1.1", features = ["sqlx-mysql", "runtime-tokio-rustls", "macros", "with-chrono", "with-json", "with-uuid"] }
+sea-orm.workspace = true
 
 # Time and UUID
-chrono = { version = "0.4"}
+chrono.workspace = true
 
 
 # Environment and Config
-dotenvy = "0.15"
-anyhow = "1.0"
-tracing = "0.1"
+dotenvy.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
 
 # NATS (placeholder for future implementation)
-async-nats = "0.42"
+async-nats.workspace = true
 
 # Async utilities
-futures = "0.3"
-async-trait = "0.1"
+futures.workspace = true
+async-trait.workspace = true
 
 # Random number generation for retry jitter
+
+# TLS support for rustls crypto provider
+rustls.workspace = true
 
 [dev-dependencies]
 # For integration tests

@@ -1,35 +1,35 @@
 [package]
 name = "nats"
-version = "0.1.0"
-edition = "2024"
-authors = ["DFST"]
-license = "Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 # Proto definitions
 
 # Core async runtime
-tokio = { version = "1.46", features = ["macros", "rt-multi-thread", "time"] }
-async-trait = "0.1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+async-trait.workspace = true
 
 # NATS messaging
-async-nats = "0.42"
+async-nats.workspace = true
 
 # Error handling
-anyhow = "1.0"
+anyhow.workspace = true
 
 # Logging
-tracing = "0.1"
+tracing.workspace = true
 
 # Buffer integration
 buffer = { path = "../buffer" }
 
 # Serialization for message publishing
 proto = { path = "../proto" }
-prost = "0.13"
-prost-reflect ={ version = "0.15.3", features = ["derive"] }
+prost.workspace = true
+prost-reflect.workspace = true
 
 # Random number generation for retry jitter
 
 # Async utilities
-futures = "0.3" 
+futures.workspace = true 

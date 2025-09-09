@@ -3,7 +3,7 @@ use proto::Event;
 use sea_orm::{Database, DatabaseConnection, EntityTrait, TransactionTrait};
 use std::time::Instant;
 use tidb as entities;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn, error};
 
 // Result structs for query responses
 #[derive(Debug, Clone)]
@@ -14,7 +14,7 @@ pub struct AgentTransactionEventResult {
     pub developer: String,
     pub agent: String,
     pub app: String,
-    pub job_id: String,
+    pub job_sequence: String,
     pub sequences: Vec<u64>,
     pub event_timestamp: u64,
     pub tx_hash: String,
@@ -32,7 +32,7 @@ pub struct AgentMessageEventResult {
     pub developer: String,
     pub agent: String,
     pub app: String,
-    pub job_id: String,
+    pub job_sequence: String,
     pub sequences: Vec<u64>,
     pub event_timestamp: u64,
     pub level: u32,
@@ -713,14 +713,14 @@ impl EventDatabase {
 
         // Build the main query with all event data and sequences in one go
         let mut main_query = format!(
-            "SELECT e.id, e.coordinator_id, e.tx_type, e.developer, e.agent, e.app, e.job_id, 
+            "SELECT e.id, e.coordinator_id, e.tx_type, e.developer, e.agent, e.app, e.job_sequence, 
                     e.event_timestamp, e.tx_hash, e.chain, e.network, e.memo, e.metadata, 
                     e.created_at, GROUP_CONCAT(all_seqs.sequence) as sequences
              FROM agent_transaction_event e 
              INNER JOIN agent_transaction_event_sequences seqs ON e.id = seqs.agent_transaction_event_id
              LEFT JOIN agent_transaction_event_sequences all_seqs ON e.id = all_seqs.agent_transaction_event_id
              WHERE {}
-             GROUP BY e.id, e.coordinator_id, e.tx_type, e.developer, e.agent, e.app, e.job_id, 
+             GROUP BY e.id, e.coordinator_id, e.tx_type, e.developer, e.agent, e.app, e.job_sequence, 
                       e.event_timestamp, e.tx_hash, e.chain, e.network, e.memo, e.metadata, e.created_at
              ORDER BY e.created_at DESC",
             where_clause
@@ -763,7 +763,7 @@ impl EventDatabase {
                 developer: row.try_get("", "developer").unwrap_or_default(),
                 agent: row.try_get("", "agent").unwrap_or_default(),
                 app: row.try_get("", "app").unwrap_or_default(),
-                job_id: row.try_get("", "job_id").unwrap_or_default(),
+                job_sequence: row.try_get("", "job_sequence").unwrap_or_default(),
                 sequences,
                 event_timestamp: {
                     let timestamp_i64 = row.try_get::<i64>("", "event_timestamp").unwrap_or(0);
@@ -871,14 +871,14 @@ impl EventDatabase {
 
         // Build the main query with all event data and sequences in one go
         let mut main_query = format!(
-            "SELECT e.id, e.coordinator_id, e.developer, e.agent, e.app, e.job_id, 
+            "SELECT e.id, e.coordinator_id, e.developer, e.agent, e.app, e.job_sequence, 
                     e.event_timestamp, e.level, e.message, e.created_at, 
                     GROUP_CONCAT(all_seqs.sequence) as sequences
              FROM agent_message_event e 
              INNER JOIN agent_message_event_sequences seqs ON e.id = seqs.agent_message_event_id
              LEFT JOIN agent_message_event_sequences all_seqs ON e.id = all_seqs.agent_message_event_id
              WHERE {}
-             GROUP BY e.id, e.coordinator_id, e.developer, e.agent, e.app, e.job_id, 
+             GROUP BY e.id, e.coordinator_id, e.developer, e.agent, e.app, e.job_sequence, 
                       e.event_timestamp, e.level, e.message, e.created_at
              ORDER BY e.created_at DESC",
             where_clause
@@ -931,7 +931,7 @@ impl EventDatabase {
                 developer: row.try_get("", "developer").unwrap_or_default(),
                 agent: row.try_get("", "agent").unwrap_or_default(),
                 app: row.try_get("", "app").unwrap_or_default(),
-                job_id: row.try_get("", "job_id").unwrap_or_default(),
+                job_sequence: row.try_get("", "job_sequence").unwrap_or_default(),
                 sequences,
                 event_timestamp: {
                     let timestamp_i64 = row.try_get::<i64>("", "event_timestamp").unwrap_or(0);
@@ -1115,7 +1115,7 @@ fn convert_agent_started_job_event(
         developer: ActiveValue::Set(event.developer.clone()),
         agent: ActiveValue::Set(event.agent.clone()),
         app: ActiveValue::Set(event.app.clone()),
-        job_id: ActiveValue::Set(event.job_id.clone()),
+        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
@@ -1134,7 +1134,7 @@ fn convert_agent_finished_job_event(
         developer: ActiveValue::Set(event.developer.clone()),
         agent: ActiveValue::Set(event.agent.clone()),
         app: ActiveValue::Set(event.app.clone()),
-        job_id: ActiveValue::Set(event.job_id.clone()),
+        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
         duration: ActiveValue::Set(if event.duration <= i64::MAX as u64 {
             event.duration as i64
         } else {
@@ -1170,7 +1170,7 @@ fn convert_coordination_tx_event(
         developer: ActiveValue::Set(event.developer.clone()),
         agent: ActiveValue::Set(event.agent.clone()),
         app: ActiveValue::Set(event.app.clone()),
-        job_id: ActiveValue::Set(event.job_id.clone()),
+        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
         memo: ActiveValue::Set(event.memo.clone()),
         tx_hash: ActiveValue::Set(event.tx_hash.clone()),
         event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
@@ -1265,7 +1265,7 @@ fn convert_agent_message_event(
         developer: ActiveValue::Set(event.developer.clone()),
         agent: ActiveValue::Set(event.agent.clone()),
         app: ActiveValue::Set(event.app.clone()),
-        job_id: ActiveValue::Set(event.job_id.clone()),
+        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
         event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
             event.event_timestamp as i64
         } else {
@@ -1299,7 +1299,7 @@ fn convert_agent_transaction_event(
         developer: ActiveValue::Set(event.developer.clone()),
         agent: ActiveValue::Set(event.agent.clone()),
         app: ActiveValue::Set(event.app.clone()),
-        job_id: ActiveValue::Set(event.job_id.clone()),
+        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
         event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
             event.event_timestamp as i64
         } else {

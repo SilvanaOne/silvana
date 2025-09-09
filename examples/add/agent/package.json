@@ -1,0 +1,35 @@
+{
+  "name": "add",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc",
+    "agent": "NODE_NO_WARNINGS=1 node --enable-source-maps dist/src/agent.js",
+    "docker": "docker compose up build --build --remove-orphans",
+    "test": "NODE_NO_WARNINGS=1 node --loader=ts-node/esm --enable-source-maps -r dotenv/config --require dotenv/config  --env-file=.env --env-file=.env.app --test",
+    "sum": "npm run test test/sum.test.ts",
+    "add": "npm run test test/add.test.ts",
+    "batch": "npm run test test/batch.test.ts",
+    "multiply": "npm run test test/multiply.test.ts",
+    "deploy": "MINA_CHAIN=mina:devnet npm run test test/deploy.test.ts",
+    "compile": "npm run test test/compile.test.ts"
+  },
+  "node": {
+    "version": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.12",
+    "dotenv": "^17.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.36.0",
+    "@silvana-one/agent": "^1.0.32",
+    "@silvana-one/coordination": "^1.0.32",
+    "@silvana-one/mina-utils": "^1.0.32",
+    "@silvana-one/storage": "^1.0.32",
+    "o1js": "2.4.0"
+  }
+}

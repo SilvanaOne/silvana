@@ -1,13 +1,13 @@
 [package]
 name = "indexed-merkle-map"
-version = "0.1.0"
-edition = "2024"
-authors = ["DFST"]
-license = "Apache-2.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 crypto-bigint = "=0.5.5"
-sha2 = "=0.10.9"
+sha2.workspace = true
 borsh = { version = "1.5", features = ["derive"] }
 
 [features]
