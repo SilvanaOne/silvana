@@ -162,6 +162,15 @@ pub enum Commands {
         #[command(subcommand)]
         subcommand: avs_operator::cli::AvsCommands,
     },
+    
+    /// Registry management commands
+    Registry {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: Option<String>,
+        
+        #[command(subcommand)]
+        subcommand: RegistryCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -251,6 +260,192 @@ pub enum FaucetCommands {
         /// Network (mina:devnet or zeko:testnet, also accepts devnet or zeko)
         #[arg(long, default_value = "mina:devnet")]
         network: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RegistryCommands {
+    /// Create a new registry
+    Create {
+        /// Name for the new registry
+        name: String,
+        
+        /// Package ID (defaults to SILVANA_REGISTRY_PACKAGE env var)
+        #[arg(long, env = "SILVANA_REGISTRY_PACKAGE")]
+        package_id: Option<String>,
+    },
+    
+    /// Add a new developer to the registry
+    AddDeveloper {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// Developer name
+        name: String,
+        
+        /// GitHub username
+        github: String,
+        
+        /// Optional image URL
+        #[arg(long)]
+        image: Option<String>,
+        
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+        
+        /// Optional website URL
+        #[arg(long)]
+        site: Option<String>,
+    },
+    
+    /// Update an existing developer in the registry
+    UpdateDeveloper {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// Developer name
+        name: String,
+        
+        /// GitHub username
+        github: String,
+        
+        /// Optional image URL
+        #[arg(long)]
+        image: Option<String>,
+        
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+        
+        /// Optional website URL
+        #[arg(long)]
+        site: Option<String>,
+    },
+    
+    /// Remove a developer from the registry
+    RemoveDeveloper {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// Developer name
+        name: String,
+        
+        /// Agent names to remove (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        agents: Vec<String>,
+    },
+    
+    /// Add a new agent to a developer
+    AddAgent {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// Developer name
+        developer: String,
+        
+        /// Agent name
+        name: String,
+        
+        /// Optional image URL
+        #[arg(long)]
+        image: Option<String>,
+        
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+        
+        /// Optional website URL
+        #[arg(long)]
+        site: Option<String>,
+        
+        /// Supported blockchain chains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        chains: Vec<String>,
+    },
+    
+    /// Update an existing agent
+    UpdateAgent {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// Developer name
+        developer: String,
+        
+        /// Agent name
+        name: String,
+        
+        /// Optional image URL
+        #[arg(long)]
+        image: Option<String>,
+        
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+        
+        /// Optional website URL
+        #[arg(long)]
+        site: Option<String>,
+        
+        /// Supported blockchain chains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        chains: Vec<String>,
+    },
+    
+    /// Remove an agent from a developer
+    RemoveAgent {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// Developer name
+        developer: String,
+        
+        /// Agent name
+        name: String,
+    },
+    
+    /// Add a new app to the registry
+    AddApp {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// App name
+        name: String,
+        
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+    },
+    
+    /// Update an existing app in the registry
+    UpdateApp {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// App name
+        name: String,
+        
+        /// Optional description
+        #[arg(long)]
+        description: Option<String>,
+    },
+    
+    /// Remove an app from the registry
+    RemoveApp {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+        
+        /// App name
+        name: String,
     },
 }
 

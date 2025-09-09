@@ -7,6 +7,10 @@ use crate::app_instance::{
     update_block_settlement_tx_included_in_block_tx, update_block_state_data_availability_tx,
     update_state_for_sequence_tx,
 };
+use crate::registry::{
+    add_agent, add_app, add_developer, create_registry, remove_agent, remove_app, remove_developer,
+    update_agent, update_app, update_developer, CreateRegistryResult,
+};
 use tracing::{debug, error, info, warn};
 
 /// Interface for calling Sui Move functions related to job management
@@ -1152,6 +1156,294 @@ impl SilvanaSuiInterface {
                     block_number, e
                 );
                 Err(e.into())
+            }
+        }
+    }
+
+    // ============= Registry Management Methods =============
+
+    /// Create a new Silvana registry
+    pub async fn create_silvana_registry(
+        &mut self,
+        name: String,
+        package_id: Option<String>,
+    ) -> Result<CreateRegistryResult, String> {
+        debug!("Creating Silvana registry '{}'", name);
+        
+        match create_registry(name.clone(), package_id).await {
+            Ok(result) => {
+                info!(
+                    "Successfully created registry '{}' with ID: {} (tx: {})",
+                    name, result.registry_id, result.tx_digest
+                );
+                Ok(result)
+            }
+            Err(e) => {
+                error!("Failed to create registry '{}': {}", name, e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Add a developer to the registry
+    pub async fn add_developer_to_registry(
+        &mut self,
+        registry_id: &str,
+        name: String,
+        github: String,
+        image: Option<String>,
+        description: Option<String>,
+        site: Option<String>,
+    ) -> Result<String, String> {
+        debug!("Adding developer '{}' to registry '{}'", name, registry_id);
+        
+        match add_developer(registry_id, name.clone(), github, image, description, site).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully added developer '{}' to registry '{}' (tx: {})",
+                    name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to add developer '{}' to registry '{}': {}", name, registry_id, e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Update a developer in the registry
+    pub async fn update_developer_in_registry(
+        &mut self,
+        registry_id: &str,
+        name: String,
+        github: String,
+        image: Option<String>,
+        description: Option<String>,
+        site: Option<String>,
+    ) -> Result<String, String> {
+        debug!("Updating developer '{}' in registry '{}'", name, registry_id);
+        
+        match update_developer(registry_id, name.clone(), github, image, description, site).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated developer '{}' in registry '{}' (tx: {})",
+                    name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to update developer '{}' in registry '{}': {}", name, registry_id, e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Remove a developer from the registry
+    pub async fn remove_developer_from_registry(
+        &mut self,
+        registry_id: &str,
+        name: String,
+        agent_names: Vec<String>,
+    ) -> Result<String, String> {
+        debug!("Removing developer '{}' from registry '{}'", name, registry_id);
+        
+        match remove_developer(registry_id, name.clone(), agent_names).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully removed developer '{}' from registry '{}' (tx: {})",
+                    name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to remove developer '{}' from registry '{}': {}", name, registry_id, e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Add an agent to a developer in the registry
+    pub async fn add_agent_to_developer(
+        &mut self,
+        registry_id: &str,
+        developer_name: String,
+        agent_name: String,
+        image: Option<String>,
+        description: Option<String>,
+        site: Option<String>,
+        chains: Vec<String>,
+    ) -> Result<String, String> {
+        debug!(
+            "Adding agent '{}' to developer '{}' in registry '{}'",
+            agent_name, developer_name, registry_id
+        );
+        
+        match add_agent(
+            registry_id,
+            developer_name.clone(),
+            agent_name.clone(),
+            image,
+            description,
+            site,
+            chains,
+        ).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully added agent '{}' to developer '{}' in registry '{}' (tx: {})",
+                    agent_name, developer_name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to add agent '{}' to developer '{}' in registry '{}': {}",
+                    agent_name, developer_name, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Update an agent in the registry
+    pub async fn update_agent_in_registry(
+        &mut self,
+        registry_id: &str,
+        developer_name: String,
+        agent_name: String,
+        image: Option<String>,
+        description: Option<String>,
+        site: Option<String>,
+        chains: Vec<String>,
+    ) -> Result<String, String> {
+        debug!(
+            "Updating agent '{}' for developer '{}' in registry '{}'",
+            agent_name, developer_name, registry_id
+        );
+        
+        match update_agent(
+            registry_id,
+            developer_name.clone(),
+            agent_name.clone(),
+            image,
+            description,
+            site,
+            chains,
+        ).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated agent '{}' for developer '{}' in registry '{}' (tx: {})",
+                    agent_name, developer_name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to update agent '{}' for developer '{}' in registry '{}': {}",
+                    agent_name, developer_name, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Remove an agent from a developer in the registry
+    pub async fn remove_agent_from_developer(
+        &mut self,
+        registry_id: &str,
+        developer_name: String,
+        agent_name: String,
+    ) -> Result<String, String> {
+        debug!(
+            "Removing agent '{}' from developer '{}' in registry '{}'",
+            agent_name, developer_name, registry_id
+        );
+        
+        match remove_agent(registry_id, developer_name.clone(), agent_name.clone()).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully removed agent '{}' from developer '{}' in registry '{}' (tx: {})",
+                    agent_name, developer_name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to remove agent '{}' from developer '{}' in registry '{}': {}",
+                    agent_name, developer_name, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Add an app to the registry
+    pub async fn add_app_to_registry(
+        &mut self,
+        registry_id: &str,
+        name: String,
+        description: Option<String>,
+    ) -> Result<String, String> {
+        debug!("Adding app '{}' to registry '{}'", name, registry_id);
+        
+        match add_app(registry_id, name.clone(), description).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully added app '{}' to registry '{}' (tx: {})",
+                    name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to add app '{}' to registry '{}': {}", name, registry_id, e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Update an app in the registry
+    pub async fn update_app_in_registry(
+        &mut self,
+        registry_id: &str,
+        name: String,
+        description: Option<String>,
+    ) -> Result<String, String> {
+        debug!("Updating app '{}' in registry '{}'", name, registry_id);
+        
+        match update_app(registry_id, name.clone(), description).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated app '{}' in registry '{}' (tx: {})",
+                    name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to update app '{}' in registry '{}': {}", name, registry_id, e);
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Remove an app from the registry
+    pub async fn remove_app_from_registry(
+        &mut self,
+        registry_id: &str,
+        name: String,
+    ) -> Result<String, String> {
+        debug!("Removing app '{}' from registry '{}'", name, registry_id);
+        
+        match remove_app(registry_id, name.clone()).await {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully removed app '{}' from registry '{}' (tx: {})",
+                    name, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!("Failed to remove app '{}' from registry '{}': {}", name, registry_id, e);
+                Err(e.to_string())
             }
         }
     }

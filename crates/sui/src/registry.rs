@@ -35,12 +35,12 @@ where
     F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
         Vec<sui_sdk_types::Argument>, // registry_args
-        sui_sdk_types::Argument, // clock_arg
+        sui_sdk_types::Argument,      // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
     let shared_state = SharedSuiState::get_instance();
     let package_id = shared_state.get_coordination_package_id();
-    
+
     execute_transaction_block(
         package_id,
         vec![(
@@ -55,34 +55,33 @@ where
 }
 
 /// Create a new Silvana registry
-/// 
+///
 /// # Arguments
 /// * `name` - Name for the registry
 /// * `package_id` - Optional package ID (uses env var SILVANA_REGISTRY_PACKAGE if not provided)
-/// 
+///
 /// # Returns
 /// CreateRegistryResult containing the registry ID and transaction digest
-pub async fn create_registry(
+pub(crate) async fn create_registry(
     name: String,
     package_id: Option<String>,
 ) -> Result<CreateRegistryResult> {
     info!("Creating registry '{}'", name);
-    
+
     // Get package ID from parameter or environment variable
     let package_id_str = package_id.unwrap_or_else(|| {
-        env::var("SILVANA_REGISTRY_PACKAGE")
-            .unwrap_or_else(|_| {
-                // Fall back to the coordination package if registry package not set
-                let shared_state = SharedSuiState::get_instance();
-                shared_state.get_coordination_package_id().to_string()
-            })
+        env::var("SILVANA_REGISTRY_PACKAGE").unwrap_or_else(|_| {
+            // Fall back to the coordination package if registry package not set
+            let shared_state = SharedSuiState::get_instance();
+            shared_state.get_coordination_package_id().to_string()
+        })
     });
-    
+
     let package_id = sui::Address::from_str(&package_id_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse package ID '{}': {}", package_id_str, e))?;
-    
+
     debug!("Using package ID: {}", package_id);
-    
+
     // Use execute_transaction_block with empty object list for create_registry
     let tx_digest = execute_transaction_block(
         package_id,
@@ -90,12 +89,14 @@ pub async fn create_registry(
             vec![], // No objects needed for create_registry
             "registry".to_string(),
             "create_registry".to_string(),
-            move |tb: &mut sui_transaction_builder::TransactionBuilder, _object_args, _clock_arg| {
+            move |tb: &mut sui_transaction_builder::TransactionBuilder,
+                  _object_args,
+                  _clock_arg| {
                 // Create the string argument for the registry name
                 let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                     bytes: name.clone().into_bytes(),
                 }));
-                
+
                 // Function call only needs the name argument
                 vec![name_arg]
             },
@@ -103,7 +104,7 @@ pub async fn create_registry(
         None, // Use default gas budget
     )
     .await?;
-    
+
     // Fetch the created registry object ID from the transaction
     let registry_id = fetch_created_object_from_transaction(&tx_digest).await
         .unwrap_or_else(|e| {
@@ -112,16 +113,16 @@ pub async fn create_registry(
             // This will be replaced once we implement proper object extraction
             format!("0x{:0>64}", &tx_digest[..64.min(tx_digest.len())])
         });
-    
+
     // Wait for the registry object to be available
     // This is important because the object might not be immediately queryable after creation
     wait_for_object_availability(&registry_id).await?;
-    
+
     info!(
         "Registry created with ID: {} (tx: {})",
         registry_id, tx_digest
     );
-    
+
     Ok(CreateRegistryResult {
         registry_id,
         tx_digest,
@@ -132,23 +133,23 @@ pub async fn create_registry(
 /// This is useful after creating new objects that need to be used immediately
 async fn wait_for_object_availability(object_id: &str) -> Result<()> {
     use crate::state::SharedSuiState;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
     use prost_types::FieldMask;
     use std::time::Duration;
+    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
     use tokio::time::sleep;
-    
+
     debug!("Waiting for object {} to be available", object_id);
-    
+
     let object_address = sui::Address::from_str(object_id)
         .map_err(|e| anyhow::anyhow!("Failed to parse object ID '{}': {}", object_id, e))?;
-    
+
     let max_retries = 10;
     let mut retry_count = 0;
-    
+
     while retry_count < max_retries {
         let mut client = SharedSuiState::get_instance().get_sui_client();
         let mut ledger = client.ledger_client();
-        
+
         let response = ledger
             .get_object(proto::GetObjectRequest {
                 object_id: Some(object_address.to_string()),
@@ -158,7 +159,7 @@ async fn wait_for_object_availability(object_id: &str) -> Result<()> {
                 }),
             })
             .await;
-        
+
         match response {
             Ok(resp) => {
                 let inner = resp.into_inner();
@@ -173,15 +174,18 @@ async fn wait_for_object_availability(object_id: &str) -> Result<()> {
                 }
             }
         }
-        
+
         retry_count += 1;
         if retry_count < max_retries {
             let wait_ms = 500 * retry_count; // Exponential backoff: 500ms, 1s, 1.5s, etc.
-            debug!("Waiting {}ms before retry {}/{}", wait_ms, retry_count, max_retries);
+            debug!(
+                "Waiting {}ms before retry {}/{}",
+                wait_ms, retry_count, max_retries
+            );
             sleep(Duration::from_millis(wait_ms as u64)).await;
         }
     }
-    
+
     Err(anyhow::anyhow!(
         "Object {} not available after {} retries",
         object_id,
@@ -191,11 +195,14 @@ async fn wait_for_object_availability(object_id: &str) -> Result<()> {
 
 /// Fetch the created registry ID from transaction events
 async fn fetch_created_object_from_transaction(tx_digest: &str) -> Result<String> {
-    debug!("Fetching created registry ID from transaction events: {}", tx_digest);
-    
+    debug!(
+        "Fetching created registry ID from transaction events: {}",
+        tx_digest
+    );
+
     // Fetch transaction events as JSON
     let events_json = crate::transactions::fetch_transaction_events_as_json(tx_digest).await?;
-    
+
     // Look for RegistryCreatedEvent in the events
     if let Some(events_array) = events_json.as_array() {
         for event in events_array {
@@ -203,9 +210,11 @@ async fn fetch_created_object_from_transaction(tx_digest: &str) -> Result<String
                 // Check if this is a RegistryCreatedEvent
                 if event_type.contains("RegistryCreatedEvent") {
                     debug!("Found RegistryCreatedEvent");
-                    
+
                     // The event data could be in parsed_json, contents, or direct fields
-                    let event_data = if event["parsed_json"].is_object() && !event["parsed_json"]["id"].is_null() {
+                    let event_data = if event["parsed_json"].is_object()
+                        && !event["parsed_json"]["id"].is_null()
+                    {
                         &event["parsed_json"]
                     } else if event["contents"].is_object() && !event["contents"]["id"].is_null() {
                         &event["contents"]
@@ -215,17 +224,20 @@ async fn fetch_created_object_from_transaction(tx_digest: &str) -> Result<String
                         warn!("RegistryCreatedEvent found but couldn't locate event data");
                         continue;
                     };
-                    
+
                     // Extract the registry ID from the event
                     if let Some(registry_id) = event_data["id"].as_str() {
-                        info!("Found registry ID from RegistryCreatedEvent: {}", registry_id);
+                        info!(
+                            "Found registry ID from RegistryCreatedEvent: {}",
+                            registry_id
+                        );
                         return Ok(registry_id.to_string());
                     }
                 }
             }
         }
     }
-    
+
     // Fallback: try to get from output_objects if events don't work
     warn!("RegistryCreatedEvent not found, falling back to output objects");
     fetch_created_object_from_output_objects(tx_digest).await
@@ -234,16 +246,16 @@ async fn fetch_created_object_from_transaction(tx_digest: &str) -> Result<String
 /// Fallback method to fetch created object from output_objects
 async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<String> {
     use crate::state::SharedSuiState;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
     use prost_types::FieldMask;
-    
+    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    
+
     // Parse transaction digest
     let digest = sui_sdk_types::Digest::from_str(tx_digest)
         .map_err(|e| anyhow::anyhow!("Failed to parse transaction digest: {}", e))?;
-    
+
     // Fetch transaction with output_objects
     let mut ledger = client.ledger_client();
     let req = proto::GetTransactionRequest {
@@ -252,21 +264,22 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
             paths: vec!["transaction.output_objects".into()],
         }),
     };
-    
+
     let resp = ledger
         .get_transaction(req)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to fetch transaction: {}", e))?;
-    
+
     let response = resp.into_inner();
-    
+
     if let Some(ref executed_tx) = response.transaction {
         if !executed_tx.output_objects.is_empty() {
             for output_object in &executed_tx.output_objects {
                 // Check if this is a registry object by looking at the type
                 if let Some(ref object_type) = output_object.object_type {
-                    if object_type.contains("::registry::SilvanaRegistry") || 
-                       object_type.contains("::registry::AgentRegistry") {
+                    if object_type.contains("::registry::SilvanaRegistry")
+                        || object_type.contains("::registry::AgentRegistry")
+                    {
                         if let Some(ref object_id) = output_object.object_id {
                             return Ok(object_id.clone());
                         }
@@ -275,12 +288,12 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
             }
         }
     }
-    
+
     Err(anyhow::anyhow!("No created objects found in transaction"))
 }
 
 /// Add a developer to the registry
-/// 
+///
 /// # Arguments
 /// * `registry_id` - The registry object ID
 /// * `name` - Developer name
@@ -288,10 +301,10 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
 /// * `image` - Optional image URL
 /// * `description` - Optional description
 /// * `site` - Optional website URL
-/// 
+///
 /// # Returns
 /// Transaction digest on success
-pub async fn add_developer(
+pub(crate) async fn add_developer(
     registry_id: &str,
     name: String,
     github: String,
@@ -299,17 +312,14 @@ pub async fn add_developer(
     description: Option<String>,
     site: Option<String>,
 ) -> Result<String> {
-    info!(
-        "Adding developer '{}' to registry '{}'",
-        name, registry_id
-    );
-    
+    info!("Adding developer '{}' to registry '{}'", name, registry_id);
+
     execute_registry_function(
         registry_id,
         "add_developer",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             // Create string arguments
             let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: name.clone().into_bytes(),
@@ -317,7 +327,7 @@ pub async fn add_developer(
             let github_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: github.clone().into_bytes(),
             }));
-            
+
             // Create optional string arguments
             let image_arg = tb.input(sui_transaction_builder::Serialized(&MoveOption {
                 vec: image
@@ -346,7 +356,7 @@ pub async fn add_developer(
                     .into_iter()
                     .collect(),
             }));
-            
+
             // Return arguments in the order expected by the Move function:
             // registry, name, github, image, description, site, clock
             vec![
@@ -368,7 +378,7 @@ pub async fn add_developer(
 }
 
 /// Update a developer in the registry
-pub async fn update_developer(
+pub(crate) async fn update_developer(
     registry_id: &str,
     name: String,
     github: String,
@@ -380,13 +390,13 @@ pub async fn update_developer(
         "Updating developer '{}' in registry '{}'",
         name, registry_id
     );
-    
+
     execute_registry_function(
         registry_id,
         "update_developer",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: name.clone().into_bytes(),
             }));
@@ -420,7 +430,7 @@ pub async fn update_developer(
                     .into_iter()
                     .collect(),
             }));
-            
+
             vec![
                 registry_arg,
                 name_arg,
@@ -440,7 +450,7 @@ pub async fn update_developer(
 }
 
 /// Remove a developer from the registry
-pub async fn remove_developer(
+pub(crate) async fn remove_developer(
     registry_id: &str,
     name: String,
     agent_names: Vec<String>,
@@ -449,13 +459,13 @@ pub async fn remove_developer(
         "Removing developer '{}' from registry '{}'",
         name, registry_id
     );
-    
+
     execute_registry_function(
         registry_id,
         "remove_developer",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: name.clone().into_bytes(),
             }));
@@ -468,7 +478,7 @@ pub async fn remove_developer(
                     })
                     .collect::<Vec<_>>(),
             ));
-            
+
             vec![registry_arg, name_arg, agent_names_arg, clock_arg]
         },
     )
@@ -480,7 +490,7 @@ pub async fn remove_developer(
 }
 
 /// Add an agent to a developer in the registry
-pub async fn add_agent(
+pub(crate) async fn add_agent(
     registry_id: &str,
     developer: String,
     name: String,
@@ -493,13 +503,13 @@ pub async fn add_agent(
         "Adding agent '{}' to developer '{}' in registry '{}'",
         name, developer, registry_id
     );
-    
+
     execute_registry_function(
         registry_id,
         "add_agent",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: developer.clone().into_bytes(),
             }));
@@ -542,7 +552,7 @@ pub async fn add_agent(
                     })
                     .collect::<Vec<_>>(),
             ));
-            
+
             vec![
                 registry_arg,
                 developer_arg,
@@ -563,7 +573,7 @@ pub async fn add_agent(
 }
 
 /// Update an agent in the registry
-pub async fn update_agent(
+pub(crate) async fn update_agent(
     registry_id: &str,
     developer: String,
     name: String,
@@ -576,13 +586,13 @@ pub async fn update_agent(
         "Updating agent '{}' for developer '{}' in registry '{}'",
         name, developer, registry_id
     );
-    
+
     execute_registry_function(
         registry_id,
         "update_agent",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: developer.clone().into_bytes(),
             }));
@@ -625,7 +635,7 @@ pub async fn update_agent(
                     })
                     .collect::<Vec<_>>(),
             ));
-            
+
             vec![
                 registry_arg,
                 developer_arg,
@@ -646,7 +656,7 @@ pub async fn update_agent(
 }
 
 /// Remove an agent from the registry
-pub async fn remove_agent(
+pub(crate) async fn remove_agent(
     registry_id: &str,
     developer: String,
     name: String,
@@ -655,20 +665,20 @@ pub async fn remove_agent(
         "Removing agent '{}' from developer '{}' in registry '{}'",
         name, developer, registry_id
     );
-    
+
     execute_registry_function(
         registry_id,
         "remove_agent",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: developer.clone().into_bytes(),
             }));
             let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: name.clone().into_bytes(),
             }));
-            
+
             vec![registry_arg, developer_arg, name_arg, clock_arg]
         },
     )
@@ -680,35 +690,31 @@ pub async fn remove_agent(
 }
 
 /// Add an app to the registry
-pub async fn add_app(
+pub(crate) async fn add_app(
     registry_id: &str,
     name: String,
     description: Option<String>,
 ) -> Result<String> {
     info!("Adding app '{}' to registry '{}'", name, registry_id);
-    
-    execute_registry_function(
-        registry_id,
-        "add_app",
-        move |tb, object_args, clock_arg| {
-            let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
-            let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
-                bytes: name.clone().into_bytes(),
-            }));
-            let description_arg = tb.input(sui_transaction_builder::Serialized(&MoveOption {
-                vec: description
-                    .clone()
-                    .map(|s| MoveString {
-                        bytes: s.into_bytes(),
-                    })
-                    .into_iter()
-                    .collect(),
-            }));
-            
-            vec![registry_arg, name_arg, description_arg, clock_arg]
-        },
-    )
+
+    execute_registry_function(registry_id, "add_app", move |tb, object_args, clock_arg| {
+        let registry_arg = *object_args.get(0).expect("Registry argument required");
+
+        let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+            bytes: name.clone().into_bytes(),
+        }));
+        let description_arg = tb.input(sui_transaction_builder::Serialized(&MoveOption {
+            vec: description
+                .clone()
+                .map(|s| MoveString {
+                    bytes: s.into_bytes(),
+                })
+                .into_iter()
+                .collect(),
+        }));
+
+        vec![registry_arg, name_arg, description_arg, clock_arg]
+    })
     .await
     .map_err(|e| {
         debug!("Failed to add app: {}", e);
@@ -717,19 +723,19 @@ pub async fn add_app(
 }
 
 /// Update an app in the registry
-pub async fn update_app(
+pub(crate) async fn update_app(
     registry_id: &str,
     name: String,
     description: Option<String>,
 ) -> Result<String> {
     info!("Updating app '{}' in registry '{}'", name, registry_id);
-    
+
     execute_registry_function(
         registry_id,
         "update_app",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: name.clone().into_bytes(),
             }));
@@ -742,7 +748,7 @@ pub async fn update_app(
                     .into_iter()
                     .collect(),
             }));
-            
+
             vec![registry_arg, name_arg, description_arg, clock_arg]
         },
     )
@@ -754,22 +760,19 @@ pub async fn update_app(
 }
 
 /// Remove an app from the registry
-pub async fn remove_app(
-    registry_id: &str,
-    name: String,
-) -> Result<String> {
+pub(crate) async fn remove_app(registry_id: &str, name: String) -> Result<String> {
     info!("Removing app '{}' from registry '{}'", name, registry_id);
-    
+
     execute_registry_function(
         registry_id,
         "remove_app",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
-            
+
             let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
                 bytes: name.clone().into_bytes(),
             }));
-            
+
             vec![registry_arg, name_arg, clock_arg]
         },
     )

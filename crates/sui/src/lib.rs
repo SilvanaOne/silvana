@@ -1,26 +1,26 @@
 //! Sui blockchain integration library for Silvana
-//! 
+//!
 //! This library provides functions for interacting with the Sui blockchain,
 //! including registry management, app instance operations, and transaction handling.
-//! 
+//!
 //! # Environment Variables
-//! 
+//!
 //! The library expects the following environment variables to be set:
 //! - `SUI_ADDRESS`: Your Sui address
 //! - `SUI_SECRET_KEY`: Your Sui private key
 //! - `SUI_CHAIN`: The Sui network to use (devnet, testnet, or mainnet)
 //! - `SILVANA_REGISTRY_PACKAGE`: The registry package ID (optional)
-//! 
+//!
 //! It's recommended to use a `.env` file with the `dotenvy` crate:
 //! ```rust,no_run
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Load environment variables from .env file
 //! dotenvy::dotenv().ok();
-//! 
+//!
 //! // Initialize the shared state
 //! let rpc_url = sui::chain::resolve_rpc_url(None, None)?;
 //! sui::SharedSuiState::initialize(&rpc_url).await?;
-//! 
+//!
 //! // Now you can use the library functions
 //! # Ok(())
 //! # }
@@ -76,10 +76,6 @@ pub use network_info::{
     get_service_info_full, print_network_info, verify_chain_config,
 };
 pub use object_lock::{ObjectLockGuard, ObjectLockManager, get_object_lock_manager};
-pub use registry::{
-    add_agent, add_app, add_developer, create_registry, remove_agent, remove_app, remove_developer,
-    update_agent, update_app, update_developer, CreateRegistryResult,
-};
 pub use state::SharedSuiState;
 pub use transactions::{fetch_transaction_events, fetch_transaction_events_as_json};
 // Re-export selected fetch utilities for convenient access at crate root
