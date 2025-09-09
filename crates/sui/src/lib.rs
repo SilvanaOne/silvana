@@ -1,4 +1,5 @@
 // Module declarations
+pub mod app_instance;
 pub mod balance;
 pub mod chain;
 pub mod coin;
@@ -18,40 +19,36 @@ pub mod transactions;
 pub mod types;
 
 // Re-export commonly used types
+pub use app_instance::{add_metadata_tx, delete_kv_tx, set_kv_tx};
 pub use balance::{
-    get_balance_info, get_total_balance_sui, get_balance_in_sui, get_current_address, get_network_name,
-    print_balance_info, BalanceInfo,
+    BalanceInfo, get_balance_in_sui, get_balance_info, get_current_address, get_network_name,
+    get_total_balance_sui, print_balance_info,
 };
 pub use chain::{get_reference_gas_price, load_sender_from_env, pick_gas_object, resolve_rpc_url};
 pub use coin::{
     CoinInfo, CoinLockGuard, CoinLockManager, fetch_coin, get_coin_lock_manager, list_coins,
 };
 pub use coin_management::{
-    ensure_gas_coin_pool, initialize_gas_coin_pool, split_gas_coins, merge_gas_coins,
-    get_gas_coins_info, CoinPoolConfig, GasCoinsInfo,
+    CoinPoolConfig, GasCoinsInfo, ensure_gas_coin_pool, get_gas_coins_info,
+    initialize_gas_coin_pool, merge_gas_coins, split_gas_coins,
 };
 pub use faucet::{
-    request_tokens_from_faucet, request_tokens_for_default_address, 
-    ensure_sufficient_balance, initialize_faucet,
-    request_tokens_from_faucet_network, request_tokens_for_default_address_network,
-    ensure_sufficient_balance_network, FaucetNetwork,
+    FaucetNetwork, ensure_sufficient_balance, ensure_sufficient_balance_network, initialize_faucet,
+    request_tokens_for_default_address, request_tokens_for_default_address_network,
+    request_tokens_from_faucet, request_tokens_from_faucet_network,
 };
-pub use object_lock::{ObjectLockGuard, ObjectLockManager, get_object_lock_manager};
 pub use interface::SilvanaSuiInterface;
 pub use keypair::{
     bcs_serialize, generate_ed25519, parse_address, parse_sui_private_key, sign_message,
     verify_with_address,
 };
 pub use network_info::{
-    get_network_info, print_network_info, get_network_summary, get_service_info,
-    get_service_info_full, verify_chain_config, NetworkInfo, ServiceInfo,
+    NetworkInfo, ServiceInfo, get_network_info, get_network_summary, get_service_info,
+    get_service_info_full, print_network_info, verify_chain_config,
 };
+pub use object_lock::{ObjectLockGuard, ObjectLockManager, get_object_lock_manager};
 pub use state::SharedSuiState;
-pub use transactions::{
-    add_metadata_tx, delete_kv_tx, set_kv_tx,
-    fetch_transaction_events,
-    fetch_transaction_events_as_json,
-};
+pub use transactions::{fetch_transaction_events, fetch_transaction_events_as_json};
 // Re-export selected fetch utilities for convenient access at crate root
 pub use fetch::fetch_agent_method;
 // Re-export multicall constants

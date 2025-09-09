@@ -1,9 +1,10 @@
-use crate::transactions::{
+use crate::app_instance::{
     complete_job_tx, create_app_job_tx, create_merge_job_tx, create_merge_job_with_proving_tx,
     create_settle_job_tx, fail_job_tx, multicall_job_operations_tx, reject_proof_tx,
     restart_failed_jobs_with_sequences_tx, start_job_tx, start_proving_tx, submit_proof_tx,
-    terminate_job_tx, try_create_block_tx, update_block_proof_data_availability_tx,
-    update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx,
+    terminate_app_job_tx, terminate_job_tx, try_create_block_tx,
+    update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx,
+    update_block_settlement_tx_included_in_block_tx, update_block_state_data_availability_tx,
     update_state_for_sequence_tx,
 };
 use tracing::{debug, error, info, warn};
@@ -277,7 +278,10 @@ impl SilvanaSuiInterface {
         // Validate all operations
         for (i, op) in operations.iter().enumerate() {
             if let Err(e) = op.validate() {
-                return Err((format!("Validation failed for operation {}: {}", i, e), None));
+                return Err((
+                    format!("Validation failed for operation {}: {}", i, e),
+                    None,
+                ));
             }
         }
 
@@ -294,10 +298,15 @@ impl SilvanaSuiInterface {
             ));
         }
 
-        let app_instances: Vec<String> = operations.iter().map(|op| op.app_instance.clone()).collect();
+        let app_instances: Vec<String> = operations
+            .iter()
+            .map(|op| op.app_instance.clone())
+            .collect();
         debug!(
             "Attempting batch multicall job operations for {} app instances: {:?} (total operations: {})",
-            operations.len(), app_instances, total_operations
+            operations.len(),
+            app_instances,
+            total_operations
         );
 
         let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
@@ -914,7 +923,7 @@ impl SilvanaSuiInterface {
             job_id
         );
 
-        match crate::transactions::terminate_app_job_tx(app_instance, job_id).await {
+        match terminate_app_job_tx(app_instance, job_id).await {
             Ok(tx_digest) => {
                 info!(
                     "Successfully terminated app job {} on blockchain, tx: {}",
@@ -1123,7 +1132,7 @@ impl SilvanaSuiInterface {
             block_number
         );
 
-        match crate::transactions::update_block_state_data_availability_tx(
+        match update_block_state_data_availability_tx(
             app_instance,
             block_number,
             state_data_availability.clone(),
