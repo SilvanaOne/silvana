@@ -263,18 +263,27 @@ async fn get_object_details(
     }
 }
 
-/// Execute multiple app instance transactions in a single transaction block
-/// Each operation is a tuple of (object, function_name, args_builder)
+/// Result of executing a transaction block
+pub struct TransactionBlockResult {
+    /// The transaction digest
+    pub digest: String,
+    /// Created object IDs (if any)
+    pub created_objects: Vec<String>,
+}
+
+/// Execute multiple transactions in a single transaction block
+/// Each operation is a tuple of (object_ids, module_name, function_name, args_builder)
 /// Operations can use different objects and share clock objects
+/// object_ids can be empty for functions that don't need object arguments (like create_registry)
 pub(crate) async fn execute_transaction_block<F>(
     package_id: sui::Address,
-    operations: Vec<(String, String, F)>, // object_id, function_name, args_builder
+    operations: Vec<(Vec<String>, String, String, F)>, // object_ids, module_name, function_name, args_builder
     custom_gas_budget: Option<u64>,
 ) -> Result<String>
 where
     F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
-        sui_sdk_types::Argument, // app_instance_arg
+        Vec<sui_sdk_types::Argument>, // object_args (can be empty)
         sui_sdk_types::Argument, // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
@@ -285,15 +294,15 @@ where
         return Err(anyhow!("No operations provided"));
     }
 
-    let function_names: Vec<String> = operations.iter().map(|(_, name, _)| name.clone()).collect();
-    let object_ids: Vec<String> = operations
+    let function_names: Vec<String> = operations.iter().map(|(_, _, name, _)| name.clone()).collect();
+    let all_object_ids: Vec<String> = operations
         .iter()
-        .map(|(object_id, _, _)| object_id.clone())
+        .flat_map(|(object_ids, _, _, _)| object_ids.clone())
         .collect();
     debug!(
         "Creating batch transaction for {} objects: {:?} with functions: {:?}",
-        object_ids.len(),
-        object_ids,
+        all_object_ids.len(),
+        all_object_ids,
         function_names
     );
 
@@ -306,8 +315,8 @@ where
     debug!("Package ID: {}", package_id);
     debug!("Sender: {}", sender);
 
-    // Parse and collect all unique app instance IDs
-    let mut unique_object_ids: Vec<String> = object_ids.clone();
+    // Parse and collect all unique object IDs
+    let mut unique_object_ids: Vec<String> = all_object_ids.clone();
     unique_object_ids.sort();
     unique_object_ids.dedup();
 
@@ -451,21 +460,25 @@ where
         let clock_arg = tb.input(clock_input);
 
         // Add all function calls to the transaction
-        for (app_instance_str, function_name, build_args) in &operations {
-            // Get the correct app_instance argument for this operation
-            let app_instance_arg = object_args.get(app_instance_str).ok_or_else(|| {
-                anyhow!("App instance argument not found for: {}", app_instance_str)
-            })?;
+        for (object_ids_for_op, module_name, function_name, build_args) in &operations {
+            // Collect the object arguments for this operation
+            let mut op_object_args = Vec::new();
+            for object_id_str in object_ids_for_op {
+                let obj_arg = object_args.get(object_id_str).ok_or_else(|| {
+                    anyhow!("Object argument not found for: {}", object_id_str)
+                })?;
+                op_object_args.push(*obj_arg);
+            }
 
             // Build function-specific arguments
-            let args = build_args(&mut tb, *app_instance_arg, clock_arg);
+            let args = build_args(&mut tb, op_object_args, clock_arg);
 
             // Function call
             let func = sui_transaction_builder::Function::new(
                 package_id,
-                "app_instance"
+                module_name
                     .parse()
-                    .map_err(|e| anyhow!("Failed to parse module name 'app_instance': {}", e))?,
+                    .map_err(|e| anyhow!("Failed to parse module name '{}': {}", module_name, e))?,
                 function_name.parse().map_err(|e| {
                     anyhow!("Failed to parse function name '{}': {}", function_name, e)
                 })?,
@@ -524,10 +537,11 @@ where
                                             gas_summary.non_refundable_storage_fee.unwrap_or(0);
 
                                         // Calculate total gas needed with 20% buffer
-                                        let total_gas_used = computation_cost
+                                        // Use saturating_sub to prevent underflow when rebate is larger than costs
+                                        let total_gas_used = (computation_cost
                                             + storage_cost
-                                            + non_refundable_storage_fee
-                                            - storage_rebate;
+                                            + non_refundable_storage_fee)
+                                            .saturating_sub(storage_rebate);
                                         let estimated_budget = (total_gas_used as f64 * 1.2) as u64;
 
                                         // Ensure minimum budget of 10M MIST (0.01 SUI)

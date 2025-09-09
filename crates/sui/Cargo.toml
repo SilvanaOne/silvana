@@ -45,3 +45,5 @@ reqwest.workspace = true
 [dev-dependencies]
 dotenvy.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rand = "0.8"
+tracing-subscriber = "0.3"

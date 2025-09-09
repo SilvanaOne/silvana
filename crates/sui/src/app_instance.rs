@@ -15,7 +15,8 @@ pub(crate) async fn start_job_tx(app_instance_str: &str, job_sequence: u64) -> R
     execute_app_instance_function(
         app_instance_str,
         "start_app_job",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
         },
@@ -33,7 +34,8 @@ pub(crate) async fn complete_job_tx(app_instance_str: &str, job_sequence: u64) -
     execute_app_instance_function(
         app_instance_str,
         "complete_app_job",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
         },
@@ -74,7 +76,8 @@ pub(crate) async fn fail_job_tx(
     execute_app_instance_function(
         app_instance_str,
         "fail_app_job",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             let error_arg = tb.input(sui_transaction_builder::Serialized(&error_msg));
             vec![app_instance_arg, job_sequence_arg, error_arg, clock_arg]
@@ -98,7 +101,8 @@ pub(crate) async fn terminate_job_tx(
         app_instance_str,
         "terminate_app_job",
         gas_budget,
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
             vec![app_instance_arg, job_sequence_arg, clock_arg]
         },
@@ -137,14 +141,15 @@ pub(crate) async fn multicall_job_operations_tx(
         app_instances
     );
 
-    // Build operations list for all app instances - format: (app_instance, function_name, builder)
+    // Build operations list for all app instances - format: (object_ids, module_name, function_name, builder)
     let mut tx_operations: Vec<(
+        Vec<String>,
         String,
         String,
         Box<
             dyn Fn(
                     &mut sui_transaction_builder::TransactionBuilder,
-                    sui_sdk_types::Argument,
+                    Vec<sui_sdk_types::Argument>,
                     sui_sdk_types::Argument,
                 ) -> Vec<sui_sdk_types::Argument>
                 + Send,
@@ -171,9 +176,11 @@ pub(crate) async fn multicall_job_operations_tx(
             let avail_mem = op.available_memory;
 
             tx_operations.push((
-                app_instance.clone(),
+                vec![app_instance.clone()],
+                "app_instance".to_string(),
                 "multicall_app_job_operations".to_string(),
-                Box::new(move |tb, app_instance_arg, clock_arg| {
+                Box::new(move |tb, object_args, clock_arg| {
+                    let app_instance_arg = *object_args.get(0).expect("App instance argument required");
                     // Create vector arguments for each operation type
                     let complete_arg = tb.input(sui_transaction_builder::Serialized(&complete));
                     let fail_sequences_arg =
@@ -209,9 +216,11 @@ pub(crate) async fn multicall_job_operations_tx(
             let da_hash = new_data_availability_hash.clone();
 
             tx_operations.push((
-                app_instance.clone(),
+                vec![app_instance.clone()],
+                "app_instance".to_string(),
                 "update_state_for_sequence".to_string(),
-                Box::new(move |tb, app_instance_arg, clock_arg| {
+                Box::new(move |tb, object_args, clock_arg| {
+                    let app_instance_arg = *object_args.get(0).expect("App instance argument required");
                     let sequence_arg = tb.input(sui_transaction_builder::Serialized(&seq));
                     let state_data_arg = tb.input(sui_transaction_builder::Serialized(&state_data));
                     let da_hash_arg = tb.input(sui_transaction_builder::Serialized(&da_hash));
@@ -253,9 +262,11 @@ pub(crate) async fn multicall_job_operations_tx(
             let time = *cpu_time;
 
             tx_operations.push((
-                app_instance.clone(),
+                vec![app_instance.clone()],
+                "app_instance".to_string(),
                 "submit_proof".to_string(),
-                Box::new(move |tb, app_instance_arg, clock_arg| {
+                Box::new(move |tb, object_args, clock_arg| {
+                    let app_instance_arg = *object_args.get(0).expect("App instance argument required");
                     let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
                     let sequences_arg = tb.input(sui_transaction_builder::Serialized(&seqs));
                     let merged_seqs_1_arg =
@@ -313,9 +324,11 @@ pub(crate) async fn multicall_job_operations_tx(
             let chain = settlement_chain.clone();
 
             tx_operations.push((
-                app_instance.clone(),
+                vec![app_instance.clone()],
+                "app_instance".to_string(),
                 "create_app_job".to_string(),
-                Box::new(move |tb, app_instance_arg, clock_arg| {
+                Box::new(move |tb, object_args, clock_arg| {
+                    let app_instance_arg = *object_args.get(0).expect("App instance argument required");
                     let method_arg = tb.input(sui_transaction_builder::Serialized(&method));
                     let description_arg = tb.input(sui_transaction_builder::Serialized(&desc));
                     let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
@@ -356,9 +369,11 @@ pub(crate) async fn multicall_job_operations_tx(
             let desc = job_description.clone();
 
             tx_operations.push((
-                app_instance.clone(),
+                vec![app_instance.clone()],
+                "app_instance".to_string(),
                 "create_merge_job".to_string(),
-                Box::new(move |tb, app_instance_arg, clock_arg| {
+                Box::new(move |tb, object_args, clock_arg| {
+                    let app_instance_arg = *object_args.get(0).expect("App instance argument required");
                     let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
                     let sequences_arg = tb.input(sui_transaction_builder::Serialized(&seqs));
                     let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&seqs1));
@@ -405,7 +420,8 @@ pub async fn restart_failed_jobs_with_sequences_tx(
         app_instance_str,
         "restart_failed_app_jobs",
         gas,
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
             vec![app_instance_arg, job_sequences_arg, clock_arg]
         },
@@ -428,7 +444,8 @@ pub async fn remove_failed_jobs_tx(
         app_instance_str,
         "remove_failed_app_jobs",
         gas_budget,
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
             vec![app_instance_arg, job_sequences_arg, clock_arg]
         },
@@ -459,7 +476,8 @@ pub(crate) async fn submit_proof_tx(
     execute_app_instance_function(
         app_instance_str,
         "submit_proof",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
             let merged_sequences_1_arg =
@@ -509,7 +527,8 @@ pub(crate) async fn update_state_for_sequence_tx(
     execute_app_instance_function(
         app_instance_str,
         "update_state_for_sequence",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let sequence_arg = tb.input(sui_transaction_builder::Serialized(&sequence));
             let new_state_data_arg = tb.input(sui_transaction_builder::Serialized(&new_state_data));
             let new_data_availability_hash_arg = tb.input(sui_transaction_builder::Serialized(
@@ -553,7 +572,8 @@ pub async fn create_app_job_tx(
     execute_app_instance_function(
         app_instance_str,
         "create_app_job",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let method_name_arg = tb.input(sui_transaction_builder::Serialized(&method_name));
             let job_description_arg =
                 tb.input(sui_transaction_builder::Serialized(&job_description));
@@ -609,7 +629,8 @@ pub async fn reject_proof_tx(
     execute_app_instance_function(
         app_instance_str,
         "reject_proof",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
             vec![app_instance_arg, block_number_arg, sequences_arg, clock_arg]
@@ -637,7 +658,8 @@ pub(crate) async fn start_proving_tx(
     execute_app_instance_function(
         app_instance_str,
         "start_proving",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
             let merged_sequences_1_arg =
@@ -730,7 +752,8 @@ pub(crate) async fn create_merge_job_with_proving_tx(
     execute_app_instance_function(
         app_instance_str,
         "create_merge_job",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences));
             let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&sequences1));
@@ -766,7 +789,8 @@ pub async fn update_block_proof_data_availability_tx(
     execute_app_instance_function(
         app_instance_str,
         "update_block_proof_data_availability",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let proof_da_arg = tb.input(sui_transaction_builder::Serialized(
                 &proof_data_availability,
@@ -792,7 +816,8 @@ pub async fn update_block_state_data_availability_tx(
     execute_app_instance_function(
         app_instance_str,
         "update_block_state_data_availability",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let state_da_arg = tb.input(sui_transaction_builder::Serialized(
                 &state_data_availability,
@@ -819,7 +844,8 @@ pub async fn increase_sequence_tx(
     execute_app_instance_function(
         app_instance_str,
         "increase_sequence",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let optimistic_state_arg =
                 tb.input(sui_transaction_builder::Serialized(&optimistic_state));
             let transition_data_arg =
@@ -877,7 +903,8 @@ pub async fn terminate_app_job_tx(app_instance_str: &str, job_id: u64) -> Result
     execute_app_instance_function(
         app_instance_str,
         "terminate_app_job",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_id_arg = tb.input(sui_transaction_builder::Serialized(&job_id));
 
             vec![app_instance_arg, job_id_arg, clock_arg]
@@ -901,7 +928,8 @@ pub async fn update_block_settlement_tx_hash_tx(
     execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_hash",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             // Order must match Move function signature: chain, block_number, settlement_tx_hash
             let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
@@ -935,7 +963,8 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
     execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_included_in_block",
-        move |tb, app_instance_arg, clock_arg| {
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             // Order must match Move function signature: chain, block_number, settled_at
             let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
@@ -1001,7 +1030,7 @@ async fn execute_app_instance_function<F>(
 where
     F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
-        sui_sdk_types::Argument, // app_instance_arg
+        Vec<sui_sdk_types::Argument>, // object_args
         sui_sdk_types::Argument, // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
@@ -1021,7 +1050,7 @@ async fn execute_app_instance_function_with_gas<F>(
 where
     F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
-        sui_sdk_types::Argument, // app_instance_arg
+        Vec<sui_sdk_types::Argument>, // object_args
         sui_sdk_types::Argument, // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
@@ -1031,7 +1060,8 @@ where
     execute_transaction_block(
         package_id,
         vec![(
-            app_instance_str.to_string(),
+            vec![app_instance_str.to_string()],
+            "app_instance".to_string(),
             function_name.to_string(),
             build_args,
         )],
@@ -1047,7 +1077,10 @@ pub async fn try_create_block_tx(app_instance_str: &str) -> Result<String> {
     execute_app_instance_function(
         app_instance_str,
         "try_create_block",
-        |_tb, app_instance_arg, clock_arg| vec![app_instance_arg, clock_arg],
+        |_tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
+            vec![app_instance_arg, clock_arg]
+        },
     )
     .await
 }
@@ -1059,7 +1092,8 @@ pub async fn set_kv_tx(app_instance_str: &str, key: String, value: String) -> Re
     execute_app_instance_function(
         app_instance_str,
         "set_kv",
-        move |tb, app_instance_arg, _clock_arg| {
+        move |tb, object_args, _clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
             let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
             vec![app_instance_arg, key_arg, value_arg]
@@ -1075,7 +1109,8 @@ pub async fn delete_kv_tx(app_instance_str: &str, key: String) -> Result<String>
     execute_app_instance_function(
         app_instance_str,
         "delete_kv",
-        move |tb, app_instance_arg, _clock_arg| {
+        move |tb, object_args, _clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
             vec![app_instance_arg, key_arg]
         },
@@ -1090,7 +1125,8 @@ pub async fn add_metadata_tx(app_instance_str: &str, key: String, value: String)
     execute_app_instance_function(
         app_instance_str,
         "add_metadata",
-        move |tb, app_instance_arg, _clock_arg| {
+        move |tb, object_args, _clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
             let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
             vec![app_instance_arg, key_arg, value_arg]
