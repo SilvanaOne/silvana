@@ -3,7 +3,7 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::{Tag, Tagging};
 use once_cell::sync::OnceCell;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +30,7 @@ impl S3Client {
             .set(client)
             .map_err(|_| anyhow!("AWS S3 client already initialized"))?;
 
-        info!("AWS S3 client initialized");
+        debug!("Storage client initialized");
         Ok(())
     }
 
@@ -61,7 +61,7 @@ impl S3Client {
     /// * `data` - The data to store
     /// * `metadata` - Optional metadata as key-value pairs
     /// * `expires_at` - Unix timestamp in milliseconds for expiration
-    /// 
+    ///
     /// # Note
     /// S3 has a limit of 10 tags per object. This method ensures we don't exceed that limit
     /// by prioritizing tags and truncating if necessary.
@@ -91,53 +91,78 @@ impl S3Client {
         if let Some(metadata) = metadata {
             // We can add up to (MAX_S3_TAGS - 1) more tags since expires_at takes one slot
             let max_additional_tags = MAX_S3_TAGS - 1;
-            
+
             if metadata.len() > max_additional_tags {
                 warn!(
                     "S3 tag limit exceeded: {} tags provided, but S3 allows max {}. Truncating to {} metadata tags.",
-                    metadata.len() + 1, MAX_S3_TAGS, max_additional_tags
+                    metadata.len() + 1,
+                    MAX_S3_TAGS,
+                    max_additional_tags
                 );
             }
-            
+
             for (key, value) in metadata.iter().take(max_additional_tags) {
                 // S3 tag limits: key max 128 chars, value max 256 chars
                 // Also, S3 tags can only contain: letters, numbers, spaces, and + - = . _ : / @
-                
+
                 let tag_key = if key.len() > 128 {
                     warn!("S3 tag key '{}' exceeds 128 chars, truncating", key);
                     &key[..128]
                 } else {
                     key.as_str()
                 };
-                
+
                 // Sanitize tag value - replace invalid characters with underscores
-                let sanitized_value = value.chars()
+                let sanitized_value = value
+                    .chars()
                     .map(|c| {
-                        if c.is_alphanumeric() || c == ' ' || c == '+' || c == '-' || c == '=' 
-                            || c == '.' || c == '_' || c == ':' || c == '/' || c == '@' {
+                        if c.is_alphanumeric()
+                            || c == ' '
+                            || c == '+'
+                            || c == '-'
+                            || c == '='
+                            || c == '.'
+                            || c == '_'
+                            || c == ':'
+                            || c == '/'
+                            || c == '@'
+                        {
                             c
                         } else {
                             '_' // Replace invalid characters with underscore
                         }
                     })
                     .collect::<String>();
-                
+
                 let tag_value = if sanitized_value.len() > 256 {
-                    warn!("S3 tag value for key '{}' exceeds 256 chars ({}), truncating", key, sanitized_value.len());
+                    warn!(
+                        "S3 tag value for key '{}' exceeds 256 chars ({}), truncating",
+                        key,
+                        sanitized_value.len()
+                    );
                     sanitized_value[..256].to_string()
                 } else {
                     sanitized_value
                 };
-                
+
                 // Log if we had to sanitize the value
                 if value != &tag_value {
-                    debug!("Sanitized S3 tag value for key '{}': '{}' -> '{}'", 
-                        key, 
-                        if value.len() > 50 { format!("{}...", &value[..50]) } else { value.clone() },
-                        if tag_value.len() > 50 { format!("{}...", &tag_value[..50]) } else { tag_value.clone() }
+                    debug!(
+                        "Sanitized S3 tag value for key '{}': '{}' -> '{}'",
+                        key,
+                        if value.len() > 50 {
+                            format!("{}...", &value[..50])
+                        } else {
+                            value.clone()
+                        },
+                        if tag_value.len() > 50 {
+                            format!("{}...", &tag_value[..50])
+                        } else {
+                            tag_value.clone()
+                        }
                     );
                 }
-                
+
                 tags.push(
                     Tag::builder()
                         .key(tag_key.to_string())
@@ -150,7 +175,7 @@ impl S3Client {
         // Store data size and tags count before moving them
         let data_size = data.len();
         let tags_count = tags.len();
-        
+
         let tagging = Tagging::builder().set_tag_set(Some(tags.clone())).build()?;
 
         let tagging_string = tagging
@@ -160,39 +185,49 @@ impl S3Client {
             .collect::<Vec<_>>()
             .join("&");
 
-        match self.client
+        match self
+            .client
             .put_object()
             .bucket(&self.bucket_name)
             .key(key)
             .body(data.into_bytes().into())
             .tagging(tagging_string)
             .send()
-            .await {
-            Ok(_) => {},
+            .await
+        {
+            Ok(_) => {}
             Err(e) => {
                 // Log detailed error information
-                error!("S3 PUT failed - Bucket: {}, Key: {}, Error: {:?}", 
-                    self.bucket_name, key, e);
-                
+                error!(
+                    "S3 PUT failed - Bucket: {}, Key: {}, Error: {:?}",
+                    self.bucket_name, key, e
+                );
+
                 // Check for specific error types
                 if let Some(service_error) = e.as_service_error() {
                     error!("S3 Service Error Details: {:?}", service_error);
-                    
+
                     // Log additional context
-                    error!("S3 Request - Data size: {} bytes, Tags count: {}", 
-                        data_size, tags_count);
-                    
+                    error!(
+                        "S3 Request - Data size: {} bytes, Tags count: {}",
+                        data_size, tags_count
+                    );
+
                     // Log tag details if they might be the issue
                     if !tags.is_empty() {
                         error!("S3 Tags being sent:");
                         for tag in &tags {
-                            error!("  Tag: {}={} (key_len={}, val_len={})", 
-                                tag.key(), tag.value(), 
-                                tag.key().len(), tag.value().len());
+                            error!(
+                                "  Tag: {}={} (key_len={}, val_len={})",
+                                tag.key(),
+                                tag.value(),
+                                tag.key().len(),
+                                tag.value().len()
+                            );
                         }
                     }
                 }
-                
+
                 return Err(anyhow!("Failed to write to S3: {}", e));
             }
         }
@@ -217,11 +252,14 @@ impl S3Client {
             .bucket(&self.bucket_name)
             .key(key)
             .send()
-            .await {
+            .await
+        {
             Ok(output) => output,
             Err(e) => {
-                error!("S3 GET failed - Bucket: {}, Key: {}, Error: {:?}", 
-                    self.bucket_name, key, e);
+                error!(
+                    "S3 GET failed - Bucket: {}, Key: {}, Error: {:?}",
+                    self.bucket_name, key, e
+                );
                 if let Some(service_error) = e.as_service_error() {
                     error!("S3 Service Error Details: {:?}", service_error);
                 }
@@ -332,7 +370,9 @@ impl S3Client {
     ) -> Result<String> {
         debug!(
             "Writing binary to S3 bucket {} with key: {}, size: {} bytes",
-            self.bucket_name, file_name, data.len()
+            self.bucket_name,
+            file_name,
+            data.len()
         );
 
         // Calculate SHA256 hash of the data
@@ -352,7 +392,8 @@ impl S3Client {
         }
 
         // Upload to S3
-        match self.client
+        match self
+            .client
             .put_object()
             .bucket(&self.bucket_name)
             .key(file_name)
@@ -360,11 +401,14 @@ impl S3Client {
             .content_type(mime_type)
             .metadata("sha256", calculated_hash.clone())
             .send()
-            .await {
-            Ok(_) => {},
+            .await
+        {
+            Ok(_) => {}
             Err(e) => {
-                error!("S3 PUT failed - Bucket: {}, Key: {}, Error: {:?}", 
-                    self.bucket_name, file_name, e);
+                error!(
+                    "S3 PUT failed - Bucket: {}, Key: {}, Error: {:?}",
+                    self.bucket_name, file_name, e
+                );
                 return Err(anyhow!("Failed to write binary to S3: {}", e));
             }
         }
@@ -372,10 +416,13 @@ impl S3Client {
         // Wait for the object to be available (with retries)
         let max_retries = S3_AVAILABILITY_MAX_RETRIES;
         let retry_delay = Duration::from_millis(S3_AVAILABILITY_RETRY_DELAY_MS);
-        
+
         for attempt in 1..=max_retries {
-            debug!("Checking if object is available (attempt {}/{})", attempt, max_retries);
-            
+            debug!(
+                "Checking if object is available (attempt {}/{})",
+                attempt, max_retries
+            );
+
             match self.exists(file_name).await {
                 Ok(true) => {
                     debug!("Object is available after {} attempts", attempt);
@@ -386,7 +433,10 @@ impl S3Client {
                     sleep(retry_delay).await;
                 }
                 Ok(false) => {
-                    return Err(anyhow!("Object not available after {} retries", max_retries));
+                    return Err(anyhow!(
+                        "Object not available after {} retries",
+                        max_retries
+                    ));
                 }
                 Err(e) if attempt < max_retries => {
                     warn!("Error checking object existence: {}, retrying...", e);
@@ -400,7 +450,7 @@ impl S3Client {
 
         // Read back and verify
         let (read_data, read_hash) = self.read_binary(file_name).await?;
-        
+
         // Verify the stored data matches
         if read_hash != calculated_hash {
             return Err(anyhow!(
@@ -414,7 +464,7 @@ impl S3Client {
         let mut verify_hasher = Sha256::new();
         verify_hasher.update(&read_data);
         let verify_hash = format!("{:x}", verify_hasher.finalize());
-        
+
         if verify_hash != calculated_hash {
             return Err(anyhow!(
                 "Data integrity check failed: read data hash {} doesn't match original {}",
@@ -450,11 +500,14 @@ impl S3Client {
             .bucket(&self.bucket_name)
             .key(file_name)
             .send()
-            .await {
+            .await
+        {
             Ok(output) => output,
             Err(e) => {
-                error!("S3 GET failed - Bucket: {}, Key: {}, Error: {:?}", 
-                    self.bucket_name, file_name, e);
+                error!(
+                    "S3 GET failed - Bucket: {}, Key: {}, Error: {:?}",
+                    self.bucket_name, file_name, e
+                );
                 if let Some(service_error) = e.as_service_error() {
                     error!("S3 Service Error Details: {:?}", service_error);
                 }
@@ -475,9 +528,12 @@ impl S3Client {
         hasher.update(&data);
         let calculated_hash = format!("{:x}", hasher.finalize());
 
-        info!(
+        debug!(
             "Successfully read binary from S3 bucket {} with key: {}, size: {} bytes, SHA256: {}",
-            self.bucket_name, file_name, data.len(), calculated_hash
+            self.bucket_name,
+            file_name,
+            data.len(),
+            calculated_hash
         );
 
         Ok((data, calculated_hash))

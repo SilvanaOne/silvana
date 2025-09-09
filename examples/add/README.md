@@ -1,3 +1,5 @@
+generate keys
+topup keys
 npm install
 npm run build
 env vars
