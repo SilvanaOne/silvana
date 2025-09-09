@@ -53,7 +53,7 @@ check-database-url:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url validate-schema check-schema show-tables show-schema apply-ddl proto2entities dev-reset build store-secret retrieve-secret
+.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url validate-schema check-schema show-tables show-schema apply-ddl proto2entities dev-reset build store-secret retrieve-secret write-config read-config
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -371,6 +371,28 @@ retrieve-secret: ## Retrieve a secret via gRPC (requires: DEVELOPER, AGENT, NAME
 	if [ -n "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	if [ -n "$(APP)" ]; then COMMAND="$$COMMAND --app $(APP)"; fi; \
 	if [ -n "$(APP_INSTANCE)" ]; then COMMAND="$$COMMAND --app-instance $(APP_INSTANCE)"; fi; \
+	eval $$COMMAND
+
+write-config: ## Write configuration to RPC server (requires: CHAIN=[devnet|testnet|mainnet], optional: ENDPOINT)
+	@echo "📤 Writing configuration to RPC server..."
+	@if [ -z "$(CHAIN)" ]; then echo "❌ ERROR: CHAIN is required. Usage: make write-config CHAIN=devnet"; exit 1; fi
+	@if [ "$(CHAIN)" != "devnet" ] && [ "$(CHAIN)" != "testnet" ] && [ "$(CHAIN)" != "mainnet" ]; then \
+		echo "❌ ERROR: CHAIN must be devnet, testnet, or mainnet. Got: $(CHAIN)"; exit 1; \
+	fi
+	@COMMAND="cargo xtask write-config --chain $(CHAIN)"; \
+	if [ ! -z "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
+	echo "🔧 Running: $$COMMAND"; \
+	eval $$COMMAND
+
+read-config: ## Read configuration from RPC server (requires: CHAIN=[devnet|testnet|mainnet], optional: ENDPOINT)
+	@echo "📥 Reading configuration from RPC server..."
+	@if [ -z "$(CHAIN)" ]; then echo "❌ ERROR: CHAIN is required. Usage: make read-config CHAIN=devnet"; exit 1; fi
+	@if [ "$(CHAIN)" != "devnet" ] && [ "$(CHAIN)" != "testnet" ] && [ "$(CHAIN)" != "mainnet" ]; then \
+		echo "❌ ERROR: CHAIN must be devnet, testnet, or mainnet. Got: $(CHAIN)"; exit 1; \
+	fi
+	@COMMAND="cargo xtask read-config --chain $(CHAIN)"; \
+	if [ ! -z "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
+	echo "🔧 Running: $$COMMAND"; \
 	eval $$COMMAND
 
 # Utility targets

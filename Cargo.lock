@@ -8569,6 +8569,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "duct",
+ "rpc-client",
  "secrets-client",
  "tokio",
 ]

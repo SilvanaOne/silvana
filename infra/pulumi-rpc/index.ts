@@ -113,9 +113,39 @@ export = async () => {
     },
   });
 
-  // Create policy for DynamoDB and KMS access (for secrets storage)
+  // -------------------------
+  // DynamoDB Table for Configuration Storage
+  // -------------------------
+  
+  const configTable = new aws.dynamodb.Table("silvana-config", {
+    name: "silvana-config",
+    billingMode: "PAY_PER_REQUEST",
+    hashKey: "chain",      // Partition key: chain identifier (testnet/devnet/mainnet)
+    rangeKey: "config_key", // Sort key: configuration key
+    attributes: [
+      {
+        name: "chain",
+        type: "S", // String
+      },
+      {
+        name: "config_key",
+        type: "S", // String
+      },
+    ],
+    pointInTimeRecovery: {
+      enabled: true,
+    },
+    tags: {
+      Name: "silvana-config",
+      Purpose: "Store configuration key-value pairs per chain",
+      BackupEnabled: "true",
+      Project: "silvana-rpc",
+    },
+  });
+
+  // Create policy for DynamoDB and KMS access (for secrets and config storage)
   const secretsPolicy = new aws.iam.Policy("silvana-rpc-secrets-policy", {
-    description: "Policy for accessing DynamoDB and KMS for secrets storage",
+    description: "Policy for accessing DynamoDB and KMS for secrets and config storage",
     policy: pulumi.interpolate`{
       "Version": "2012-10-17",
       "Statement": [
@@ -128,6 +158,16 @@ export = async () => {
             "dynamodb:UpdateItem"
           ],
           "Resource": "${secretsTable.arn}"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dynamodb:Query",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:PutItem",
+            "dynamodb:DeleteItem"
+          ],
+          "Resource": "${configTable.arn}"
         },
         {
           "Effect": "Allow",
@@ -277,13 +317,13 @@ export = async () => {
   // Read and store the .env.rpc file in Parameter Store
   const envContent = fs.readFileSync("./.env.rpc", "utf8");
   
-  // Append the S3 bucket name to the environment variables
-  const envContentWithBucket = pulumi.interpolate`${envContent}\nPROOFS_CACHE_BUCKET=${proofsCacheBucket.bucket}`;
+  // Append the S3 bucket name and config table name to the environment variables
+  const envContentWithResources = pulumi.interpolate`${envContent}\nPROOFS_CACHE_BUCKET=${proofsCacheBucket.bucket}\nDYNAMODB_CONFIG_TABLE=${configTable.name}`;
 
   const envParameter = new aws.ssm.Parameter("silvana-rpc-env-dev", {
     name: "/silvana-rpc/dev/env",
     type: "SecureString",
-    value: envContentWithBucket,
+    value: envContentWithResources,
     keyId: "alias/aws/ssm",
     description: "Silvana RPC environment variables for development",
     tags: {
@@ -442,6 +482,9 @@ export = async () => {
     secretsTableArn: secretsTable.arn,
     secretsKmsKeyId: secretsKmsKey.id,
     secretsKmsKeyAlias: secretsKmsKeyAlias.name,
+    // Config storage resources
+    configTableName: configTable.name,
+    configTableArn: configTable.arn,
     // Proofs cache bucket
     proofsCacheBucketName: proofsCacheBucket.bucket,
     proofsCacheBucketArn: proofsCacheBucket.arn,

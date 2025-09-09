@@ -294,6 +294,29 @@ message GetProofResponse {
   repeated QuiltPiece quilt_pieces = 6;  // If is_quilt=true, contains the pieces
 }
 
+// Configuration storage messages
+
+message GetConfigRequest {
+  string chain = 1;  // Chain identifier (testnet/devnet/mainnet)
+}
+
+message GetConfigResponse {
+  bool success = 1;
+  string message = 2;
+  map<string, string> config = 3;  // Key-value configuration pairs
+}
+
+message WriteConfigRequest {
+  string chain = 1;  // Chain identifier (testnet/devnet/mainnet)
+  map<string, string> config = 2;  // Key-value configuration pairs to write
+}
+
+message WriteConfigResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 items_written = 3;  // Number of configuration items written
+}
+
 // Binary storage messages for S3
 
 message WriteBinaryRequest {
@@ -378,4 +401,8 @@ service SilvanaEventsService {
   // Binary storage methods
   rpc WriteBinary(WriteBinaryRequest) returns (WriteBinaryResponse);
   rpc ReadBinary(ReadBinaryRequest) returns (ReadBinaryResponse);
+  
+  // Configuration storage methods
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse);
 } 

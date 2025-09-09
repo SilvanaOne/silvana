@@ -201,6 +201,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let s3_storage = S3Storage::new(s3_bucket);
     events_service = events_service.with_s3_storage(Arc::new(s3_storage));
     info!("✅ S3 storage initialized for binary operations");
+    
+    // Initialize config storage
+    let config_table = env::var("DYNAMODB_CONFIG_TABLE").unwrap_or_else(|_| "silvana-config".to_string());
+    if !config_table.is_empty() {
+        info!("🔧 Initializing config storage with table: {}", config_table);
+        match db::kv::ConfigStorage::new(config_table).await {
+            Ok(config_storage) => {
+                events_service = events_service.with_config_storage(Arc::new(config_storage));
+                info!("✅ Config storage initialized");
+            }
+            Err(e) => {
+                error!("❌ Failed to initialize config storage: {}", e);
+                warn!("⚠️  Config endpoints will return 'not available' errors");
+            }
+        }
+    } else {
+        warn!("⚠️  Config storage not configured - config endpoints will return 'not available' errors");
+    }
 
     // Create gRPC service with Prometheus metrics layer
     let grpc_service = SilvanaEventsServiceServer::new(events_service);

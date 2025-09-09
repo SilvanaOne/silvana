@@ -9,6 +9,7 @@ pub use proto::{
     AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
     Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
+    GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
     RetrieveSecretRequest, RetrieveSecretResponse, SearchCoordinatorMessageEventsRequest,
     SearchCoordinatorMessageEventsResponse, SecretReference, StoreSecretRequest,
     StoreSecretResponse, SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest,
@@ -196,6 +197,34 @@ impl SilvanaRpcClient {
         };
 
         let response = self.inner.retrieve_secret(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Get configuration for a chain
+    pub async fn get_config(
+        &mut self,
+        chain: &str,
+    ) -> Result<GetConfigResponse, RpcClientError> {
+        let request = GetConfigRequest {
+            chain: chain.to_string(),
+        };
+
+        let response = self.inner.get_config(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Write configuration for a chain
+    pub async fn write_config(
+        &mut self,
+        chain: &str,
+        config: std::collections::HashMap<String, String>,
+    ) -> Result<WriteConfigResponse, RpcClientError> {
+        let request = WriteConfigRequest {
+            chain: chain.to_string(),
+            config,
+        };
+
+        let response = self.inner.write_config(request).await?;
         Ok(response.into_inner())
     }
 

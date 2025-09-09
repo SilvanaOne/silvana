@@ -8,11 +8,13 @@ use crate::database::EventDatabase;
 use crate::storage::S3Storage;
 use buffer::EventBuffer;
 use db::secrets_storage::SecureSecretsStorage;
+use db::kv::ConfigStorage;
 use monitoring::record_grpc_request;
 use proto::{
     AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
     Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
+    GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
     GetProofRequest, GetProofResponse, ReadBinaryRequest, ReadBinaryResponse,
     RetrieveSecretRequest, RetrieveSecretResponse,
     SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
@@ -29,6 +31,7 @@ pub struct SilvanaEventsServiceImpl {
     secrets_storage: Option<Arc<SecureSecretsStorage>>,
     proofs_cache: Option<Arc<ProofsCache>>,
     s3_storage: Option<Arc<S3Storage>>,
+    config_storage: Option<Arc<ConfigStorage>>,
 }
 
 impl SilvanaEventsServiceImpl {
@@ -39,6 +42,7 @@ impl SilvanaEventsServiceImpl {
             secrets_storage: None,
             proofs_cache: None,
             s3_storage: None,
+            config_storage: None,
         }
     }
 
@@ -54,6 +58,11 @@ impl SilvanaEventsServiceImpl {
 
     pub fn with_s3_storage(mut self, s3_storage: Arc<S3Storage>) -> Self {
         self.s3_storage = Some(s3_storage);
+        self
+    }
+    
+    pub fn with_config_storage(mut self, config_storage: Arc<ConfigStorage>) -> Self {
+        self.config_storage = Some(config_storage);
         self
     }
 }
@@ -914,6 +923,84 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
                     Err(Status::not_found(format!("File not found: {}", req.file_name)))
                 } else {
                     Err(Status::internal(format!("Failed to read binary: {}", e)))
+                }
+            }
+        }
+    }
+    
+    async fn get_config(
+        &self,
+        request: Request<GetConfigRequest>,
+    ) -> Result<Response<GetConfigResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Getting config for chain: {}", req.chain);
+        
+        match &self.config_storage {
+            None => {
+                warn!("Config storage not configured");
+                record_grpc_request("get_config", "not_configured", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(GetConfigResponse {
+                    success: false,
+                    message: "Config storage not configured".to_string(),
+                    config: std::collections::HashMap::new(),
+                }))
+            }
+            Some(storage) => {
+                match storage.get_config(&req.chain).await {
+                    Ok(config) => {
+                        record_grpc_request("get_config", "success", start_time.elapsed().as_secs_f64());
+                        Ok(Response::new(GetConfigResponse {
+                            success: true,
+                            message: format!("Retrieved {} config items", config.len()),
+                            config,
+                        }))
+                    }
+                    Err(e) => {
+                        error!("Failed to get config: {}", e);
+                        record_grpc_request("get_config", "error", start_time.elapsed().as_secs_f64());
+                        Err(Status::internal(format!("Failed to get config: {}", e)))
+                    }
+                }
+            }
+        }
+    }
+    
+    async fn write_config(
+        &self,
+        request: Request<WriteConfigRequest>,
+    ) -> Result<Response<WriteConfigResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+        
+        debug!("Writing config for chain: {} ({} items)", req.chain, req.config.len());
+        
+        match &self.config_storage {
+            None => {
+                warn!("Config storage not configured");
+                record_grpc_request("write_config", "not_configured", start_time.elapsed().as_secs_f64());
+                Ok(Response::new(WriteConfigResponse {
+                    success: false,
+                    message: "Config storage not configured".to_string(),
+                    items_written: 0,
+                }))
+            }
+            Some(storage) => {
+                match storage.write_config(&req.chain, req.config).await {
+                    Ok(items_written) => {
+                        record_grpc_request("write_config", "success", start_time.elapsed().as_secs_f64());
+                        Ok(Response::new(WriteConfigResponse {
+                            success: true,
+                            message: format!("Successfully wrote {} config items", items_written),
+                            items_written,
+                        }))
+                    }
+                    Err(e) => {
+                        error!("Failed to write config: {}", e);
+                        record_grpc_request("write_config", "error", start_time.elapsed().as_secs_f64());
+                        Err(Status::internal(format!("Failed to write config: {}", e)))
+                    }
                 }
             }
         }
