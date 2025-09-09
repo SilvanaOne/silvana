@@ -5,7 +5,7 @@ import { initBlockchain } from "@silvana-one/mina-utils";
 import { compile } from "../src/compile.js";
 
 describe("Add Rollup", async () => {
-  it.skip("should get ZkProgram constraints", async () => {
+  it("should get ZkProgram constraints", async () => {
     // Analyze the constraint count for both methods
     const methods = await AddProgram.analyzeMethods();
     const addMethodStats = (methods as any).add;
