@@ -171,9 +171,9 @@ pub async fn setup_example_project(project_path: &Path, project_name: &str) -> R
 
 /// Sui keypair structure
 #[derive(Debug)]
-struct SuiKeypair {
-    private_key: String,
-    address: String,
+pub struct SuiKeypair {
+    pub private_key: String,
+    pub address: String,
 }
 
 /// Mina keypair structure  
@@ -184,7 +184,7 @@ struct MinaKeypair {
 }
 
 /// Generate a Sui Ed25519 keypair
-fn generate_sui_keypair(name: &str) -> Result<SuiKeypair> {
+pub fn generate_sui_keypair(name: &str) -> Result<SuiKeypair> {
     info!("   • Generating Sui {} keypair...", name);
 
     match sui::keypair::generate_ed25519() {

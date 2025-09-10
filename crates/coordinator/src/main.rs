@@ -126,6 +126,87 @@ async fn main_impl() -> Result<()> {
                 }
             }
 
+            // Check if SUI_ADDRESS and SUI_SECRET_KEY are set, generate if not
+            let env_file_path = std::path::Path::new(".env");
+            if std::env::var("SUI_ADDRESS").is_err() || std::env::var("SUI_SECRET_KEY").is_err() {
+                // Check if .env file exists
+                if !env_file_path.exists() {
+                    println!("🔑 SUI credentials not found, generating new keypair...");
+
+                    // Generate a new Sui keypair
+                    let sui_keypair = example::generate_sui_keypair("coordinator")
+                        .map_err(|e| anyhow::anyhow!("Failed to generate Sui keypair: {}", e))?;
+
+                    println!("✅ Generated new Sui keypair:");
+                    println!("   Address: {}", sui_keypair.address);
+
+                    // Set the environment variables for the current session
+                    unsafe {
+                        std::env::set_var("SUI_ADDRESS", &sui_keypair.address);
+                        std::env::set_var("SUI_SECRET_KEY", &sui_keypair.private_key);
+                    }
+
+                    // Write to .env file
+                    let env_content = format!(
+                        "# Auto-generated Sui credentials\n\
+                        SUI_ADDRESS={}\n\
+                        SUI_SECRET_KEY={}\n\
+                        SUI_CHAIN={}\n",
+                        sui_keypair.address, sui_keypair.private_key, chain
+                    );
+
+                    std::fs::write(env_file_path, env_content)
+                        .map_err(|e| anyhow::anyhow!("Failed to write .env file: {}", e))?;
+
+                    println!("📝 Saved credentials to .env file");
+
+                    // Auto-fund on devnet
+                    if chain == "devnet" {
+                        println!("💰 Requesting funds from devnet faucet...");
+                        match sui::request_tokens_from_faucet(
+                            "devnet",
+                            &sui_keypair.address,
+                            Some(10.0),
+                        )
+                        .await
+                        {
+                            Ok(tx_digest) => {
+                                println!("✅ Faucet request successful!");
+                                if tx_digest != "unknown" {
+                                    println!("   Transaction: {}", tx_digest);
+                                    println!(
+                                        "   🔗 Explorer: https://suiscan.xyz/devnet/tx/{}",
+                                        tx_digest
+                                    );
+                                } else {
+                                    println!(
+                                        "   🔗 Explorer: https://suiscan.xyz/devnet/account/{}",
+                                        sui_keypair.address
+                                    );
+                                }
+                                println!("   Waiting for transaction to be processed...");
+                                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                            }
+                            Err(e) => {
+                                eprintln!("⚠️  Failed to request funds from faucet: {}", e);
+                                eprintln!("   Please manually fund the address:");
+                                eprintln!(
+                                    "   silvana faucet sui --address {} --amount 10",
+                                    sui_keypair.address
+                                );
+                            }
+                        }
+                    } else {
+                        println!("⚠️  Please fund this address before running operations:");
+                        println!("   silvana faucet sui --address {}", sui_keypair.address);
+                    }
+                } else {
+                    eprintln!("❌ SUI_ADDRESS or SUI_SECRET_KEY not set, but .env file exists");
+                    eprintln!("   Please check your .env file or set these environment variables");
+                    std::process::exit(1);
+                }
+            }
+
             // Resolve the RPC URL using the helper from sui crate
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
@@ -2282,20 +2363,20 @@ async fn main_impl() -> Result<()> {
 
             Ok(())
         }
-        
+
         Commands::Secrets { subcommand } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
                 .with(tracing_subscriber::fmt::layer())
                 .init();
-            
+
             // Get default endpoint if not specified
             let get_endpoint = || {
                 std::env::var("SILVANA_RPC_SERVER")
                     .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string())
             };
-            
+
             match subcommand {
                 cli::SecretsCommands::Store {
                     endpoint,
@@ -2307,9 +2388,9 @@ async fn main_impl() -> Result<()> {
                     app_instance,
                 } => {
                     let endpoint = endpoint.unwrap_or_else(get_endpoint);
-                    
+
                     info!("🔗 Connecting to RPC endpoint: {}", endpoint);
-                    
+
                     let mut client = match secrets_client::SecretsClient::new(&endpoint).await {
                         Ok(client) => client,
                         Err(e) => {
@@ -2317,7 +2398,7 @@ async fn main_impl() -> Result<()> {
                             return Err(anyhow!("Failed to connect to RPC endpoint").into());
                         }
                     };
-                    
+
                     info!("📦 Storing secret...");
                     info!("  Developer: {}", developer);
                     info!("  Agent: {}", agent);
@@ -2329,10 +2410,10 @@ async fn main_impl() -> Result<()> {
                         info!("  App Instance: {}", app_instance);
                     }
                     info!("  Secret length: {} characters", secret.len());
-                    
+
                     // TODO: For now using empty signature - will be replaced with actual signature validation
                     let placeholder_signature = vec![];
-                    
+
                     match client
                         .store_secret(
                             &developer,
@@ -2354,7 +2435,7 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
+
                 cli::SecretsCommands::Retrieve {
                     endpoint,
                     developer,
@@ -2364,9 +2445,9 @@ async fn main_impl() -> Result<()> {
                     app_instance,
                 } => {
                     let endpoint = endpoint.unwrap_or_else(get_endpoint);
-                    
+
                     info!("🔗 Connecting to RPC endpoint: {}", endpoint);
-                    
+
                     let mut client = match secrets_client::SecretsClient::new(&endpoint).await {
                         Ok(client) => client,
                         Err(e) => {
@@ -2374,7 +2455,7 @@ async fn main_impl() -> Result<()> {
                             return Err(anyhow!("Failed to connect to RPC endpoint").into());
                         }
                     };
-                    
+
                     info!("🔍 Retrieving secret...");
                     info!("  Developer: {}", developer);
                     info!("  Agent: {}", agent);
@@ -2385,10 +2466,10 @@ async fn main_impl() -> Result<()> {
                     if let Some(ref app_instance) = app_instance {
                         info!("  App Instance: {}", app_instance);
                     }
-                    
+
                     // TODO: For now using empty signature - will be replaced with actual signature validation
                     let placeholder_signature = vec![];
-                    
+
                     match client
                         .retrieve_secret(
                             &developer,
@@ -2407,7 +2488,9 @@ async fn main_impl() -> Result<()> {
                         }
                         Err(secrets_client::SecretsClientError::SecretNotFound) => {
                             error!("❌ Secret not found with the specified parameters");
-                            info!("💡 Try checking if the secret exists with different scope parameters (app, app-instance)");
+                            info!(
+                                "💡 Try checking if the secret exists with different scope parameters (app, app-instance)"
+                            );
                             return Err(anyhow!("Secret not found").into());
                         }
                         Err(e) => {
@@ -2417,7 +2500,7 @@ async fn main_impl() -> Result<()> {
                     }
                 }
             }
-            
+
             Ok(())
         }
     }

@@ -235,8 +235,10 @@ github-release: release-archives ## Create a GitHub release using gh CLI (all pl
 		echo "Install from: https://cli.github.com/"; \
 		exit 1; \
 	fi
-	@echo "📌 Creating git tag $(VERSION) if it doesn't exist..."
-	@git tag -a $(VERSION) -m "Release $(VERSION)" 2>/dev/null || echo "Tag already exists"
+	@echo "🔄 Fetching latest main branch..."
+	@git fetch origin main
+	@echo "📌 Creating git tag $(VERSION) from origin/main..."
+	@git tag -a $(VERSION) -m "Release $(VERSION)" origin/main 2>/dev/null || echo "Tag already exists"
 	@git push origin $(VERSION) 2>/dev/null || echo "Tag already pushed"
 	@echo "📦 Creating GitHub release..."
 	@gh release create $(VERSION) \

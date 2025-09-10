@@ -1,8 +1,10 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "coordinator")]
-#[command(about = "Silvana CLI", long_about = None)]
+#[command(name = "silvana")]
+#[command(about = "Silvana CLI - Distributed Proving Infrastructure", long_about = None)]
+#[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(author = "DFST")]
 pub struct Cli {
     /// Override the blockchain network (devnet, testnet, or mainnet)
     #[arg(long, global = true, env = "SUI_CHAIN")]
