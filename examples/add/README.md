@@ -413,3 +413,39 @@ If you encounter issues:
 - **Docker errors**: Verify Docker Desktop is running and you're logged in to Docker Hub
 - **Insufficient balance**: Run `silvana faucet` commands to request more tokens
 - **Transaction failures**: Check the explorer for detailed error messages and look at the coordinator logs in the terminal
+- **Debugging**: Use `silvana instance` command to show App Instance state, `silvana block`, `silvana proofs` commands to show block information and aggregated proof production details for the block, and `silvana jobs` and `silvana job` commands to show the details about proving, merging and settlement jobs being run by coordinators.
+- **Manual transactions**: Use `silvana transaction` to manually execute transactions for your App Instance.
+
+## Silvana CLI
+
+Run `silvana help` to see all available commands:
+
+```
+Usage: silvana [OPTIONS] <COMMAND>
+
+Commands:
+  start        Start the Silvana node
+  new          Create a new Silvana project from template
+  instance     Fetch and display an app instance by ID
+  object       Fetch and display a raw Sui object by ID
+  block        Fetch and display a block by number
+  proofs       Fetch and display proof calculations for a block
+  job          Fetch and display a job by sequence number
+  jobs         Fetch and display all jobs from an app instance
+  transaction  Execute blockchain transactions
+  keypair      Generate keypairs for different blockchains
+  balance      Check balance
+  split        Split coins to maintain gas coin pool
+  network      Display network information
+  config       Fetch and display configuration from RPC server
+  faucet       Request tokens from the faucet
+  avs          AVS Operator commands for managing EigenLayer AVS operations
+  registry     Registry management commands
+  secrets      Secret storage commands
+  help         Print this message or the help of the given subcommand(s)
+
+Options:
+      --chain <CHAIN>  Override the blockchain network (devnet, testnet, or mainnet) [env: SUI_CHAIN=devnet]
+  -h, --help           Print help
+
+```
