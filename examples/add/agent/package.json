@@ -8,7 +8,7 @@
     "agent": "NODE_NO_WARNINGS=1 node --enable-source-maps dist/src/agent.js",
     "docker": "docker compose up build --build --remove-orphans",
     "test": "NODE_NO_WARNINGS=1 node --loader=ts-node/esm --enable-source-maps -r dotenv/config --require dotenv/config  --env-file=.env --env-file=.env.app --test",
-    "sum": "npm run test test/sum.test.ts",
+    "state": "npm run test test/state.test.ts",
     "add": "npm run test test/add.test.ts",
     "batch": "npm run test test/batch.test.ts",
     "multiply": "npm run test test/multiply.test.ts",
