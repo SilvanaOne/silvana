@@ -74,6 +74,16 @@ pub async fn setup_example_project(project_path: &Path, project_name: &str) -> R
     let config = match crate::config::fetch_config("devnet").await {
         Ok(cfg) => {
             info!("✓ Fetched configuration successfully");
+            
+            // Inject configuration as environment variables (without overriding existing ones)
+            for (key, value) in cfg.iter() {
+                if std::env::var(key).is_err() {
+                    unsafe {
+                        std::env::set_var(key, value);
+                    }
+                }
+            }
+            
             cfg
         }
         Err(e) => {

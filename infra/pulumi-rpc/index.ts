@@ -67,11 +67,10 @@ export = async () => {
     }
   );
 
-
   // -------------------------
   // KMS Key for Secrets Encryption
   // -------------------------
-  
+
   const secretsKmsKey = new aws.kms.Key("silvana-secrets-encryption-key", {
     description: "KMS key for encrypting Silvana secrets at rest",
     keyUsage: "ENCRYPT_DECRYPT",
@@ -83,15 +82,18 @@ export = async () => {
     },
   });
 
-  const secretsKmsKeyAlias = new aws.kms.Alias("silvana-secrets-encryption-alias", {
-    name: "alias/silvana-secrets-encryption",
-    targetKeyId: secretsKmsKey.id,
-  });
+  const secretsKmsKeyAlias = new aws.kms.Alias(
+    "silvana-secrets-encryption-alias",
+    {
+      name: "alias/silvana-secrets-encryption",
+      targetKeyId: secretsKmsKey.id,
+    }
+  );
 
   // -------------------------
   // DynamoDB Table for Secrets Storage
   // -------------------------
-  
+
   const secretsTable = new aws.dynamodb.Table("silvana-secrets", {
     name: "silvana-secrets",
     billingMode: "PAY_PER_REQUEST",
@@ -116,11 +118,11 @@ export = async () => {
   // -------------------------
   // DynamoDB Table for Configuration Storage
   // -------------------------
-  
+
   const configTable = new aws.dynamodb.Table("silvana-config", {
     name: "silvana-config",
     billingMode: "PAY_PER_REQUEST",
-    hashKey: "chain",      // Partition key: chain identifier (testnet/devnet/mainnet)
+    hashKey: "chain", // Partition key: chain identifier (testnet/devnet/mainnet)
     rangeKey: "config_key", // Sort key: configuration key
     attributes: [
       {
@@ -145,7 +147,8 @@ export = async () => {
 
   // Create policy for DynamoDB and KMS access (for secrets and config storage)
   const secretsPolicy = new aws.iam.Policy("silvana-rpc-secrets-policy", {
-    description: "Policy for accessing DynamoDB and KMS for secrets and config storage",
+    description:
+      "Policy for accessing DynamoDB and KMS for secrets and config storage",
     policy: pulumi.interpolate`{
       "Version": "2012-10-17",
       "Statement": [
@@ -208,9 +211,12 @@ export = async () => {
   });
 
   // Update S3 policy to include proofs-cache bucket
-  const s3PolicyWithProofsCache = new aws.iam.Policy("silvana-rpc-s3-policy-with-proofs", {
-    description: "Policy for accessing S3 buckets for SSL certificates and proofs cache",
-    policy: pulumi.interpolate`{
+  const s3PolicyWithProofsCache = new aws.iam.Policy(
+    "silvana-rpc-s3-policy-with-proofs",
+    {
+      description:
+        "Policy for accessing S3 buckets for SSL certificates and proofs cache",
+      policy: pulumi.interpolate`{
       "Version": "2012-10-17",
       "Statement": [
         {
@@ -236,14 +242,25 @@ export = async () => {
             "s3:GetBucketLocation"
           ],
           "Resource": "${proofsCacheBucket.arn}"
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["s3:GetObject", "s3:PutObject"],
+          "Resource": "arn:aws:s3:::silvana-distribution/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["s3:ListBucket"],
+          "Resource": "arn:aws:s3:::silvana-distribution"
         }
       ]
     }`,
-    tags: {
-      Name: "silvana-rpc-s3-policy-with-proofs",
-      Project: "silvana-rpc",
-    },
-  });
+      tags: {
+        Name: "silvana-rpc-s3-policy-with-proofs",
+        Project: "silvana-rpc",
+      },
+    }
+  );
 
   // -------------------------
   // IAM User for S3 uploads (API keys)
@@ -316,7 +333,7 @@ export = async () => {
 
   // Read and store the .env.rpc file in Parameter Store
   const envContent = fs.readFileSync("./.env.rpc", "utf8");
-  
+
   // Append the S3 bucket name and config table name to the environment variables
   const envContentWithResources = pulumi.interpolate`${envContent}\nPROOFS_CACHE_BUCKET=${proofsCacheBucket.bucket}\nDYNAMODB_CONFIG_TABLE=${configTable.name}`;
 

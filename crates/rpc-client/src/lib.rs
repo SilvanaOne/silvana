@@ -10,10 +10,11 @@ pub use proto::{
     Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
     GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
-    ReadBinaryRequest, ReadBinaryResponse, RetrieveSecretRequest, RetrieveSecretResponse,
-    SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
-    SecretReference, StoreSecretRequest, StoreSecretResponse, SubmitEventRequest,
-    SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
+    ReadBinaryRequest, ReadBinaryResponse, WriteBinaryRequest, WriteBinaryResponse,
+    RetrieveSecretRequest, RetrieveSecretResponse, SearchCoordinatorMessageEventsRequest,
+    SearchCoordinatorMessageEventsResponse, SecretReference, StoreSecretRequest,
+    StoreSecretResponse, SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest,
+    SubmitEventsResponse,
 };
 
 // Re-export the proto events module
@@ -265,6 +266,27 @@ impl SilvanaRpcClient {
         };
 
         let response = self.inner.read_binary(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Write binary file to storage
+    pub async fn write_binary(
+        &mut self,
+        data: Vec<u8>,
+        file_name: &str,
+        mime_type: &str,
+        expected_sha256: Option<String>,
+        metadata: std::collections::HashMap<String, String>,
+    ) -> Result<WriteBinaryResponse, RpcClientError> {
+        let request = WriteBinaryRequest {
+            data,
+            file_name: file_name.to_string(),
+            mime_type: mime_type.to_string(),
+            expected_sha256,
+            metadata,
+        };
+
+        let response = self.inner.write_binary(request).await?;
         Ok(response.into_inner())
     }
 }

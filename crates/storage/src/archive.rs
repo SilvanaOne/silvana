@@ -355,6 +355,16 @@ pub fn unpack_local_archive(archive_path: &Path, target_folder: &Path) -> Result
     Ok(())
 }
 
+/// Pack a folder into a compressed tar archive and return as bytes
+pub fn pack_folder_to_bytes(folder_path: &Path, config: Option<ArchiveConfig>) -> Result<Vec<u8>> {
+    let config = config.unwrap_or_default();
+    
+    // Create the compressed archive
+    let archive_data = create_compressed_archive(folder_path, &config)?;
+    
+    Ok(archive_data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

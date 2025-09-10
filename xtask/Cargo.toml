@@ -15,3 +15,4 @@ storage = { path = "../crates/storage" }
 tokio.workspace = true
 dotenvy.workspace = true
 chrono.workspace = true
+sha2.workspace = true

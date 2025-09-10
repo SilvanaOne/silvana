@@ -8584,6 +8584,7 @@ dependencies = [
  "duct",
  "rpc-client",
  "secrets-client",
+ "sha2",
  "storage",
  "tokio",
 ]

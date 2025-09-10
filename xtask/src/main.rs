@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use duct::cmd;
 use secrets_client::SecretsClient;
-use rpc_client::SilvanaRpcClient;
-use storage::{S3Client, pack_folder_to_s3};
+use rpc_client::{SilvanaRpcClient, RpcClientConfig};
+use storage;
 use std::collections::HashMap;
 use std::fs;
 
@@ -461,10 +461,7 @@ async fn read_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
 }
 
 async fn pack_examples_add() -> anyhow::Result<()> {
-    println!("📦 Packing examples/add folder to S3...");
-    
-    // Initialize S3 client
-    let s3_client = S3Client::new("silvana-distribution".to_string()).await?;
+    println!("📦 Packing examples/add folder...");
     
     // Get the examples/add folder path
     let current_dir = std::env::current_dir()?;
@@ -477,25 +474,54 @@ async fn pack_examples_add() -> anyhow::Result<()> {
     
     println!("Source folder: {:?}", examples_add_path);
     
+    // Create the archive using storage utility
+    let archive_data = storage::pack_folder_to_bytes(
+        &examples_add_path,
+        None, // Use default config with max compression
+    )?;
+    
+    println!("✅ Archive created: {} bytes", archive_data.len());
+    
+    // Calculate SHA256
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(&archive_data);
+    let hash = format!("{:x}", hasher.finalize());
+    println!("   SHA256: {}", hash);
+    
+    // Upload via RPC
+    println!("📤 Uploading to RPC server...");
+    
+    // Get RPC endpoint from environment or use default
+    let rpc_endpoint = std::env::var("SILVANA_RPC_SERVER")
+        .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
+    
+    // Initialize RPC client
+    let mut rpc_client = SilvanaRpcClient::new(RpcClientConfig::new(&rpc_endpoint)).await?;
+    
     // Use fixed S3 key for consistent retrieval
     let s3_key = "examples/add.tar.zst";
     
-    println!("Packing folder to S3: {}", s3_key);
-    
-    // Pack and upload to S3 with default config (1MB limit)
-    let archive_hash = pack_folder_to_s3(
-        &examples_add_path,
-        &s3_client,
-        &s3_key,
-        None, // Use default config
+    // Upload via RPC
+    let response = rpc_client.write_binary(
+        archive_data,
+        s3_key,
+        "application/zstd",
+        Some(hash.clone()),
+        std::collections::HashMap::new(),
     ).await?;
     
-    println!("✅ Archive uploaded successfully!");
-    println!("   S3 Key: {}", s3_key);
-    println!("   Hash: {}", archive_hash);
-    println!("");
-    println!("📥 To download and unpack this archive later:");
-    println!("   Use the S3 key: {}", s3_key);
+    if response.success {
+        println!("✅ Archive uploaded successfully!");
+        println!("   S3 Key: {}", s3_key);
+        println!("   Hash: {}", response.sha256);
+        println!("   S3 URL: {}", response.s3_url);
+        println!("");
+        println!("📥 To download and unpack this archive later:");
+        println!("   Use the S3 key: {}", s3_key);
+    } else {
+        anyhow::bail!("Failed to upload archive: {}", response.message);
+    }
     
     Ok(())
 }
