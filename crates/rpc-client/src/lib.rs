@@ -10,10 +10,10 @@ pub use proto::{
     Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
     GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
     GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
-    RetrieveSecretRequest, RetrieveSecretResponse, SearchCoordinatorMessageEventsRequest,
-    SearchCoordinatorMessageEventsResponse, SecretReference, StoreSecretRequest,
-    StoreSecretResponse, SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest,
-    SubmitEventsResponse,
+    ReadBinaryRequest, ReadBinaryResponse, RetrieveSecretRequest, RetrieveSecretResponse,
+    SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
+    SecretReference, StoreSecretRequest, StoreSecretResponse, SubmitEventRequest,
+    SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
 };
 
 // Re-export the proto events module
@@ -252,6 +252,19 @@ impl SilvanaRpcClient {
         request: GetAgentTransactionEventsBySequenceRequest,
     ) -> Result<GetAgentTransactionEventsBySequenceResponse, RpcClientError> {
         let response = self.inner.get_agent_transaction_events_by_sequence(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Read binary file from storage
+    pub async fn read_binary(
+        &mut self,
+        file_name: &str,
+    ) -> Result<ReadBinaryResponse, RpcClientError> {
+        let request = ReadBinaryRequest {
+            file_name: file_name.to_string(),
+        };
+
+        let response = self.inner.read_binary(request).await?;
         Ok(response.into_inner())
     }
 }

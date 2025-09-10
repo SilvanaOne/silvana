@@ -321,25 +321,48 @@ async fn main_impl() -> Result<()> {
 
             info!("📥 Downloading project template...");
 
-            // Initialize S3 client
-            let s3_client = storage::S3Client::new("silvana-distribution".to_string())
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to initialize download client: {}", e))?;
-
-            // Fixed S3 key for the example archive
-            let s3_key = "examples/add.tar.zst";
-
-            // Download and unpack the template
-            match storage::unpack_from_s3(
-                &s3_client,
-                s3_key,
-                &project_path,
-                None, // No hash verification needed for template
+            // Get RPC endpoint from environment or use default
+            let rpc_endpoint = std::env::var("SILVANA_RPC_SERVER")
+                .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
+            
+            // Initialize RPC client
+            let mut rpc_client = rpc_client::SilvanaRpcClient::new(
+                rpc_client::RpcClientConfig::new(&rpc_endpoint)
             )
             .await
-            {
-                Ok(_) => {
+            .map_err(|e| anyhow::anyhow!("Failed to connect to RPC server: {}", e))?;
+            
+            // Fixed S3 key for the example archive
+            let s3_key = "examples/add.tar.zst";
+            
+            // Download the template binary via RPC
+            info!("   Fetching from: {}", s3_key);
+            match rpc_client.read_binary(s3_key).await {
+                Ok(response) if response.success => {
                     info!("✅ Template downloaded successfully!");
+                    info!("   Archive size: {} bytes", response.data.len());
+                    info!("   SHA256: {}", response.sha256);
+                    
+                    // Write the binary data to a temporary file
+                    let temp_path = project_path.join(".download.tar.zst");
+                    std::fs::write(&temp_path, &response.data)
+                        .map_err(|e| anyhow::anyhow!("Failed to write temporary archive: {}", e))?;
+                    
+                    // Unpack the archive using the storage utility
+                    match storage::unpack_local_archive(&temp_path, &project_path) {
+                        Ok(_) => {
+                            info!("✅ Template extracted successfully!");
+                            // Clean up temporary file
+                            let _ = std::fs::remove_file(&temp_path);
+                        }
+                        Err(e) => {
+                            error!("Failed to extract template: {}", e);
+                            // Clean up
+                            let _ = std::fs::remove_file(&temp_path);
+                            let _ = std::fs::remove_dir_all(&project_path);
+                            return Err(anyhow::anyhow!("Failed to extract template: {}", e).into());
+                        }
+                    }
 
                     // Setup the example project (generate keys, fund accounts, etc.)
                     match example::setup_example_project(&project_path, &name).await {
@@ -371,13 +394,17 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                Err(e) => {
-                    // Clean up on failure
+                Ok(response) => {
+                    error!("Failed to download template: {}", response.message);
+                    // Clean up the created directory
                     let _ = std::fs::remove_dir_all(&project_path);
-                    error!("Failed to download project template: {}", e);
-                    return Err(
-                        anyhow::anyhow!("Failed to download project template: {}", e).into(),
-                    );
+                    return Err(anyhow::anyhow!("Failed to download template: {}", response.message).into());
+                }
+                Err(e) => {
+                    error!("Failed to download template: {}", e);
+                    // Clean up the created directory
+                    let _ = std::fs::remove_dir_all(&project_path);
+                    return Err(anyhow::anyhow!("Failed to download template: {}", e).into());
                 }
             }
 
