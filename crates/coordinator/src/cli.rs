@@ -7,7 +7,7 @@ pub struct Cli {
     /// Override the blockchain network (devnet, testnet, or mainnet)
     #[arg(long, global = true, env = "SUI_CHAIN")]
     pub chain: Option<String>,
-    
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -31,168 +31,172 @@ pub enum Commands {
         #[arg(long, env = "LOG_LEVEL", default_value = "info")]
         log_level: String,
 
-        #[arg(long, env = "GRPC_SOCKET_PATH", default_value = "/tmp/coordinator.sock")]
+        #[arg(
+            long,
+            env = "GRPC_SOCKET_PATH",
+            default_value = "/tmp/coordinator.sock"
+        )]
         grpc_socket_path: String,
-        
+
         /// Filter to only process jobs from a specific app instance
         #[arg(long, env = "APP_INSTANCE_FILTER")]
         instance: Option<String>,
-        
+
         /// Run as a dedicated settlement node (only process settlement jobs)
         #[arg(long, env = "SETTLE_ONLY", default_value = "false")]
         settle: bool,
     },
-    
+
     /// Create a new Silvana project from template
     New {
         /// Name of the project folder to create
         name: String,
-        
+
         /// Force overwrite if the folder already exists
         #[arg(long, short, default_value = "false")]
         force: bool,
     },
-    
+
     /// Fetch and display an app instance by ID
     Instance {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// The app instance ID to fetch
         instance: String,
     },
-    
+
     /// Fetch and display a raw Sui object by ID
     Object {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// The object ID to fetch
         object: String,
     },
-    
+
     /// Fetch and display a block by number
     Block {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// The app instance ID to fetch from
         instance: String,
-        
+
         /// The block number to fetch
         block: u64,
     },
-    
+
     /// Fetch and display proof calculations for a block
     Proofs {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// The app instance ID to fetch from
         instance: String,
-        
+
         /// The block number to fetch proofs for
         block: u64,
     },
-    
+
     /// Fetch and display a job by sequence number
     Job {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// The app instance ID to fetch from
         instance: String,
-        
+
         /// The job sequence number to fetch
         job: u64,
-        
+
         /// Fetch from failed jobs table instead of active jobs
         #[arg(long, default_value = "false")]
         failed: bool,
     },
-    
+
     /// Fetch and display all jobs from an app instance
     Jobs {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// The app instance ID to fetch jobs from
         instance: String,
-        
+
         /// Fetch failed jobs instead of active jobs
         #[arg(long, default_value = "false")]
         failed: bool,
     },
-    
+
     /// Execute blockchain transactions
     Transaction {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// Private key for signing transactions (optional, defaults to SUI_SECRET_KEY env var)
         #[arg(long, env = "SUI_PRIVATE_KEY")]
         private_key: Option<String>,
-        
+
         #[command(subcommand)]
         tx_type: TransactionType,
     },
-    
+
     /// Generate keypairs for different blockchains
     Keypair {
         #[command(subcommand)]
         subcommand: KeypairCommands,
     },
-    
+
     /// Check balance
     Balance {
         #[command(subcommand)]
         subcommand: BalanceCommands,
     },
-    
+
     /// Split coins to maintain gas coin pool
     Split {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
     },
-    
+
     /// Display network information
     Network {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
     },
-    
+
     /// Fetch and display configuration from RPC server
     Config {
         /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
         #[arg(long, env = "SILVANA_RPC_SERVER")]
         endpoint: Option<String>,
-        
+
         /// Display raw JSON output instead of formatted table
         #[arg(long, default_value = "false")]
         json: bool,
     },
-    
+
     /// Request tokens from the faucet
     Faucet {
         #[command(subcommand)]
         subcommand: FaucetCommands,
     },
-    
+
     /// AVS Operator commands for managing EigenLayer AVS operations
     Avs {
         #[command(subcommand)]
         subcommand: avs_operator::cli::AvsCommands,
     },
-    
+
     /// Registry management commands
     Registry {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         #[command(subcommand)]
         subcommand: RegistryCommands,
     },
-    
+
     /// Secret storage commands
     Secrets {
         #[command(subcommand)]
@@ -206,54 +210,53 @@ pub enum TransactionType {
     TerminateJob {
         /// The app instance ID
         instance: String,
-        
+
         /// The job sequence number to terminate
         job: u64,
-        
+
         /// Gas budget in SUI (e.g., 0.2 for 0.2 SUI)
         #[arg(long, default_value = "0.1")]
         gas: f64,
     },
-    
+
     /// Restart a specific failed job on the blockchain
     RestartFailedJob {
         /// The app instance ID
         instance: String,
-        
+
         /// The job sequence number to restart
         job: u64,
-        
+
         /// Gas budget in SUI (e.g., 0.2 for 0.2 SUI)
         #[arg(long, default_value = "0.1")]
         gas: f64,
     },
-    
+
     /// Restart all failed jobs on the blockchain
     RestartFailedJobs {
         /// The app instance ID
         instance: String,
-        
+
         /// Gas budget in SUI (e.g., 1.0 for 1 SUI, default higher for this heavy operation)
         #[arg(long, default_value = "1.0")]
         gas: f64,
     },
-    
+
     /// Reject a proof (mark it as failed)
     RejectProof {
         /// The app instance ID
         instance: String,
-        
+
         /// The block number containing the proof
         block: u64,
-        
+
         /// The sequences to reject (comma-separated, e.g., "1,2,3")
         sequences: String,
-        
+
         /// Gas budget in SUI (e.g., 0.1 for 0.1 SUI)
         #[arg(long, default_value = "0.1")]
         gas: f64,
     },
-    
 }
 
 #[derive(Subcommand)]
@@ -273,7 +276,7 @@ pub enum FaucetCommands {
         /// Address to fund (defaults to SUI_ADDRESS env var)
         #[arg(long, env = "SUI_ADDRESS")]
         address: Option<String>,
-        
+
         /// Amount of SUI to request (e.g., 10.0 for 10 SUI)
         #[arg(long, default_value = "10.0")]
         amount: f64,
@@ -283,7 +286,7 @@ pub enum FaucetCommands {
         /// Address to fund (Mina public key)
         #[arg(long)]
         address: String,
-        
+
         /// Network (mina:devnet or zeko:testnet, also accepts devnet or zeko)
         #[arg(long, default_value = "mina:devnet")]
         network: String,
@@ -296,181 +299,181 @@ pub enum RegistryCommands {
     Create {
         /// Name for the new registry
         name: String,
-        
+
         /// Package ID (defaults to SILVANA_REGISTRY_PACKAGE env var)
         #[arg(long, env = "SILVANA_REGISTRY_PACKAGE")]
         package_id: Option<String>,
     },
-    
+
     /// Add a new developer to the registry
     AddDeveloper {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// Developer name
         name: String,
-        
+
         /// GitHub username
         github: String,
-        
+
         /// Optional image URL
         #[arg(long)]
         image: Option<String>,
-        
+
         /// Optional description
         #[arg(long)]
         description: Option<String>,
-        
+
         /// Optional website URL
         #[arg(long)]
         site: Option<String>,
     },
-    
+
     /// Update an existing developer in the registry
     UpdateDeveloper {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// Developer name
         name: String,
-        
+
         /// GitHub username
         github: String,
-        
+
         /// Optional image URL
         #[arg(long)]
         image: Option<String>,
-        
+
         /// Optional description
         #[arg(long)]
         description: Option<String>,
-        
+
         /// Optional website URL
         #[arg(long)]
         site: Option<String>,
     },
-    
+
     /// Remove a developer from the registry
     RemoveDeveloper {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// Developer name
         name: String,
-        
+
         /// Agent names to remove (comma-separated)
         #[arg(long, value_delimiter = ',')]
         agents: Vec<String>,
     },
-    
+
     /// Add a new agent to a developer
     AddAgent {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// Developer name
         developer: String,
-        
+
         /// Agent name
         name: String,
-        
+
         /// Optional image URL
         #[arg(long)]
         image: Option<String>,
-        
+
         /// Optional description
         #[arg(long)]
         description: Option<String>,
-        
+
         /// Optional website URL
         #[arg(long)]
         site: Option<String>,
-        
+
         /// Supported blockchain chains (comma-separated)
         #[arg(long, value_delimiter = ',')]
         chains: Vec<String>,
     },
-    
+
     /// Update an existing agent
     UpdateAgent {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// Developer name
         developer: String,
-        
+
         /// Agent name
         name: String,
-        
+
         /// Optional image URL
         #[arg(long)]
         image: Option<String>,
-        
+
         /// Optional description
         #[arg(long)]
         description: Option<String>,
-        
+
         /// Optional website URL
         #[arg(long)]
         site: Option<String>,
-        
+
         /// Supported blockchain chains (comma-separated)
         #[arg(long, value_delimiter = ',')]
         chains: Vec<String>,
     },
-    
+
     /// Remove an agent from a developer
     RemoveAgent {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// Developer name
         developer: String,
-        
+
         /// Agent name
         name: String,
     },
-    
+
     /// Add a new app to the registry
     AddApp {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// App name
         name: String,
-        
+
         /// Optional description
         #[arg(long)]
         description: Option<String>,
     },
-    
+
     /// Update an existing app in the registry
     UpdateApp {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// App name
         name: String,
-        
+
         /// Optional description
         #[arg(long)]
         description: Option<String>,
     },
-    
+
     /// Remove an app from the registry
     RemoveApp {
         /// Registry object ID (defaults to SILVANA_REGISTRY env var)
         #[arg(long, env = "SILVANA_REGISTRY")]
         registry: Option<String>,
-        
+
         /// App name
         name: String,
     },
@@ -482,7 +485,7 @@ pub enum BalanceCommands {
     Sui {
         #[arg(long, env = "SUI_RPC_URL")]
         rpc_url: Option<String>,
-        
+
         /// Address to check balance for (defaults to SUI_ADDRESS env var)
         #[arg(long, env = "SUI_ADDRESS")]
         address: Option<String>,
@@ -492,9 +495,9 @@ pub enum BalanceCommands {
         /// Address to check balance for (Mina public key)
         #[arg(long)]
         address: String,
-        
+
         /// Network (mina:devnet, zeko:testnet, mina:mainnet, etc.)
-        #[arg(long, default_value = "mina:mainnet")]
+        #[arg(long, default_value = "mina:devnet")]
         network: String,
     },
     /// Check Ethereum balance
@@ -502,7 +505,7 @@ pub enum BalanceCommands {
         /// Address to check balance for
         #[arg(long)]
         address: String,
-        
+
         /// Network (mainnet, sepolia, holesky, arbitrum, optimism, base, polygon, etc.)
         #[arg(long, default_value = "holesky")]
         network: String,
@@ -516,57 +519,56 @@ pub enum SecretsCommands {
         /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
         #[arg(long, env = "SILVANA_RPC_SERVER")]
         endpoint: Option<String>,
-        
+
         /// Developer identifier
         #[arg(long)]
         developer: String,
-        
+
         /// Agent identifier
         #[arg(long)]
         agent: String,
-        
+
         /// Secret name/key
         #[arg(long)]
         name: String,
-        
+
         /// Secret value to store
         #[arg(long)]
         secret: String,
-        
+
         /// Optional app identifier
         #[arg(long)]
         app: Option<String>,
-        
+
         /// Optional app instance identifier
         #[arg(long)]
         app_instance: Option<String>,
     },
-    
+
     /// Retrieve a secret from secure storage
     Retrieve {
         /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
         #[arg(long, env = "SILVANA_RPC_SERVER")]
         endpoint: Option<String>,
-        
+
         /// Developer identifier
         #[arg(long)]
         developer: String,
-        
+
         /// Agent identifier
         #[arg(long)]
         agent: String,
-        
+
         /// Secret name/key
         #[arg(long)]
         name: String,
-        
+
         /// Optional app identifier
         #[arg(long)]
         app: Option<String>,
-        
+
         /// Optional app instance identifier
         #[arg(long)]
         app_instance: Option<String>,
     },
 }
-
