@@ -101,8 +101,15 @@ async fn main_impl() -> Result<()> {
                     );
 
                     // Inject configuration as environment variables (without overriding existing ones)
+                    // Special handling for SILVANA_REGISTRY_PACKAGE: don't override if package_id arg is provided
                     let mut injected_count = 0;
                     for (key, value) in config_map.iter() {
+                        // Skip SILVANA_REGISTRY_PACKAGE if package_id arg was provided
+                        if key == "SILVANA_REGISTRY_PACKAGE" && package_id.is_some() {
+                            println!("  ⏩ Skipped SILVANA_REGISTRY_PACKAGE (using --package-id argument)");
+                            continue;
+                        }
+                        
                         // Check if the environment variable already exists
                         if std::env::var(key).is_err() {
                             // Setting environment variables is safe in this context
@@ -207,6 +214,25 @@ async fn main_impl() -> Result<()> {
                 }
             }
 
+            // Resolve the package_id: use arg if provided, otherwise check environment variable
+            let final_package_id = if let Some(pid) = package_id {
+                // Package ID provided as argument
+                pid
+            } else {
+                // Try to get from environment variable (may have been injected from config)
+                match std::env::var("SILVANA_REGISTRY_PACKAGE") {
+                    Ok(pid) if !pid.is_empty() => pid,
+                    _ => {
+                        eprintln!("❌ Error: Registry package ID not provided");
+                        eprintln!("   Please provide it using one of these methods:");
+                        eprintln!("   1. Use --package-id argument");
+                        eprintln!("   2. Set SILVANA_REGISTRY_PACKAGE environment variable");
+                        eprintln!("   3. Ensure it's configured on the RPC server for chain: {}", chain);
+                        std::process::exit(1);
+                    }
+                }
+            };
+
             // Resolve the RPC URL using the helper from sui crate
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
@@ -232,7 +258,7 @@ async fn main_impl() -> Result<()> {
             // Start the coordinator
             coordinator::start_coordinator(
                 rpc_url,
-                package_id,
+                final_package_id,
                 use_tee,
                 container_timeout,
                 grpc_socket_path,
@@ -295,25 +321,48 @@ async fn main_impl() -> Result<()> {
 
             info!("📥 Downloading project template...");
 
-            // Initialize S3 client
-            let s3_client = storage::S3Client::new("silvana-distribution".to_string())
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to initialize download client: {}", e))?;
-
-            // Fixed S3 key for the example archive
-            let s3_key = "examples/add.tar.zst";
-
-            // Download and unpack the template
-            match storage::unpack_from_s3(
-                &s3_client,
-                s3_key,
-                &project_path,
-                None, // No hash verification needed for template
+            // Get RPC endpoint from environment or use default
+            let rpc_endpoint = std::env::var("SILVANA_RPC_SERVER")
+                .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
+            
+            // Initialize RPC client
+            let mut rpc_client = rpc_client::SilvanaRpcClient::new(
+                rpc_client::RpcClientConfig::new(&rpc_endpoint)
             )
             .await
-            {
-                Ok(_) => {
+            .map_err(|e| anyhow::anyhow!("Failed to connect to RPC server: {}", e))?;
+            
+            // Fixed S3 key for the example archive
+            let s3_key = "examples/add.tar.zst";
+            
+            // Download the template binary via RPC
+            info!("   Fetching from: {}", s3_key);
+            match rpc_client.read_binary(s3_key).await {
+                Ok(response) if response.success => {
                     info!("✅ Template downloaded successfully!");
+                    info!("   Archive size: {} bytes", response.data.len());
+                    info!("   SHA256: {}", response.sha256);
+                    
+                    // Write the binary data to a temporary file
+                    let temp_path = project_path.join(".download.tar.zst");
+                    std::fs::write(&temp_path, &response.data)
+                        .map_err(|e| anyhow::anyhow!("Failed to write temporary archive: {}", e))?;
+                    
+                    // Unpack the archive using the storage utility
+                    match storage::unpack_local_archive(&temp_path, &project_path) {
+                        Ok(_) => {
+                            info!("✅ Template extracted successfully!");
+                            // Clean up temporary file
+                            let _ = std::fs::remove_file(&temp_path);
+                        }
+                        Err(e) => {
+                            error!("Failed to extract template: {}", e);
+                            // Clean up
+                            let _ = std::fs::remove_file(&temp_path);
+                            let _ = std::fs::remove_dir_all(&project_path);
+                            return Err(anyhow::anyhow!("Failed to extract template: {}", e).into());
+                        }
+                    }
 
                     // Setup the example project (generate keys, fund accounts, etc.)
                     match example::setup_example_project(&project_path, &name).await {
@@ -345,13 +394,17 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                Err(e) => {
-                    // Clean up on failure
+                Ok(response) => {
+                    error!("Failed to download template: {}", response.message);
+                    // Clean up the created directory
                     let _ = std::fs::remove_dir_all(&project_path);
-                    error!("Failed to download project template: {}", e);
-                    return Err(
-                        anyhow::anyhow!("Failed to download project template: {}", e).into(),
-                    );
+                    return Err(anyhow::anyhow!("Failed to download template: {}", response.message).into());
+                }
+                Err(e) => {
+                    error!("Failed to download template: {}", e);
+                    // Clean up the created directory
+                    let _ = std::fs::remove_dir_all(&project_path);
+                    return Err(anyhow::anyhow!("Failed to download template: {}", e).into());
                 }
             }
 

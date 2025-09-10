@@ -344,6 +344,27 @@ pub async fn unpack_archive(
     unpack_from_s3(s3_client, s3_key, target_folder, None).await
 }
 
+/// Unpack a local compressed tar archive file to a folder
+pub fn unpack_local_archive(archive_path: &Path, target_folder: &Path) -> Result<()> {
+    // Read the archive file
+    let archive_data = fs::read(archive_path)?;
+    
+    // Extract the compressed archive
+    extract_compressed_archive(&archive_data, target_folder)?;
+    
+    Ok(())
+}
+
+/// Pack a folder into a compressed tar archive and return as bytes
+pub fn pack_folder_to_bytes(folder_path: &Path, config: Option<ArchiveConfig>) -> Result<Vec<u8>> {
+    let config = config.unwrap_or_default();
+    
+    // Create the compressed archive
+    let archive_data = create_compressed_archive(folder_path, &config)?;
+    
+    Ok(archive_data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -78,6 +78,9 @@ rand.workspace = true
 # HTTP client for faucet requests
 reqwest.workspace = true
 
+# OpenSSL with vendored feature for cross-compilation
+openssl = { version = "0.10", features = ["vendored"] }
+
 # For parallel coin management (used by sui crate)
 parking_lot.workspace = true
 
