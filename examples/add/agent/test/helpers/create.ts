@@ -4,6 +4,7 @@ import {
   waitTx,
   createTestRegistry,
   getSuiAddress,
+  AgentRegistry,
 } from "@silvana-one/coordination";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
@@ -24,10 +25,11 @@ export async function createApp(params: {
   if (!suiSecretKey) {
     throw new Error("Missing environment variable SUI_SECRET_KEY");
   }
+  process.env.SUI_KEY = suiSecretKey;
 
   const packageID = process.env.APP_PACKAGE_ID;
   if (!packageID) {
-    throw new Error("PACKAGE_ID is not set");
+    throw new Error("APP_PACKAGE_ID is not set");
   }
 
   if (!params.adminAddress) {
@@ -41,6 +43,11 @@ export async function createApp(params: {
   // Get registry from env or create a test one
   let registryAddress = process.env.SILVANA_REGISTRY;
   const registryPackageID = process.env.SILVANA_REGISTRY_PACKAGE;
+  if (!registryPackageID) {
+    throw new Error(
+      "SILVANA_REGISTRY_PACKAGE is not set, run silvana config to get it"
+    );
+  }
 
   // Initialize keyPair early since we need it for method transactions
   const keyPair = Ed25519Keypair.fromSecretKey(suiSecretKey);
@@ -52,215 +59,190 @@ export async function createApp(params: {
   if (!registryAddress) {
     console.log("SILVANA_REGISTRY not set, creating a test registry...");
 
-    // Set the registry package ID if provided
-    if (registryPackageID) {
-      process.env.SILVANA_REGISTRY_PACKAGE = registryPackageID;
-    }
-
-    // Set SUI_KEY for createTestRegistry
-    process.env.SUI_KEY = suiSecretKey;
-
-    const testRegistry = await createTestRegistry({
-      registryName: "Test Registry for Silvana Add App",
-      developerName,
-      appName,
-      appDescription,
-      testAgentName: agentName,
-      testAgentChains: [
-        "sui:testnet",
-        "sui:devnet",
-        "mina:devnet",
-        "zeko:testnet",
-      ],
+    const transaction = new Transaction();
+    const testRegistry = await AgentRegistry.createAgentRegistry({
+      name: "Test Registry for Silvana Add App",
+      transaction,
     });
 
-    registryAddress = testRegistry.registryAddress;
-    console.log("Created test registry:", registryAddress);
+    transaction.setSender(keyPair.toSuiAddress());
+    transaction.setGasBudget(100_000_000);
 
-    // Add methods to the app BEFORE creating the app instance
-    console.log("Adding methods to agent in registry...");
-    const methodTx = new Transaction();
-
-    // Create and add the agent 'prove' method using full registry::add_method interface
-    methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::registry::add_method`,
-      arguments: [
-        methodTx.object(registryAddress),
-        methodTx.pure.string(developerName),
-        methodTx.pure.string(agentName),
-        methodTx.pure.string("prove"),
-        methodTx.pure.string("docker.io/dfstio/add:latest"),
-        methodTx.pure.option("string", null),
-        methodTx.pure.u16(3),
-        methodTx.pure.u16(8),
-        methodTx.pure.bool(false),
-        methodTx.object(SUI_CLOCK_OBJECT_ID),
-      ],
-    });
-
-    console.log("Adding methods to app in registry...");
-
-    // Create and add the 'init' method
-    const initAppMethod = methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::app_method::new`,
-      arguments: [
-        methodTx.pure.option("string", "Initialize app state"),
-        methodTx.pure.string(developerName),
-        methodTx.pure.string(agentName),
-        methodTx.pure.string("prove"),
-      ],
-    });
-
-    methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::registry::add_method_to_app`,
-      arguments: [
-        methodTx.object(registryAddress),
-        methodTx.pure.string(appName),
-        methodTx.pure.string("init"),
-        initAppMethod,
-      ],
-    });
-
-    // Create and add the 'add' method
-    const addAppMethod = methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::app_method::new`,
-      arguments: [
-        methodTx.pure.option("string", "Prove addition"), // No description
-        methodTx.pure.string(developerName),
-        methodTx.pure.string(agentName),
-        methodTx.pure.string("prove"),
-      ],
-    });
-
-    methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::registry::add_method_to_app`,
-      arguments: [
-        methodTx.object(registryAddress),
-        methodTx.pure.string(appName),
-        methodTx.pure.string("add"),
-        addAppMethod,
-      ],
-    });
-
-    // Create and add the 'multiply' method
-    const multiplyAppMethod = methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::app_method::new`,
-      arguments: [
-        methodTx.pure.option("string", "Prove multiplication"), // No description
-        methodTx.pure.string(developerName),
-        methodTx.pure.string(agentName),
-        methodTx.pure.string("prove"),
-      ],
-    });
-
-    methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::registry::add_method_to_app`,
-      arguments: [
-        methodTx.object(registryAddress),
-        methodTx.pure.string(appName),
-        methodTx.pure.string("multiply"),
-        multiplyAppMethod,
-      ],
-    });
-
-    // Create and add the 'merge' method
-    const mergeAppMethod = methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::app_method::new`,
-      arguments: [
-        methodTx.pure.option("string", "Merge proofs"),
-        methodTx.pure.string(developerName),
-        methodTx.pure.string(agentName),
-        methodTx.pure.string("prove"),
-      ],
-    });
-
-    methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::registry::add_method_to_app`,
-      arguments: [
-        methodTx.object(registryAddress),
-        methodTx.pure.string(appName),
-        methodTx.pure.string("merge"),
-        mergeAppMethod,
-      ],
-    });
-
-    // Create and add the 'settle' method
-    const settleAppMethod = methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::app_method::new`,
-      arguments: [
-        methodTx.pure.option("string", "Settle to Mina or Zeko"),
-        methodTx.pure.string(developerName),
-        methodTx.pure.string(agentName),
-        methodTx.pure.string("prove"),
-      ],
-    });
-
-    methodTx.moveCall({
-      target: `${
-        registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-      }::registry::add_method_to_app`,
-      arguments: [
-        methodTx.object(registryAddress),
-        methodTx.pure.string(appName),
-        methodTx.pure.string("settle"),
-        settleAppMethod,
-      ],
-    });
-
-    methodTx.setSender(keyPair.toSuiAddress());
-    methodTx.setGasBudget(100_000_000);
-
-    const methodResult = await executeTx({
-      tx: methodTx,
+    const registryResult = await executeTx({
+      tx: transaction,
       keyPair,
     });
 
-    if (!methodResult) {
-      throw new Error("Failed to add methods to app");
+    if (!registryResult) {
+      throw new Error("Failed to create registry - no result");
     }
 
-    const methodWaitResult = await waitTx(methodResult.digest);
-    if (methodWaitResult.errors) {
-      console.log(
-        `Errors for method tx ${methodResult.digest}:`,
-        methodWaitResult.errors
-      );
-      throw new Error("Failed to add methods to app");
+    if (registryResult.error) {
+      throw new Error(`Failed to create registry: ${registryResult.error}`);
     }
 
-    console.log("Methods added to registry app successfully");
+    if (!registryResult.tx?.objectChanges) {
+      throw new Error("Failed to create registry - no object changes");
+    }
 
-    // Save for later use in the test
-    process.env.TEST_REGISTRY_ADDRESS = registryAddress;
+    // Find the created registry object
+    const registryObject = registryResult.tx.objectChanges.find(
+      (obj: any) =>
+        obj.type === "created" &&
+        obj.objectType?.includes("::registry::SilvanaRegistry")
+    );
+
+    if (!registryObject || !("objectId" in registryObject)) {
+      throw new Error("Failed to find created registry object");
+    }
+
+    registryAddress = registryObject.objectId;
+    console.log("Registry created with address:", registryAddress);
+
+    if (registryResult.digest) {
+      await waitTx(registryResult.digest);
+    }
+
+    console.log("Created test registry:", registryAddress);
   }
 
   // Ensure we have a valid registry address
   if (!registryAddress) {
     throw new Error("Registry address is not set after creation");
   }
+  process.env.SILVANA_REGISTRY = registryAddress;
+
+  const registry = new AgentRegistry({ registry: registryAddress });
+  const developer = await registry.getDeveloper({ name: developerName });
+
+  if (!developer) {
+    if (!process.env.DOCKER_IMAGE) {
+      throw new Error("DOCKER_IMAGE is not set");
+    }
+    console.log("Creating developer...");
+    const transaction = new Transaction();
+    registry.createDeveloper({
+      name: developerName,
+      github: "",
+      image: "",
+      description: "",
+      site: "",
+      transaction,
+    });
+    registry.createAgent({
+      developer: developerName,
+      name: agentName,
+      image: "",
+      description: "Add Agent",
+      site: "",
+      chains: ["sui:devnet", "mina:devnet", "zeko:testnet"],
+      transaction,
+    });
+
+    // Create app
+    registry.createApp({
+      name: appName,
+      description: appDescription,
+      transaction,
+    });
+
+    // Add methods to the app BEFORE creating the app instance
+    console.log(
+      "Adding methods to agent in registry using docker image:",
+      process.env.DOCKER_IMAGE
+    );
+    registry.addAgentMethod({
+      developer: developerName,
+      agent: agentName,
+      method: "prove",
+      dockerImage: process.env.DOCKER_IMAGE,
+      dockerSha256: undefined,
+      minMemoryGb: 3,
+      minCpuCores: 8,
+      requiresTee: false,
+      transaction,
+    });
+
+    console.log("Adding methods to app in registry...");
+    registry.addMethodToApp({
+      appName,
+      methodName: "init",
+      description: "Initialize app state",
+      developerName,
+      agentName,
+      agentMethod: "prove",
+      transaction,
+    });
+    registry.addMethodToApp({
+      appName,
+      methodName: "add",
+      description: "Prove addition",
+      developerName,
+      agentName,
+      agentMethod: "prove",
+      transaction,
+    });
+
+    registry.addMethodToApp({
+      appName,
+      methodName: "multiply",
+      description: "Prove multiplication",
+      developerName,
+      agentName,
+      agentMethod: "prove",
+      transaction,
+    });
+
+    registry.addMethodToApp({
+      appName,
+      methodName: "merge",
+      description: "Merge proofs",
+      developerName,
+      agentName,
+      agentMethod: "prove",
+      transaction,
+    });
+
+    registry.addMethodToApp({
+      appName,
+      methodName: "settle",
+      description: "Settle to Mina or Zeko",
+      developerName,
+      agentName,
+      agentMethod: "prove",
+      transaction,
+    });
+
+    transaction.setSender(keyPair.toSuiAddress());
+    transaction.setGasBudget(100_000_000);
+
+    const result = await executeTx({
+      tx: transaction,
+      keyPair,
+    });
+
+    if (!result) {
+      throw new Error("Failed to create developer and add methods to app");
+    }
+
+    const waitResult = await waitTx(result.digest);
+    if (waitResult.errors) {
+      console.log(`Errors for method tx ${result.digest}:`, waitResult.errors);
+      throw new Error("Failed to create developer and add methods to app");
+    }
+
+    console.log("Developer and methods added to registry app successfully");
+  }
+
+  const existingApp = await registry.getApp({ name: appName });
+  if (existingApp) {
+    console.log("App data:", existingApp);
+  }
 
   let appID: string | undefined = undefined;
 
+  // Create app
+  console.log("Creating app instance...");
   const tx = new Transaction();
 
   // Call create_app with the registry, settlement info, and clock
@@ -335,49 +317,20 @@ export async function createApp(params: {
 
   // Add metadata and kv to the AppInstance
   console.log("Adding metadata and kv to AppInstance...");
-  const metadataTx = new Transaction();
 
-  // Add contractAddress to metadata
-  metadataTx.moveCall({
-    target: `${
-      registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-    }::app_instance::add_metadata`,
-    arguments: [
-      metadataTx.object(appInstanceID),
-      metadataTx.pure.string("settlementAdmin"),
-      metadataTx.pure.string(params.adminAddress),
-    ],
+  const transaction = new Transaction();
+  registry.addMetadata({
+    appInstanceId: appInstanceID,
+    key: "settlementAdmin",
+    value: params.adminAddress,
+    transaction,
   });
 
-  // Add chain to metadata
-  // metadataTx.moveCall({
-  //   target: `${
-  //     registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-  //   }::app_instance::add_metadata`,
-  //   arguments: [
-  //     metadataTx.object(appInstanceID),
-  //     metadataTx.pure.string("chain"),
-  //     metadataTx.pure.string(params.chain),
-  //   ],
-  // });
-
-  // Add nonce to kv (convert number to string)
-  // metadataTx.moveCall({
-  //   target: `${
-  //     registryPackageID || process.env.SILVANA_REGISTRY_PACKAGE
-  //   }::app_instance::add_kv`,
-  //   arguments: [
-  //     metadataTx.object(appInstanceID),
-  //     metadataTx.pure.string("nonce"),
-  //     metadataTx.pure.string(params.nonce.toString()),
-  //   ],
-  // });
-
-  metadataTx.setSender(address);
-  metadataTx.setGasBudget(100_000_000);
+  transaction.setSender(address);
+  transaction.setGasBudget(100_000_000);
 
   const metadataResult = await executeTx({
-    tx: metadataTx,
+    tx: transaction,
     keyPair,
   });
 

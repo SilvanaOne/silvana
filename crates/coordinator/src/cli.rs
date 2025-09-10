@@ -43,6 +43,16 @@ pub enum Commands {
         settle: bool,
     },
     
+    /// Create a new Silvana project from template
+    New {
+        /// Name of the project folder to create
+        name: String,
+        
+        /// Force overwrite if the folder already exists
+        #[arg(long, short, default_value = "false")]
+        force: bool,
+    },
+    
     /// Fetch and display an app instance by ID
     Instance {
         #[arg(long, env = "SUI_RPC_URL")]
@@ -151,6 +161,17 @@ pub enum Commands {
         rpc_url: Option<String>,
     },
     
+    /// Fetch and display configuration from RPC server
+    Config {
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, env = "SILVANA_RPC_SERVER")]
+        endpoint: Option<String>,
+        
+        /// Display raw JSON output instead of formatted table
+        #[arg(long, default_value = "false")]
+        json: bool,
+    },
+    
     /// Request tokens from the faucet
     Faucet {
         #[command(subcommand)]
@@ -170,6 +191,12 @@ pub enum Commands {
         
         #[command(subcommand)]
         subcommand: RegistryCommands,
+    },
+    
+    /// Secret storage commands
+    Secrets {
+        #[command(subcommand)]
+        subcommand: SecretsCommands,
     },
 }
 
@@ -479,6 +506,67 @@ pub enum BalanceCommands {
         /// Network (mainnet, sepolia, holesky, arbitrum, optimism, base, polygon, etc.)
         #[arg(long, default_value = "holesky")]
         network: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SecretsCommands {
+    /// Store a secret in secure storage
+    Store {
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, env = "SILVANA_RPC_SERVER")]
+        endpoint: Option<String>,
+        
+        /// Developer identifier
+        #[arg(long)]
+        developer: String,
+        
+        /// Agent identifier
+        #[arg(long)]
+        agent: String,
+        
+        /// Secret name/key
+        #[arg(long)]
+        name: String,
+        
+        /// Secret value to store
+        #[arg(long)]
+        secret: String,
+        
+        /// Optional app identifier
+        #[arg(long)]
+        app: Option<String>,
+        
+        /// Optional app instance identifier
+        #[arg(long)]
+        app_instance: Option<String>,
+    },
+    
+    /// Retrieve a secret from secure storage
+    Retrieve {
+        /// RPC endpoint (uses SILVANA_RPC_SERVER env var if not specified)
+        #[arg(long, env = "SILVANA_RPC_SERVER")]
+        endpoint: Option<String>,
+        
+        /// Developer identifier
+        #[arg(long)]
+        developer: String,
+        
+        /// Agent identifier
+        #[arg(long)]
+        agent: String,
+        
+        /// Secret name/key
+        #[arg(long)]
+        name: String,
+        
+        /// Optional app identifier
+        #[arg(long)]
+        app: Option<String>,
+        
+        /// Optional app instance identifier
+        #[arg(long)]
+        app_instance: Option<String>,
     },
 }
 

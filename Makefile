@@ -67,7 +67,7 @@ help: ## Show this help message
 	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🏗️  BUILD & DEPLOYMENT:"
-	@grep -E '^(build-rpc|build-arm|build-x86|build-mac):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -75,24 +75,26 @@ help: ## Show this help message
 	@echo "🔧 DEVELOPMENT & DEBUGGING:"
 	@grep -E '^(clean-dev|dev-reset|show-tables|show-schema|validate-schema|check-schema):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "🔐 SECRET MANAGEMENT:"
-	@grep -E '^(store-secret|retrieve-secret):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo "🔐 SECRET MANAGEMENT & CONFIG:"
+	@grep -E '^(store-secret|retrieve-secret|write-config|read-config):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "💡 SECRET MANAGEMENT EXAMPLES:"
-	@echo "  Store basic secret:"
+	@echo "📚 EXAMPLES:"
+	@grep -E '^(example-archive):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "💡 USAGE EXAMPLES:"
+	@echo ""
+	@echo "  Secret Management:"
 	@echo "    make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"
-	@echo ""
-	@echo "  Store with app context:"
 	@echo "    make store-secret DEVELOPER=bob AGENT=bot APP=trading NAME=db-pass SECRET=secret123"
-	@echo ""
-	@echo "  Store with full context:"
-	@echo "    make store-secret DEVELOPER=charlie AGENT=processor APP=analytics \\"
-	@echo "                      APP_INSTANCE=prod-123 NAME=redis-url \\"
-	@echo "                      SECRET='redis://user:pass@host:6379/0'"
-	@echo ""
-	@echo "  Retrieve secrets:"
 	@echo "    make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"
-	@echo "    make retrieve-secret DEVELOPER=bob AGENT=bot APP=trading NAME=db-pass"
+	@echo ""
+	@echo "  Configuration Management:"
+	@echo "    make write-config CHAIN=devnet"
+	@echo "    make read-config CHAIN=testnet ENDPOINT=http://localhost:8080"
+	@echo ""
+	@echo "  Build and Release:"
+	@echo "    make build-all                    # Build for all platforms"
+	@echo "    make github-release VERSION=v1.0.0 # Create GitHub release"
 	@echo ""
 	@echo "⚙️  CONFIGURATION:"
 	@echo "  .env              Contains DATABASE_URL (REQUIRED)"
@@ -356,7 +358,7 @@ store-secret: ## Store a secret via gRPC (requires: DEVELOPER, AGENT, NAME, SECR
 	@if [ -z "$(AGENT)" ]; then echo "❌ ERROR: AGENT is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
 	@if [ -z "$(NAME)" ]; then echo "❌ ERROR: NAME is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
 	@if [ -z "$(SECRET)" ]; then echo "❌ ERROR: SECRET is required. Usage: make store-secret DEVELOPER=alice AGENT=my-agent NAME=api-key SECRET=sk-123"; exit 1; fi
-	@COMMAND="cargo xtask store-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME) --secret '$(SECRET)'"; \
+	@COMMAND="cargo x store-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME) --secret '$(SECRET)'"; \
 	if [ -n "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	if [ -n "$(APP)" ]; then COMMAND="$$COMMAND --app $(APP)"; fi; \
 	if [ -n "$(APP_INSTANCE)" ]; then COMMAND="$$COMMAND --app-instance $(APP_INSTANCE)"; fi; \
@@ -367,7 +369,7 @@ retrieve-secret: ## Retrieve a secret via gRPC (requires: DEVELOPER, AGENT, NAME
 	@if [ -z "$(DEVELOPER)" ]; then echo "❌ ERROR: DEVELOPER is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
 	@if [ -z "$(AGENT)" ]; then echo "❌ ERROR: AGENT is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
 	@if [ -z "$(NAME)" ]; then echo "❌ ERROR: NAME is required. Usage: make retrieve-secret DEVELOPER=alice AGENT=my-agent NAME=api-key"; exit 1; fi
-	@COMMAND="cargo xtask retrieve-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME)"; \
+	@COMMAND="cargo x retrieve-secret --developer $(DEVELOPER) --agent $(AGENT) --name $(NAME)"; \
 	if [ -n "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	if [ -n "$(APP)" ]; then COMMAND="$$COMMAND --app $(APP)"; fi; \
 	if [ -n "$(APP_INSTANCE)" ]; then COMMAND="$$COMMAND --app-instance $(APP_INSTANCE)"; fi; \
@@ -379,7 +381,7 @@ write-config: ## Write configuration to RPC server (requires: CHAIN=[devnet|test
 	@if [ "$(CHAIN)" != "devnet" ] && [ "$(CHAIN)" != "testnet" ] && [ "$(CHAIN)" != "mainnet" ]; then \
 		echo "❌ ERROR: CHAIN must be devnet, testnet, or mainnet. Got: $(CHAIN)"; exit 1; \
 	fi
-	@COMMAND="cargo xtask write-config --chain $(CHAIN)"; \
+	@COMMAND="cargo x write-config --chain $(CHAIN)"; \
 	if [ ! -z "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	echo "🔧 Running: $$COMMAND"; \
 	eval $$COMMAND
@@ -390,7 +392,7 @@ read-config: ## Read configuration from RPC server (requires: CHAIN=[devnet|test
 	@if [ "$(CHAIN)" != "devnet" ] && [ "$(CHAIN)" != "testnet" ] && [ "$(CHAIN)" != "mainnet" ]; then \
 		echo "❌ ERROR: CHAIN must be devnet, testnet, or mainnet. Got: $(CHAIN)"; exit 1; \
 	fi
-	@COMMAND="cargo xtask read-config --chain $(CHAIN)"; \
+	@COMMAND="cargo x read-config --chain $(CHAIN)"; \
 	if [ ! -z "$(ENDPOINT)" ]; then COMMAND="$$COMMAND --endpoint $(ENDPOINT)"; fi; \
 	echo "🔧 Running: $$COMMAND"; \
 	eval $$COMMAND
@@ -434,7 +436,7 @@ validate-schema: check-database-url check-tools ## Validate that database schema
 check-schema: check-database-url check-tools ## Quick schema validation check
 	@./infra/tidb/check_schema.sh
 
-# Test targets
-example-archive: ## Test packing and unpacking examples/add folder to S3
-	@echo "📦 Testing archive functionality with examples/add folder..."
-	@cargo test -p storage test_pack_examples_add_folder -- --nocapture 
+# Example targets
+example-archive: ## Prepare archive with example project (examples/add)
+	@echo "📦 Packing examples/add folder to S3..."
+	@cargo x example-archive 

@@ -2,6 +2,7 @@ target/
 **/target
 logs/
 data/
+myprogram/
 
 .env
 .env.*

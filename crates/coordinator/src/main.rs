@@ -7,6 +7,7 @@ mod coordinator;
 mod docker;
 mod error;
 mod events;
+mod example;
 mod grpc;
 mod hardware;
 mod job_id;
@@ -31,8 +32,11 @@ use dotenvy::dotenv;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
-use crate::cli::{Cli, Commands, TransactionType, KeypairCommands, FaucetCommands, BalanceCommands, RegistryCommands};
-use crate::error::{Result, CoordinatorError};
+use crate::cli::{
+    BalanceCommands, Cli, Commands, FaucetCommands, KeypairCommands, RegistryCommands,
+    TransactionType,
+};
+use crate::error::{CoordinatorError, Result};
 use anyhow::anyhow;
 
 #[tokio::main]
@@ -81,11 +85,53 @@ async fn main_impl() -> Result<()> {
             instance,
             settle,
         } => {
+            // Fetch and inject configuration from RPC server as early as possible
+            let chain = chain_override
+                .clone()
+                .or_else(|| std::env::var("SUI_CHAIN").ok())
+                .unwrap_or_else(|| "devnet".to_string());
+
+            println!("🔄 Fetching configuration for chain: {}", chain);
+
+            match config::fetch_config(&chain).await {
+                Ok(config_map) => {
+                    println!(
+                        "✅ Successfully fetched {} configuration items",
+                        config_map.len()
+                    );
+
+                    // Inject configuration as environment variables (without overriding existing ones)
+                    let mut injected_count = 0;
+                    for (key, value) in config_map.iter() {
+                        // Check if the environment variable already exists
+                        if std::env::var(key).is_err() {
+                            // Setting environment variables is safe in this context
+                            // as we're doing it early in startup before any threads are spawned
+                            unsafe {
+                                std::env::set_var(key, value);
+                            }
+                            injected_count += 1;
+                            println!("  ✓ Set env var: {}", key);
+                        } else {
+                            println!("  ⏩ Skipped (already set): {}", key);
+                        }
+                    }
+
+                    println!("📋 Injected {} new environment variables", injected_count);
+                }
+                Err(e) => {
+                    // Log the error but continue - config fetching is not critical
+                    eprintln!("⚠️  Failed to fetch configuration from RPC server: {}", e);
+                    eprintln!("   Continuing with local environment variables only");
+                }
+            }
+
             // Resolve the RPC URL using the helper from sui crate
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
             // Initialize logging with New Relic tracing layer
-            monitoring::init_logging_with_newrelic().await
+            monitoring::init_logging_with_newrelic()
+                .await
                 .map_err(CoordinatorError::Other)?;
             info!("✅ Logging initialized with New Relic support");
 
@@ -98,8 +144,7 @@ async fn main_impl() -> Result<()> {
             }
 
             // Initialize monitoring system
-            monitoring::init_monitoring()
-                .map_err(CoordinatorError::Other)?;
+            monitoring::init_monitoring().map_err(CoordinatorError::Other)?;
 
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -116,6 +161,122 @@ async fn main_impl() -> Result<()> {
             .await
         }
 
+        Commands::New { name, force } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+
+            // Validate project name
+            if name.trim().is_empty() {
+                error!("Project name cannot be empty");
+                return Err(anyhow::anyhow!("Project name cannot be empty").into());
+            }
+
+            // Check for invalid characters in project name
+            if name.contains('/') || name.contains('\\') || name.contains("..") {
+                error!("Invalid project name: {}", name);
+                return Err(anyhow::anyhow!("Project name contains invalid characters").into());
+            }
+
+            let current_dir = std::env::current_dir()
+                .map_err(|e| anyhow::anyhow!("Failed to get current directory: {}", e))?;
+            let project_path = current_dir.join(&name);
+
+            // Check if folder exists
+            if project_path.exists() && !force {
+                error!(
+                    "Folder '{}' already exists. Use --force to overwrite.",
+                    name
+                );
+                return Err(anyhow::anyhow!(
+                    "Folder '{}' already exists. Use --force to overwrite.",
+                    name
+                )
+                .into());
+            }
+
+            info!("🚀 Creating new Silvana project: {}", name);
+
+            // Create the project directory
+            if !project_path.exists() {
+                std::fs::create_dir(&project_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to create project directory: {}", e))?;
+            } else if force {
+                warn!("⚠️  Overwriting existing folder: {}", name);
+                // Clean the existing directory
+                std::fs::remove_dir_all(&project_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to remove existing directory: {}", e))?;
+                std::fs::create_dir(&project_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to recreate project directory: {}", e))?;
+            }
+
+            info!("📥 Downloading project template...");
+
+            // Initialize S3 client
+            let s3_client = storage::S3Client::new("silvana-distribution".to_string())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to initialize download client: {}", e))?;
+
+            // Fixed S3 key for the example archive
+            let s3_key = "examples/add.tar.zst";
+
+            // Download and unpack the template
+            match storage::unpack_from_s3(
+                &s3_client,
+                s3_key,
+                &project_path,
+                None, // No hash verification needed for template
+            )
+            .await
+            {
+                Ok(_) => {
+                    info!("✅ Template downloaded successfully!");
+
+                    // Setup the example project (generate keys, fund accounts, etc.)
+                    match example::setup_example_project(&project_path, &name).await {
+                        Ok(_) => {
+                            info!("");
+                            info!("🎉 Project '{}' is ready!", name);
+                            info!("");
+                            info!("📁 Project structure:");
+                            info!("   {}/", name);
+                            info!("   ├── agent/     # TypeScript agent implementation");
+                            info!("   ├── move/      # Move smart contracts");
+                            info!("   └── silvana/   # Silvana coordinator configuration");
+                            info!("");
+                            info!("🚀 Next steps:");
+                            info!("   cd {}", name);
+                            info!("   cd agent && npm install    # Install agent dependencies");
+                            info!("   cd move && sui move build  # Build Move contracts");
+                            info!("");
+                            info!("📖 Check the README file for more information.");
+                        }
+                        Err(e) => {
+                            warn!("Failed to complete project setup: {}", e);
+                            warn!("");
+                            warn!("⚠️  Project template was downloaded but setup is incomplete.");
+                            warn!("   Error: {}", e);
+                            warn!("");
+                            warn!("   You can manually set up keys and funding later.");
+                            warn!("   Check the README file for instructions.");
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Clean up on failure
+                    let _ = std::fs::remove_dir_all(&project_path);
+                    error!("Failed to download project template: {}", e);
+                    return Err(
+                        anyhow::anyhow!("Failed to download project template: {}", e).into(),
+                    );
+                }
+            }
+
+            Ok(())
+        }
+
         Commands::Instance { rpc_url, instance } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
@@ -126,7 +287,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             // Fetch and display the app instance
@@ -212,18 +374,24 @@ async fn main_impl() -> Result<()> {
                         println!("    jobs: Some(Jobs {{");
                         println!("        id: \"{}\",", jobs.id);
                         println!("        jobs_table_id: \"{}\",", jobs.jobs_table_id);
-                        println!("        total_jobs_count: {}, // Total jobs in ObjectTable (pending + running + failed)", jobs.total_jobs_count);
+                        println!(
+                            "        total_jobs_count: {}, // Total jobs in ObjectTable (pending + running + failed)",
+                            jobs.total_jobs_count
+                        );
                         // Note: failed_jobs_table_id no longer exists - failed jobs are in main jobs table
                         println!("        failed_jobs_count: {},", jobs.failed_jobs_count);
                         println!("        failed_jobs_index: {:?},", jobs.failed_jobs_index);
                         println!("        pending_jobs: {:?},", jobs.pending_jobs);
                         println!("        pending_jobs_count: {},", jobs.pending_jobs_count);
-                        
+
                         // Calculate and display running jobs count
-                        let running_jobs_count = jobs.total_jobs_count.saturating_sub(
-                            jobs.pending_jobs_count + jobs.failed_jobs_count
+                        let running_jobs_count = jobs
+                            .total_jobs_count
+                            .saturating_sub(jobs.pending_jobs_count + jobs.failed_jobs_count);
+                        println!(
+                            "        running_jobs_count: {}, // Calculated: total - pending - failed",
+                            running_jobs_count
                         );
-                        println!("        running_jobs_count: {}, // Calculated: total - pending - failed", running_jobs_count);
 
                         // Display pending_jobs_indexes in a readable format
                         println!("        pending_jobs_indexes: {{");
@@ -341,7 +509,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             // Fetch and display the raw object
@@ -375,7 +544,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
@@ -560,7 +730,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
@@ -579,22 +750,22 @@ async fn main_impl() -> Result<()> {
                     println!("    id: \"{}\",", proof_calc.id);
                     println!("    block_number: {},", proof_calc.block_number);
                     println!("    start_sequence: {},", proof_calc.start_sequence);
-                    
+
                     if let Some(end) = proof_calc.end_sequence {
                         println!("    end_sequence: Some({}),", end);
                     } else {
                         println!("    end_sequence: None,");
                     }
-                    
+
                     println!("    proofs: [");
-                    
+
                     // Sort proofs by first sequence number
                     let mut sorted_proofs = proof_calc.proofs.clone();
                     sorted_proofs.sort_by_key(|p| p.sequences.first().cloned().unwrap_or(0));
-                    
+
                     for proof in &sorted_proofs {
                         println!("        Proof {{");
-                        
+
                         // Format status
                         let status_str = match proof.status {
                             sui::fetch::ProofStatus::Used => "Used",
@@ -604,50 +775,50 @@ async fn main_impl() -> Result<()> {
                             sui::fetch::ProofStatus::Rejected => "Rejected",
                         };
                         println!("            status: {},", status_str);
-                        
+
                         // Format DA hash
                         if let Some(ref hash) = proof.da_hash {
                             println!("            da_hash: Some(\"{}\"),", hash);
                         } else {
                             println!("            da_hash: None,");
                         }
-                        
+
                         // Format sequence1 and sequence2 for merge proofs
                         if let Some(ref seq1) = proof.sequence1 {
                             println!("            sequence1: Some({:?}),", seq1);
                         } else {
                             println!("            sequence1: None,");
                         }
-                        
+
                         if let Some(ref seq2) = proof.sequence2 {
                             println!("            sequence2: Some({:?}),", seq2);
                         } else {
                             println!("            sequence2: None,");
                         }
-                        
+
                         println!("            rejected_count: {},", proof.rejected_count);
                         println!("            timestamp: {},", proof.timestamp);
                         println!("            prover: \"{}\",", proof.prover);
-                        
+
                         if let Some(ref user) = proof.user {
                             println!("            user: Some(\"{}\"),", user);
                         } else {
                             println!("            user: None,");
                         }
-                        
+
                         println!("            job_id: \"{}\",", proof.job_id);
                         println!("            sequences: {:?},", proof.sequences);
                         println!("        }},");
                     }
-                    
+
                     println!("    ],");
-                    
+
                     if let Some(ref block_proof) = proof_calc.block_proof {
                         println!("    block_proof: Some(\"{}\"),", block_proof);
                     } else {
                         println!("    block_proof: None,");
                     }
-                    
+
                     println!("    is_finished: {},", proof_calc.is_finished);
                     println!("}}");
                 }
@@ -681,7 +852,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
@@ -832,7 +1004,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             // Fetch the app instance first
@@ -1082,35 +1255,49 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                TransactionType::RejectProof { instance, block, sequences, gas: _ } => {
+
+                TransactionType::RejectProof {
+                    instance,
+                    block,
+                    sequences,
+                    gas: _,
+                } => {
                     // Parse the sequences string into a vector of u64
                     let seq_vec: Vec<u64> = sequences
                         .split(',')
                         .map(|s| s.trim())
                         .filter(|s| !s.is_empty())
                         .map(|s| {
-                            s.parse::<u64>()
-                                .map_err(|e| anyhow::anyhow!("Invalid sequence number '{}': {}", s, e))
+                            s.parse::<u64>().map_err(|e| {
+                                anyhow::anyhow!("Invalid sequence number '{}': {}", s, e)
+                            })
                         })
                         .collect::<std::result::Result<Vec<_>, _>>()?;
-                    
+
                     if seq_vec.is_empty() {
                         println!("❌ No sequences provided");
-                        println!("Expected comma-separated numbers, e.g., '1,2,3' or '1430,1431,1432'");
+                        println!(
+                            "Expected comma-separated numbers, e.g., '1,2,3' or '1430,1431,1432'"
+                        );
                         return Err(anyhow::anyhow!("No sequences provided").into());
                     }
-                    
+
                     println!(
                         "Rejecting proof for block {} with sequences {:?} in instance {}",
                         block, seq_vec, instance
                     );
 
-                    match interface.reject_proof(&instance, block, seq_vec.clone()).await {
+                    match interface
+                        .reject_proof(&instance, block, seq_vec.clone())
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ Transaction executed successfully");
                             println!("Transaction digest: {}", tx_digest);
-                            println!("Proof for sequences {:?} in block {} has been rejected", seq_vec, block);
+                            println!(
+                                "Proof for sequences {:?} in block {} has been rejected",
+                                seq_vec, block
+                            );
                         }
                         Err(e) => {
                             println!("❌ Transaction execution failed");
@@ -1130,41 +1317,50 @@ async fn main_impl() -> Result<()> {
                 .with(tracing_subscriber::EnvFilter::new("info"))
                 .with(tracing_subscriber::fmt::layer())
                 .init();
-            
+
             match subcommand {
                 BalanceCommands::Sui { rpc_url, address } => {
                     // Resolve and initialize Sui connection
                     let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                         .map_err(CoordinatorError::Other)?;
-                    sui::SharedSuiState::initialize(&rpc_url).await
+                    sui::SharedSuiState::initialize(&rpc_url)
+                        .await
                         .map_err(CoordinatorError::Other)?;
 
                     // Show the balance, passing the optional address
-                    sui::print_balance_info(address.as_deref()).await
+                    sui::print_balance_info(address.as_deref())
+                        .await
                         .map_err(CoordinatorError::Other)?;
                 }
-                
+
                 BalanceCommands::Mina { address, network } => {
                     // Validate address format
                     if !mina::validate_mina_address(&address) {
                         eprintln!("❌ Error: Invalid Mina address format");
-                        eprintln!("   Mina addresses should start with 'B62' and be at least 55 characters");
+                        eprintln!(
+                            "   Mina addresses should start with 'B62' and be at least 55 characters"
+                        );
                         return Err(anyhow!("Invalid Mina address format").into());
                     }
-                    
+
                     println!("📊 Checking balance for {} on {}", address, network);
                     println!();
-                    
+
                     // Check if account exists first
                     match mina::account_exists(&address, &network).await {
                         Ok(exists) => {
                             if !exists {
                                 println!("⚠️  Account not found on {}", network);
-                                println!("   The account may not have been created yet or may not exist on this network");
-                                
+                                println!(
+                                    "   The account may not have been created yet or may not exist on this network"
+                                );
+
                                 // Show explorer link if available
-                                if let Some(network_config) = mina::MinaNetwork::get_network(&network) {
-                                    if let Some(explorer_url) = network_config.explorer_account_url {
+                                if let Some(network_config) =
+                                    mina::MinaNetwork::get_network(&network)
+                                {
+                                    if let Some(explorer_url) = network_config.explorer_account_url
+                                    {
                                         println!("   Check explorer: {}{}", explorer_url, address);
                                     }
                                 }
@@ -1175,12 +1371,12 @@ async fn main_impl() -> Result<()> {
                             eprintln!("⚠️  Warning: Could not verify account existence: {}", e);
                         }
                     }
-                    
+
                     // Fetch balance
                     match mina::get_balance_in_mina(&address, &network).await {
                         Ok(balance) => {
                             println!("💰 Balance: {} MINA", balance);
-                            
+
                             // Also fetch account info for more details
                             match mina::get_account_info(&address, &network).await {
                                 Ok(info) => {
@@ -1193,7 +1389,7 @@ async fn main_impl() -> Result<()> {
                                     // Ignore error, we already have the balance
                                 }
                             }
-                            
+
                             // Show explorer link if available
                             if let Some(network_config) = mina::MinaNetwork::get_network(&network) {
                                 if let Some(explorer_url) = network_config.explorer_account_url {
@@ -1209,22 +1405,22 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
+
                 BalanceCommands::Ethereum { address, network } => {
                     println!("📊 Checking balance for {} on {}", address, network);
                     println!();
-                    
+
                     // Get network configuration to display native currency
                     let network_config = ethereum::EthereumNetwork::get_network(&network);
                     let symbol = network_config
                         .map(|n| n.native_currency.symbol.clone())
                         .unwrap_or_else(|| "ETH".to_string());
-                    
+
                     // Fetch balance
                     match ethereum::get_balance(&address, &network).await {
                         Ok(balance) => {
                             println!("💰 Balance: {} {}", balance, symbol);
-                            
+
                             // Also fetch account info for more details
                             match ethereum::get_account_info(&address, &network).await {
                                 Ok(info) => {
@@ -1235,7 +1431,7 @@ async fn main_impl() -> Result<()> {
                                     // Ignore error, we already have the balance
                                 }
                             }
-                            
+
                             // Show explorer link if available
                             if let Some(network_config) = network_config {
                                 if let Some(explorer_url) = &network_config.explorer {
@@ -1271,7 +1467,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             println!("Checking gas coin pool and splitting if needed...");
@@ -1282,7 +1479,8 @@ async fn main_impl() -> Result<()> {
 
                     // Show updated balance info
                     println!("\nUpdated balance:");
-                    sui::print_balance_info(None).await
+                    sui::print_balance_info(None)
+                        .await
                         .map_err(CoordinatorError::Other)?;
                 }
                 Err(e) => {
@@ -1304,7 +1502,8 @@ async fn main_impl() -> Result<()> {
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
 
             let network_name = sui::get_network_name();
@@ -1325,13 +1524,64 @@ async fn main_impl() -> Result<()> {
             Ok(())
         }
 
+        Commands::Config { endpoint, json } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+
+            // Determine which chain to fetch config for
+            let chain = chain_override
+                .or_else(|| std::env::var("SUI_CHAIN").ok())
+                .unwrap_or_else(|| "testnet".to_string());
+
+            println!("📥 Fetching configuration for chain: {}", chain);
+
+            // Fetch configuration
+            let config_map = if let Some(endpoint) = endpoint.as_ref() {
+                config::fetch_config_with_endpoint(&chain, Some(endpoint)).await
+            } else {
+                config::fetch_config(&chain).await
+            };
+
+            match config_map {
+                Ok(config) => {
+                    if json {
+                        // Output as JSON
+                        match serde_json::to_string_pretty(&config) {
+                            Ok(json_str) => println!("{}", json_str),
+                            Err(e) => {
+                                error!("Failed to serialize config to JSON: {}", e);
+                                return Err(anyhow::anyhow!(
+                                    "Failed to serialize config to JSON: {}",
+                                    e
+                                )
+                                .into());
+                            }
+                        }
+                    } else {
+                        // Use the display function from config module
+                        config::fetch_and_display_config(&chain)
+                            .await
+                            .map_err(|e| anyhow::anyhow!("Failed to display config: {}", e))?;
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("Failed to fetch configuration: {}", e);
+                    Err(anyhow::anyhow!("Failed to fetch configuration: {}", e).into())
+                }
+            }
+        }
+
         Commands::Faucet { subcommand } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
                 .with(tracing_subscriber::fmt::layer())
                 .init();
-            
+
             match subcommand {
                 FaucetCommands::Sui { address, amount } => {
                     // Get the chain from environment
@@ -1341,67 +1591,83 @@ async fn main_impl() -> Result<()> {
 
                     // Check if mainnet (no faucet available)
                     if chain == "mainnet" {
-                        eprintln!("❌ Error: Faucet is not available for mainnet");
-                        eprintln!("   Please acquire SUI tokens through an exchange or other means");
+                        error!("❌ Faucet is not available for mainnet");
+                        error!("   Please acquire SUI tokens through an exchange or other means");
                         return Err(anyhow!("Faucet not available for mainnet").into());
                     }
 
                     // Validate amount
                     if amount > 10.0 {
-                        eprintln!("❌ Error: Amount exceeds maximum of 10 SUI");
-                        eprintln!("   Maximum faucet amount is 10 SUI per request");
+                        error!("❌ Amount exceeds maximum of 10 SUI");
+                        error!("   Maximum faucet amount is 10 SUI per request");
                         return Err(anyhow!("Amount exceeds maximum of 10 SUI").into());
                     }
 
                     if amount <= 0.0 {
-                        eprintln!("❌ Error: Amount must be greater than 0");
+                        error!("❌ Amount must be greater than 0");
                         return Err(anyhow!("Invalid amount").into());
                     }
 
                     // Get the address to fund
                     let target_address = address.unwrap_or_else(|| {
                         std::env::var("SUI_ADDRESS").unwrap_or_else(|_| {
-                            eprintln!("❌ Error: No address provided and SUI_ADDRESS not set");
+                            error!("❌ No address provided and SUI_ADDRESS not set");
                             std::process::exit(1);
                         })
                     });
 
                     // Validate address format
                     if !target_address.starts_with("0x") || target_address.len() != 66 {
-                        eprintln!("❌ Error: Invalid SUI address format: {}", target_address);
-                        eprintln!("   Address should start with '0x' and be 66 characters long");
+                        error!("❌ Invalid SUI address format: {}", target_address);
+                        error!("   Address should start with '0x' and be 66 characters long");
                         return Err(anyhow!("Invalid address format").into());
                     }
 
-                    println!("💧 Requesting {} SUI from {} faucet...", amount, chain);
-                    println!("📍 Target address: {}", target_address);
+                    info!("💧 Requesting {} SUI from {} faucet...", amount, chain);
+                    info!("📍 Target address: {}", target_address);
 
                     // Get RPC URL based on chain using the resolver
                     let rpc_url = sui::resolve_rpc_url(None, Some(chain.clone()))?;
 
                     // Initialize Sui connection to check balance
-                    sui::SharedSuiState::initialize(&rpc_url).await
+                    sui::SharedSuiState::initialize(&rpc_url)
+                        .await
                         .map_err(CoordinatorError::Other)?;
 
                     // Check balance before faucet
-                    println!("\n📊 Balance before faucet:");
-                    let balance_before = sui::get_balance_in_sui(&target_address).await
+                    info!("📊 Balance before faucet:");
+                    let balance_before = sui::get_balance_in_sui(&target_address)
+                        .await
                         .map_err(CoordinatorError::Other)?;
-                    println!("   {:.4} SUI", balance_before);
+                    info!("   {:.4} SUI", balance_before);
 
                     // Call the faucet
-                    println!("\n🚰 Calling faucet...");
+                    info!("🚰 Calling faucet...");
                     let faucet_result =
-                        sui::request_tokens_from_faucet(&chain, &target_address, Some(amount)).await;
+                        sui::request_tokens_from_faucet(&chain, &target_address, Some(amount))
+                            .await;
 
                     match faucet_result {
                         Ok(tx_digest) => {
-                            println!("✅ Faucet successful!");
-                            println!("   Transaction: {}", tx_digest);
+                            info!("✅ Faucet request sent!");
+
+                            // Handle the case where transaction digest is not immediately available
+                            if tx_digest != "unknown" {
+                                info!("   Transaction: {}", tx_digest);
+                                info!(
+                                    "   🔗 Explorer: https://suiscan.xyz/{}/tx/{}",
+                                    chain, tx_digest
+                                );
+                            } else {
+                                info!(
+                                    "   🔗 Explorer: https://suiscan.xyz/{}/account/{}",
+                                    chain, target_address
+                                );
+                            }
 
                             // Wait for transaction to be processed
-                            println!(
-                                "\n⏳ Waiting {} seconds for transaction to be processed...",
+                            info!(
+                                "⏳ Waiting {} seconds for transaction to be processed...",
                                 constants::CLI_TRANSACTION_WAIT_SECS
                             );
                             tokio::time::sleep(tokio::time::Duration::from_secs(
@@ -1410,74 +1676,81 @@ async fn main_impl() -> Result<()> {
                             .await;
 
                             // Check balance after faucet
-                            println!("\n📊 Balance after faucet:");
-                            let balance_after = sui::get_balance_in_sui(&target_address).await
+                            info!("📊 Balance after faucet:");
+                            let balance_after = sui::get_balance_in_sui(&target_address)
+                                .await
                                 .map_err(CoordinatorError::Other)?;
-                            println!("   {:.4} SUI", balance_after);
+                            info!("   {:.4} SUI", balance_after);
 
                             let received = balance_after - balance_before;
                             if received > 0.0 {
-                                println!("\n💰 Received: {:.4} SUI", received);
+                                info!("💰 Received: {:.4} SUI", received);
                             }
                         }
                         Err(e) => {
-                            eprintln!("❌ Faucet failed: {}", e);
+                            error!("❌ Faucet failed: {}", e);
                             return Err(e.into());
                         }
                     }
                 }
-                
+
                 FaucetCommands::Mina { address, network } => {
                     // Validate the address format
                     if !mina::validate_mina_address(&address) {
-                        eprintln!("❌ Error: Invalid Mina address format");
-                        eprintln!("   Mina addresses should start with 'B62' and be at least 55 characters");
+                        error!("❌ Invalid Mina address format");
+                        error!(
+                            "   Mina addresses should start with 'B62' and be at least 55 characters"
+                        );
                         return Err(anyhow!("Invalid Mina address format").into());
                     }
-                    
+
                     // Validate network - the network module will handle validation
                     if mina::MinaNetwork::get_network(&network).is_none() {
-                        eprintln!("❌ Error: Invalid network '{}'", network);
-                        eprintln!("   Supported networks: mina:devnet, zeko:testnet (or devnet, zeko for short)");
+                        error!("❌ Invalid network '{}'", network);
+                        error!(
+                            "   Supported networks: mina:devnet, zeko:testnet (or devnet, zeko for short)"
+                        );
                         return Err(anyhow!("Invalid network").into());
                     }
-                    
-                    println!("💧 Requesting MINA from {} faucet...", network);
-                    println!("📍 Target address: {}", address);
-                    
+
+                    info!("💧 Requesting MINA from {} faucet...", network);
+                    info!("📍 Target address: {}", address);
+
                     // Call the Mina faucet
                     match mina::request_mina_from_faucet(&address, &network).await {
                         Ok(response) => {
                             if let Some(status) = &response.status {
                                 if status == "rate-limit" {
-                                    eprintln!("⚠️  Rate limited by faucet");
-                                    eprintln!("   Please wait 30 minutes before trying again");
+                                    error!("⚠️  Rate limited by faucet");
+                                    error!("   Please wait 30 minutes before trying again");
                                     return Err(anyhow!("Rate limited by faucet").into());
                                 }
                             }
-                            
+
                             if let Some(error) = &response.error {
-                                eprintln!("❌ Faucet error: {}", error);
+                                error!("❌ Faucet error: {}", error);
                                 return Err(anyhow!("Faucet error: {}", error).into());
                             }
-                            
-                            println!("✅ Faucet request successful!");
+
+                            info!("✅ Faucet request successful!");
                             if let Some(message) = &response.message {
-                                println!("   Response: {}", message);
+                                info!("   Response: {}", message);
                             }
-                            
-                            println!("\n⏳ Note: It may take a few minutes for the funds to appear in your account");
-                            
+
+                            info!(
+                                "⏳ Note: It may take a few minutes for the funds to appear in your account"
+                            );
+
                             // Get explorer URL from network config
                             if let Some(network_config) = mina::MinaNetwork::get_network(&network) {
                                 if let Some(explorer_url) = network_config.explorer_account_url {
-                                    println!("   Check your balance at:");
-                                    println!("   {}{}", explorer_url, address);
+                                    info!("   Check your balance at:");
+                                    info!("   {}{}", explorer_url, address);
                                 }
                             }
                         }
                         Err(e) => {
-                            eprintln!("❌ Faucet request failed: {}", e);
+                            error!("❌ Faucet request failed: {}", e);
                             return Err(e.into());
                         }
                     }
@@ -1486,29 +1759,32 @@ async fn main_impl() -> Result<()> {
 
             Ok(())
         }
-        
+
         Commands::Keypair { subcommand } => {
-            
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::fmt::layer())
                 .with(tracing_subscriber::EnvFilter::from_default_env())
                 .init();
-            
+
             match subcommand {
                 KeypairCommands::Sui => {
                     println!("🔑 Generating new Sui Ed25519 keypair...\n");
-                    
+
                     match sui::keypair::generate_ed25519() {
                         Ok(keypair) => {
                             println!("✅ Sui Keypair Generated Successfully!\n");
-                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            );
                             println!("🔐 PRIVATE KEY (Keep this secret!):");
                             println!("   {}", keypair.sui_private_key);
                             println!();
                             println!("📍 ADDRESS:");
                             println!("   {}", keypair.address);
-                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            );
                             println!();
                             println!("⚠️  IMPORTANT:");
                             println!("   • Save your private key in a secure location");
@@ -1525,22 +1801,26 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
+
                 KeypairCommands::Mina => {
                     println!("🔑 Generating new Mina keypair...");
                     println!();
-                    
+
                     match mina::generate_mina_keypair() {
                         Ok(keypair) => {
                             println!("✅ Mina Keypair Generated Successfully!");
                             println!();
-                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            );
                             println!("🔐 PRIVATE KEY (Keep this secret!):");
                             println!("   {}", keypair.private_key);
                             println!();
                             println!("📍 PUBLIC KEY (Address):");
                             println!("   {}", keypair.public_key);
-                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            );
                             println!();
                             println!("⚠️  IMPORTANT:");
                             println!("   • Save your private key in a secure location");
@@ -1553,26 +1833,32 @@ async fn main_impl() -> Result<()> {
                         }
                         Err(e) => {
                             eprintln!("❌ Failed to generate Mina keypair: {}", e);
-                            return Err(anyhow::anyhow!("Mina keypair generation failed: {}", e).into());
+                            return Err(
+                                anyhow::anyhow!("Mina keypair generation failed: {}", e).into()
+                            );
                         }
                     }
                 }
-                
+
                 KeypairCommands::Ethereum => {
                     println!("🔑 Generating new Ethereum keypair...");
                     println!();
-                    
+
                     match ethereum::generate_ethereum_keypair() {
                         Ok(keypair) => {
                             println!("✅ Ethereum Keypair Generated Successfully!");
                             println!();
-                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            );
                             println!("🔐 PRIVATE KEY (Keep this secret!):");
                             println!("   {}", keypair.private_key);
                             println!();
                             println!("📍 ADDRESS:");
                             println!("   {}", keypair.address);
-                            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            println!(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            );
                             println!();
                             println!("⚠️  IMPORTANT:");
                             println!("   • Save your private key in a secure location");
@@ -1585,42 +1871,50 @@ async fn main_impl() -> Result<()> {
                         }
                         Err(e) => {
                             eprintln!("❌ Failed to generate Ethereum keypair: {}", e);
-                            return Err(anyhow::anyhow!("Ethereum keypair generation failed: {}", e).into());
+                            return Err(anyhow::anyhow!(
+                                "Ethereum keypair generation failed: {}",
+                                e
+                            )
+                            .into());
                         }
                     }
                 }
             }
-            
+
             Ok(())
         }
-        
+
         Commands::Avs { subcommand } => {
             // Initialize tracing for AVS commands
             tracing_subscriber::registry()
                 .with(tracing_subscriber::fmt::layer())
                 .with(tracing_subscriber::EnvFilter::from_default_env())
                 .init();
-            
+
             // Execute the AVS command
             Ok(avs_operator::cli::execute_avs_command(subcommand).await?)
         }
-        
-        Commands::Registry { rpc_url, subcommand } => {
+
+        Commands::Registry {
+            rpc_url,
+            subcommand,
+        } => {
             // Initialize minimal logging
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new("info"))
                 .with(tracing_subscriber::fmt::layer())
                 .init();
-            
+
             // Resolve and initialize Sui connection
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url).await
+            sui::SharedSuiState::initialize(&rpc_url)
+                .await
                 .map_err(CoordinatorError::Other)?;
-            
+
             // Create interface
             let mut interface = sui::SilvanaSuiInterface::new();
-            
+
             match subcommand {
                 RegistryCommands::Create { name, package_id } => {
                     println!("📝 Creating new Silvana registry...\n");
@@ -1629,8 +1923,11 @@ async fn main_impl() -> Result<()> {
                         println!("   Package: {}", pkg);
                     }
                     println!();
-                    
-                    match interface.create_silvana_registry(name.clone(), package_id).await {
+
+                    match interface
+                        .create_silvana_registry(name.clone(), package_id)
+                        .await
+                    {
                         Ok(result) => {
                             println!("✅ Registry created successfully!\n");
                             println!("   Registry ID: {}", result.registry_id);
@@ -1645,12 +1942,19 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::AddDeveloper { registry, name, github, image, description, site } => {
+
+                RegistryCommands::AddDeveloper {
+                    registry,
+                    name,
+                    github,
+                    image,
+                    description,
+                    site,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("👤 Adding developer to registry...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Name: {}", name);
@@ -1665,8 +1969,18 @@ async fn main_impl() -> Result<()> {
                         println!("   Site: {}", s);
                     }
                     println!();
-                    
-                    match interface.add_developer_to_registry(&registry_id, name, github, image, description, site).await {
+
+                    match interface
+                        .add_developer_to_registry(
+                            &registry_id,
+                            name,
+                            github,
+                            image,
+                            description,
+                            site,
+                        )
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ Developer added successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1677,19 +1991,36 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::UpdateDeveloper { registry, name, github, image, description, site } => {
+
+                RegistryCommands::UpdateDeveloper {
+                    registry,
+                    name,
+                    github,
+                    image,
+                    description,
+                    site,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("📝 Updating developer in registry...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Name: {}", name);
                     println!("   GitHub: {}", github);
                     println!();
-                    
-                    match interface.update_developer_in_registry(&registry_id, name, github, image, description, site).await {
+
+                    match interface
+                        .update_developer_in_registry(
+                            &registry_id,
+                            name,
+                            github,
+                            image,
+                            description,
+                            site,
+                        )
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ Developer updated successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1700,12 +2031,16 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::RemoveDeveloper { registry, name, agents } => {
+
+                RegistryCommands::RemoveDeveloper {
+                    registry,
+                    name,
+                    agents,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("🗑️  Removing developer from registry...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Name: {}", name);
@@ -1713,8 +2048,11 @@ async fn main_impl() -> Result<()> {
                         println!("   Agents to remove: {}", agents.join(", "));
                     }
                     println!();
-                    
-                    match interface.remove_developer_from_registry(&registry_id, name, agents).await {
+
+                    match interface
+                        .remove_developer_from_registry(&registry_id, name, agents)
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ Developer removed successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1725,12 +2063,20 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::AddAgent { registry, developer, name, image, description, site, chains } => {
+
+                RegistryCommands::AddAgent {
+                    registry,
+                    developer,
+                    name,
+                    image,
+                    description,
+                    site,
+                    chains,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("🤖 Adding agent to developer...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Developer: {}", developer);
@@ -1748,8 +2094,19 @@ async fn main_impl() -> Result<()> {
                         println!("   Site: {}", s);
                     }
                     println!();
-                    
-                    match interface.add_agent_to_developer(&registry_id, developer, name, image, description, site, chains).await {
+
+                    match interface
+                        .add_agent_to_developer(
+                            &registry_id,
+                            developer,
+                            name,
+                            image,
+                            description,
+                            site,
+                            chains,
+                        )
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ Agent added successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1760,12 +2117,20 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::UpdateAgent { registry, developer, name, image, description, site, chains } => {
+
+                RegistryCommands::UpdateAgent {
+                    registry,
+                    developer,
+                    name,
+                    image,
+                    description,
+                    site,
+                    chains,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("📝 Updating agent...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Developer: {}", developer);
@@ -1774,8 +2139,19 @@ async fn main_impl() -> Result<()> {
                         println!("   Chains: {}", chains.join(", "));
                     }
                     println!();
-                    
-                    match interface.update_agent_in_registry(&registry_id, developer, name, image, description, site, chains).await {
+
+                    match interface
+                        .update_agent_in_registry(
+                            &registry_id,
+                            developer,
+                            name,
+                            image,
+                            description,
+                            site,
+                            chains,
+                        )
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ Agent updated successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1786,19 +2162,26 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::RemoveAgent { registry, developer, name } => {
+
+                RegistryCommands::RemoveAgent {
+                    registry,
+                    developer,
+                    name,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("🗑️  Removing agent from developer...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Developer: {}", developer);
                     println!("   Agent: {}", name);
                     println!();
-                    
-                    match interface.remove_agent_from_developer(&registry_id, developer, name).await {
+
+                    match interface
+                        .remove_agent_from_developer(&registry_id, developer, name)
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ Agent removed successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1809,12 +2192,16 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::AddApp { registry, name, description } => {
+
+                RegistryCommands::AddApp {
+                    registry,
+                    name,
+                    description,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("📱 Adding app to registry...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Name: {}", name);
@@ -1822,8 +2209,11 @@ async fn main_impl() -> Result<()> {
                         println!("   Description: {}", desc);
                     }
                     println!();
-                    
-                    match interface.add_app_to_registry(&registry_id, name, description).await {
+
+                    match interface
+                        .add_app_to_registry(&registry_id, name, description)
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ App added successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1834,12 +2224,16 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
-                RegistryCommands::UpdateApp { registry, name, description } => {
+
+                RegistryCommands::UpdateApp {
+                    registry,
+                    name,
+                    description,
+                } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("📝 Updating app in registry...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Name: {}", name);
@@ -1847,8 +2241,11 @@ async fn main_impl() -> Result<()> {
                         println!("   Description: {}", desc);
                     }
                     println!();
-                    
-                    match interface.update_app_in_registry(&registry_id, name, description).await {
+
+                    match interface
+                        .update_app_in_registry(&registry_id, name, description)
+                        .await
+                    {
                         Ok(tx_digest) => {
                             println!("✅ App updated successfully!");
                             println!("   Transaction: {}", tx_digest);
@@ -1859,17 +2256,17 @@ async fn main_impl() -> Result<()> {
                         }
                     }
                 }
-                
+
                 RegistryCommands::RemoveApp { registry, name } => {
                     let registry_id = registry.ok_or_else(|| {
                         anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
                     })?;
-                    
+
                     println!("🗑️  Removing app from registry...\n");
                     println!("   Registry: {}", registry_id);
                     println!("   Name: {}", name);
                     println!();
-                    
+
                     match interface.remove_app_from_registry(&registry_id, name).await {
                         Ok(tx_digest) => {
                             println!("✅ App removed successfully!");
@@ -1878,6 +2275,144 @@ async fn main_impl() -> Result<()> {
                         Err(e) => {
                             eprintln!("❌ Failed to remove app: {}", e);
                             return Err(anyhow!(e).into());
+                        }
+                    }
+                }
+            }
+
+            Ok(())
+        }
+        
+        Commands::Secrets { subcommand } => {
+            // Initialize minimal logging
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::EnvFilter::new("info"))
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+            
+            // Get default endpoint if not specified
+            let get_endpoint = || {
+                std::env::var("SILVANA_RPC_SERVER")
+                    .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string())
+            };
+            
+            match subcommand {
+                cli::SecretsCommands::Store {
+                    endpoint,
+                    developer,
+                    agent,
+                    name,
+                    secret,
+                    app,
+                    app_instance,
+                } => {
+                    let endpoint = endpoint.unwrap_or_else(get_endpoint);
+                    
+                    info!("🔗 Connecting to RPC endpoint: {}", endpoint);
+                    
+                    let mut client = match secrets_client::SecretsClient::new(&endpoint).await {
+                        Ok(client) => client,
+                        Err(e) => {
+                            error!("Failed to connect to RPC endpoint {}: {}", endpoint, e);
+                            return Err(anyhow!("Failed to connect to RPC endpoint").into());
+                        }
+                    };
+                    
+                    info!("📦 Storing secret...");
+                    info!("  Developer: {}", developer);
+                    info!("  Agent: {}", agent);
+                    info!("  Name: {}", name);
+                    if let Some(ref app) = app {
+                        info!("  App: {}", app);
+                    }
+                    if let Some(ref app_instance) = app_instance {
+                        info!("  App Instance: {}", app_instance);
+                    }
+                    info!("  Secret length: {} characters", secret.len());
+                    
+                    // TODO: For now using empty signature - will be replaced with actual signature validation
+                    let placeholder_signature = vec![];
+                    
+                    match client
+                        .store_secret(
+                            &developer,
+                            &agent,
+                            app.as_deref(),
+                            app_instance.as_deref(),
+                            Some(&name),
+                            &secret,
+                            &placeholder_signature,
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            info!("✅ Secret stored successfully!");
+                        }
+                        Err(e) => {
+                            error!("Failed to store secret: {}", e);
+                            return Err(anyhow!("Failed to store secret").into());
+                        }
+                    }
+                }
+                
+                cli::SecretsCommands::Retrieve {
+                    endpoint,
+                    developer,
+                    agent,
+                    name,
+                    app,
+                    app_instance,
+                } => {
+                    let endpoint = endpoint.unwrap_or_else(get_endpoint);
+                    
+                    info!("🔗 Connecting to RPC endpoint: {}", endpoint);
+                    
+                    let mut client = match secrets_client::SecretsClient::new(&endpoint).await {
+                        Ok(client) => client,
+                        Err(e) => {
+                            error!("Failed to connect to RPC endpoint {}: {}", endpoint, e);
+                            return Err(anyhow!("Failed to connect to RPC endpoint").into());
+                        }
+                    };
+                    
+                    info!("🔍 Retrieving secret...");
+                    info!("  Developer: {}", developer);
+                    info!("  Agent: {}", agent);
+                    info!("  Name: {}", name);
+                    if let Some(ref app) = app {
+                        info!("  App: {}", app);
+                    }
+                    if let Some(ref app_instance) = app_instance {
+                        info!("  App Instance: {}", app_instance);
+                    }
+                    
+                    // TODO: For now using empty signature - will be replaced with actual signature validation
+                    let placeholder_signature = vec![];
+                    
+                    match client
+                        .retrieve_secret(
+                            &developer,
+                            &agent,
+                            app.as_deref(),
+                            app_instance.as_deref(),
+                            Some(&name),
+                            &placeholder_signature,
+                        )
+                        .await
+                    {
+                        Ok(secret_value) => {
+                            info!("✅ Secret retrieved successfully!");
+                            info!("📋 Secret value: {}", secret_value);
+                            info!("📏 Secret length: {} characters", secret_value.len());
+                        }
+                        Err(secrets_client::SecretsClientError::SecretNotFound) => {
+                            error!("❌ Secret not found with the specified parameters");
+                            info!("💡 Try checking if the secret exists with different scope parameters (app, app-instance)");
+                            return Err(anyhow!("Secret not found").into());
+                        }
+                        Err(e) => {
+                            error!("Failed to retrieve secret: {}", e);
+                            return Err(anyhow!("Failed to retrieve secret").into());
                         }
                     }
                 }

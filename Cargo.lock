@@ -4364,6 +4364,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -8566,11 +8567,13 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "dotenvy",
  "duct",
  "rpc-client",
  "secrets-client",
+ "storage",
  "tokio",
 ]
 

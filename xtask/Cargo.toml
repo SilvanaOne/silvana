@@ -11,5 +11,7 @@ duct = "1.0"
 anyhow.workspace = true
 secrets-client = { path = "../crates/secrets-client" }
 rpc-client = { path = "../crates/rpc-client" }
+storage = { path = "../crates/storage" }
 tokio.workspace = true
 dotenvy.workspace = true
+chrono.workspace = true
