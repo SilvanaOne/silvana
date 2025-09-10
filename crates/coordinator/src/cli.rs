@@ -22,7 +22,7 @@ pub enum Commands {
         rpc_url: Option<String>,
 
         #[arg(long, env = "SILVANA_REGISTRY_PACKAGE")]
-        package_id: String,
+        package_id: Option<String>,
 
         #[arg(long, env = "DOCKER_USE_TEE", default_value = "false")]
         use_tee: bool,

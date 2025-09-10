@@ -101,8 +101,15 @@ async fn main_impl() -> Result<()> {
                     );
 
                     // Inject configuration as environment variables (without overriding existing ones)
+                    // Special handling for SILVANA_REGISTRY_PACKAGE: don't override if package_id arg is provided
                     let mut injected_count = 0;
                     for (key, value) in config_map.iter() {
+                        // Skip SILVANA_REGISTRY_PACKAGE if package_id arg was provided
+                        if key == "SILVANA_REGISTRY_PACKAGE" && package_id.is_some() {
+                            println!("  ⏩ Skipped SILVANA_REGISTRY_PACKAGE (using --package-id argument)");
+                            continue;
+                        }
+                        
                         // Check if the environment variable already exists
                         if std::env::var(key).is_err() {
                             // Setting environment variables is safe in this context
@@ -207,6 +214,25 @@ async fn main_impl() -> Result<()> {
                 }
             }
 
+            // Resolve the package_id: use arg if provided, otherwise check environment variable
+            let final_package_id = if let Some(pid) = package_id {
+                // Package ID provided as argument
+                pid
+            } else {
+                // Try to get from environment variable (may have been injected from config)
+                match std::env::var("SILVANA_REGISTRY_PACKAGE") {
+                    Ok(pid) if !pid.is_empty() => pid,
+                    _ => {
+                        eprintln!("❌ Error: Registry package ID not provided");
+                        eprintln!("   Please provide it using one of these methods:");
+                        eprintln!("   1. Use --package-id argument");
+                        eprintln!("   2. Set SILVANA_REGISTRY_PACKAGE environment variable");
+                        eprintln!("   3. Ensure it's configured on the RPC server for chain: {}", chain);
+                        std::process::exit(1);
+                    }
+                }
+            };
+
             // Resolve the RPC URL using the helper from sui crate
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
@@ -232,7 +258,7 @@ async fn main_impl() -> Result<()> {
             // Start the coordinator
             coordinator::start_coordinator(
                 rpc_url,
-                package_id,
+                final_package_id,
                 use_tee,
                 container_timeout,
                 grpc_socket_path,
