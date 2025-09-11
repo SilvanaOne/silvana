@@ -699,10 +699,22 @@ impl DockerBufferProcessor {
                                 "Failed to fetch agent method for buffered job {}: {}",
                                 job.job_sequence, e
                             );
-                            // Increment agent method fetch failures metric
+                            
+                            // Return job to buffer for retry on any error
+                            self.state.add_started_jobs(vec![started_job]).await;
+                            info!(
+                                "Returned job {} to buffer due to agent method fetch error",
+                                job.job_sequence
+                            );
+                            
+                            // Increment metrics
                             if let Some(ref metrics) = self.metrics {
                                 metrics.increment_docker_agent_method_fetch_failures();
+                                metrics.increment_docker_jobs_returned_to_buffer();
                             }
+                            
+                            // Wait before retrying
+                            sleep(Duration::from_secs(5)).await;
                             continue;
                         }
                     };
