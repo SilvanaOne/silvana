@@ -224,6 +224,22 @@ impl AgentJobDatabase {
             None
         }
     }
+    
+    /// Release a job back to available pool (used when session can't take it due to chain mismatch)
+    pub async fn release_job(&self, job_id: &str) -> Option<AgentJob> {
+        let job = {
+            let mut running = self.running_jobs.write().await;
+            running.remove(job_id)
+        };
+
+        if let Some(job) = job {
+            info!("Released job {} back to available pool", job.job_id);
+            Some(job)
+        } else {
+            warn!("Attempted to release non-existent job: {}", job_id);
+            None
+        }
+    }
 
     /// Get a job by job_id for reference (doesn't remove it)
     pub async fn get_job_by_id(&self, job_id: &str) -> Option<AgentJob> {
