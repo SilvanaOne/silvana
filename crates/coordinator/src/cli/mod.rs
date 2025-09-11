@@ -7,6 +7,7 @@ pub mod jobs;
 pub mod block;
 pub mod faucet;
 pub mod balance;
+pub mod secrets;
 
 // Re-export all items from commands module
 pub use commands::*;

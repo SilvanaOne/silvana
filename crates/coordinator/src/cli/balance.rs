@@ -1,7 +1,6 @@
 use crate::cli::BalanceCommands;
 use crate::error::{CoordinatorError, Result};
 use anyhow::anyhow;
-use tracing::info;
 use tracing_subscriber::prelude::*;
 
 pub async fn handle_balance_command(
@@ -17,8 +16,8 @@ pub async fn handle_balance_command(
     match subcommand {
         BalanceCommands::Sui { rpc_url, address } => {
             // Resolve and initialize Sui connection
-            let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override)
-                .map_err(CoordinatorError::Other)?;
+            let rpc_url =
+                sui::resolve_rpc_url(rpc_url, chain_override).map_err(CoordinatorError::Other)?;
             sui::SharedSuiState::initialize(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
