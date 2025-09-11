@@ -62,7 +62,10 @@ impl EventProcessor {
                         * 2_u64.pow((retry_count - 1) as u32))
                     .min(RETRY_MAX_DELAY_SECS);
                     let delay = Duration::from_secs(delay_secs);
-                    warn!("Retrying in {}s...", delay_secs);
+                    warn!(
+                        "Event processor streamerror, retrying in {}s...",
+                        delay_secs
+                    );
                     sleep(delay).await;
                 }
             }
