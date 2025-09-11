@@ -7,6 +7,7 @@ pub mod jobs;
 pub mod block;
 pub mod proofs;
 pub mod faucet;
+pub mod keypair;
 pub mod balance;
 pub mod secrets;
 pub mod registry;
