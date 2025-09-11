@@ -11,6 +11,7 @@ pub mod keypair;
 pub mod balance;
 pub mod secrets;
 pub mod registry;
+pub mod config_cmd;
 
 // Re-export all items from commands module
 pub use commands::*;

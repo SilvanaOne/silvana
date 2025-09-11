@@ -31,11 +31,8 @@ use dotenvy::dotenv;
 use tracing::{error, info, warn};
 use tracing_subscriber::prelude::*;
 
-use crate::cli::{
-    Cli, Commands,
-};
+use crate::cli::{Cli, Commands};
 use crate::error::{CoordinatorError, Result};
-use anyhow::anyhow;
 use std::collections::HashMap;
 
 // Current version from Cargo.toml
@@ -44,7 +41,7 @@ const SILVANA_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Helper function to fetch config and inject environment variables for all commands
 async fn fetch_and_inject_config(chain: &str) -> HashMap<String, String> {
     //println!("🔄 Fetching configuration for chain: {}", chain);
-    
+
     match config::fetch_config(chain).await {
         Ok(config_map) => {
             // println!(
@@ -103,7 +100,7 @@ fn check_version_update(last_version: &str) {
     for i in 0..3 {
         let current = current_parts.get(i).unwrap_or(&0);
         let last = last_parts.get(i).unwrap_or(&0);
-        
+
         if last > current {
             newer_available = true;
             break;
@@ -119,7 +116,9 @@ fn check_version_update(last_version: &str) {
         println!("   Latest version:  {}", last_version);
         println!();
         println!("   Please upgrade to the latest version:");
-        println!("   curl -sSL https://raw.githubusercontent.com/SilvanaOne/silvana/main/install.sh | bash");
+        println!(
+            "   curl -sSL https://raw.githubusercontent.com/SilvanaOne/silvana/main/install.sh | bash"
+        );
         println!();
     }
 }
@@ -250,17 +249,16 @@ async fn main_impl() -> Result<()> {
             // Get RPC endpoint from environment or use default
             let rpc_endpoint = std::env::var("SILVANA_RPC_SERVER")
                 .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
-            
+
             // Initialize RPC client
-            let mut rpc_client = rpc_client::SilvanaRpcClient::new(
-                rpc_client::RpcClientConfig::new(&rpc_endpoint)
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to connect to RPC server: {}", e))?;
-            
+            let mut rpc_client =
+                rpc_client::SilvanaRpcClient::new(rpc_client::RpcClientConfig::new(&rpc_endpoint))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to connect to RPC server: {}", e))?;
+
             // Fixed S3 key for the example archive
             let s3_key = "examples/add.tar.zst";
-            
+
             // Download the template binary via RPC
             info!("   Fetching from: {}", s3_key);
             match rpc_client.read_binary(s3_key).await {
@@ -268,12 +266,12 @@ async fn main_impl() -> Result<()> {
                     info!("✅ Template downloaded successfully!");
                     info!("   Archive size: {} bytes", response.data.len());
                     info!("   SHA256: {}", response.sha256);
-                    
+
                     // Write the binary data to a temporary file
                     let temp_path = project_path.join(".download.tar.zst");
                     std::fs::write(&temp_path, &response.data)
                         .map_err(|e| anyhow::anyhow!("Failed to write temporary archive: {}", e))?;
-                    
+
                     // Unpack the archive using the storage utility
                     match storage::unpack_local_archive(&temp_path, &project_path) {
                         Ok(_) => {
@@ -324,7 +322,11 @@ async fn main_impl() -> Result<()> {
                     error!("Failed to download template: {}", response.message);
                     // Clean up the created directory
                     let _ = std::fs::remove_dir_all(&project_path);
-                    return Err(anyhow::anyhow!("Failed to download template: {}", response.message).into());
+                    return Err(anyhow::anyhow!(
+                        "Failed to download template: {}",
+                        response.message
+                    )
+                    .into());
                 }
                 Err(e) => {
                     error!("Failed to download template: {}", e);
@@ -363,7 +365,8 @@ async fn main_impl() -> Result<()> {
             job,
             failed,
         } => {
-            cli::jobs::handle_job_command(rpc_url, instance, job, failed, chain_override.clone()).await
+            cli::jobs::handle_job_command(rpc_url, instance, job, failed, chain_override.clone())
+                .await
         }
 
         Commands::Jobs {
@@ -460,54 +463,7 @@ async fn main_impl() -> Result<()> {
         }
 
         Commands::Config { endpoint, json } => {
-            // Initialize minimal logging
-            tracing_subscriber::registry()
-                .with(tracing_subscriber::EnvFilter::new("info"))
-                .with(tracing_subscriber::fmt::layer())
-                .init();
-
-            // Determine which chain to fetch config for
-            let chain = chain_override
-                .or_else(|| std::env::var("SUI_CHAIN").ok())
-                .unwrap_or_else(|| "testnet".to_string());
-
-            println!("📥 Fetching configuration for chain: {}", chain);
-
-            // Fetch configuration
-            let config_map = if let Some(endpoint) = endpoint.as_ref() {
-                config::fetch_config_with_endpoint(&chain, Some(endpoint)).await
-            } else {
-                config::fetch_config(&chain).await
-            };
-
-            match config_map {
-                Ok(config) => {
-                    if json {
-                        // Output as JSON
-                        match serde_json::to_string_pretty(&config) {
-                            Ok(json_str) => println!("{}", json_str),
-                            Err(e) => {
-                                error!("Failed to serialize config to JSON: {}", e);
-                                return Err(anyhow::anyhow!(
-                                    "Failed to serialize config to JSON: {}",
-                                    e
-                                )
-                                .into());
-                            }
-                        }
-                    } else {
-                        // Use the display function from config module
-                        config::fetch_and_display_config(&chain)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("Failed to display config: {}", e))?;
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    error!("Failed to fetch configuration: {}", e);
-                    Err(anyhow::anyhow!("Failed to fetch configuration: {}", e).into())
-                }
-            }
+            cli::config_cmd::handle_config_command(endpoint, json, chain_override).await
         }
 
         Commands::Faucet { subcommand } => cli::faucet::handle_faucet_command(subcommand).await,
@@ -529,6 +485,6 @@ async fn main_impl() -> Result<()> {
             subcommand,
         } => cli::registry::handle_registry_command(rpc_url, subcommand, chain_override).await,
 
-        Commands::Secrets { subcommand } => cli::secrets::handle_secrets_command(subcommand).await
+        Commands::Secrets { subcommand } => cli::secrets::handle_secrets_command(subcommand).await,
     }
 }
