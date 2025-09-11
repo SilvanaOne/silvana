@@ -5,6 +5,7 @@ pub mod object;
 pub mod instance;
 pub mod jobs;
 pub mod block;
+pub mod proofs;
 pub mod faucet;
 pub mod balance;
 pub mod secrets;
