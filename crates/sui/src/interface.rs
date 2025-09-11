@@ -322,7 +322,7 @@ impl SilvanaSuiInterface {
                     tx_digest
                 );
 
-                // Parse the MulticallExecutedEvent from transaction events
+                // Parse all MulticallExecutedEvents from transaction events (one per app instance)
                 let mut result = crate::types::MulticallResult {
                     tx_digest: tx_digest.clone(),
                     start_jobs: vec![],
@@ -335,6 +335,8 @@ impl SilvanaSuiInterface {
                     terminate_results: vec![],
                     timestamp: 0,
                 };
+                
+                let mut event_count = 0;
 
                 // Fetch and analyze transaction events
                 if let Ok(events_json) =
@@ -345,7 +347,8 @@ impl SilvanaSuiInterface {
                         for event in events_array {
                             if let Some(event_type) = event["event_type"].as_str() {
                                 if event_type.contains("MulticallExecutedEvent") {
-                                    debug!("Found MulticallExecutedEvent in transaction");
+                                    event_count += 1;
+                                    debug!("Found MulticallExecutedEvent #{} in transaction", event_count);
 
                                     // Parse the event data - could be in parsed_json, contents, or direct fields
                                     let event_data = if event["parsed_json"].is_object()
@@ -365,9 +368,9 @@ impl SilvanaSuiInterface {
                                         continue;
                                     };
 
-                                    // Parse start jobs and results
+                                    // Parse start jobs and results (append to existing)
                                     if let Some(start_jobs) = event_data["start_jobs"].as_array() {
-                                        result.start_jobs = start_jobs
+                                        let new_start_jobs: Vec<u64> = start_jobs
                                             .iter()
                                             .filter_map(|v| {
                                                 v.as_str()
@@ -375,22 +378,24 @@ impl SilvanaSuiInterface {
                                                     .or_else(|| v.as_u64())
                                             })
                                             .collect();
+                                        result.start_jobs.extend(new_start_jobs);
                                     }
 
                                     if let Some(start_results) =
                                         event_data["start_results"].as_array()
                                     {
-                                        result.start_results = start_results
+                                        let new_start_results: Vec<bool> = start_results
                                             .iter()
                                             .filter_map(|v| v.as_bool())
                                             .collect();
+                                        result.start_results.extend(new_start_results);
                                     }
 
-                                    // Parse complete jobs and results
+                                    // Parse complete jobs and results (append to existing)
                                     if let Some(complete_jobs) =
                                         event_data["complete_jobs"].as_array()
                                     {
-                                        result.complete_jobs = complete_jobs
+                                        let new_complete_jobs: Vec<u64> = complete_jobs
                                             .iter()
                                             .filter_map(|v| {
                                                 v.as_str()
@@ -398,20 +403,22 @@ impl SilvanaSuiInterface {
                                                     .or_else(|| v.as_u64())
                                             })
                                             .collect();
+                                        result.complete_jobs.extend(new_complete_jobs);
                                     }
 
                                     if let Some(complete_results) =
                                         event_data["complete_results"].as_array()
                                     {
-                                        result.complete_results = complete_results
+                                        let new_complete_results: Vec<bool> = complete_results
                                             .iter()
                                             .filter_map(|v| v.as_bool())
                                             .collect();
+                                        result.complete_results.extend(new_complete_results);
                                     }
 
-                                    // Parse fail jobs and results
+                                    // Parse fail jobs and results (append to existing)
                                     if let Some(fail_jobs) = event_data["fail_jobs"].as_array() {
-                                        result.fail_jobs = fail_jobs
+                                        let new_fail_jobs: Vec<u64> = fail_jobs
                                             .iter()
                                             .filter_map(|v| {
                                                 v.as_str()
@@ -419,22 +426,24 @@ impl SilvanaSuiInterface {
                                                     .or_else(|| v.as_u64())
                                             })
                                             .collect();
+                                        result.fail_jobs.extend(new_fail_jobs);
                                     }
 
                                     if let Some(fail_results) =
                                         event_data["fail_results"].as_array()
                                     {
-                                        result.fail_results = fail_results
+                                        let new_fail_results: Vec<bool> = fail_results
                                             .iter()
                                             .filter_map(|v| v.as_bool())
                                             .collect();
+                                        result.fail_results.extend(new_fail_results);
                                     }
 
-                                    // Parse terminate jobs and results
+                                    // Parse terminate jobs and results (append to existing)
                                     if let Some(terminate_jobs) =
                                         event_data["terminate_jobs"].as_array()
                                     {
-                                        result.terminate_jobs = terminate_jobs
+                                        let new_terminate_jobs: Vec<u64> = terminate_jobs
                                             .iter()
                                             .filter_map(|v| {
                                                 v.as_str()
@@ -442,35 +451,55 @@ impl SilvanaSuiInterface {
                                                     .or_else(|| v.as_u64())
                                             })
                                             .collect();
+                                        result.terminate_jobs.extend(new_terminate_jobs);
                                     }
 
                                     if let Some(terminate_results) =
                                         event_data["terminate_results"].as_array()
                                     {
-                                        result.terminate_results = terminate_results
+                                        let new_terminate_results: Vec<bool> = terminate_results
                                             .iter()
                                             .filter_map(|v| v.as_bool())
                                             .collect();
+                                        result.terminate_results.extend(new_terminate_results);
                                     }
 
-                                    // Parse timestamp
-                                    result.timestamp = event_data["timestamp"]
+                                    // Parse timestamp (use the latest one)
+                                    let event_timestamp = event_data["timestamp"]
                                         .as_str()
                                         .and_then(|s| s.parse::<u64>().ok())
                                         .or_else(|| event_data["timestamp"].as_u64())
                                         .unwrap_or(0);
+                                    if event_timestamp > result.timestamp {
+                                        result.timestamp = event_timestamp;
+                                    }
 
                                     debug!(
-                                        "Parsed MulticallExecutedEvent: {} starts, {} completes, {} fails, {} terminates",
-                                        result.start_jobs.len(),
-                                        result.complete_jobs.len(),
-                                        result.fail_jobs.len(),
-                                        result.terminate_jobs.len()
+                                        "Event #{} parsed - starts: {}, completes: {}, fails: {}, terminates: {}",
+                                        event_count,
+                                        event_data["start_jobs"].as_array().map(|a| a.len()).unwrap_or(0),
+                                        event_data["complete_jobs"].as_array().map(|a| a.len()).unwrap_or(0),
+                                        event_data["fail_jobs"].as_array().map(|a| a.len()).unwrap_or(0),
+                                        event_data["terminate_jobs"].as_array().map(|a| a.len()).unwrap_or(0)
                                     );
-
-                                    break;
+                                    
+                                    // Continue processing other events instead of breaking
                                 }
                             }
+                        }
+                        
+                        // Log total accumulated results from all MulticallExecutedEvents
+                        if event_count > 0 {
+                            info!(
+                                "Processed {} MulticallExecutedEvent(s) - Total: {} starts, {} completes, {} fails, {} terminates",
+                                event_count,
+                                result.start_jobs.len(),
+                                result.complete_jobs.len(),
+                                result.fail_jobs.len(),
+                                result.terminate_jobs.len()
+                            );
+                        } else {
+                            warn!("No MulticallExecutedEvent found in transaction {}", tx_digest);
                         }
 
                         // Also check for failure events and log them
