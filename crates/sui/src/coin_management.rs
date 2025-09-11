@@ -101,8 +101,8 @@ pub async fn split_gas_coins(
 ) -> Result<String> {
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let sender = shared_state.get_sui_address();
-    let secret_key = shared_state.get_sui_private_key();
+    let sender = shared_state.get_sui_address_required();
+    let secret_key = shared_state.get_sui_private_key_required();
 
     info!(
         "Splitting coin {} (balance: {} MIST) into {} coins of {} MIST each",
@@ -276,7 +276,7 @@ async fn wait_for_split_transaction(digest: &str) -> Result<()> {
 /// Check and split coins if needed to maintain the coin pool
 pub async fn ensure_gas_coin_pool() -> Result<()> {
     let shared_state = SharedSuiState::get_instance();
-    let sender = shared_state.get_sui_address();
+    let sender = shared_state.get_sui_address_required();
     let config = CoinPoolConfig::default();
     let mut gas_info = get_gas_coins_info(&config, sender).await?;
 
@@ -396,8 +396,8 @@ pub async fn merge_gas_coins(coins_to_merge: Vec<CoinInfo>) -> Result<String> {
 
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let sender = shared_state.get_sui_address();
-    let secret_key = shared_state.get_sui_private_key();
+    let sender = shared_state.get_sui_address_required();
+    let secret_key = shared_state.get_sui_private_key_required();
 
     // Calculate total balance that will be merged
     let total_balance: u64 = coins_to_merge.iter().map(|c| c.balance).sum();
@@ -548,7 +548,7 @@ pub async fn initialize_gas_coin_pool() -> Result<()> {
     info!("Initializing gas coin pool...");
 
     let shared_state = SharedSuiState::get_instance();
-    let sender = shared_state.get_sui_address();
+    let sender = shared_state.get_sui_address_required();
 
     // Check current state
     let config = CoinPoolConfig::default();

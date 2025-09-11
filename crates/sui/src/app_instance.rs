@@ -129,7 +129,7 @@ pub(crate) async fn multicall_job_operations_tx(
     }
 
     let shared_state = SharedSuiState::get_instance();
-    let package_id = shared_state.get_coordination_package_id();
+    let package_id = shared_state.get_coordination_package_id_required();
 
     let app_instances: Vec<String> = operations
         .iter()
@@ -1055,7 +1055,7 @@ where
     ) -> Vec<sui_sdk_types::Argument>,
 {
     let shared_state = SharedSuiState::get_instance();
-    let package_id = shared_state.get_coordination_package_id();
+    let package_id = shared_state.get_coordination_package_id_required();
     // Call the batch version with a single operation
     execute_transaction_block(
         package_id,

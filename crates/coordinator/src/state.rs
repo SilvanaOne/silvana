@@ -205,11 +205,11 @@ impl SharedState {
         }
     }
 
-    /// Get the coordinator ID
-    pub fn get_coordinator_id(&self) -> String {
+    /// Get the coordinator ID (returns None if not available for read-only operations)
+    pub fn get_coordinator_id(&self) -> Option<String> {
         sui::SharedSuiState::get_instance()
             .get_coordinator_id()
-            .clone()
+            .map(|s| s.clone())
     }
 
     /// Get the chain

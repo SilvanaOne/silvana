@@ -23,7 +23,7 @@ pub struct AgentJob {
 }
 
 impl AgentJob {
-    pub fn new(job: Job, session_id: String, state: &SharedState, memory_requirement: u64) -> Self {
+    pub fn new(job: Job, session_id: String, state: &SharedState, memory_requirement: u64) -> Result<Self, String> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -37,9 +37,9 @@ impl AgentJob {
             &job.app_instance,
             job.job_sequence,
             timestamp,
-        );
+        ).ok_or_else(|| format!("Cannot create agent job {}: coordinator_id not available", job.job_sequence))?;
 
-        Self {
+        Ok(Self {
             session_id: session_id.clone(),
             job_id,
             job_sequence: job.job_sequence,
@@ -49,7 +49,7 @@ impl AgentJob {
             agent_method: job.agent_method.clone(),
             job,
             memory_requirement,
-        }
+        })
     }
 }
 

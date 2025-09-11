@@ -318,8 +318,8 @@ where
 
     // Get shared state and client
     let shared_state = SharedSuiState::get_instance();
-    let sender = shared_state.get_sui_address();
-    let sk = shared_state.get_sui_private_key().clone();
+    let sender = shared_state.get_sui_address_required();
+    let sk = shared_state.get_sui_private_key_required().clone();
     let clock_object_id = get_clock_object_id();
 
     debug!("Package ID: {}", package_id);

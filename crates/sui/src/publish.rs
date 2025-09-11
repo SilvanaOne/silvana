@@ -305,7 +305,7 @@ pub async fn publish_move_package(
 
     // Get the shared state to access the package ID
     let shared_state = SharedSuiState::get_instance();
-    let package_id = shared_state.get_coordination_package_id();
+    let package_id = shared_state.get_coordination_package_id_required();
 
     // Create publish options from the build result
     let publish_options = PublishOptions {

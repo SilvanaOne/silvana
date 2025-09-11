@@ -475,10 +475,10 @@ async fn main_impl() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Resolve and initialize Sui connection
+            // Resolve and initialize Sui connection (read-only mode)
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url)
+            sui::SharedSuiState::initialize_read_only(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
 
@@ -697,10 +697,10 @@ async fn main_impl() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Resolve and initialize Sui connection
+            // Resolve and initialize Sui connection (read-only mode)
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url)
+            sui::SharedSuiState::initialize_read_only(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
 
@@ -732,10 +732,10 @@ async fn main_impl() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Resolve and initialize Sui connection
+            // Resolve and initialize Sui connection (read-only mode)
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url)
+            sui::SharedSuiState::initialize_read_only(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
 
@@ -918,10 +918,10 @@ async fn main_impl() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Resolve and initialize Sui connection
+            // Resolve and initialize Sui connection (read-only mode)
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url)
+            sui::SharedSuiState::initialize_read_only(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
 
@@ -1040,10 +1040,10 @@ async fn main_impl() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Resolve and initialize Sui connection
+            // Resolve and initialize Sui connection (read-only mode)
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url)
+            sui::SharedSuiState::initialize_read_only(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
 
@@ -1192,10 +1192,10 @@ async fn main_impl() -> Result<()> {
                 .with(tracing_subscriber::fmt::layer())
                 .init();
 
-            // Resolve and initialize Sui connection
+            // Resolve and initialize Sui connection (read-only mode)
             let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
                 .map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url)
+            sui::SharedSuiState::initialize_read_only(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
 

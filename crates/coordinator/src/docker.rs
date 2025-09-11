@@ -27,6 +27,16 @@ pub async fn run_docker_container_task(
 ) {
     let job_start = Instant::now();
 
+    // Early check: coordinator_id must be available for running jobs
+    if state.get_coordinator_id().is_none() {
+        error!(
+            "Cannot run Docker container for job {}: coordinator_id not available. \
+             The coordinator must be properly initialized with SUI_ADDRESS.",
+            job.job_sequence
+        );
+        return;
+    }
+
     debug!(
         "🐳 Running Docker task: dev={}, agent={}/{}, job_seq={}, app={}",
         job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
@@ -177,12 +187,21 @@ pub async fn run_docker_container_task(
 
     // Add job to agent database as a session-specific job for Docker retrieval
     let memory_requirement = (agent_method.min_memory_gb as u64) * 1024 * 1024 * 1024;
-    let agent_job = AgentJob::new(
+    let agent_job = match AgentJob::new(
         job.clone(),
         docker_session.session_id.clone(),
         &state,
         memory_requirement,
-    );
+    ) {
+        Ok(job) => job,
+        Err(e) => {
+            error!(
+                "Failed to create agent job for job {}: {}",
+                job.job_sequence, e
+            );
+            return;
+        }
+    };
     let job_id = agent_job.job_id.clone();
     // Use add_session_job to link this job to the Docker session
     state.get_agent_job_db().add_session_job(agent_job).await;
@@ -259,9 +278,13 @@ pub async fn run_docker_container_task(
     // Configure the Docker container with memory limits
     let mut env_vars = HashMap::new();
     env_vars.insert("CHAIN".to_string(), state.get_chain().clone());
+    // We already checked coordinator_id exists at the beginning of the function
     env_vars.insert(
         "COORDINATOR_ID".to_string(),
-        state.get_coordinator_id().clone(),
+        state.get_coordinator_id().unwrap_or_else(|| {
+            error!("Unexpected: coordinator_id not available after check");
+            "error".to_string()
+        }),
     );
     env_vars.insert("SESSION_ID".to_string(), docker_session.session_id.clone());
     env_vars.insert(

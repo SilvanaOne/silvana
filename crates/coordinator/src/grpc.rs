@@ -223,12 +223,24 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
                     // Create AgentJob and add it to agent database
-                    let agent_job = crate::agent::AgentJob::new(
+                    let agent_job = match crate::agent::AgentJob::new(
                         pending_job.clone(),
                         req.session_id.clone(),
                         &self.state,
                         started_job.memory_requirement,
-                    );
+                    ) {
+                        Ok(job) => job,
+                        Err(e) => {
+                            error!(
+                                "Failed to create agent job for job {}: {}",
+                                pending_job.job_sequence, e
+                            );
+                            return Err(Status::internal(format!(
+                                "Failed to create agent job: {}",
+                                e
+                            )));
+                        }
+                    };
 
                     // Store in agent database
                     self.state

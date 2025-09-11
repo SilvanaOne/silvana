@@ -29,7 +29,7 @@ pub async fn get_balance_info(address_str: Option<&str>) -> Result<BalanceInfo> 
         (addr, addr_str.to_string())
     } else {
         // Use the default address from SharedSuiState
-        let addr = shared_state.get_sui_address();
+        let addr = shared_state.get_sui_address_required();
         (addr, addr.to_string())
     };
     
@@ -55,7 +55,7 @@ pub async fn get_balance_info(address_str: Option<&str>) -> Result<BalanceInfo> 
 pub async fn get_total_balance_sui() -> Result<f64> {
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let address = shared_state.get_sui_address();
+    let address = shared_state.get_sui_address_required();
     
     let coins = list_coins(&mut client, address).await?;
     let total_balance: u64 = coins.iter().map(|c| c.balance).sum();
@@ -81,7 +81,7 @@ pub async fn get_balance_in_sui(address_str: &str) -> Result<f64> {
 /// Get the current address
 pub fn get_current_address() -> String {
     let shared_state = SharedSuiState::get_instance();
-    shared_state.get_sui_address().to_string()
+    shared_state.get_sui_address_required().to_string()
 }
 
 /// Get the current network name from SUI_CHAIN env var
