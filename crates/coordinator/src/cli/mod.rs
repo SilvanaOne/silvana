@@ -8,6 +8,7 @@ pub mod block;
 pub mod faucet;
 pub mod balance;
 pub mod secrets;
+pub mod registry;
 
 // Re-export all items from commands module
 pub use commands::*;
