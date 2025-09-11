@@ -538,9 +538,9 @@ pub async fn start_coordinator(
         }
     }
 
-    // Phase 4: Cancel all background tasks
-    info!("  3️⃣ Stopping background tasks...");
-    grpc_handle.abort();
+    // Phase 4: Cancel non-critical background tasks (but keep gRPC running for containers)
+    info!("  3️⃣ Stopping non-critical background tasks...");
+    // Don't abort gRPC yet - containers need it to communicate
     reconciliation_handle.abort();
     block_creation_handle.abort();
     proof_analysis_handle.abort();
@@ -550,6 +550,7 @@ pub async fn start_coordinator(
     // 1. Job searcher stops immediately (no new jobs)
     // 2. Docker processor processes all buffered jobs and waits for containers
     // 3. Multicall processor continues until docker is done, then processes final operations
+    // 4. gRPC server stays running until Docker containers complete
     
     // Job searcher should stop immediately
     if !job_searcher_handle.is_finished() {
@@ -608,6 +609,11 @@ pub async fn start_coordinator(
         warn!("  ⚠️ Multicall processor timeout - forcing shutdown");
         multicall_handle.abort();
     }
+
+    // Now that Docker containers are done, we can safely stop the gRPC server
+    info!("  ⏳ Stopping gRPC server...");
+    grpc_handle.abort();
+    info!("  ✅ gRPC server stopped");
 
     info!("✅ Graceful shutdown complete");
     Ok(())
