@@ -136,7 +136,7 @@ pub enum Commands {
         rpc_url: Option<String>,
 
         /// Private key for signing transactions (optional, defaults to SUI_SECRET_KEY env var)
-        #[arg(long, env = "SUI_PRIVATE_KEY")]
+        #[arg(long, env = "SUI_SECRET_KEY")]
         private_key: Option<String>,
 
         #[command(subcommand)]
