@@ -399,10 +399,42 @@ where
         let (gas_coin, new_gas_guard) = match fetch_coin(&mut client, sender, gas_budget).await? {
             Some((coin, guard)) => (coin, guard),
             None => {
-                error!("No available coins with sufficient balance for gas");
-                return Err(anyhow!(
-                    "No available coins with sufficient balance for gas"
-                ));
+                warn!("No available coins with sufficient balance for gas, attempting to request from faucet...");
+                
+                // Request fixed amount from faucet
+                match crate::faucet::ensure_sufficient_balance(crate::constants::FAUCET_REQUEST_AMOUNT_SUI).await {
+                    Ok(true) => {
+                        info!("Faucet tokens requested successfully ({} SUI), retrying coin fetch...", 
+                            crate::constants::FAUCET_REQUEST_AMOUNT_SUI);
+                        // Wait a bit more for tokens to be available
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        
+                        // Try to fetch coin again after faucet
+                        match fetch_coin(&mut client, sender, gas_budget).await? {
+                            Some((coin, guard)) => (coin, guard),
+                            None => {
+                                error!("Still no available coins after faucet request");
+                                return Err(anyhow!(
+                                    "No available coins with sufficient balance for gas even after faucet request"
+                                ));
+                            }
+                        }
+                    }
+                    Ok(false) => {
+                        // Faucet wasn't needed (shouldn't happen here but handle it)
+                        error!("No available coins but faucet claims sufficient balance exists");
+                        return Err(anyhow!(
+                            "No available coins with sufficient balance for gas"
+                        ));
+                    }
+                    Err(e) => {
+                        error!("Failed to request faucet tokens: {}", e);
+                        return Err(anyhow!(
+                            "No available coins with sufficient balance for gas and faucet request failed: {}",
+                            e
+                        ));
+                    }
+                }
             }
         };
         gas_guard = Some(new_gas_guard);

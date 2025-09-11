@@ -14,3 +14,8 @@ pub fn get_max_operations_per_multicall() -> usize {
 /// Timeout for object locks (in seconds).
 /// Maximum time to hold locks on shared objects like app_instance.
 pub const OBJECT_LOCK_TIMEOUT_SECS: u64 = 120; // 2 minutes
+
+// Faucet configuration
+
+/// Amount of SUI to request from faucet when no coins are available for gas
+pub const FAUCET_REQUEST_AMOUNT_SUI: f64 = 10.0;
