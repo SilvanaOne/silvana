@@ -38,6 +38,93 @@ use crate::cli::{
 };
 use crate::error::{CoordinatorError, Result};
 use anyhow::anyhow;
+use std::collections::HashMap;
+
+// Current version from Cargo.toml
+const SILVANA_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Helper function to fetch config and inject environment variables for all commands
+async fn fetch_and_inject_config(chain: &str) -> HashMap<String, String> {
+    //println!("🔄 Fetching configuration for chain: {}", chain);
+    
+    match config::fetch_config(chain).await {
+        Ok(config_map) => {
+            // println!(
+            //     "✅ Successfully fetched {} configuration items",
+            //     config_map.len()
+            // );
+
+            // Check for new version
+            if let Some(last_version) = config_map.get("LAST_VERSION") {
+                check_version_update(last_version);
+            }
+
+            // Inject configuration as environment variables (without overriding existing ones)
+            //let mut injected_count = 0;
+            for (key, value) in config_map.iter() {
+                // Check if the environment variable already exists
+                if std::env::var(key).is_err() {
+                    // Setting environment variables is safe in this context
+                    // as we're doing it early in startup before any threads are spawned
+                    unsafe {
+                        std::env::set_var(key, value);
+                    }
+                    //injected_count += 1;
+                    //println!("  ✓ Set env var: {}", key);
+                } else {
+                    //println!("  ⏩ Skipped (already set): {}", key);
+                }
+            }
+
+            //println!("📋 Injected {} new environment variables", injected_count);
+            config_map
+        }
+        Err(e) => {
+            // Log the error but continue - config fetching is not critical
+            eprintln!("⚠️  Failed to fetch configuration from RPC server: {}", e);
+            eprintln!("   Continuing with local environment variables only");
+            HashMap::new()
+        }
+    }
+}
+
+/// Check if a new version is available and print upgrade message
+fn check_version_update(last_version: &str) {
+    // Parse versions for comparison
+    let current_parts: Vec<u32> = SILVANA_VERSION
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let last_parts: Vec<u32> = last_version
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    // Compare versions (major, minor, patch)
+    let mut newer_available = false;
+    for i in 0..3 {
+        let current = current_parts.get(i).unwrap_or(&0);
+        let last = last_parts.get(i).unwrap_or(&0);
+        
+        if last > current {
+            newer_available = true;
+            break;
+        } else if last < current {
+            break;
+        }
+    }
+
+    if newer_available {
+        println!();
+        println!("🆕 New version available!");
+        println!("   Current version: {}", SILVANA_VERSION);
+        println!("   Latest version:  {}", last_version);
+        println!();
+        println!("   Please upgrade to the latest version:");
+        println!("   curl -sSL https://raw.githubusercontent.com/SilvanaOne/silvana/main/install.sh | bash");
+        println!();
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -73,6 +160,15 @@ async fn main_impl() -> Result<()> {
         }
     }
 
+    // Determine the chain for config fetching
+    let chain = chain_override
+        .clone()
+        .or_else(|| std::env::var("SUI_CHAIN").ok())
+        .unwrap_or_else(|| "devnet".to_string());
+
+    // Fetch and inject configuration for all commands
+    let config_map = fetch_and_inject_config(&chain).await;
+
     // Process commands
     match cli.command {
         Commands::Start {
@@ -85,51 +181,12 @@ async fn main_impl() -> Result<()> {
             instance,
             settle,
         } => {
-            // Fetch and inject configuration from RPC server as early as possible
-            let chain = chain_override
-                .clone()
-                .or_else(|| std::env::var("SUI_CHAIN").ok())
-                .unwrap_or_else(|| "devnet".to_string());
-
-            println!("🔄 Fetching configuration for chain: {}", chain);
-
-            match config::fetch_config(&chain).await {
-                Ok(config_map) => {
-                    println!(
-                        "✅ Successfully fetched {} configuration items",
-                        config_map.len()
-                    );
-
-                    // Inject configuration as environment variables (without overriding existing ones)
-                    // Special handling for SILVANA_REGISTRY_PACKAGE: don't override if package_id arg is provided
-                    let mut injected_count = 0;
-                    for (key, value) in config_map.iter() {
-                        // Skip SILVANA_REGISTRY_PACKAGE if package_id arg was provided
-                        if key == "SILVANA_REGISTRY_PACKAGE" && package_id.is_some() {
-                            println!("  ⏩ Skipped SILVANA_REGISTRY_PACKAGE (using --package-id argument)");
-                            continue;
-                        }
-                        
-                        // Check if the environment variable already exists
-                        if std::env::var(key).is_err() {
-                            // Setting environment variables is safe in this context
-                            // as we're doing it early in startup before any threads are spawned
-                            unsafe {
-                                std::env::set_var(key, value);
-                            }
-                            injected_count += 1;
-                            println!("  ✓ Set env var: {}", key);
-                        } else {
-                            println!("  ⏩ Skipped (already set): {}", key);
-                        }
-                    }
-
-                    println!("📋 Injected {} new environment variables", injected_count);
-                }
-                Err(e) => {
-                    // Log the error but continue - config fetching is not critical
-                    eprintln!("⚠️  Failed to fetch configuration from RPC server: {}", e);
-                    eprintln!("   Continuing with local environment variables only");
+            // Config already fetched and injected above
+            // Special handling for SILVANA_REGISTRY_PACKAGE if package_id arg is provided
+            if package_id.is_some() {
+                // Override the environment variable if it was set from config
+                if config_map.contains_key("SILVANA_REGISTRY_PACKAGE") {
+                    println!("  ⏩ Overriding SILVANA_REGISTRY_PACKAGE with --package-id argument");
                 }
             }
 
