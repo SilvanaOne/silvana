@@ -8,8 +8,8 @@ use crate::app_instance::{
     update_state_for_sequence_tx,
 };
 use crate::registry::{
-    add_agent, add_app, add_developer, create_registry, remove_agent, remove_app, remove_developer,
-    update_agent, update_app, update_developer, CreateRegistryResult,
+    CreateRegistryResult, add_agent, add_app, add_developer, create_registry, remove_agent,
+    remove_app, remove_developer, update_agent, update_app, update_developer,
 };
 use tracing::{debug, error, info, warn};
 
@@ -335,7 +335,7 @@ impl SilvanaSuiInterface {
                     terminate_results: vec![],
                     timestamp: 0,
                 };
-                
+
                 let mut event_count = 0;
 
                 // Fetch and analyze transaction events
@@ -348,7 +348,10 @@ impl SilvanaSuiInterface {
                             if let Some(event_type) = event["event_type"].as_str() {
                                 if event_type.contains("MulticallExecutedEvent") {
                                     event_count += 1;
-                                    debug!("Found MulticallExecutedEvent #{} in transaction", event_count);
+                                    debug!(
+                                        "Found MulticallExecutedEvent #{} in transaction",
+                                        event_count
+                                    );
 
                                     // Parse the event data - could be in parsed_json, contents, or direct fields
                                     let event_data = if event["parsed_json"].is_object()
@@ -477,17 +480,29 @@ impl SilvanaSuiInterface {
                                     debug!(
                                         "Event #{} parsed - starts: {}, completes: {}, fails: {}, terminates: {}",
                                         event_count,
-                                        event_data["start_jobs"].as_array().map(|a| a.len()).unwrap_or(0),
-                                        event_data["complete_jobs"].as_array().map(|a| a.len()).unwrap_or(0),
-                                        event_data["fail_jobs"].as_array().map(|a| a.len()).unwrap_or(0),
-                                        event_data["terminate_jobs"].as_array().map(|a| a.len()).unwrap_or(0)
+                                        event_data["start_jobs"]
+                                            .as_array()
+                                            .map(|a| a.len())
+                                            .unwrap_or(0),
+                                        event_data["complete_jobs"]
+                                            .as_array()
+                                            .map(|a| a.len())
+                                            .unwrap_or(0),
+                                        event_data["fail_jobs"]
+                                            .as_array()
+                                            .map(|a| a.len())
+                                            .unwrap_or(0),
+                                        event_data["terminate_jobs"]
+                                            .as_array()
+                                            .map(|a| a.len())
+                                            .unwrap_or(0)
                                     );
-                                    
+
                                     // Continue processing other events instead of breaking
                                 }
                             }
                         }
-                        
+
                         // Log total accumulated results from all MulticallExecutedEvents
                         if event_count > 0 {
                             info!(
@@ -499,7 +514,10 @@ impl SilvanaSuiInterface {
                                 result.terminate_jobs.len()
                             );
                         } else {
-                            warn!("No MulticallExecutedEvent found in transaction {}", tx_digest);
+                            info!(
+                                "No MulticallExecutedEvent found in transaction {}",
+                                tx_digest
+                            );
                         }
 
                         // Also check for failure events and log them
@@ -1198,7 +1216,7 @@ impl SilvanaSuiInterface {
         package_id: Option<String>,
     ) -> Result<CreateRegistryResult, String> {
         debug!("Creating Silvana registry '{}'", name);
-        
+
         match create_registry(name.clone(), package_id).await {
             Ok(result) => {
                 info!(
@@ -1225,7 +1243,7 @@ impl SilvanaSuiInterface {
         site: Option<String>,
     ) -> Result<String, String> {
         debug!("Adding developer '{}' to registry '{}'", name, registry_id);
-        
+
         match add_developer(registry_id, name.clone(), github, image, description, site).await {
             Ok(tx_digest) => {
                 info!(
@@ -1235,7 +1253,10 @@ impl SilvanaSuiInterface {
                 Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to add developer '{}' to registry '{}': {}", name, registry_id, e);
+                error!(
+                    "Failed to add developer '{}' to registry '{}': {}",
+                    name, registry_id, e
+                );
                 Err(e.to_string())
             }
         }
@@ -1251,8 +1272,11 @@ impl SilvanaSuiInterface {
         description: Option<String>,
         site: Option<String>,
     ) -> Result<String, String> {
-        debug!("Updating developer '{}' in registry '{}'", name, registry_id);
-        
+        debug!(
+            "Updating developer '{}' in registry '{}'",
+            name, registry_id
+        );
+
         match update_developer(registry_id, name.clone(), github, image, description, site).await {
             Ok(tx_digest) => {
                 info!(
@@ -1262,7 +1286,10 @@ impl SilvanaSuiInterface {
                 Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to update developer '{}' in registry '{}': {}", name, registry_id, e);
+                error!(
+                    "Failed to update developer '{}' in registry '{}': {}",
+                    name, registry_id, e
+                );
                 Err(e.to_string())
             }
         }
@@ -1275,8 +1302,11 @@ impl SilvanaSuiInterface {
         name: String,
         agent_names: Vec<String>,
     ) -> Result<String, String> {
-        debug!("Removing developer '{}' from registry '{}'", name, registry_id);
-        
+        debug!(
+            "Removing developer '{}' from registry '{}'",
+            name, registry_id
+        );
+
         match remove_developer(registry_id, name.clone(), agent_names).await {
             Ok(tx_digest) => {
                 info!(
@@ -1286,7 +1316,10 @@ impl SilvanaSuiInterface {
                 Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to remove developer '{}' from registry '{}': {}", name, registry_id, e);
+                error!(
+                    "Failed to remove developer '{}' from registry '{}': {}",
+                    name, registry_id, e
+                );
                 Err(e.to_string())
             }
         }
@@ -1307,7 +1340,7 @@ impl SilvanaSuiInterface {
             "Adding agent '{}' to developer '{}' in registry '{}'",
             agent_name, developer_name, registry_id
         );
-        
+
         match add_agent(
             registry_id,
             developer_name.clone(),
@@ -1316,7 +1349,9 @@ impl SilvanaSuiInterface {
             description,
             site,
             chains,
-        ).await {
+        )
+        .await
+        {
             Ok(tx_digest) => {
                 info!(
                     "Successfully added agent '{}' to developer '{}' in registry '{}' (tx: {})",
@@ -1349,7 +1384,7 @@ impl SilvanaSuiInterface {
             "Updating agent '{}' for developer '{}' in registry '{}'",
             agent_name, developer_name, registry_id
         );
-        
+
         match update_agent(
             registry_id,
             developer_name.clone(),
@@ -1358,7 +1393,9 @@ impl SilvanaSuiInterface {
             description,
             site,
             chains,
-        ).await {
+        )
+        .await
+        {
             Ok(tx_digest) => {
                 info!(
                     "Successfully updated agent '{}' for developer '{}' in registry '{}' (tx: {})",
@@ -1387,7 +1424,7 @@ impl SilvanaSuiInterface {
             "Removing agent '{}' from developer '{}' in registry '{}'",
             agent_name, developer_name, registry_id
         );
-        
+
         match remove_agent(registry_id, developer_name.clone(), agent_name.clone()).await {
             Ok(tx_digest) => {
                 info!(
@@ -1414,7 +1451,7 @@ impl SilvanaSuiInterface {
         description: Option<String>,
     ) -> Result<String, String> {
         debug!("Adding app '{}' to registry '{}'", name, registry_id);
-        
+
         match add_app(registry_id, name.clone(), description).await {
             Ok(tx_digest) => {
                 info!(
@@ -1424,7 +1461,10 @@ impl SilvanaSuiInterface {
                 Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to add app '{}' to registry '{}': {}", name, registry_id, e);
+                error!(
+                    "Failed to add app '{}' to registry '{}': {}",
+                    name, registry_id, e
+                );
                 Err(e.to_string())
             }
         }
@@ -1438,7 +1478,7 @@ impl SilvanaSuiInterface {
         description: Option<String>,
     ) -> Result<String, String> {
         debug!("Updating app '{}' in registry '{}'", name, registry_id);
-        
+
         match update_app(registry_id, name.clone(), description).await {
             Ok(tx_digest) => {
                 info!(
@@ -1448,7 +1488,10 @@ impl SilvanaSuiInterface {
                 Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to update app '{}' in registry '{}': {}", name, registry_id, e);
+                error!(
+                    "Failed to update app '{}' in registry '{}': {}",
+                    name, registry_id, e
+                );
                 Err(e.to_string())
             }
         }
@@ -1461,7 +1504,7 @@ impl SilvanaSuiInterface {
         name: String,
     ) -> Result<String, String> {
         debug!("Removing app '{}' from registry '{}'", name, registry_id);
-        
+
         match remove_app(registry_id, name.clone()).await {
             Ok(tx_digest) => {
                 info!(
@@ -1471,7 +1514,10 @@ impl SilvanaSuiInterface {
                 Ok(tx_digest)
             }
             Err(e) => {
-                error!("Failed to remove app '{}' from registry '{}': {}", name, registry_id, e);
+                error!(
+                    "Failed to remove app '{}' from registry '{}': {}",
+                    name, registry_id, e
+                );
                 Err(e.to_string())
             }
         }
