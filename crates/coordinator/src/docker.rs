@@ -650,15 +650,40 @@ impl DockerBufferProcessor {
                                 Ok(job) => Ok(job),
                                 Err(e) => {
                                     error!("Failed to fetch job by ID: {}", e);
+                                    // During shutdown, fail the job after logging the error
+                                    if self.state.is_shutting_down() {
+                                        warn!(
+                                            "Failing job {} during shutdown due to fetch error: {}",
+                                            started_job.job_sequence, e
+                                        );
+                                        self.state.add_fail_job_request(
+                                            started_job.app_instance.clone(),
+                                            started_job.job_sequence,
+                                            format!("Failed to fetch job during shutdown: {}", e),
+                                        ).await;
+                                    }
                                     Ok(None)
                                 }
                             }
                         } else {
+                            // No jobs object - job likely doesn't exist
                             Ok(None)
                         }
                     }
                     Err(e) => {
                         error!("Failed to fetch app instance: {}", e);
+                        // During shutdown, fail the job after logging the error
+                        if self.state.is_shutting_down() {
+                            warn!(
+                                "Failing job {} during shutdown due to app instance fetch error: {}",
+                                started_job.job_sequence, e
+                            );
+                            self.state.add_fail_job_request(
+                                started_job.app_instance.clone(),
+                                started_job.job_sequence,
+                                format!("Failed to fetch app instance during shutdown: {}", e),
+                            ).await;
+                        }
                         Ok(None)
                     }
                 };
@@ -803,6 +828,20 @@ impl DockerBufferProcessor {
                         "Buffered job {} from app_instance {} not found in blockchain (may have been deleted or completed)",
                         started_job.job_sequence, started_job.app_instance
                     );
+                    
+                    // During shutdown, fail the job to ensure clean shutdown
+                    if self.state.is_shutting_down() {
+                        warn!(
+                            "Failing job {} during shutdown as it cannot be fetched from blockchain",
+                            started_job.job_sequence
+                        );
+                        self.state.add_fail_job_request(
+                            started_job.app_instance.clone(),
+                            started_job.job_sequence,
+                            "Job could not be fetched during shutdown".to_string(),
+                        ).await;
+                    }
+                    
                     // Job doesn't exist or can't be fetched, don't put it back in buffer
                     // Increment jobs skipped metric
                     if let Some(ref metrics) = self.metrics {
