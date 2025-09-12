@@ -19,3 +19,15 @@ pub const OBJECT_LOCK_TIMEOUT_SECS: u64 = 120; // 2 minutes
 
 /// Amount of SUI to request from faucet when no coins are available for gas
 pub const FAUCET_REQUEST_AMOUNT_SUI: f64 = 10.0;
+
+// Gas budget configuration
+// 1 SUI = 1,000,000,000 MIST
+
+/// Maximum gas budget allowed by Sui network (5 SUI)
+pub const MAX_GAS_BUDGET_MIST: u64 = 5_000_000_000;
+
+/// Minimum gas budget for any transaction (0.05 SUI)
+pub const MIN_GAS_BUDGET: u64 = 50_000_000;
+
+/// Fallback gas budget when simulation fails or no custom budget provided (0.5 SUI)
+pub const FALLBACK_GAS_BUDGET: u64 = 500_000_000;
