@@ -3,7 +3,7 @@ use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get
 use crate::state::SharedSuiState;
 use super::AppInstance;
 use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
-use tracing::{debug, warn};
+use tracing::{debug, warn, info};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
 
@@ -838,7 +838,7 @@ pub async fn fetch_job_by_id(
         }
     }
     
-    warn!("Job {} not found in jobs table {} after checking {} fields", 
+    info!("Job {} not found in jobs table {} after checking {} fields", 
         job_sequence, jobs_table_id, total_fields_checked);
     Ok(None)
 }

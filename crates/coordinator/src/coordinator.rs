@@ -1,9 +1,8 @@
 use crate::config::Config;
 use crate::constants::{
     BALANCE_CHECK_INTERVAL_SECS, GRACEFUL_SHUTDOWN_TIMEOUT_SECS,
-    JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS, PROOF_ANALYSIS_INTERVAL_SECS,
-    RECONCILIATION_INTERVAL_SECS, SHUTDOWN_CLEANUP_DELAY_MS, SHUTDOWN_PROGRESS_INTERVAL_SECS,
-    STARTUP_RECONCILIATION_DELAY_SECS,
+    JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS, PROOF_ANALYSIS_INTERVAL_SECS, RECONCILIATION_INTERVAL_SECS,
+    SHUTDOWN_CLEANUP_DELAY_MS, SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
 };
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
@@ -130,10 +129,13 @@ pub async fn start_coordinator(
             _ = sigint.recv() => {
                 if shutdown_state.is_shutting_down() {
                     // Second Ctrl-C - force shutdown
+                    eprintln!("🛑 Second SIGINT received - forcing immediate shutdown!");
                     error!("🛑 Second SIGINT received - forcing immediate shutdown!");
                     shutdown_state.set_force_shutdown();
                 } else {
                     // First Ctrl-C - graceful shutdown
+                    eprintln!("⚠️  Received SIGINT (Ctrl-C), initiating graceful shutdown...");
+                    eprintln!("    Press Ctrl-C again to force immediate shutdown");
                     warn!("⚠️  Received SIGINT (Ctrl-C), initiating graceful shutdown...");
                     warn!("    Press Ctrl-C again to force immediate shutdown");
                     shutdown_state.set_shutdown();
@@ -143,12 +145,14 @@ pub async fn start_coordinator(
                         let mut sigint2 = signal::unix::signal(signal::unix::SignalKind::interrupt())
                             .expect("Failed to create second SIGINT handler");
                         sigint2.recv().await;
+                        eprintln!("🛑 Second SIGINT received - forcing immediate shutdown!");
                         error!("🛑 Second SIGINT received - forcing immediate shutdown!");
                         force_shutdown_state.set_force_shutdown();
                     });
                 }
             }
             _ = sigterm.recv() => {
+                eprintln!("⚠️  Received SIGTERM (system shutdown/reboot), initiating graceful shutdown...");
                 warn!("⚠️  Received SIGTERM (system shutdown/reboot), initiating graceful shutdown...");
                 shutdown_state.set_shutdown();
             }
@@ -379,7 +383,11 @@ pub async fn start_coordinator(
     let docker_state = state.clone();
     let docker_metrics = metrics.clone();
     let docker_handle = task::spawn(async move {
-        let mut docker_processor = match crate::docker::DockerBufferProcessor::new(docker_state, use_tee, container_timeout) {
+        let mut docker_processor = match crate::docker::DockerBufferProcessor::new(
+            docker_state,
+            use_tee,
+            container_timeout,
+        ) {
             Ok(processor) => processor,
             Err(e) => {
                 error!("Failed to create docker buffer processor: {}", e);
@@ -551,7 +559,7 @@ pub async fn start_coordinator(
     // 2. Docker processor processes all buffered jobs and waits for containers
     // 3. Multicall processor continues until docker is done, then processes final operations
     // 4. gRPC server stays running until Docker containers complete
-    
+
     // Job searcher should stop immediately
     if !job_searcher_handle.is_finished() {
         info!("  ⏳ Waiting for job searcher to stop...");
@@ -562,33 +570,35 @@ pub async fn start_coordinator(
         .await;
         info!("  ✅ Job searcher stopped (no new jobs will be searched)");
     }
-    
+
     // Docker and Multicall processors work together
     // Docker processes buffered jobs and waits for containers
     // Multicall continues processing requests from containers
     let mut docker_done = false;
     let mut multicall_done = false;
     let shutdown_start = tokio::time::Instant::now();
-    
-    while (!docker_done || !multicall_done) && shutdown_start.elapsed().as_secs() < GRACEFUL_SHUTDOWN_TIMEOUT_SECS {
+
+    while (!docker_done || !multicall_done)
+        && shutdown_start.elapsed().as_secs() < GRACEFUL_SHUTDOWN_TIMEOUT_SECS
+    {
         // Check docker status
         if !docker_done && docker_handle.is_finished() {
             docker_done = true;
             info!("  ✅ Docker processor completed all jobs and containers");
         }
-        
+
         // Check multicall status
         if !multicall_done && multicall_handle.is_finished() {
             multicall_done = true;
             info!("  ✅ Multicall processor completed all operations");
         }
-        
+
         // Show progress
         if !docker_done || !multicall_done {
             let buffer_size = state.get_started_jobs_buffer_size().await;
             let current_agents = state.get_current_agent_count().await;
             let pending_ops = state.get_total_operations_count().await;
-            
+
             if shutdown_start.elapsed().as_secs() % 5 == 0 {
                 info!(
                     "  ⏳ Shutdown progress: {} buffered jobs, {} containers, {} pending operations",
@@ -596,10 +606,10 @@ pub async fn start_coordinator(
                 );
             }
         }
-        
+
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    
+
     // Force abort if timeout
     if !docker_done {
         warn!("  ⚠️ Docker processor timeout - forcing shutdown");
@@ -616,5 +626,6 @@ pub async fn start_coordinator(
     info!("  ✅ gRPC server stopped");
 
     info!("✅ Graceful shutdown complete");
+    println!("✅ Graceful shutdown complete");
     Ok(())
 }

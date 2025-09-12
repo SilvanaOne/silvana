@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "devnet".to_string());
 
     // Fetch and inject configuration for all commands
-    let config_map = fetch_and_inject_config(&chain).await;
+    fetch_and_inject_config(&chain).await;
 
     // Process commands
     match cli.command {
@@ -182,7 +182,6 @@ async fn main() -> Result<()> {
                 settle,
                 &chain,
                 chain_override.clone(),
-                &config_map,
             )
             .await
         }

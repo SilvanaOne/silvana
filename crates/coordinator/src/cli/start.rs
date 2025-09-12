@@ -2,7 +2,6 @@ use crate::coordinator;
 use crate::error::{CoordinatorError, Result};
 use crate::example;
 use anyhow::anyhow;
-use std::collections::HashMap;
 use tracing::{info, warn};
 
 pub async fn handle_start_command(
@@ -15,17 +14,8 @@ pub async fn handle_start_command(
     settle: bool,
     chain: &str,
     chain_override: Option<String>,
-    config_map: &HashMap<String, String>,
 ) -> Result<()> {
     // Config already fetched and injected above
-    // Special handling for SILVANA_REGISTRY_PACKAGE if package_id arg is provided
-    if package_id.is_some() {
-        // Override the environment variable if it was set from config
-        if config_map.contains_key("SILVANA_REGISTRY_PACKAGE") {
-            println!("  ⏩ Overriding SILVANA_REGISTRY_PACKAGE with --package-id argument");
-        }
-    }
-
     // Check if SUI_ADDRESS and SUI_SECRET_KEY are set, generate if not
     let env_file_path = std::path::Path::new(".env");
     if std::env::var("SUI_ADDRESS").is_err() || std::env::var("SUI_SECRET_KEY").is_err() {
@@ -63,12 +53,8 @@ pub async fn handle_start_command(
             // Auto-fund on devnet
             if chain == "devnet" {
                 println!("💰 Requesting funds from devnet faucet...");
-                match sui::request_tokens_from_faucet(
-                    "devnet",
-                    &sui_keypair.address,
-                    Some(10.0),
-                )
-                .await
+                match sui::request_tokens_from_faucet("devnet", &sui_keypair.address, Some(10.0))
+                    .await
                 {
                     Ok(tx_digest) => {
                         println!("✅ Faucet request successful!");
@@ -120,16 +106,19 @@ pub async fn handle_start_command(
                 eprintln!("   Please provide it using one of these methods:");
                 eprintln!("   1. Use --package-id argument");
                 eprintln!("   2. Set SILVANA_REGISTRY_PACKAGE environment variable");
-                eprintln!("   3. Ensure it's configured on the RPC server for chain: {}", chain);
+                eprintln!(
+                    "   3. Ensure it's configured on the RPC server for chain: {}",
+                    chain
+                );
                 std::process::exit(1);
             }
         }
     };
 
     // Resolve the RPC URL using the helper from sui crate
-    let rpc_url = sui::resolve_rpc_url(rpc_url, chain_override.clone())
-        .map_err(CoordinatorError::Other)?;
-    
+    let rpc_url =
+        sui::resolve_rpc_url(rpc_url, chain_override.clone()).map_err(CoordinatorError::Other)?;
+
     // Initialize logging with New Relic tracing layer
     monitoring::init_logging_with_newrelic()
         .await
