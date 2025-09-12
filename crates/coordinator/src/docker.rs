@@ -27,6 +27,16 @@ pub async fn run_docker_container_task(
 ) {
     let job_start = Instant::now();
 
+    // Early check: coordinator_id must be available for running jobs
+    if state.get_coordinator_id().is_none() {
+        error!(
+            "Cannot run Docker container for job {}: coordinator_id not available. \
+             The coordinator must be properly initialized with SUI_ADDRESS.",
+            job.job_sequence
+        );
+        return;
+    }
+
     debug!(
         "🐳 Running Docker task: dev={}, agent={}/{}, job_seq={}, app={}",
         job.developer, job.agent, job.agent_method, job.job_sequence, job.app_instance
@@ -177,12 +187,21 @@ pub async fn run_docker_container_task(
 
     // Add job to agent database as a session-specific job for Docker retrieval
     let memory_requirement = (agent_method.min_memory_gb as u64) * 1024 * 1024 * 1024;
-    let agent_job = AgentJob::new(
+    let agent_job = match AgentJob::new(
         job.clone(),
         docker_session.session_id.clone(),
         &state,
         memory_requirement,
-    );
+    ) {
+        Ok(job) => job,
+        Err(e) => {
+            error!(
+                "Failed to create agent job for job {}: {}",
+                job.job_sequence, e
+            );
+            return;
+        }
+    };
     let job_id = agent_job.job_id.clone();
     // Use add_session_job to link this job to the Docker session
     state.get_agent_job_db().add_session_job(agent_job).await;
@@ -259,9 +278,13 @@ pub async fn run_docker_container_task(
     // Configure the Docker container with memory limits
     let mut env_vars = HashMap::new();
     env_vars.insert("CHAIN".to_string(), state.get_chain().clone());
+    // We already checked coordinator_id exists at the beginning of the function
     env_vars.insert(
         "COORDINATOR_ID".to_string(),
-        state.get_coordinator_id().clone(),
+        state.get_coordinator_id().unwrap_or_else(|| {
+            error!("Unexpected: coordinator_id not available after check");
+            "error".to_string()
+        }),
     );
     env_vars.insert("SESSION_ID".to_string(), docker_session.session_id.clone());
     env_vars.insert(
@@ -627,15 +650,40 @@ impl DockerBufferProcessor {
                                 Ok(job) => Ok(job),
                                 Err(e) => {
                                     error!("Failed to fetch job by ID: {}", e);
+                                    // During shutdown, fail the job after logging the error
+                                    if self.state.is_shutting_down() {
+                                        warn!(
+                                            "Failing job {} during shutdown due to fetch error: {}",
+                                            started_job.job_sequence, e
+                                        );
+                                        self.state.add_fail_job_request(
+                                            started_job.app_instance.clone(),
+                                            started_job.job_sequence,
+                                            format!("Failed to fetch job during shutdown: {}", e),
+                                        ).await;
+                                    }
                                     Ok(None)
                                 }
                             }
                         } else {
+                            // No jobs object - job likely doesn't exist
                             Ok(None)
                         }
                     }
                     Err(e) => {
                         error!("Failed to fetch app instance: {}", e);
+                        // During shutdown, fail the job after logging the error
+                        if self.state.is_shutting_down() {
+                            warn!(
+                                "Failing job {} during shutdown due to app instance fetch error: {}",
+                                started_job.job_sequence, e
+                            );
+                            self.state.add_fail_job_request(
+                                started_job.app_instance.clone(),
+                                started_job.job_sequence,
+                                format!("Failed to fetch app instance during shutdown: {}", e),
+                            ).await;
+                        }
                         Ok(None)
                     }
                 };
@@ -676,10 +724,22 @@ impl DockerBufferProcessor {
                                 "Failed to fetch agent method for buffered job {}: {}",
                                 job.job_sequence, e
                             );
-                            // Increment agent method fetch failures metric
+                            
+                            // Return job to buffer for retry on any error
+                            self.state.add_started_jobs(vec![started_job]).await;
+                            info!(
+                                "Returned job {} to buffer due to agent method fetch error",
+                                job.job_sequence
+                            );
+                            
+                            // Increment metrics
                             if let Some(ref metrics) = self.metrics {
                                 metrics.increment_docker_agent_method_fetch_failures();
+                                metrics.increment_docker_jobs_returned_to_buffer();
                             }
+                            
+                            // Wait before retrying
+                            sleep(Duration::from_secs(5)).await;
                             continue;
                         }
                     };
@@ -768,6 +828,20 @@ impl DockerBufferProcessor {
                         "Buffered job {} from app_instance {} not found in blockchain (may have been deleted or completed)",
                         started_job.job_sequence, started_job.app_instance
                     );
+                    
+                    // During shutdown, fail the job to ensure clean shutdown
+                    if self.state.is_shutting_down() {
+                        warn!(
+                            "Failing job {} during shutdown as it cannot be fetched from blockchain",
+                            started_job.job_sequence
+                        );
+                        self.state.add_fail_job_request(
+                            started_job.app_instance.clone(),
+                            started_job.job_sequence,
+                            "Job could not be fetched during shutdown".to_string(),
+                        ).await;
+                    }
+                    
                     // Job doesn't exist or can't be fetched, don't put it back in buffer
                     // Increment jobs skipped metric
                     if let Some(ref metrics) = self.metrics {

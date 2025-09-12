@@ -26,7 +26,7 @@ impl Default for CoinPoolConfig {
         Self {
             target_gas_coins: 9,
             target_coin_balance: 1_000_000_000, // 1.0 SUI per coin
-            min_coin_balance: 100_000_000,    // 0.1 SUI minimum
+            min_coin_balance: 500_000_000,      // 0.5 SUI minimum
             min_faucet_coin_balance: 9_100_000_000, // 5 SUI minimum for splitting
         }
     }
@@ -101,8 +101,8 @@ pub async fn split_gas_coins(
 ) -> Result<String> {
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let sender = shared_state.get_sui_address();
-    let secret_key = shared_state.get_sui_private_key();
+    let sender = shared_state.get_sui_address_required();
+    let secret_key = shared_state.get_sui_private_key_required();
 
     info!(
         "Splitting coin {} (balance: {} MIST) into {} coins of {} MIST each",
@@ -276,7 +276,7 @@ async fn wait_for_split_transaction(digest: &str) -> Result<()> {
 /// Check and split coins if needed to maintain the coin pool
 pub async fn ensure_gas_coin_pool() -> Result<()> {
     let shared_state = SharedSuiState::get_instance();
-    let sender = shared_state.get_sui_address();
+    let sender = shared_state.get_sui_address_required();
     let config = CoinPoolConfig::default();
     let mut gas_info = get_gas_coins_info(&config, sender).await?;
 
@@ -287,14 +287,14 @@ pub async fn ensure_gas_coin_pool() -> Result<()> {
         gas_info.total_coins,
         config.target_gas_coins
     );
-    
+
     // Check if we have too many dust coins that should be merged
     if gas_info.dust_coins.len() >= 10 {
         info!(
             "Found {} dust coins, merging them to reduce clutter",
             gas_info.dust_coins.len()
         );
-        
+
         // Merge all dust coins
         match merge_gas_coins(gas_info.dust_coins.clone()).await {
             Ok(tx_digest) => {
@@ -303,12 +303,14 @@ pub async fn ensure_gas_coin_pool() -> Result<()> {
                     gas_info.dust_coins.len(),
                     tx_digest
                 );
-                
+
                 // Re-fetch gas info after merging
                 gas_info = get_gas_coins_info(&config, sender).await?;
-                
+
                 // Check if we still need to split after merging
-                if gas_info.suitable_coins >= config.target_gas_coins && gas_info.splittable_coins >= 2 {
+                if gas_info.suitable_coins >= config.target_gas_coins
+                    && gas_info.splittable_coins >= 2
+                {
                     debug!("Sufficient gas coins available after merging, no splitting needed");
                     return Ok(());
                 }
@@ -396,8 +398,8 @@ pub async fn merge_gas_coins(coins_to_merge: Vec<CoinInfo>) -> Result<String> {
 
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let sender = shared_state.get_sui_address();
-    let secret_key = shared_state.get_sui_private_key();
+    let sender = shared_state.get_sui_address_required();
+    let secret_key = shared_state.get_sui_private_key_required();
 
     // Calculate total balance that will be merged
     let total_balance: u64 = coins_to_merge.iter().map(|c| c.balance).sum();
@@ -548,7 +550,7 @@ pub async fn initialize_gas_coin_pool() -> Result<()> {
     info!("Initializing gas coin pool...");
 
     let shared_state = SharedSuiState::get_instance();
-    let sender = shared_state.get_sui_address();
+    let sender = shared_state.get_sui_address_required();
 
     // Check current state
     let config = CoinPoolConfig::default();

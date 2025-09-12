@@ -16,6 +16,7 @@ struct JobIdInput {
 }
 
 /// Generate a unique job ID using the "sn" prefix and base56 encoding of SHA256 hash
+/// Returns None if coordinator_id is not available (read-only mode)
 pub fn generate_job_id(
     state: &SharedState,
     developer: &str,
@@ -24,9 +25,12 @@ pub fn generate_job_id(
     app_instance: &str,
     job_sequence: u64,
     timestamp: u64,
-) -> String {
+) -> Option<String> {
+    // Return None if coordinator_id is not available
+    let coordinator_id = state.get_coordinator_id()?;
+    
     let input = JobIdInput {
-        coordinator_id: state.get_coordinator_id().clone(),
+        coordinator_id,
         developer: developer.to_string(),
         agent: agent.to_string(),
         agent_method: agent_method.to_string(),
@@ -48,7 +52,7 @@ pub fn generate_job_id(
     let base56_hash = encode_base56(&hash_result);
 
     // Return with "sn" prefix
-    format!("sn{}", base56_hash)
+    Some(format!("sn{}", base56_hash))
 }
 
 /// Base56 encoding using Bitcoin base58 alphabet without confusing characters
@@ -123,7 +127,7 @@ mod tests {
             "test_app_instance",
             123,
             1692537600000, // Fixed timestamp for reproducible tests
-        );
+        ).expect("Should generate job ID in test");
 
         // Should start with "sn" prefix
         assert!(job_id.starts_with("sn"));
@@ -140,7 +144,7 @@ mod tests {
             "test_app_instance",
             123,
             1692537600000, // Same timestamp
-        );
+        ).expect("Should generate job ID in test");
         assert_eq!(job_id, job_id2);
 
         // Different inputs should produce different outputs
@@ -152,7 +156,7 @@ mod tests {
             "test_app_instance",
             124, // Different sequence
             1692537600000,
-        );
+        ).expect("Should generate job ID in test");
         assert_ne!(job_id, job_id3);
     }
 

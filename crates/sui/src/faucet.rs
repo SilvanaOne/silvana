@@ -258,7 +258,7 @@ pub async fn request_tokens_for_default_address() -> Result<()> {
     use crate::state::SharedSuiState;
     
     let shared_state = SharedSuiState::get_instance();
-    let address = shared_state.get_sui_address();
+    let address = shared_state.get_sui_address_required();
     
     // Determine chain from environment or default to devnet
     let chain = std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string());
@@ -274,7 +274,7 @@ pub async fn request_tokens_for_default_address_network(
     use crate::state::SharedSuiState;
     
     let shared_state = SharedSuiState::get_instance();
-    let address = shared_state.get_sui_address();
+    let address = shared_state.get_sui_address_required();
     
     request_tokens_from_faucet_network(address, network, amount).await?;
     Ok(())
@@ -288,7 +288,7 @@ pub async fn ensure_sufficient_balance(min_balance_sui: f64) -> Result<bool> {
     
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let address = shared_state.get_sui_address();
+    let address = shared_state.get_sui_address_required();
     
     // Check current balance
     let coins = list_coins(&mut client, address).await?;
@@ -345,7 +345,7 @@ pub async fn ensure_sufficient_balance_network(
     
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
-    let address = shared_state.get_sui_address();
+    let address = shared_state.get_sui_address_required();
     
     // Check current balance
     let coins = list_coins(&mut client, address).await?;

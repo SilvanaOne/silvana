@@ -24,8 +24,7 @@ pub struct CurrentAgent {
     pub developer: String,
     pub agent: String,
     pub agent_method: String,
-    #[allow(dead_code)]
-    pub settlement_chain: Option<String>, // Track which chain this agent is settling for
+    pub settlement_chain: Option<String>, // Track which chain this session is settling for
 }
 
 /// Information about a job that has been started on the blockchain
@@ -205,11 +204,11 @@ impl SharedState {
         }
     }
 
-    /// Get the coordinator ID
-    pub fn get_coordinator_id(&self) -> String {
+    /// Get the coordinator ID (returns None if not available for read-only operations)
+    pub fn get_coordinator_id(&self) -> Option<String> {
         sui::SharedSuiState::get_instance()
             .get_coordinator_id()
-            .clone()
+            .map(|s| s.clone())
     }
 
     /// Get the chain
@@ -240,6 +239,59 @@ impl SharedState {
             current_agent.agent,
             current_agent.agent_method
         );
+    }
+
+    /// Update only the settlement chain for an existing session
+    /// This ensures the session's agent identity cannot be corrupted
+    pub async fn set_settlement_chain_for_session(
+        &self,
+        session_id: &str,
+        settlement_chain: Option<String>,
+    ) -> Result<(), String> {
+        let mut current_agents = self.current_agents.write().await;
+        
+        // Get existing agent or return error
+        let existing_agent = current_agents
+            .get(session_id)
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
+        
+        // Check if session already has a different settlement chain
+        if let Some(existing_chain) = &existing_agent.settlement_chain {
+            if let Some(new_chain) = &settlement_chain {
+                if existing_chain != new_chain {
+                    return Err(format!(
+                        "Session {} is already locked to chain '{}', cannot change to '{}'",
+                        session_id, existing_chain, new_chain
+                    ));
+                }
+            }
+            // If already has a chain and new is None or same, keep existing
+            return Ok(());
+        }
+        
+        // Create updated agent with same identity but new settlement chain
+        let updated_agent = CurrentAgent {
+            session_id: session_id.to_string(),
+            developer: existing_agent.developer.clone(),
+            agent: existing_agent.agent.clone(),
+            agent_method: existing_agent.agent_method.clone(),
+            settlement_chain: settlement_chain.clone(),
+        };
+        
+        current_agents.insert(session_id.to_string(), updated_agent.clone());
+        
+        if let Some(chain) = settlement_chain {
+            debug!(
+                "Set settlement chain '{}' for session {}: {}/{}/{}",
+                chain,
+                session_id,
+                updated_agent.developer,
+                updated_agent.agent,
+                updated_agent.agent_method
+            );
+        }
+        
+        Ok(())
     }
 
     pub async fn clear_current_agent(&self, session_id: &str) {
@@ -896,11 +948,13 @@ impl SharedState {
 
     /// Get a started job from buffer that matches specific agent details
     /// This requires fetching job details from blockchain to check agent match
+    /// For settlement jobs, also validates chain consistency with session
     pub async fn get_started_job_for_agent(
         &self,
         developer: &str,
         agent: &str,
         agent_method: &str,
+        session_id: &str,
     ) -> Option<StartedJob> {
         let mut buffer = self.started_jobs_buffer.lock().await;
         let mut checked_jobs = Vec::new();
@@ -925,6 +979,40 @@ impl SharedState {
                                     && pending_job.agent == agent
                                     && pending_job.agent_method == agent_method
                                 {
+                                    // For settlement jobs, check chain consistency
+                                    if pending_job.app_instance_method == "settle" {
+                                        // Get the settlement chain for this job
+                                        let job_chain = match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
+                                            &started_job.app_instance,
+                                            started_job.job_sequence,
+                                        ).await {
+                                            Ok(chain) => chain,
+                                            Err(e) => {
+                                                warn!(
+                                                    "Failed to get settlement chain for job {}: {}",
+                                                    started_job.job_sequence, e
+                                                );
+                                                None
+                                            }
+                                        };
+
+                                        // Check if session already has a settlement chain
+                                        let current_agents = self.current_agents.read().await;
+                                        if let Some(current_agent) = current_agents.get(session_id) {
+                                            if let Some(session_chain) = &current_agent.settlement_chain {
+                                                // Session is locked to a chain, only accept jobs for that chain
+                                                if job_chain.as_ref() != Some(session_chain) {
+                                                    debug!(
+                                                        "Settlement job {} for chain {:?} doesn't match session chain {}, skipping",
+                                                        started_job.job_sequence, job_chain, session_chain
+                                                    );
+                                                    checked_jobs.push(started_job);
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
                                     debug!(
                                         "Found matching buffer job: app_instance={}, sequence={}, dev={}, agent={}, method={}",
                                         started_job.app_instance,

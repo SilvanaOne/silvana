@@ -23,10 +23,14 @@ Before starting, ensure you have the following tools installed:
    sui --version
    ```
 
-3. **Docker Desktop**
+3. **Docker**
 
    - Download from [Docker Desktop](https://www.docker.com/products/docker-desktop/)
    - Ensure Docker is running before proceeding
+
+   ```bash
+   docker --version
+   ```
 
 4. **Silvana CLI**
 

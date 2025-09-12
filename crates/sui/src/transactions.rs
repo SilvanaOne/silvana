@@ -10,6 +10,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::chain::get_reference_gas_price;
 use crate::coin::fetch_coin;
+use crate::constants::{FALLBACK_GAS_BUDGET, MAX_GAS_BUDGET_MIST, MIN_GAS_BUDGET};
 use crate::error::SilvanaSuiInterfaceError;
 use crate::object_lock::get_object_lock_manager;
 use crate::state::SharedSuiState;
@@ -318,8 +319,8 @@ where
 
     // Get shared state and client
     let shared_state = SharedSuiState::get_instance();
-    let sender = shared_state.get_sui_address();
-    let sk = shared_state.get_sui_private_key().clone();
+    let sender = shared_state.get_sui_address_required();
+    let sk = shared_state.get_sui_private_key_required().clone();
     let clock_object_id = get_clock_object_id();
 
     debug!("Package ID: {}", package_id);
@@ -341,8 +342,8 @@ where
     // Determine if we need to estimate gas
     let needs_gas_estimation = custom_gas_budget.is_none();
 
-    // Use custom gas budget or default to 1.0 SUI for simulation
-    let mut gas_budget = custom_gas_budget.unwrap_or(1_000_000_000);
+    // Use custom gas budget or default to 0.5 SUI for simulation
+    let mut gas_budget = custom_gas_budget.unwrap_or(FALLBACK_GAS_BUDGET);
     debug!(
         "Initial gas budget: {} MIST ({} SUI), needs estimation: {}",
         gas_budget,
@@ -633,32 +634,19 @@ where
                                             .saturating_sub(storage_rebate);
                                         let estimated_budget = (total_gas_used as f64 * 1.2) as u64;
 
-                                        // Ensure minimum budget of 10M MIST (0.01 SUI)
-                                        let final_budget = estimated_budget.max(10_000_000);
+                                        // Ensure minimum budget
+                                        let final_budget = estimated_budget.max(MIN_GAS_BUDGET);
 
-                                        // Cap at 5 SUI maximum (5 billion MIST) - Sui network limit
-                                        const MAX_GAS_BUDGET_MIST: u64 = 5_000_000_000;
+                                        // Cap at maximum allowed by Sui network
                                         let final_budget = if final_budget > MAX_GAS_BUDGET_MIST {
-                                            // Check if this is due to invalid simulation result
-                                            if final_budget == u64::MAX
-                                                || final_budget > MAX_GAS_BUDGET_MIST * 100
-                                            {
-                                                info!(
-                                                    "Gas estimation returned invalid value: {} MIST, using fallback budget of 0.5 SUI",
-                                                    final_budget
-                                                );
-                                                gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
-                                                gas_budget
-                                            } else {
-                                                info!(
-                                                    "Gas estimation returned excessive value: {} MIST ({:.4} SUI), capping at {} MIST ({} SUI)",
-                                                    final_budget,
-                                                    final_budget as f64 / 1_000_000_000.0,
-                                                    MAX_GAS_BUDGET_MIST,
-                                                    MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
-                                                );
-                                                MAX_GAS_BUDGET_MIST
-                                            }
+                                            info!(
+                                                "Gas estimation returned excessive value: {} MIST ({:.4} SUI), capping at {} MIST ({} SUI)",
+                                                final_budget,
+                                                final_budget as f64 / 1_000_000_000.0,
+                                                MAX_GAS_BUDGET_MIST,
+                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                                            );
+                                            MAX_GAS_BUDGET_MIST
                                         } else {
                                             final_budget
                                         };
@@ -728,9 +716,9 @@ where
                                         }
                                     } else {
                                         warn!(
-                                            "Dry run succeeded but no gas cost summary available, using fallback budget of 0.1 SUI"
+                                            "Dry run succeeded but no gas cost summary available, using fallback budget of 0.5 SUI"
                                         );
-                                        gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
+                                        gas_budget = FALLBACK_GAS_BUDGET;
                                         // Update transaction builder with fallback gas budget
                                         tb.set_gas_budget(gas_budget);
                                     }
@@ -738,15 +726,15 @@ where
                                     // Simulation failed
                                     if let Some(ref error) = status.error {
                                         warn!(
-                                            "Dry run failed with error: {:?}, using fallback budget of 0.1 SUI",
+                                            "Dry run failed with error: {:?}, using fallback budget of 0.5 SUI",
                                             error
                                         );
                                     } else {
                                         warn!(
-                                            "Dry run failed with unknown error, using fallback budget of 0.1 SUI"
+                                            "Dry run failed with unknown error, using fallback budget of 0.5 SUI"
                                         );
                                     }
-                                    gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
+                                    gas_budget = FALLBACK_GAS_BUDGET;
                                     // Update transaction builder with fallback gas budget
                                     tb.set_gas_budget(gas_budget);
                                 }
@@ -756,10 +744,10 @@ where
                 }
                 Err(e) => {
                     warn!(
-                        "Failed to perform dry run: {}, using fallback budget of 0.1 SUI",
+                        "Failed to perform dry run: {}, using fallback budget of 0.5 SUI",
                         e
                     );
-                    gas_budget = 100_000_000; // 0.1 SUI fallback for complex multicalls
+                    gas_budget = FALLBACK_GAS_BUDGET;
                     // Update transaction builder with fallback gas budget
                     tb.set_gas_budget(gas_budget);
                 }

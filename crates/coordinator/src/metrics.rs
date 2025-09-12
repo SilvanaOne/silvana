@@ -270,11 +270,13 @@ async fn collect_coordinator_metrics(
     let docker_agent_method_fetch_failures = metrics.docker_agent_method_fetch_failures.load(Ordering::Relaxed);
 
     // Coordinator info
-    let coordinator_id = state.get_coordinator_id();
+    let coordinator_id_opt = state.get_coordinator_id();
     let chain = state.get_chain();
 
-    // Send OpenTelemetry metrics to New Relic (if configured)
-    coordinator_metrics::send_coordinator_metrics(
+    // Only send metrics if we have a coordinator_id (i.e., we're in operational mode)
+    if coordinator_id_opt.is_some() {
+        // Send OpenTelemetry metrics to New Relic (if configured)
+        coordinator_metrics::send_coordinator_metrics(
         containers_loading as u64,
         containers_running as u64,
         app_instances_count as u64,
@@ -311,8 +313,9 @@ async fn collect_coordinator_metrics(
         docker_containers_failed as u64,
         docker_resource_check_failures as u64,
         docker_job_lock_conflicts as u64,
-        docker_agent_method_fetch_failures as u64,
-    );
+            docker_agent_method_fetch_failures as u64,
+        );
+    }
 
     // Log metrics at debug level (these will be sent to New Relic if warn/error occur)
     debug!(
@@ -338,7 +341,7 @@ async fn collect_coordinator_metrics(
         last_selected_job_sequence,
         shutdown,
         force_shutdown,
-        coordinator_id,
+        coordinator_id_opt.as_deref().unwrap_or("not-initialized"),
         chain
     );
 

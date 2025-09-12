@@ -3,7 +3,7 @@ use crate::error::{CoordinatorError, Result};
 use crate::metrics::CoordinatorMetrics;
 use crate::state::{SharedState, StartedJob, TerminateJobRequest};
 use std::sync::Arc;
-use tokio::time::{Duration, sleep, Instant};
+use tokio::time::{Duration, Instant, sleep};
 use tracing::{debug, error, info, warn};
 
 /// Multicall processor that monitors multicall_requests and executes batched operations
@@ -43,12 +43,12 @@ impl MulticallProcessor {
                     // in case new operations were just added
                     info!("Multicall operations appear complete, waiting 1 second to verify...");
                     sleep(Duration::from_secs(1)).await;
-                    
+
                     // Final check after delay
                     let final_operations = self.state.get_total_operations_count().await;
                     let final_buffer_size = self.state.get_started_jobs_buffer_size().await;
                     let final_agents = self.state.get_current_agent_count().await;
-                    
+
                     if final_operations > 0 || final_buffer_size > 0 || final_agents > 0 {
                         // Race condition detected - new work appeared
                         debug!(
@@ -57,7 +57,7 @@ impl MulticallProcessor {
                         );
                         continue; // Go back to processing
                     }
-                    
+
                     // Really done now
                     info!("🛑 Multicall processor received shutdown signal");
                     info!("✅ All multicall operations processed and docker completed");
@@ -78,7 +78,7 @@ impl MulticallProcessor {
             let should_execute_by_limit = self.state.should_execute_multicall_by_limit().await;
             let should_execute_by_time = self.state.should_execute_multicall_by_time().await;
             let total_operations = self.state.get_total_operations_count().await;
-            
+
             // For settlement nodes, check if we have any settle jobs to process immediately
             let should_execute_settle_immediately = if self.state.is_settle_only() {
                 self.state.has_settle_jobs_pending().await
@@ -493,7 +493,7 @@ impl MulticallProcessor {
                                         }
                                     }
                                     Ok(None) => {
-                                        warn!(
+                                        info!(
                                             "Job {} not found in blockchain",
                                             start_job.job_sequence
                                         );

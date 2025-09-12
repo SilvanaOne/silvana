@@ -39,7 +39,7 @@ where
     ) -> Vec<sui_sdk_types::Argument>,
 {
     let shared_state = SharedSuiState::get_instance();
-    let package_id = shared_state.get_coordination_package_id();
+    let package_id = shared_state.get_coordination_package_id_required();
 
     execute_transaction_block(
         package_id,
@@ -74,7 +74,7 @@ pub(crate) async fn create_registry(
         env::var("SILVANA_REGISTRY_PACKAGE").unwrap_or_else(|_| {
             // Fall back to the coordination package if registry package not set
             let shared_state = SharedSuiState::get_instance();
-            shared_state.get_coordination_package_id().to_string()
+            shared_state.get_coordination_package_id_required().to_string()
         })
     });
 

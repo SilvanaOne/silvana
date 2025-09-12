@@ -112,29 +112,66 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     None
                 };
 
-                // If this is a settlement job with no associated chain, terminate it and look for next job
-                if agent_job.job.app_instance_method == "settle" && settlement_chain.is_none() {
-                    error!(
-                        "🚨 Settlement job {} has no associated chain - terminating and looking for next job",
-                        agent_job.job_sequence
-                    );
+                // For settlement jobs, validate chain consistency
+                if agent_job.job.app_instance_method == "settle" {
+                    // If no chain, terminate the job
+                    if settlement_chain.is_none() {
+                        error!(
+                            "🚨 Settlement job {} has no associated chain - terminating and looking for next job",
+                            agent_job.job_sequence
+                        );
 
-                    // Add terminate request to multicall queue
-                    self.state
-                        .add_terminate_job_request(
-                            agent_job.app_instance.clone(),
-                            agent_job.job_sequence,
+                        // Add terminate request to multicall queue
+                        self.state
+                            .add_terminate_job_request(
+                                agent_job.app_instance.clone(),
+                                agent_job.job_sequence,
+                            )
+                            .await;
+
+                        // Remove this job from the agent database so we don't pick it again
+                        self.state
+                            .get_agent_job_db()
+                            .terminate_job(&agent_job.job_id)
+                            .await;
+
+                        // Continue to look for next job
+                        continue 'job_search;
+                    }
+                    
+                    // Check if session already has a different settlement chain
+                    let current_agent = self.state.get_current_agent(&req.session_id).await;
+                    if let Some(current) = current_agent {
+                        if let Some(session_chain) = &current.settlement_chain {
+                            if settlement_chain.as_ref() != Some(session_chain) {
+                                warn!(
+                                    "Session {} is locked to chain '{}', but job {} is for chain '{:?}' - skipping",
+                                    req.session_id, session_chain, agent_job.job_sequence, settlement_chain
+                                );
+                                
+                                // Don't terminate the job, just skip it for this session
+                                // Put it back as available for other sessions
+                                self.state
+                                    .get_agent_job_db()
+                                    .release_job(&agent_job.job_id)
+                                    .await;
+                                
+                                // Continue to look for next job
+                                continue 'job_search;
+                            }
+                        }
+                    }
+                    
+                    // Update session with settlement chain if not already set
+                    if let Err(e) = self.state
+                        .set_settlement_chain_for_session(
+                            &req.session_id,
+                            settlement_chain.clone(),
                         )
-                        .await;
-
-                    // Remove this job from the agent database so we don't pick it again
-                    self.state
-                        .get_agent_job_db()
-                        .terminate_job(&agent_job.job_id)
-                        .await;
-
-                    // Continue to look for next job
-                    continue 'job_search;
+                        .await
+                    {
+                        warn!("Failed to set settlement chain for session: {}", e);
+                    }
                 }
 
                 let elapsed = start_time.elapsed();
@@ -177,7 +214,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // The buffer contains jobs that have been started on blockchain via multicall
         if let Some(started_job) = self
             .state
-            .get_started_job_for_agent(&req.developer, &req.agent, &req.agent_method)
+            .get_started_job_for_agent(&req.developer, &req.agent, &req.agent_method, &req.session_id)
             .await
         {
             debug!(
@@ -223,12 +260,24 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
                     // Create AgentJob and add it to agent database
-                    let agent_job = crate::agent::AgentJob::new(
+                    let agent_job = match crate::agent::AgentJob::new(
                         pending_job.clone(),
                         req.session_id.clone(),
                         &self.state,
                         started_job.memory_requirement,
-                    );
+                    ) {
+                        Ok(job) => job,
+                        Err(e) => {
+                            error!(
+                                "Failed to create agent job for job {}: {}",
+                                pending_job.job_sequence, e
+                            );
+                            return Err(Status::internal(format!(
+                                "Failed to create agent job: {}",
+                                e
+                            )));
+                        }
+                    };
 
                     // Store in agent database
                     self.state
@@ -236,19 +285,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         .add_to_running(agent_job.clone())
                         .await;
 
-                    // Set current agent for this session
-                    self.state
-                        .set_current_agent(
-                            req.session_id.clone(),
-                            pending_job.developer.clone(),
-                            pending_job.agent.clone(),
-                            pending_job.agent_method.clone(),
-                        )
-                        .await;
-
-                    // Track app_instance for this session
-
-                    // Check if this is a settlement job
+                    // Check if this is a settlement job and get the chain
                     let settlement_chain = if pending_job.app_instance_method == "settle" {
                         // Use helper function to get chain by job sequence
                         match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
@@ -291,6 +328,29 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             message: "Settlement job with no chain terminated".to_string(),
                             job: None,
                         }));
+                    }
+                    
+                    // Set current agent for this session
+                    self.state
+                        .set_current_agent(
+                            req.session_id.clone(),
+                            pending_job.developer.clone(),
+                            pending_job.agent.clone(),
+                            pending_job.agent_method.clone(),
+                        )
+                        .await;
+                    
+                    // Set settlement chain if this is a settlement job
+                    if pending_job.app_instance_method == "settle" {
+                        if let Err(e) = self.state
+                            .set_settlement_chain_for_session(
+                                &req.session_id,
+                                settlement_chain.clone(),
+                            )
+                            .await
+                        {
+                            warn!("Failed to set settlement chain for session: {}", e);
+                        }
                     }
 
                     // Convert to protobuf Job
