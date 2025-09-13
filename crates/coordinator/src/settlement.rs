@@ -382,7 +382,10 @@ pub async fn fetch_pending_job_from_instances(
         for (chain, settle_id) in &settlement_job_ids {
             if let Some(job) = jobs_map.get(&settle_id) {
                 // Check if it's ready to run (next_scheduled_at with buffer)
-                if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + buffer_ms <= current_time_ms {
+                let is_ready = job.next_scheduled_at
+                    .map(|scheduled| scheduled + buffer_ms <= current_time_ms)
+                    .unwrap_or(true);
+                if is_ready {
                     // All jobs have updated_at
                     ready_settlement_jobs.push((
                         *settle_id,
@@ -392,8 +395,9 @@ pub async fn fetch_pending_job_from_instances(
                         job.next_scheduled_at,
                     ));
                 } else {
+                    let scheduled_time = job.next_scheduled_at.unwrap_or(0);
                     debug!("Settlement job {} for chain {} not ready yet, scheduled for {}", 
-                        settle_id, chain, job.next_scheduled_at.unwrap());
+                        settle_id, chain, scheduled_time);
                 }
             }
         }
@@ -422,7 +426,10 @@ pub async fn fetch_pending_job_from_instances(
             }
             
             // Check if job is ready to run (next_scheduled_at with buffer)
-            if job.next_scheduled_at.is_none() || job.next_scheduled_at.unwrap() + buffer_ms <= current_time_ms {
+            let is_ready = job.next_scheduled_at
+                .map(|scheduled| scheduled + buffer_ms <= current_time_ms)
+                .unwrap_or(true);
+            if is_ready {
                 all_jobs.push((
                     *job_sequence, 
                     app_instance_id.clone(), 
@@ -432,8 +439,9 @@ pub async fn fetch_pending_job_from_instances(
                     false // not a settlement job
                 ));
             } else {
+                let scheduled_time = job.next_scheduled_at.unwrap_or(0);
                 debug!("Job {} not ready yet, scheduled for {}", 
-                    job_sequence, job.next_scheduled_at.unwrap());
+                    job_sequence, scheduled_time);
             }
         }
     }
@@ -557,7 +565,10 @@ pub async fn fetch_all_pending_jobs(
                             Ok(Some(settle_job)) => {
                                 // Check if it's pending and ready to run
                                 if matches!(settle_job.status, sui::fetch::JobStatus::Pending) {
-                                    if settle_job.next_scheduled_at.is_none() || settle_job.next_scheduled_at.unwrap() + buffer_ms <= current_time_ms {
+                                    let is_ready = settle_job.next_scheduled_at
+                                        .map(|scheduled| scheduled + buffer_ms <= current_time_ms)
+                                        .unwrap_or(true);
+                                    if is_ready {
                                         let sort_time = settle_job.updated_at;
                                         debug!("Found pending settlement job {} for chain {} (updated_at: {})", 
                                             settle_job.job_sequence, chain, sort_time);
@@ -583,10 +594,11 @@ pub async fn fetch_all_pending_jobs(
                     // If we found ready settlement jobs, add only the oldest one
                     if !ready_settlement_jobs.is_empty() {
                         ready_settlement_jobs.sort_by_key(|(_, sort_time, _)| *sort_time);
-                        let (oldest_job, _, chain) = ready_settlement_jobs.into_iter().next().unwrap();
-                        debug!("Selected oldest ready settlement job {} for chain {} in app_instance {}", 
-                            oldest_job.job_sequence, chain, app_instance_id);
-                        all_pending_jobs.push((oldest_job, true)); // true = is_settlement
+                        if let Some((oldest_job, _, chain)) = ready_settlement_jobs.into_iter().next() {
+                            debug!("Selected oldest ready settlement job {} for chain {} in app_instance {}", 
+                                oldest_job.job_sequence, chain, app_instance_id);
+                            all_pending_jobs.push((oldest_job, true)); // true = is_settlement
+                        }
                     }
                 }
             }
@@ -622,8 +634,9 @@ pub async fn fetch_all_pending_jobs(
                                 if !matches!(job.status, sui::fetch::JobStatus::Pending) {
                                     continue;
                                 }
-                                if job.next_scheduled_at.is_some()
-                                    && job.next_scheduled_at.unwrap() + buffer_ms > current_time_ms
+                                if job.next_scheduled_at
+                                    .map(|scheduled| scheduled + buffer_ms > current_time_ms)
+                                    .unwrap_or(false)
                                 {
                                     continue;
                                 }

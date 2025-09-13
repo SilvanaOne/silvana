@@ -651,12 +651,10 @@ fn find_merge_to_create_sequence(
     current_time: u64,
     excluded: &[(Vec<u64>, Vec<u64>)],
 ) -> Option<MergeRequest> {
-    if target_sequence.is_empty() {
-        return None;
-    }
-    
-    let target_start = *target_sequence.first().unwrap();
-    let target_end = *target_sequence.last().unwrap();
+    let (target_start, target_end) = match (target_sequence.first(), target_sequence.last()) {
+        (Some(&start), Some(&end)) => (start, end),
+        _ => return None,
+    };
     
     // Try all possible split points for the target sequence
     for split_point in (target_start + 1)..=target_end {

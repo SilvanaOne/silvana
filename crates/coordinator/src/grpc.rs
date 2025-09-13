@@ -2382,11 +2382,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                 Ok(Response::new(GetMetadataResponse {
                     success: true,
-                    message: if req.key.is_some() {
+                    message: if let Some(ref key) = req.key {
                         if metadata_value.is_some() {
                             "Metadata retrieved successfully".to_string()
                         } else {
-                            format!("Key '{}' not found", req.key.as_ref().unwrap())
+                            format!("Key '{}' not found", key)
                         }
                     } else {
                         "App instance info retrieved successfully".to_string()
