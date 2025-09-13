@@ -189,10 +189,22 @@ impl SharedSuiState {
     /// Initialize coordination package ID from SILVANA_REGISTRY_PACKAGE environment variable
     fn init_coordination_package_id() {
         COORDINATION_PACKAGE_ID.get_or_init(|| {
-            let package_id_str = std::env::var("SILVANA_REGISTRY_PACKAGE")
-                .expect("SILVANA_REGISTRY_PACKAGE environment variable must be set");
-            sui::Address::from_str(&package_id_str)
-                .expect("Invalid SILVANA_REGISTRY_PACKAGE address format")
+            match std::env::var("SILVANA_REGISTRY_PACKAGE") {
+                Ok(package_id_str) => {
+                    match sui::Address::from_str(&package_id_str) {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            eprintln!("Error: Invalid SILVANA_REGISTRY_PACKAGE address format: {}", e);
+                            eprintln!("   Expected format: 0x... (66 characters hex string)");
+                            std::process::exit(1);
+                        }
+                    }
+                },
+                Err(_) => {
+                    eprintln!("Error: SILVANA_REGISTRY_PACKAGE environment variable must be set");
+                    std::process::exit(1);
+                }
+            }
         });
     }
     

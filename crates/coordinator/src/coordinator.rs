@@ -120,10 +120,20 @@ pub async fn start_coordinator(
     let shutdown_state = state.clone();
     let force_shutdown_state = state.clone();
     tokio::spawn(async move {
-        let mut sigint = signal::unix::signal(signal::unix::SignalKind::interrupt())
-            .expect("Failed to create SIGINT handler");
-        let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to create SIGTERM handler");
+        let mut sigint = match signal::unix::signal(signal::unix::SignalKind::interrupt()) {
+            Ok(sig) => sig,
+            Err(e) => {
+                error!("Failed to create SIGINT handler: {}. Graceful shutdown disabled.", e);
+                return;
+            }
+        };
+        let mut sigterm = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(sig) => sig,
+            Err(e) => {
+                error!("Failed to create SIGTERM handler: {}. Graceful shutdown disabled.", e);
+                return;
+            }
+        };
 
         tokio::select! {
             _ = sigint.recv() => {
@@ -142,12 +152,17 @@ pub async fn start_coordinator(
 
                     // Spawn a task to listen for second Ctrl-C
                     tokio::spawn(async move {
-                        let mut sigint2 = signal::unix::signal(signal::unix::SignalKind::interrupt())
-                            .expect("Failed to create second SIGINT handler");
-                        sigint2.recv().await;
-                        eprintln!("🛑 Second SIGINT received - forcing immediate shutdown!");
-                        error!("🛑 Second SIGINT received - forcing immediate shutdown!");
-                        force_shutdown_state.set_force_shutdown();
+                        match signal::unix::signal(signal::unix::SignalKind::interrupt()) {
+                            Ok(mut sigint2) => {
+                                sigint2.recv().await;
+                                eprintln!("🛑 Second SIGINT received - forcing immediate shutdown!");
+                                error!("🛑 Second SIGINT received - forcing immediate shutdown!");
+                                force_shutdown_state.set_force_shutdown();
+                            }
+                            Err(e) => {
+                                error!("Failed to create second SIGINT handler: {}", e);
+                            }
+                        }
                     });
                 }
             }
