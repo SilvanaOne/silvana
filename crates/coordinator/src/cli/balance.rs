@@ -15,15 +15,30 @@ pub async fn handle_balance_command(
 
     match subcommand {
         BalanceCommands::Sui { rpc_url, address } => {
-            // Resolve and initialize Sui connection
+            // Resolve and initialize Sui connection (always read-only for balance checks)
             let rpc_url =
                 sui::resolve_rpc_url(rpc_url, chain_override).map_err(CoordinatorError::Other)?;
-            sui::SharedSuiState::initialize(&rpc_url)
+            
+            // Always use read-only initialization for balance checks
+            sui::SharedSuiState::initialize_read_only(&rpc_url)
                 .await
                 .map_err(CoordinatorError::Other)?;
 
-            // Show the balance, passing the optional address
-            sui::print_balance_info(address.as_deref())
+            // Determine which address to use
+            let address_to_use = if let Some(addr) = address {
+                // Use provided address
+                Some(addr)
+            } else if let Ok(env_addr) = std::env::var("SUI_ADDRESS") {
+                // Use address from environment
+                Some(env_addr)
+            } else {
+                // No address provided and no SUI_ADDRESS in environment
+                eprintln!("Error: No address provided. Either provide --address or set SUI_ADDRESS environment variable.");
+                return Err(anyhow!("No address provided").into());
+            };
+
+            // Show the balance, passing the address
+            sui::print_balance_info(address_to_use.as_deref())
                 .await
                 .map_err(CoordinatorError::Other)?;
         }

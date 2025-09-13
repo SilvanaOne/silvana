@@ -148,8 +148,13 @@ impl SharedSuiState {
     /// Initialize coordinator ID from SUI_ADDRESS environment variable
     fn init_coordinator_id() {
         COORDINATOR_ID.get_or_init(|| {
-            std::env::var("SUI_ADDRESS")
-                .expect("SUI_ADDRESS environment variable must be set")
+            match std::env::var("SUI_ADDRESS") {
+                Ok(addr) => addr,
+                Err(_) => {
+                    eprintln!("Error: SUI_ADDRESS environment variable must be set");
+                    std::process::exit(1);
+                }
+            }
         });
     }
     
@@ -163,8 +168,13 @@ impl SharedSuiState {
     /// Initialize chain from SUI_CHAIN environment variable
     fn init_chain() {
         CHAIN.get_or_init(|| {
-            std::env::var("SUI_CHAIN")
-                .expect("SUI_CHAIN environment variable must be set")
+            match std::env::var("SUI_CHAIN") {
+                Ok(chain) => chain,
+                Err(_) => {
+                    eprintln!("Error: SUI_CHAIN environment variable must be set");
+                    std::process::exit(1);
+                }
+            }
         });
     }
     
