@@ -791,7 +791,26 @@ where
                 let error_str = e.to_string();
 
                 // Clean up error message - remove binary details
-                let clean_error = if error_str.contains("Object ID")
+                let clean_error = if error_str.contains("grpc-status header missing") {
+                    // Handle grpc-status header missing error specially
+                    if error_str.contains("HTTP status code 400") {
+                        format!("Transaction rejected by server (HTTP 400): Likely invalid transaction parameters or object state. Original error: {}", 
+                                if let Some(idx) = error_str.find(", details: [") {
+                                    &error_str[..idx]
+                                } else {
+                                    &error_str
+                                })
+                    } else if error_str.contains("HTTP status code 503") {
+                        "Service temporarily unavailable (HTTP 503) - server may be overloaded".to_string()
+                    } else {
+                        format!("Server communication error: {}", 
+                                if let Some(idx) = error_str.find(", details: [") {
+                                    &error_str[..idx]
+                                } else {
+                                    &error_str
+                                })
+                    }
+                } else if error_str.contains("Object ID")
                     && error_str.contains("is not available for consumption")
                 {
                     // Extract just the relevant object version conflict info
@@ -820,29 +839,72 @@ where
                     error_str
                 };
 
-                // Check if this is a version conflict that we should retry
-                if (clean_error.contains("version conflict")
-                    || clean_error.contains("not available for consumption"))
-                    && retry_count < MAX_RETRIES
-                {
+                // Check if this is an error that we should retry
+                let should_retry = (clean_error.contains("version conflict")
+                    || clean_error.contains("not available for consumption")
+                    || clean_error.contains("Service temporarily unavailable")
+                    || (clean_error.contains("grpc-status header missing") && clean_error.contains("HTTP status code 503")))
+                    && retry_count < MAX_RETRIES;
+
+                if should_retry {
                     retry_count += 1;
+                    
+                    // Different retry strategies for different errors
+                    let (delay_ms, log_msg) = if clean_error.contains("Service temporarily unavailable") 
+                        || clean_error.contains("HTTP status code 503") {
+                        // Longer delay for service unavailable
+                        (2000 * (2_u64.pow(retry_count - 1)), 
+                         format!("service unavailability on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                    } else if clean_error.contains("version conflict") {
+                        // Standard exponential backoff for version conflicts
+                        (1000 * (2_u64.pow(retry_count - 1)), 
+                         format!("version conflict on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                    } else {
+                        // Shorter delay for other retryable errors
+                        (500 * (2_u64.pow(retry_count - 1)), 
+                         format!("transient error on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                    };
+
                     info!(
-                        "Batch transaction [{}] failed with version conflict on attempt {}/{}. Retrying with fresh object version. Version conflict details: {}",
+                        "Batch transaction [{}] failed with {}. Retrying after {}ms. Error: {}",
                         functions_str,
-                        retry_count,
-                        MAX_RETRIES + 1,
+                        log_msg,
+                        delay_ms,
                         clean_error
                     );
 
                     // Add exponential backoff delay before retry
-                    let delay = Duration::from_millis(1000 * (2_u64.pow(retry_count - 1)));
+                    let delay = Duration::from_millis(delay_ms);
                     sleep(delay).await;
 
                     continue; // Retry the transaction
                 }
 
-                // Log as warning for expected race conditions, error for unexpected issues
-                if clean_error.contains("version conflict")
+                // Log appropriate error level based on error type
+                if clean_error.contains("HTTP 400") {
+                    // This is likely a permanent error - invalid transaction
+                    // Log additional diagnostic information
+                    error!(
+                        "Batch transaction [{}] failed with invalid request after {} attempts: {}",
+                        functions_str,
+                        retry_count + 1,
+                        clean_error
+                    );
+                    
+                    // Log transaction details for debugging
+                    debug!("Failed transaction details:");
+                    debug!("  Package ID: {}", package_id);
+                    debug!("  Operations count: {}", operations.len());
+                    for (i, (obj_ids, module, func, _)) in operations.iter().enumerate() {
+                        debug!("  Operation {}: {}::{} with {} objects", 
+                               i, module, func, obj_ids.len());
+                        for (j, obj_id) in obj_ids.iter().enumerate() {
+                            debug!("    Object {}: {}", j, obj_id);
+                        }
+                    }
+                    debug!("  Gas budget: {} MIST", gas_budget);
+                    debug!("  Sender address: {}", sender);
+                } else if clean_error.contains("version conflict")
                     || clean_error.contains("not available for consumption")
                 {
                     error!(
