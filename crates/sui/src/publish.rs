@@ -426,7 +426,9 @@ mod tests {
         println!("Testing build_move_package with path: {}", path.display());
 
         // Build the package with ignore-chain flag (more portable for tests)
-        let result = build_move_package(path.to_str().unwrap()).await?;
+        let path_str = path.to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path: contains non-UTF8 characters"))?;
+        let result = build_move_package(path_str).await?;
 
         // Verify we got some results
         assert!(
@@ -480,7 +482,9 @@ mod tests {
         );
 
         // Build the package without ignore-chain flag
-        let result = build_move_package(path.to_str().unwrap()).await?;
+        let path_str = path.to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid path: contains non-UTF8 characters"))?;
+        let result = build_move_package(path_str).await?;
 
         // Verify we got some results
         assert!(

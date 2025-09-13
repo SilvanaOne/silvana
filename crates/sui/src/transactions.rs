@@ -33,8 +33,7 @@ fn check_transaction_effects(
         if let Some(ref effects) = transaction.effects {
             debug!("{} effects status: {:?}", operation, effects.status);
             if let Some(ref status) = effects.status {
-                if status.error.is_some() {
-                    let error_msg = status.error.as_ref().unwrap();
+                if let Some(ref error_msg) = status.error {
                     let error_str = format!("{:?}", error_msg);
 
                     // Clean up common error messages for better readability
