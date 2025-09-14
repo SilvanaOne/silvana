@@ -7,27 +7,28 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "proto:generate": "cd ../../ && buf lint && buf generate"
+    "proto:generate": "cd ../../ && buf lint && buf generate",
+    "update": "ncu -i"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "^2.6.0",
-    "@connectrpc/connect": "^2.0.2",
-    "@connectrpc/connect-web": "^2.0.2",
-    "@nats-io/jetstream": "^3.0.2",
-    "@nats-io/nats-core": "^3.0.2",
+    "@bufbuild/protobuf": "^2.8.0",
+    "@connectrpc/connect": "^2.1.0",
+    "@connectrpc/connect-web": "^2.1.0",
+    "@nats-io/jetstream": "^3.1.0",
+    "@nats-io/nats-core": "^3.1.0",
     "autoprefixer": "^10.4.21",
-    "next": "15.3.5",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "next": "15.5.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.3.5",
+    "eslint-config-next": "15.5.3",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

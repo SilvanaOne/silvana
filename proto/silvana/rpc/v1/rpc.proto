@@ -19,9 +19,10 @@ enum LogLevel {
 
 // Job result enumeration
 enum JobResult {
-  JOB_RESULT_COMPLETED = 0;
-  JOB_RESULT_FAILED = 1;
-  JOB_RESULT_TERMINATED = 2;
+  JOB_RESULT_UNSPECIFIED = 0;
+  JOB_RESULT_COMPLETED = 1;
+  JOB_RESULT_FAILED = 2;
+  JOB_RESULT_TERMINATED = 3;
 }
 
 // Coordinator Events
