@@ -207,13 +207,12 @@ async fn test_send_coordinator_and_agent_events() {
 #[derive(Debug)]
 struct NatsEventCollector {
     coordinator_started: tokio::sync::mpsc::Receiver<Event>,
-    agent_started_job: tokio::sync::mpsc::Receiver<Event>,
-    agent_finished_job: tokio::sync::mpsc::Receiver<Event>,
+    job_started: tokio::sync::mpsc::Receiver<Event>,
+    job_finished: tokio::sync::mpsc::Receiver<Event>,
     coordination_tx: tokio::sync::mpsc::Receiver<Event>,
-    coordinator_error: tokio::sync::mpsc::Receiver<Event>,
-    client_transaction: tokio::sync::mpsc::Receiver<Event>,
+    coordinator_message: tokio::sync::mpsc::Receiver<Event>,
+    settlement_transaction: tokio::sync::mpsc::Receiver<Event>,
     agent_message: tokio::sync::mpsc::Receiver<Event>,
-    agent_transaction: tokio::sync::mpsc::Receiver<Event>,
 }
 
 async fn setup_nats_subscriptions(
@@ -222,15 +221,14 @@ async fn setup_nats_subscriptions(
     // Create channels for each event type
     let (coordinator_started_tx, coordinator_started_rx) =
         tokio::sync::mpsc::channel(NUM_EVENTS * 10);
-    let (agent_started_job_tx, agent_started_job_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
-    let (agent_finished_job_tx, agent_finished_job_rx) =
+    let (job_started_tx, job_started_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
+    let (job_finished_tx, job_finished_rx) =
         tokio::sync::mpsc::channel(NUM_EVENTS * 10);
     let (coordination_tx_tx, coordination_tx_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
-    let (coordinator_error_tx, coordinator_error_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
-    let (client_transaction_tx, client_transaction_rx) =
+    let (coordinator_message_tx, coordinator_message_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
+    let (settlement_transaction_tx, settlement_transaction_rx) =
         tokio::sync::mpsc::channel(NUM_EVENTS * 10);
     let (agent_message_tx, agent_message_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
-    let (agent_transaction_tx, agent_transaction_rx) = tokio::sync::mpsc::channel(NUM_EVENTS * 10);
 
     // Setup JetStream and consumer
     println!("📡 Setting up JetStream stream: {}", NATS_STREAM_NAME);
@@ -271,16 +269,15 @@ async fn setup_nats_subscriptions(
         }
     };
 
-    // Create event type channels mapping
+    // Create event type channels mapping (matching classify_event output)
     let event_senders = vec![
         ("coordinator_started", coordinator_started_tx),
-        ("agent_started_job", agent_started_job_tx),
-        ("agent_finished_job", agent_finished_job_tx),
+        ("job_started", job_started_tx),
+        ("job_finished", job_finished_tx),
         ("coordination_tx", coordination_tx_tx),
-        ("coordinator_error", coordinator_error_tx),
-        ("client_transaction", client_transaction_tx),
+        ("coordinator_message", coordinator_message_tx),
+        ("settlement_transaction", settlement_transaction_tx),
         ("agent_message", agent_message_tx),
-        ("agent_transaction", agent_transaction_tx),
     ];
 
     // Start a single consumer task that distributes events to appropriate channels
@@ -330,32 +327,30 @@ async fn setup_nats_subscriptions(
 
     NatsEventCollector {
         coordinator_started: coordinator_started_rx,
-        agent_started_job: agent_started_job_rx,
-        agent_finished_job: agent_finished_job_rx,
+        job_started: job_started_rx,
+        job_finished: job_finished_rx,
         coordination_tx: coordination_tx_rx,
-        coordinator_error: coordinator_error_rx,
-        client_transaction: client_transaction_rx,
+        coordinator_message: coordinator_message_rx,
+        settlement_transaction: settlement_transaction_rx,
         agent_message: agent_message_rx,
-        agent_transaction: agent_transaction_rx,
     }
 }
 
 fn classify_event(event: &Event) -> &'static str {
-    match &event.event_type {
-        Some(event::EventType::Coordinator(coord_event)) => match &coord_event.event {
-            Some(coordinator_event::Event::CoordinatorStarted(_)) => "coordinator_started",
-            Some(coordinator_event::Event::AgentStartedJob(_)) => "agent_started_job",
-            Some(coordinator_event::Event::AgentFinishedJob(_)) => "agent_finished_job",
-            Some(coordinator_event::Event::CoordinationTx(_)) => "coordination_tx",
-            Some(coordinator_event::Event::CoordinatorError(_)) => "coordinator_error",
-            Some(coordinator_event::Event::ClientTransaction(_)) => "client_transaction",
-            None => "coordinator_unknown",
-        },
-        Some(event::EventType::Agent(agent_event)) => match &agent_event.event {
-            Some(agent_event::Event::Message(_)) => "agent_message",
-            Some(agent_event::Event::Transaction(_)) => "agent_transaction",
-            None => "agent_unknown",
-        },
+    match &event.event {
+        Some(event::Event::CoordinatorStarted(_)) => "coordinator_started",
+        Some(event::Event::CoordinatorActive(_)) => "coordinator_active",
+        Some(event::Event::CoordinatorShutdown(_)) => "coordinator_shutdown",
+        Some(event::Event::AgentSessionStarted(_)) => "agent_session_started",
+        Some(event::Event::JobCreated(_)) => "job_created",
+        Some(event::Event::JobStarted(_)) => "job_started",
+        Some(event::Event::JobFinished(_)) => "job_finished",
+        Some(event::Event::CoordinationTx(_)) => "coordination_tx",
+        Some(event::Event::ProofSubmitted(_)) => "proof_submitted",
+        Some(event::Event::SettlementTransaction(_)) => "settlement_transaction",
+        Some(event::Event::SettlementTransactionIncluded(_)) => "settlement_transaction_included",
+        Some(event::Event::CoordinatorMessage(_)) => "coordinator_message",
+        Some(event::Event::AgentMessage(_)) => "agent_message",
         None => "unknown",
     }
 }
@@ -384,16 +379,16 @@ async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: Sent
                     total_received += 1;
                 }
             }
-            event = collector.agent_started_job.recv() => {
+            event = collector.job_started.recv() => {
                 if let Some(event) = event {
-                    *events_by_type.entry("agent_started_job".to_string()).or_insert(0) += 1;
+                    *events_by_type.entry("job_started".to_string()).or_insert(0) += 1;
                     received_events.push(event);
                     total_received += 1;
                 }
             }
-            event = collector.agent_finished_job.recv() => {
+            event = collector.job_finished.recv() => {
                 if let Some(event) = event {
-                    *events_by_type.entry("agent_finished_job".to_string()).or_insert(0) += 1;
+                    *events_by_type.entry("job_finished".to_string()).or_insert(0) += 1;
                     received_events.push(event);
                     total_received += 1;
                 }
@@ -405,16 +400,16 @@ async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: Sent
                     total_received += 1;
                 }
             }
-            event = collector.coordinator_error.recv() => {
+            event = collector.coordinator_message.recv() => {
                 if let Some(event) = event {
-                    *events_by_type.entry("coordinator_error".to_string()).or_insert(0) += 1;
+                    *events_by_type.entry("coordinator_message".to_string()).or_insert(0) += 1;
                     received_events.push(event);
                     total_received += 1;
                 }
             }
-            event = collector.client_transaction.recv() => {
+            event = collector.settlement_transaction.recv() => {
                 if let Some(event) = event {
-                    *events_by_type.entry("client_transaction".to_string()).or_insert(0) += 1;
+                    *events_by_type.entry("settlement_transaction".to_string()).or_insert(0) += 1;
                     received_events.push(event);
                     total_received += 1;
                 }
@@ -422,13 +417,6 @@ async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: Sent
             event = collector.agent_message.recv() => {
                 if let Some(event) = event {
                     *events_by_type.entry("agent_message".to_string()).or_insert(0) += 1;
-                    received_events.push(event);
-                    total_received += 1;
-                }
-            }
-            event = collector.agent_transaction.recv() => {
-                if let Some(event) = event {
-                    *events_by_type.entry("agent_transaction".to_string()).or_insert(0) += 1;
                     received_events.push(event);
                     total_received += 1;
                 }
@@ -450,13 +438,12 @@ async fn verify_nats_events(mut collector: NatsEventCollector, sent_events: Sent
     // Show detailed comparison
     let all_event_types = [
         "coordinator_started",
-        "agent_started_job",
-        "agent_finished_job",
+        "job_started",
+        "job_finished",
         "coordination_tx",
-        "coordinator_error",
-        "client_transaction",
+        "coordinator_message",
+        "settlement_transaction",
         "agent_message",
-        "agent_transaction",
     ];
 
     for event_type in &all_event_types {
@@ -605,47 +592,46 @@ async fn compare_events(
 
 fn create_event_signature(event: &Event) -> String {
     // Create a unique signature for each event based on stable fields (not timestamps)
-    match &event.event_type {
-        Some(event_type) => match event_type {
-            events::event::EventType::Coordinator(coord_event) => match &coord_event.event {
-                Some(coordinator_event) => match coordinator_event {
-                    events::coordinator_event::Event::CoordinatorStarted(e) => {
-                        // Use ethereum_address as unique identifier (contains the index)
-                        format!("coord_started_{}_{}", e.coordinator_id, e.ethereum_address)
-                    }
-                    events::coordinator_event::Event::AgentStartedJob(e) => {
-                        format!("agent_started_{}", e.job_sequence)
-                    }
-                    events::coordinator_event::Event::AgentFinishedJob(e) => {
-                        // Include duration to differentiate from started job
-                        format!("agent_finished_{}_{}", e.job_sequence, e.duration)
-                    }
-                    events::coordinator_event::Event::CoordinationTx(e) => {
-                        format!("coord_tx_{}", e.tx_hash)
-                    }
-                    events::coordinator_event::Event::CoordinatorError(e) => {
-                        // Use message content which includes the index
-                        format!("coord_error_{}_{}", e.coordinator_id, e.message)
-                    }
-                    events::coordinator_event::Event::ClientTransaction(e) => {
-                        format!("client_tx_{}_{}", e.tx_hash, e.sequence)
-                    }
-                },
-                None => "coord_unknown".to_string(),
-            },
-            events::event::EventType::Agent(agent_event) => match &agent_event.event {
-                Some(agent_event_type) => match agent_event_type {
-                    events::agent_event::Event::Message(e) => {
-                        // Use message content which includes the index
-                        format!("agent_msg_{}_{}", e.job_sequence, e.message)
-                    }
-                    events::agent_event::Event::Transaction(e) => {
-                        format!("agent_tx_{}", e.tx_hash)
-                    }
-                },
-                None => "agent_unknown".to_string(),
-            },
-        },
+    match &event.event {
+        Some(event::Event::CoordinatorStarted(e)) => {
+            format!("coord_started_{}_{}", e.coordinator_id, e.ethereum_address)
+        }
+        Some(event::Event::CoordinatorActive(e)) => {
+            format!("coord_active_{}", e.coordinator_id)
+        }
+        Some(event::Event::CoordinatorShutdown(e)) => {
+            format!("coord_shutdown_{}", e.coordinator_id)
+        }
+        Some(event::Event::AgentSessionStarted(e)) => {
+            format!("agent_session_started_{}", e.session_id)
+        }
+        Some(event::Event::JobCreated(e)) => {
+            format!("job_created_{}", e.job_id)
+        }
+        Some(event::Event::JobStarted(e)) => {
+            format!("job_started_{}", e.job_id)
+        }
+        Some(event::Event::JobFinished(e)) => {
+            format!("job_finished_{}", e.job_id)
+        }
+        Some(event::Event::CoordinationTx(e)) => {
+            format!("coord_tx_{}", e.tx_hash)
+        }
+        Some(event::Event::ProofSubmitted(e)) => {
+            format!("proof_submitted_{}_{}", e.job_id, e.block_number)
+        }
+        Some(event::Event::SettlementTransaction(e)) => {
+            format!("settlement_tx_{}", e.tx_hash)
+        }
+        Some(event::Event::SettlementTransactionIncluded(e)) => {
+            format!("settlement_tx_included_{}_{}", e.job_id, e.block_number)
+        }
+        Some(event::Event::CoordinatorMessage(e)) => {
+            format!("coord_msg_{}_{}", e.coordinator_id, e.message)
+        }
+        Some(event::Event::AgentMessage(e)) => {
+            format!("agent_msg_{}_{}", e.session_id, e.message)
+        }
         None => "unknown".to_string(),
     }
 }
@@ -663,11 +649,11 @@ async fn test_coordinator_events(
 
     let test_cases = vec![
         ("coordinator_started", create_coordinator_started_event()),
-        ("agent_started_job", create_agent_started_job_event()),
-        ("agent_finished_job", create_agent_finished_job_event()),
+        ("job_started", create_job_started_event()),
+        ("job_finished", create_job_finished_event()),
         ("coordination_tx", create_coordination_tx_event()),
         ("coordinator_message", create_coordinator_message_event()),
-        ("client_transaction", create_client_transaction_event()),
+        ("settlement_transaction", create_settlement_transaction_event()),
     ];
 
     println!(
@@ -777,7 +763,6 @@ async fn test_agent_events(
 
     let test_cases = vec![
         ("agent_message", create_agent_message_event()),
-        ("agent_transaction", create_agent_transaction_event()),
     ];
 
     println!(
@@ -1027,148 +1012,87 @@ async fn test_batch_events(
 
 fn create_coordinator_started_event() -> Event {
     Event {
-        event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-            event: Some(coordinator_event::Event::CoordinatorStarted(
-                CoordinatorStartedEvent {
-                    coordinator_id: COORDINATOR_ID.to_string(),
-                    ethereum_address: "0x1234567890abcdef1234567890abcdef12345678".to_string(),
-                    sui_ed25519_address: "0xabcdef1234567890abcdef1234567890abcdef12".to_string(),
-                    event_timestamp: get_current_timestamp(),
-                },
-            )),
+        event: Some(event::Event::CoordinatorStarted(CoordinatorStartedEvent {
+            coordinator_id: COORDINATOR_ID.to_string(),
+            ethereum_address: "0x1234567890abcdef1234567890abcdef12345678".to_string(),
+            event_timestamp: get_current_timestamp(),
         })),
     }
 }
 
-fn create_agent_started_job_event() -> Event {
+fn create_job_started_event() -> Event {
+    // Use JobStarted event as replacement for AgentStartedJob
     Event {
-        event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-            event: Some(coordinator_event::Event::AgentStartedJob(
-                AgentStartedJobEvent {
-                    coordinator_id: COORDINATOR_ID.to_string(),
-                    developer: "test-developer".to_string(),
-                    agent: "test-agent".to_string(),
-                    app: "test-app".to_string(),
-                    job_sequence: "123".to_string(),
-                    event_timestamp: get_current_timestamp(),
-                },
-            )),
+        event: Some(event::Event::JobStarted(JobStartedEvent {
+            coordinator_id: COORDINATOR_ID.to_string(),
+            session_id: "test-session-123".to_string(),
+            job_id: "job-123".to_string(),
+            app_instance_id: "app-instance-123".to_string(),
+            event_timestamp: get_current_timestamp(),
         })),
     }
 }
 
-fn create_agent_finished_job_event() -> Event {
+fn create_job_finished_event() -> Event {
+    // Use JobFinished event as replacement for AgentFinishedJob
     Event {
-        event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-            event: Some(coordinator_event::Event::AgentFinishedJob(
-                AgentFinishedJobEvent {
-                    coordinator_id: COORDINATOR_ID.to_string(),
-                    developer: "test-developer".to_string(),
-                    agent: "test-agent".to_string(),
-                    app: "test-app".to_string(),
-                    job_sequence: "123".to_string(),
-                    duration: 5000, // 5 seconds
-                    event_timestamp: get_current_timestamp(),
-                },
-            )),
+        event: Some(event::Event::JobFinished(JobFinishedEvent {
+            coordinator_id: COORDINATOR_ID.to_string(),
+            job_id: "job-123".to_string(),
+            duration: 5000, // 5 seconds
+            result: 0, // JOB_RESULT_COMPLETED
+            event_timestamp: get_current_timestamp(),
         })),
     }
 }
 
 fn create_coordination_tx_event() -> Event {
     Event {
-        event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-            event: Some(coordinator_event::Event::CoordinationTx(
-                CoordinationTxEvent {
-                    coordinator_id: COORDINATOR_ID.to_string(),
-                    developer: "test-developer".to_string(),
-                    agent: "test-agent".to_string(),
-                    app: "test-app".to_string(),
-                    job_sequence: "123".to_string(),
-                    memo: "Test coordination transaction".to_string(),
-                    tx_hash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-                        .to_string(),
-                    event_timestamp: get_current_timestamp(),
-                },
-            )),
+        event: Some(event::Event::CoordinationTx(CoordinationTxEvent {
+            coordinator_id: COORDINATOR_ID.to_string(),
+            tx_hash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+                .to_string(),
+            event_timestamp: get_current_timestamp(),
         })),
     }
 }
 
 fn create_coordinator_message_event() -> Event {
     Event {
-        event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-            event: Some(coordinator_event::Event::CoordinatorError(
-                CoordinatorMessageEvent {
-                    coordinator_id: COORDINATOR_ID.to_string(),
-                    event_timestamp: get_current_timestamp(),
-                    level: 3, // LogLevel::Error
-                    message: "Test error message".to_string(),
-                },
-            )),
+        event: Some(event::Event::CoordinatorMessage(CoordinatorMessageEvent {
+            coordinator_id: COORDINATOR_ID.to_string(),
+            event_timestamp: get_current_timestamp(),
+            level: 3, // LogLevel::Error
+            message: "Test error message".to_string(),
         })),
     }
 }
 
-fn create_client_transaction_event() -> Event {
+fn create_settlement_transaction_event() -> Event {
+    // Use SettlementTransaction as replacement for ClientTransaction
     Event {
-        event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-            event: Some(coordinator_event::Event::ClientTransaction(
-                ClientTransactionEvent {
-                    coordinator_id: COORDINATOR_ID.to_string(),
-                    developer: "test-developer".to_string(),
-                    agent: "test-agent".to_string(),
-                    app: "test-app".to_string(),
-                    client_ip_address: "192.168.1.100".to_string(),
-                    method: "submit_proof".to_string(),
-                    data: b"test transaction data".to_vec(),
-                    tx_hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-                        .to_string(),
-                    sequence: 1,
-                    event_timestamp: get_current_timestamp(),
-                },
-            )),
+        event: Some(event::Event::SettlementTransaction(SettlementTransactionEvent {
+            coordinator_id: COORDINATOR_ID.to_string(),
+            session_id: "test-session-123".to_string(),
+            job_id: "job-123".to_string(),
+            app_instance_id: "app-instance-123".to_string(),
+            block_number: 12345678,
+            tx_hash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+                .to_string(),
+            event_timestamp: get_current_timestamp(),
         })),
     }
 }
 
 fn create_agent_message_event() -> Event {
     Event {
-        event_type: Some(event::EventType::Agent(AgentEvent {
-            event: Some(agent_event::Event::Message(AgentMessageEvent {
-                coordinator_id: COORDINATOR_ID.to_string(),
-                developer: "test-developer".to_string(),
-                agent: "test-agent".to_string(),
-                app: "test-app".to_string(),
-                job_sequence: "123".to_string(),
-                sequences: vec![1, 2, 3],
-                event_timestamp: get_current_timestamp(),
-                level: 1, // LogLevel::Info
-                message: "Test agent message".to_string(),
-            })),
-        })),
-    }
-}
-
-fn create_agent_transaction_event() -> Event {
-    Event {
-        event_type: Some(event::EventType::Agent(AgentEvent {
-            event: Some(agent_event::Event::Transaction(AgentTransactionEvent {
-                coordinator_id: COORDINATOR_ID.to_string(),
-                tx_type: "transaction".to_string(),
-                developer: "test-developer".to_string(),
-                agent: "test-agent".to_string(),
-                app: "test-app".to_string(),
-                job_sequence: "123".to_string(),
-                sequences: vec![1, 2, 3],
-                event_timestamp: get_current_timestamp(),
-                tx_hash: "0x9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba"
-                    .to_string(),
-                chain: "ethereum".to_string(),
-                network: "mainnet".to_string(),
-                memo: "Test agent transaction".to_string(),
-                metadata: Some(r#"{"gas_used": 21000, "gas_price": "20000000000"}"#.to_string()),
-            })),
+        event: Some(event::Event::AgentMessage(AgentMessageEvent {
+            coordinator_id: COORDINATOR_ID.to_string(),
+            session_id: "test-session-123".to_string(),
+            job_id: Some("job-123".to_string()),
+            event_timestamp: get_current_timestamp(),
+            level: 1, // LogLevel::Info
+            message: "Test agent message".to_string(),
         })),
     }
 }
@@ -1176,57 +1100,46 @@ fn create_agent_transaction_event() -> Event {
 // Helper functions to add uniqueness to events
 
 fn modify_coordinator_event_for_uniqueness(event: &mut Event, index: usize) {
-    if let Some(event::EventType::Coordinator(coord_event)) = &mut event.event_type {
-        match &mut coord_event.event {
-            Some(coordinator_event::Event::CoordinatorStarted(e)) => {
-                e.ethereum_address = format!("0x{:040x}", index);
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            Some(coordinator_event::Event::AgentStartedJob(e)) => {
-                e.job_sequence = format!("{}", index);
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            Some(coordinator_event::Event::AgentFinishedJob(e)) => {
-                e.job_sequence = format!("{}", index);
-                e.duration = 1000 + (index as u64 * 100);
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            Some(coordinator_event::Event::CoordinationTx(e)) => {
-                e.job_sequence = format!("{}", index);
-                e.tx_hash = format!("0x{:064x}", index);
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            Some(coordinator_event::Event::CoordinatorError(e)) => {
-                e.message = format!("Test error message #{}", index);
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            Some(coordinator_event::Event::ClientTransaction(e)) => {
-                e.tx_hash = format!("0x{:064x}", index);
-                e.sequence = index as u64;
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            None => {}
+    match &mut event.event {
+        Some(event::Event::CoordinatorStarted(e)) => {
+            e.ethereum_address = format!("0x{:040x}", index);
+            e.event_timestamp = get_current_timestamp() + index as u64;
         }
+        Some(event::Event::JobStarted(e)) => {
+            e.job_id = format!("job-started-{}", index);
+            e.event_timestamp = get_current_timestamp() + index as u64;
+        }
+        Some(event::Event::JobFinished(e)) => {
+            e.job_id = format!("job-finished-{}", index);
+            e.duration = 1000 + (index as u64 * 100);
+            e.event_timestamp = get_current_timestamp() + index as u64;
+        }
+        Some(event::Event::CoordinationTx(e)) => {
+            e.tx_hash = format!("0x{:064x}", index);
+            e.event_timestamp = get_current_timestamp() + index as u64;
+        }
+        Some(event::Event::CoordinatorMessage(e)) => {
+            e.message = format!("Test error message #{}", index);
+            e.event_timestamp = get_current_timestamp() + index as u64;
+        }
+        Some(event::Event::SettlementTransaction(e)) => {
+            e.tx_hash = format!("0x{:064x}", index + 10000000);
+            e.job_id = format!("job-settlement-{}", index);
+            e.block_number = 10000000 + index as u64;
+            e.event_timestamp = get_current_timestamp() + index as u64;
+        }
+        _ => {}
     }
 }
 
 fn modify_agent_event_for_uniqueness(event: &mut Event, index: usize) {
-    if let Some(event::EventType::Agent(agent_event)) = &mut event.event_type {
-        match &mut agent_event.event {
-            Some(agent_event::Event::Message(e)) => {
-                e.job_sequence = format!("{}", index);
-                e.message = format!("Test agent message #{}", index);
-                e.sequences = vec![index as u64];
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            Some(agent_event::Event::Transaction(e)) => {
-                e.job_sequence = format!("{}", index);
-                e.tx_hash = format!("0x{:064x}", index + 1000);
-                e.sequences = vec![index as u64];
-                e.event_timestamp = get_current_timestamp() + index as u64;
-            }
-            None => {}
+    match &mut event.event {
+        Some(event::Event::AgentMessage(e)) => {
+            e.job_id = Some(format!("job-{}", index));
+            e.message = format!("Test agent message #{}", index);
+            e.event_timestamp = get_current_timestamp() + index as u64;
         }
+        _ => {}
     }
 }
 

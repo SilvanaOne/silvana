@@ -26,6 +26,9 @@ fn get_unique_coordinator_id() -> String {
 
 #[tokio::test]
 async fn test_nats_roundtrip_latency() {
+    // Initialize Rustls crypto provider for HTTPS connections
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let server_addr = get_server_addr();
     println!("🧪 Starting NATS roundtrip latency test...");
     println!("🎯 gRPC Server: {}", server_addr);
@@ -198,18 +201,11 @@ async fn test_nats_roundtrip_latency() {
                                 }
 
                                 // Extract coordinator info for logging
-                                if let Some(event::EventType::Coordinator(coord_event)) =
-                                    &received_event.event_type
-                                {
-                                    if let Some(coordinator_event::Event::CoordinatorStarted(
-                                        started,
-                                    )) = &coord_event.event
-                                    {
-                                        println!(
-                                            "     📊 Received event: coordinator_id={}, ethereum_address={}",
-                                            started.coordinator_id, started.ethereum_address
-                                        );
-                                    }
+                                if let Some(event::Event::CoordinatorStarted(started)) = &received_event.event {
+                                    println!(
+                                        "     📊 Received event: coordinator_id={}, ethereum_address={}",
+                                        started.coordinator_id, started.ethereum_address
+                                    );
                                 }
                                 break; // Exit the inner loop once we find the matching message
                             } else {
@@ -292,28 +288,20 @@ fn create_test_coordinator_started_event(coordinator_id: &str) -> Event {
     let unique_address = format!("0x{:040x}", timestamp); // Use timestamp for uniqueness
 
     Event {
-        event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-            event: Some(coordinator_event::Event::CoordinatorStarted(
-                CoordinatorStartedEvent {
-                    coordinator_id: coordinator_id.to_string(),
-                    ethereum_address: unique_address,
-                    sui_ed25519_address: format!("0x{:040x}", timestamp + 1),
-                    event_timestamp: timestamp,
-                },
-            )),
+        event: Some(event::Event::CoordinatorStarted(CoordinatorStartedEvent {
+            coordinator_id: coordinator_id.to_string(),
+            ethereum_address: unique_address,
+            event_timestamp: timestamp,
         })),
     }
 }
 
 fn create_event_signature(event: &Event) -> String {
     // Create a unique signature based on stable fields (same logic as integration_test.rs)
-    match &event.event_type {
-        Some(event::EventType::Coordinator(coord_event)) => match &coord_event.event {
-            Some(coordinator_event::Event::CoordinatorStarted(e)) => {
-                format!("coord_started_{}_{}", e.coordinator_id, e.ethereum_address)
-            }
-            _ => "coord_other".to_string(),
-        },
+    match &event.event {
+        Some(event::Event::CoordinatorStarted(e)) => {
+            format!("coord_started_{}_{}", e.coordinator_id, e.ethereum_address)
+        }
         _ => "unknown".to_string(),
     }
 }

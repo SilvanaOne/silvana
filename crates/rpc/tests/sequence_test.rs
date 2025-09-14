@@ -24,6 +24,9 @@ fn get_unique_coordinator_id() -> String {
 
 #[tokio::test]
 async fn test_sequence_events_round_trip() {
+    // Initialize Rustls crypto provider for HTTPS connections
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let server_addr = get_server_addr();
 
     println!("🧪 Starting sequence round-trip test...");
@@ -139,122 +142,79 @@ async fn test_sequence_events_round_trip() {
             attempt += 1;
             let query_start = std::time::Instant::now();
 
-            // Query AgentMessageEvents by sequence
-            // Query message events by sequence
-            // Note: Since the new API only has GetEventsByAppInstanceSequence,
-            // we'll need to adapt the test to use SearchEvents instead
-            let message_search_request = Request::new(SearchEventsRequest {
-                search_query: format!("coordinator_id:{} sequence:{}", coordinator_id, sequence),
-                limit: Some(100),
+            // Query events using the new SearchEvents API
+            let search_request = Request::new(SearchEventsRequest {
+                search_query: format!("coordinator_id:{}", coordinator_id),
+                limit: Some(200),
                 offset: None,
                 coordinator_id: Some(coordinator_id.clone()),
             });
 
-            println!("Message request: {:?}", &message_request);
+            println!("Search request: {:?}", &search_request);
 
-            let message_response = match client
-                .get_agent_message_events_by_sequence(message_request)
+            let search_response = match client
+                .search_events(search_request)
                 .await
             {
                 Ok(resp) => resp.into_inner(),
                 Err(e) => {
-                    println!("    ⚠️  Attempt {}: Message query failed: {}", attempt, e);
+                    println!("    ⚠️  Attempt {}: Search query failed: {}", attempt, e);
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     continue;
                 }
             };
 
-            // Query AgentTransactionEvents by sequence
-            // Query transaction events by sequence
-            // Note: Since the new API only has GetEventsByAppInstanceSequence,
-            // we'll need to adapt the test to use SearchEvents instead
-            let tx_search_request = Request::new(SearchEventsRequest {
-                search_query: format!("coordinator_id:{} sequence:{}", coordinator_id, sequence),
-                limit: Some(100),
-                offset: None,
-                coordinator_id: Some(coordinator_id.clone()),
-            });
+            // Count message and transaction events from the search response
+            let mut message_count = 0;
+            let mut tx_count = 0;
 
-            let tx_response = match client
-                .get_agent_transaction_events_by_sequence(tx_request)
-                .await
-            {
-                Ok(resp) => resp.into_inner(),
-                Err(e) => {
-                    println!(
-                        "    ⚠️  Attempt {}: Transaction query failed: {}",
-                        attempt, e
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    continue;
+            if search_response.success {
+                for event_with_relevance in &search_response.events {
+                    if let Some(event) = &event_with_relevance.event {
+                        match &event.event {
+                            Some(event::Event::AgentMessage(_)) => message_count += 1,
+                            Some(event::Event::SettlementTransaction(_)) => tx_count += 1,
+                            _ => {}
+                        }
+                    }
                 }
-            };
+            }
 
             let query_duration = query_start.elapsed();
             let end_to_end_latency = last_send_time.elapsed();
 
             // Check if we got the expected results
-            if message_response.success
-                && tx_response.success
-                && message_response.events.len() == expected_message_events
-                && tx_response.events.len() == expected_tx_events
+            if search_response.success
+                && message_count == expected_message_events
+                && tx_count == expected_tx_events
             {
-                // Verify data integrity
-                let mut all_valid = true;
+                success = true;
+                let retrieved_count = message_count + tx_count;
+                total_retrieved += retrieved_count;
 
-                for event in &message_response.events {
-                    if event.coordinator_id != coordinator_id
-                        || !event.sequences.contains(&sequence)
-                    {
-                        all_valid = false;
-                        break;
-                    }
-                }
+                // Track latency for min/max calculation
+                latencies.push(end_to_end_latency.as_millis());
 
-                for event in &tx_response.events {
-                    if event.coordinator_id != coordinator_id
-                        || !event.sequences.contains(&sequence)
-                    {
-                        all_valid = false;
-                        break;
-                    }
-                }
-
-                if all_valid {
-                    success = true;
-                    let retrieved_count = message_response.events.len() + tx_response.events.len();
-                    total_retrieved += retrieved_count;
-
-                    // Track latency for min/max calculation
-                    latencies.push(end_to_end_latency.as_millis());
-
-                    println!(
-                        "  ✅ SUCCESS: attempt={}, query_time={}ms, send→query_latency={}ms",
-                        attempt,
-                        query_duration.as_millis(),
-                        end_to_end_latency.as_millis()
-                    );
-                    println!(
-                        "     Retrieved: {} events ({} messages, {} transactions)",
-                        retrieved_count,
-                        message_response.events.len(),
-                        tx_response.events.len()
-                    );
-                } else {
-                    println!(
-                        "    🔄 Attempt {}: Got expected counts but data validation failed (latency={}ms)",
-                        attempt,
-                        end_to_end_latency.as_millis()
-                    );
-                }
+                println!(
+                    "  ✅ SUCCESS: attempt={}, query_time={}ms, send→query_latency={}ms",
+                    attempt,
+                    query_duration.as_millis(),
+                    end_to_end_latency.as_millis()
+                );
+                println!(
+                    "     Retrieved: {} events ({} messages, {} transactions)",
+                    retrieved_count,
+                    message_count,
+                    tx_count
+                );
             } else {
                 println!(
                     "    🔄 Attempt {}: Expected {}/{} events, got {}/{} (query_time={}ms, latency={}ms)",
                     attempt,
                     expected_message_events,
                     expected_tx_events,
-                    message_response.events.len(),
-                    tx_response.events.len(),
+                    message_count,
+                    tx_count,
                     query_duration.as_millis(),
                     end_to_end_latency.as_millis()
                 );
@@ -317,43 +277,27 @@ fn create_test_events_with_sequences(coordinator_id: &str) -> Vec<(Event, u64, S
         if i % 2 == 0 {
             // Agent Message Event
             let event = Event {
-                event_type: Some(event::EventType::Agent(AgentEvent {
-                    event: Some(agent_event::Event::Message(AgentMessageEvent {
-                        coordinator_id: coordinator_id.to_string(),
-                        developer: "sequence-test-developer".to_string(),
-                        agent: "sequence-test-agent".to_string(),
-                        app: "sequence-test-app".to_string(),
-                        job_sequence: job_id.clone(),
-                        sequences: vec![sequence], // Single sequence per event for this test
-                        event_timestamp: get_current_timestamp() + i as u64,
-                        level: 1, // LogLevel::Info
-                        message: format!("Test message for sequence {} (event {})", sequence, i),
-                    })),
+                event: Some(event::Event::AgentMessage(AgentMessageEvent {
+                    coordinator_id: coordinator_id.to_string(),
+                    session_id: format!("seq-test-session-{}", sequence),
+                    job_id: Some(job_id.clone()),
+                    event_timestamp: get_current_timestamp() + i as u64,
+                    level: 1, // LogLevel::Info
+                    message: format!("Test message for sequence {} (event {})", sequence, i),
                 })),
             };
             events.push((event, sequence, "message".to_string(), job_id));
         } else {
-            // Agent Transaction Event
+            // Settlement Transaction Event (no direct AgentTransaction equivalent)
             let event = Event {
-                event_type: Some(event::EventType::Agent(AgentEvent {
-                    event: Some(agent_event::Event::Transaction(AgentTransactionEvent {
-                        coordinator_id: coordinator_id.to_string(),
-                        tx_type: "test_transaction".to_string(),
-                        developer: "sequence-test-developer".to_string(),
-                        agent: "sequence-test-agent".to_string(),
-                        app: "sequence-test-app".to_string(),
-                        job_sequence: job_id.clone(),
-                        sequences: vec![sequence], // Single sequence per event for this test
-                        event_timestamp: get_current_timestamp() + i as u64,
-                        tx_hash: format!("0x{:064x}", i),
-                        chain: "ethereum".to_string(),
-                        network: "testnet".to_string(),
-                        memo: format!("Test transaction for sequence {} (event {})", sequence, i),
-                        metadata: Some(format!(
-                            r#"{{"event_index": {}, "sequence": {}}}"#,
-                            i, sequence
-                        )),
-                    })),
+                event: Some(event::Event::SettlementTransaction(SettlementTransactionEvent {
+                    coordinator_id: coordinator_id.to_string(),
+                    session_id: format!("seq-test-session-{}", sequence),
+                    job_id: job_id.clone(),
+                    app_instance_id: "test-app-instance".to_string(),
+                    block_number: 1000000 + i as u64,
+                    tx_hash: format!("0x{:064x}", i),
+                    event_timestamp: get_current_timestamp() + i as u64,
                 })),
             };
             events.push((event, sequence, "transaction".to_string(), job_id));

@@ -20,6 +20,9 @@ fn get_unique_coordinator_id() -> String {
 
 #[tokio::test]
 async fn test_fulltext_search_coordinator_messages() {
+    // Initialize Rustls crypto provider for HTTPS connections
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     println!("🧪 Starting full-text search test...");
     let server_addr = get_server_addr();
     println!("🎯 Server address: {}", server_addr);
@@ -166,14 +169,14 @@ async fn verify_indexing_with_polling(
         let query_start = std::time::Instant::now();
 
         // Test with a simple search that should return results
-        let request = Request::new(SearchCoordinatorMessageEventsRequest {
+        let request = Request::new(SearchEventsRequest {
             search_query: "error".to_string(),
             limit: Some(10),
             offset: None,
             coordinator_id: Some(coordinator_id.to_string()),
         });
 
-        match client.search_coordinator_message_events(request).await {
+        match client.search_events(request).await {
             Ok(response) => {
                 let search_result = response.into_inner();
                 let query_duration = query_start.elapsed();
@@ -234,14 +237,14 @@ async fn test_basic_search(
         attempt += 1;
         let query_start = std::time::Instant::now();
 
-        let request = Request::new(SearchCoordinatorMessageEventsRequest {
+        let request = Request::new(SearchEventsRequest {
             search_query: search_term.to_string(),
             limit: Some(10),
             offset: None,
             coordinator_id: Some(coordinator_id.to_string()),
         });
 
-        match client.search_coordinator_message_events(request).await {
+        match client.search_events(request).await {
             Ok(response) => {
                 let result = response.into_inner();
                 let query_duration = query_start.elapsed();
@@ -299,19 +302,23 @@ async fn test_basic_search(
     assert_eq!(search_result.returned_count as usize, expected_count);
 
     // Verify all results contain the search term
-    for event in &search_result.events {
+    for event_with_relevance in &search_result.events {
+        if let Some(event) = &event_with_relevance.event {
+            if let Some(event::Event::CoordinatorMessage(msg_event)) = &event.event {
+                assert!(
+                    msg_event
+                        .message
+                        .to_lowercase()
+                        .contains(&search_term.to_lowercase()),
+                    "Result message '{}' should contain '{}'",
+                    msg_event.message,
+                    search_term
+                );
+                assert_eq!(msg_event.coordinator_id, coordinator_id);
+            }
+        }
         assert!(
-            event
-                .message
-                .to_lowercase()
-                .contains(&search_term.to_lowercase()),
-            "Result message '{}' should contain '{}'",
-            event.message,
-            search_term
-        );
-        assert_eq!(event.coordinator_id, coordinator_id);
-        assert!(
-            event.relevance_score > 0.0,
+            event_with_relevance.relevance_score > 0.0,
             "Relevance score should be positive"
         );
     }
@@ -342,7 +349,7 @@ async fn test_coordinator_filtered_search(
     println!("🔍 Testing coordinator-filtered search");
 
     // Search without coordinator filter (should find events from multiple coordinators)
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "error".to_string(),
         limit: Some(10),
         offset: None,
@@ -350,14 +357,14 @@ async fn test_coordinator_filtered_search(
     });
 
     let response = client
-        .search_coordinator_message_events(request)
+        .search_events(request)
         .await
         .expect("Unfiltered search should succeed");
 
     let _unfiltered_result = response.into_inner();
 
     // Search with coordinator filter
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "error".to_string(),
         limit: Some(10),
         offset: None,
@@ -365,7 +372,7 @@ async fn test_coordinator_filtered_search(
     });
 
     let response = client
-        .search_coordinator_message_events(request)
+        .search_events(request)
         .await
         .expect("Filtered search should succeed");
 
@@ -381,8 +388,12 @@ async fn test_coordinator_filtered_search(
     );
 
     // Verify all results are from the correct coordinator
-    for event in &filtered_result.events {
-        assert_eq!(event.coordinator_id, coordinator_id);
+    for event_with_relevance in &filtered_result.events {
+        if let Some(event) = &event_with_relevance.event {
+            if let Some(event::Event::CoordinatorMessage(msg_event)) = &event.event {
+                assert_eq!(msg_event.coordinator_id, coordinator_id);
+            }
+        }
     }
 
     println!(
@@ -398,7 +409,7 @@ async fn test_search_pagination(
     println!("🔍 Testing search pagination");
 
     // Get all results first
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "error".to_string(),
         limit: None,
         offset: None,
@@ -406,7 +417,7 @@ async fn test_search_pagination(
     });
 
     let response = client
-        .search_coordinator_message_events(request)
+        .search_events(request)
         .await
         .expect("Full search should succeed");
 
@@ -419,7 +430,7 @@ async fn test_search_pagination(
     }
 
     // Test pagination - first page
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "error".to_string(),
         limit: Some(2),
         offset: Some(0),
@@ -427,7 +438,7 @@ async fn test_search_pagination(
     });
 
     let response = client
-        .search_coordinator_message_events(request)
+        .search_events(request)
         .await
         .expect("Paginated search should succeed");
 
@@ -442,7 +453,7 @@ async fn test_search_pagination(
 
     // Test pagination - second page if enough results
     if total_count > 2 {
-        let request = Request::new(SearchCoordinatorMessageEventsRequest {
+        let request = Request::new(SearchEventsRequest {
             search_query: "error".to_string(),
             limit: Some(2),
             offset: Some(2),
@@ -450,7 +461,7 @@ async fn test_search_pagination(
         });
 
         let response = client
-            .search_coordinator_message_events(request)
+            .search_events(request)
             .await
             .expect("Second page search should succeed");
 
@@ -477,14 +488,14 @@ async fn test_empty_query_handling(
 ) {
     println!("🔍 Testing empty query handling");
 
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "".to_string(),
         limit: Some(10),
         offset: None,
         coordinator_id: None,
     });
 
-    let response = client.search_coordinator_message_events(request).await;
+    let response = client.search_events(request).await;
 
     match response {
         Err(status) => {
@@ -507,7 +518,7 @@ async fn test_relevance_scoring(
 ) {
     println!("🔍 Testing relevance scoring");
 
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "error critical".to_string(),
         limit: Some(10),
         offset: None,
@@ -515,7 +526,7 @@ async fn test_relevance_scoring(
     });
 
     let response = client
-        .search_coordinator_message_events(request)
+        .search_events(request)
         .await
         .expect("Relevance test search should succeed");
 
@@ -564,7 +575,7 @@ async fn test_multilanguage_search(
     println!("🔍 Testing multi-language search");
 
     // Test Japanese search (from our test data)
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "ネットワーク".to_string(),
         limit: Some(10),
         offset: None,
@@ -572,14 +583,14 @@ async fn test_multilanguage_search(
     });
 
     let response = client
-        .search_coordinator_message_events(request)
+        .search_events(request)
         .await
         .expect("Japanese search should succeed");
 
     let japanese_result = response.into_inner();
 
     // Test Chinese search (from our test data)
-    let request = Request::new(SearchCoordinatorMessageEventsRequest {
+    let request = Request::new(SearchEventsRequest {
         search_query: "区块链".to_string(),
         limit: Some(10),
         offset: None,
@@ -587,7 +598,7 @@ async fn test_multilanguage_search(
     });
 
     let response = client
-        .search_coordinator_message_events(request)
+        .search_events(request)
         .await
         .expect("Chinese search should succeed");
 
@@ -638,20 +649,16 @@ fn create_test_coordinator_messages(coordinator_id: &str) -> Vec<(Event, String)
 
     for (i, (message, description)) in test_messages.iter().enumerate() {
         let event = Event {
-            event_type: Some(event::EventType::Coordinator(CoordinatorEvent {
-                event: Some(coordinator_event::Event::CoordinatorError(
-                    CoordinatorMessageEvent {
-                        coordinator_id: coordinator_id.to_string(),
-                        event_timestamp: base_timestamp + i as u64,
-                        level: match i % 4 {
-                            0 => 3, // Error
-                            1 => 2, // Warn
-                            2 => 1, // Info
-                            _ => 0, // Debug
-                        },
-                        message: message.to_string(),
-                    },
-                )),
+            event: Some(event::Event::CoordinatorMessage(CoordinatorMessageEvent {
+                coordinator_id: coordinator_id.to_string(),
+                event_timestamp: base_timestamp + i as u64,
+                level: match i % 4 {
+                    0 => 3, // Error
+                    1 => 2, // Warn
+                    2 => 1, // Info
+                    _ => 0, // Debug
+                },
+                message: message.to_string(),
             })),
         };
 

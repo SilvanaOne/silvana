@@ -1613,3 +1613,139 @@ mod tests {
         assert_eq!(safe_count, u32::MAX);
     }
 }
+
+// Search result structure
+pub struct SearchResult {
+    pub events: Vec<proto::EventWithRelevance>,
+    pub total_count: usize,
+    pub returned_count: usize,
+}
+
+// Search function for coordinator messages using TiDB's fulltext search
+pub async fn search_coordinator_messages(
+    database: &EventDatabase,
+    search_query: &str,
+    coordinator_id: Option<&str>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<SearchResult> {
+    use sea_orm::{ConnectionTrait, Statement};
+
+    let start_time = Instant::now();
+
+    if search_query.trim().is_empty() {
+        return Ok(SearchResult {
+            events: vec![],
+            total_count: 0,
+            returned_count: 0,
+        });
+    }
+
+    // Escape single quotes in search query to prevent SQL injection
+    let escaped_query = search_query.replace("'", "''");
+
+    // Build the WHERE clause - TiDB uses fts_match_word for fulltext search
+    let mut where_conditions = vec![format!("fts_match_word('{}', message)", escaped_query)];
+    let mut params: Vec<sea_orm::Value> = Vec::new();
+
+    if let Some(coord_id) = coordinator_id {
+        where_conditions.push("coordinator_id = ?".to_string());
+        params.push(coord_id.into());
+    }
+
+    let where_clause = where_conditions.join(" AND ");
+
+    // First, get the count for pagination
+    let count_query = format!(
+        "SELECT COUNT(*) as count FROM coordinator_message_event WHERE {}",
+        where_clause
+    );
+
+    let count_stmt = Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::MySql,
+        &count_query,
+        params.clone(),
+    );
+
+    let count_result = database.connection.query_one(count_stmt).await?;
+    let total_count = count_result
+        .and_then(|row| row.try_get::<i64>("", "count").ok())
+        .unwrap_or(0) as usize;
+
+    if total_count == 0 {
+        return Ok(SearchResult {
+            events: vec![],
+            total_count: 0,
+            returned_count: 0,
+        });
+    }
+
+    // Build the main query with full-text search and relevance scoring
+    let mut main_query = format!(
+        "SELECT id, coordinator_id, event_timestamp, level, message, created_at,
+                fts_match_word('{}', message) as relevance_score
+         FROM coordinator_message_event
+         WHERE {}
+         ORDER BY fts_match_word('{}', message) DESC, created_at DESC",
+        escaped_query, where_clause, escaped_query
+    );
+
+    // Add pagination
+    let limit_val = limit.unwrap_or(100).min(1000);
+    main_query.push_str(&format!(" LIMIT {}", limit_val));
+    if let Some(offset_val) = offset {
+        main_query.push_str(&format!(" OFFSET {}", offset_val));
+    }
+
+    let main_stmt = Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::MySql,
+        &main_query,
+        params
+    );
+
+    let results = database.connection.query_all(main_stmt).await?;
+
+    // Convert to proto events with relevance scores
+    let mut events = Vec::new();
+    for row in results.iter() {
+        let id = row.try_get::<i64>("", "id").unwrap_or(0);
+        let coordinator_id = row.try_get::<String>("", "coordinator_id").unwrap_or_default();
+        let event_timestamp = row.try_get::<i64>("", "event_timestamp").unwrap_or(0) as u64;
+        let level = row.try_get::<i8>("", "level").unwrap_or(0) as i32;
+        let message = row.try_get::<String>("", "message").unwrap_or_default();
+        let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
+
+        let event = proto::Event {
+            event: Some(proto::event::Event::CoordinatorMessage(
+                proto::CoordinatorMessageEvent {
+                    coordinator_id,
+                    event_timestamp,
+                    level,
+                    message,
+                }
+            )),
+        };
+
+        events.push(proto::EventWithRelevance {
+            id,
+            event: Some(event),
+            relevance_score,
+        });
+    }
+
+    let returned_count = events.len();
+
+    debug!(
+        "Search completed in {}ms: query='{}', found={}/{} events",
+        start_time.elapsed().as_millis(),
+        search_query,
+        returned_count,
+        total_count
+    );
+
+    Ok(SearchResult {
+        events,
+        total_count,
+        returned_count,
+    })
+}

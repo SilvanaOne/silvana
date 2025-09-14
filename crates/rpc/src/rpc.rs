@@ -216,15 +216,26 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             ));
         }
 
-        // TODO: Implement full event search based on new requirements
-        // This should search across all event types
+        // Search coordinator_message_event table using fulltext search
+        let search_result = crate::database::search_coordinator_messages(
+            &self._database,
+            &req.search_query,
+            req.coordinator_id.as_deref(),
+            req.limit,
+            req.offset,
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to search events: {}", e);
+            Status::internal(format!("Failed to search events: {}", e))
+        })?;
 
         Ok(Response::new(SearchEventsResponse {
             success: true,
             message: "Search completed".to_string(),
-            events: vec![],
-            total_count: 0,
-            returned_count: 0,
+            events: search_result.events,
+            total_count: search_result.total_count as u32,
+            returned_count: search_result.returned_count as u32,
         }))
     }
 
