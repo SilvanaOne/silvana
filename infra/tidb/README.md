@@ -95,7 +95,7 @@ Our custom `proto-to-ddl` tool generates Sea-ORM entities directly from proto de
 
 ### Making Schema Changes
 
-1. **Edit proto file**: Modify `proto/events.proto`
+1. **Edit proto file**: Modify `proto/silvana/rpc/v1/rpc.proto`
 2. **Regenerate**: Run `make regen`
 3. **Review changes**: Check generated entities in `src/entity/`
 4. **Test**: Run your application with new schema

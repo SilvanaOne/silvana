@@ -29,7 +29,7 @@ fi
 
 # Run the validation using proto-to-ddl
 if ./infra/tidb/proto-to-ddl/target/release/proto-to-ddl validate \
-    --proto-file proto/events.proto \
+    --proto-file proto/silvana/rpc/v1/rpc.proto \
     --database-url "$DATABASE_URL" >/dev/null 2>&1; then
     echo "🎉 All schemas are valid!"
     echo "✅ Proto definitions match database structure perfectly."
