@@ -21,6 +21,11 @@ pub async fn setup_example_project(project_path: &Path, project_name: &str) -> R
     let sui_user_key = generate_sui_keypair("user")?;
     let sui_coordinator_key = generate_sui_keypair("coordinator")?;
 
+    // Generate Ethereum keys
+    info!("📍 Generating Ethereum keypairs...");
+    let eth_user_key = generate_ethereum_keypair("user")?;
+    let eth_coordinator_key = generate_ethereum_keypair("coordinator")?;
+
     // Generate Mina keys
     info!("📍 Generating Mina keypairs...");
     let mina_app_admin_key = generate_mina_keypair("app-admin")?;
@@ -161,6 +166,8 @@ pub async fn setup_example_project(project_path: &Path, project_name: &str) -> R
         project_path,
         &sui_user_key,
         &sui_coordinator_key,
+        &eth_user_key,
+        &eth_coordinator_key,
         &mina_app_admin_key,
         &mina_user_key,
         &registry_package,
@@ -171,6 +178,8 @@ pub async fn setup_example_project(project_path: &Path, project_name: &str) -> R
     display_setup_summary(
         &sui_user_key,
         &sui_coordinator_key,
+        &eth_user_key,
+        &eth_coordinator_key,
         &mina_app_admin_key,
         &mina_user_key,
         &registry_id,
@@ -186,7 +195,14 @@ pub struct SuiKeypair {
     pub address: String,
 }
 
-/// Mina keypair structure  
+/// Ethereum keypair structure
+#[derive(Debug)]
+struct EthereumKeypair {
+    private_key: String,
+    address: String,
+}
+
+/// Mina keypair structure
 #[derive(Debug)]
 struct MinaKeypair {
     private_key: String,
@@ -209,6 +225,29 @@ pub fn generate_sui_keypair(name: &str) -> Result<SuiKeypair> {
             error!("Failed to generate Sui {} keypair: {}", name, e);
             Err(anyhow::anyhow!(
                 "Failed to generate Sui {} keypair: {}",
+                name,
+                e
+            ))
+        }
+    }
+}
+
+/// Generate an Ethereum keypair
+fn generate_ethereum_keypair(name: &str) -> Result<EthereumKeypair> {
+    info!("   • Generating Ethereum {} keypair...", name);
+
+    match ethereum::keypair::generate_ethereum_keypair() {
+        Ok(keypair) => {
+            info!("     ✓ Ethereum {} address: {}", name, keypair.address);
+            Ok(EthereumKeypair {
+                private_key: keypair.private_key,
+                address: keypair.address,
+            })
+        }
+        Err(e) => {
+            error!("Failed to generate Ethereum {} keypair: {}", name, e);
+            Err(anyhow::anyhow!(
+                "Failed to generate Ethereum {} keypair: {}",
                 name,
                 e
             ))
@@ -335,6 +374,8 @@ fn create_env_files(
     project_path: &Path,
     sui_user: &SuiKeypair,
     sui_coordinator: &SuiKeypair,
+    eth_user: &EthereumKeypair,
+    eth_coordinator: &EthereumKeypair,
     mina_app_admin: &MinaKeypair,
     mina_user: &MinaKeypair,
     registry_package: &Option<String>,
@@ -349,7 +390,7 @@ fn create_env_files(
     } else {
         // Default template if env.example doesn't exist
         String::from(
-            "#\nSUI_CHAIN=devnet\nSUI_ADDRESS=\nSUI_SECRET_KEY=\nSILVANA_REGISTRY_PACKAGE=\nSILVANA_REGISTRY=\nAPP_PACKAGE_ID=\n\n# Mina\nMINA_PRIVATE_KEY=\nMINA_PUBLIC_KEY=\nMINA_APP_ADMIN=\nMINA_APP_ADMIN_PRIVATE_KEY=\n\n# Docker\nDOCKER_USERNAME=\nDOCKER_PASSWORD=\nIMAGE_NAME=add\nDOCKER_ACCESS_TOKEN=",
+            "#\nSUI_CHAIN=devnet\nSUI_ADDRESS=\nSUI_SECRET_KEY=\nSILVANA_REGISTRY_PACKAGE=\nSILVANA_REGISTRY=\nAPP_PACKAGE_ID=\n\n# Ethereum\nETHEREUM_ADDRESS=\nETHEREUM_PRIVATE_KEY=\n\n# Mina\nMINA_PRIVATE_KEY=\nMINA_PUBLIC_KEY=\nMINA_APP_ADMIN=\nMINA_APP_ADMIN_PRIVATE_KEY=\n\n# Docker\nDOCKER_USERNAME=\nDOCKER_PASSWORD=\nIMAGE_NAME=add\nDOCKER_ACCESS_TOKEN=",
         )
     };
 
@@ -368,6 +409,14 @@ fn create_env_files(
         .replace(
             "SILVANA_REGISTRY=",
             &format!("SILVANA_REGISTRY={}", &registry_id),
+        )
+        .replace(
+            "ETHEREUM_ADDRESS=",
+            &format!("ETHEREUM_ADDRESS={}", eth_user.address),
+        )
+        .replace(
+            "ETHEREUM_PRIVATE_KEY=",
+            &format!("ETHEREUM_PRIVATE_KEY={}", eth_user.private_key),
         )
         .replace(
             "MINA_PRIVATE_KEY=",
@@ -408,10 +457,16 @@ fn create_env_files(
         SUI_ADDRESS={}\n\
         SUI_CHAIN=devnet\n\
         \n\
+        # Ethereum Configuration\n\
+        ETHEREUM_ADDRESS={}\n\
+        ETHEREUM_PRIVATE_KEY={}\n\
+        \n\
         # Registry Configuration\n\
         SILVANA_REGISTRY_PACKAGE={}\n\
         SILVANA_REGISTRY={}\n",
-        sui_coordinator.private_key, sui_coordinator.address, &registry_package, &registry_id
+        sui_coordinator.private_key, sui_coordinator.address,
+        eth_coordinator.address, eth_coordinator.private_key,
+        &registry_package, &registry_id
     );
     fs::write(silvana_env_path, silvana_env)?;
 
@@ -422,6 +477,8 @@ fn create_env_files(
 fn display_setup_summary(
     sui_user: &SuiKeypair,
     sui_coordinator: &SuiKeypair,
+    eth_user: &EthereumKeypair,
+    eth_coordinator: &EthereumKeypair,
     mina_app_admin: &MinaKeypair,
     mina_user: &MinaKeypair,
     registry_id: &Option<String>,
@@ -431,6 +488,9 @@ fn display_setup_summary(
     info!("   ├── Sui:");
     info!("   │   ├── User: {}", sui_user.address);
     info!("   │   └── Coordinator: {}", sui_coordinator.address);
+    info!("   ├── Ethereum:");
+    info!("   │   ├── User: {}", eth_user.address);
+    info!("   │   └── Coordinator: {}", eth_coordinator.address);
     info!("   ├── Mina:");
     info!("   │   ├── App Admin: {}", mina_app_admin.public_key);
     info!("   │   └── User: {}", mina_user.public_key);
