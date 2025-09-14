@@ -97,23 +97,13 @@ export default function Home() {
           opt_start_time: new Date().toISOString(),
         });
         const consumer = await js.consumers.get(stream, consumerInfo.config);
-        console.log("Waiting for NATS message");
-        let message = await consumer.next({
-          expires: 1000,
-        });
-        console.log("Received NATS message:", message?.seq);
-        while (message !== null) {
-          console.log("Received NATS message:", message.seq);
-          message.ack();
-          console.log("Waiting for NATS message");
-          message = await consumer.next({
-            expires: 1000,
-          });
-          console.log("Received next NATS message:", message?.seq);
-        }
+        console.log("NATS consumer created:", consumerName);
+
+        // Don't consume messages here - just set up the consumer
         setNats(js);
         setNatsConsumer(consumer);
         setNatsConnection("connected");
+        console.log("✅ NATS connected and ready to receive messages");
       } catch (error: unknown) {
         setError(error instanceof Error ? error.message : "Unknown NATS error");
         setNatsConnection("error");
@@ -122,6 +112,44 @@ export default function Home() {
 
     initializeNats();
   }, []);
+
+  // Monitor NATS messages in the background
+  useEffect(() => {
+    if (natsConsumer && !isLoading) {
+      const monitorMessages = async () => {
+        console.log("🎧 Starting background NATS monitoring...");
+        try {
+          const iter = await natsConsumer.consume({ max_messages: 100 });
+          for await (const message of iter) {
+            console.log("📡 Background NATS event received, seq:", message.seq);
+            message.ack();
+
+            try {
+              const event = fromBinary(EventSchema, message.data);
+              const eventType = event.event.case || "unknown";
+              console.log(`📡 Background event type: ${eventType}`);
+              console.log(`📡 Full event details:`, event);
+
+              // Add to message log for visibility with full JSON (newest first)
+              setNatsMessageLog(prev => [
+                `[Background ${new Date().toISOString()}] ${eventType}`,
+                JSON.stringify(event, (_key, value) =>
+                  typeof value === 'bigint' ? value.toString() : value
+                , 2),
+                ...prev
+              ].slice(0, 100)); // Keep only last 100 messages
+            } catch (err) {
+              console.error("Failed to decode background message:", err);
+            }
+          }
+        } catch (err) {
+          console.error("Background monitoring error:", err);
+        }
+      };
+
+      monitorMessages();
+    }
+  }, [natsConsumer, isLoading]);
 
   // Update connection status dots
   useEffect(() => {
@@ -157,28 +185,84 @@ export default function Home() {
       return;
     }
     const { coordinatorId, start } = params;
+
+    console.log("🔍 Starting NATS message processing for coordinator:", coordinatorId);
+    let messageCount = 0;
+
     try {
       let message = await natsConsumer.next({
         expires: 1000,
       });
 
       while (message && Date.now() - start < 5000) {
-        console.log("NATS message:", message.seq);
+        messageCount++;
+        console.log(`📨 NATS message #${messageCount}, seq:`, message.seq);
         message.ack();
         const payload = message.data;
         try {
           const event = fromBinary(EventSchema, payload);
-          if (event.event.case === "agentMessage") {
-            const agentEvent = event.event.value;
-            if (agentEvent.coordinatorId === coordinatorId) {
-              const endNats = Date.now();
-              console.log("received message", agentEvent);
-              setNatsMessageLog([
-                `Received NATS message: ${serialize(agentEvent)}`,
-              ]);
-              setNatsRoundtripDelay(endNats - start);
-              return;
-            }
+          const endNats = Date.now();
+
+          // Log any event type we receive
+          let eventInfo = "";
+          let isRelevant = false;
+
+          switch (event.event.case) {
+            case "coordinatorStarted":
+              eventInfo = `CoordinatorStarted: ${event.event.value.coordinatorId}`;
+              break;
+            case "coordinatorActive":
+              eventInfo = `CoordinatorActive: ${event.event.value.coordinatorId}`;
+              break;
+            case "coordinatorShutdown":
+              eventInfo = `CoordinatorShutdown: ${event.event.value.coordinatorId}`;
+              break;
+            case "agentSessionStarted":
+              eventInfo = `AgentSessionStarted: ${event.event.value.sessionId}`;
+              break;
+            case "jobCreated":
+              eventInfo = `JobCreated: ${event.event.value.jobId}`;
+              break;
+            case "jobStarted":
+              eventInfo = `JobStarted: ${event.event.value.jobId}`;
+              break;
+            case "jobFinished":
+              eventInfo = `JobFinished: ${event.event.value.jobId}`;
+              break;
+            case "agentMessage":
+              const agentEvent = event.event.value;
+              eventInfo = `AgentMessage: ${agentEvent.message}`;
+              // Check if this is our message
+              if (agentEvent.coordinatorId === coordinatorId) {
+                isRelevant = true;
+              }
+              break;
+            case "coordinationTx":
+              eventInfo = `CoordinationTx: ${event.event.value.txHash}`;
+              break;
+            case "coordinatorMessage":
+              eventInfo = `CoordinatorMessage: ${event.event.value.message}`;
+              break;
+            default:
+              eventInfo = `Unknown event type: ${event.event.case}`;
+          }
+
+          console.log("Received NATS event:", eventInfo);
+          console.log("Full event details:", event);
+
+          // Update the message log with all events (newest first)
+          setNatsMessageLog(prev => [
+            `[${new Date().toISOString()}] ${eventInfo}`,
+            JSON.stringify(event, (_key, value) =>
+              typeof value === 'bigint' ? value.toString() : value
+            , 2),
+            ...prev
+          ].slice(0, 100)); // Keep only last 100 messages
+
+          // If this was our specific message, set the roundtrip delay
+          if (isRelevant) {
+            setNatsRoundtripDelay(endNats - start);
+            console.log("Found our message!");
           }
         } catch (error: unknown) {
           console.log(
@@ -202,8 +286,13 @@ export default function Home() {
       return;
     }
 
-    setError("NATS message timeout");
-    setNatsConnection("error");
+    // Only show timeout error if we didn't receive ANY events
+    if (natsMessageLog.length === 0) {
+      setError("NATS message timeout - no events received");
+      setNatsConnection("error");
+    } else {
+      console.log(`Received ${natsMessageLog.length} NATS events (none matched our coordinator ID)`);
+    }
   }
 
   async function sendGrpcQuery(params: {
