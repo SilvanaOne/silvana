@@ -3,7 +3,7 @@ syntax = "proto3";
 import "google/protobuf/descriptor.proto";
 import "silvana/options/v1/options.proto";
 
-package silvana.events.v1;
+package silvana.rpc.v1;
 
 option go_package = "github.com/SilvanaOne/silvana/proto;events";
 
@@ -136,7 +136,28 @@ message AgentMessageEvent {
 
 // Main event wrapper
 message Event {
+  oneof event {
+    // Coordinator lifecycle events
+    CoordinatorStartedEvent coordinator_started = 1;
+    CoordinatorActiveEvent coordinator_active = 2;
+    CoordinatorShutdownEvent coordinator_shutdown = 3;
 
+    // Session and job events
+    AgentSessionStartedEvent agent_session_started = 4;
+    JobCreatedEvent job_created = 5;
+    JobStartedEvent job_started = 6;
+    JobFinishedEvent job_finished = 7;
+
+    // Transaction and proof events
+    CoordinationTxEvent coordination_tx = 8;
+    ProofSubmittedEvent proof_submitted = 9;
+    SettlementTransactionEvent settlement_transaction = 10;
+    SettlementTransactionIncludedInBlockEvent settlement_transaction_included = 11;
+
+    // Message events
+    CoordinatorMessageEvent coordinator_message = 12;
+    AgentMessageEvent agent_message = 13;
+  }
 }
 
 // Batch events request

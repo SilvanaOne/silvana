@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let events_descriptor_path =
-        PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("events_descriptor.bin");
+        PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("rpc_descriptor.bin");
 
     // Determine proto file paths - check for Docker environment first, then local development
     let (proto_files, proto_includes) = if std::path::Path::new("./proto/options.proto").exists() {
         // Docker environment - proto files are in ./proto/
         (
-            vec!["./proto/options.proto", "./proto/events.proto"],
+            vec!["./proto/options.proto", "./proto/rpc.proto"],
             vec!["./proto"],
         )
     } else {
@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (
             vec![
                 "../../proto/silvana/options/v1/options.proto",
-                "../../proto/silvana/events/v1/events.proto",
+                "../../proto/silvana/rpc/v1/rpc.proto",
             ],
             vec!["../../proto"],
         )
