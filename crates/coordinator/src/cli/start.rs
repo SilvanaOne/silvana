@@ -16,34 +16,68 @@ pub async fn handle_start_command(
     chain_override: Option<String>,
 ) -> Result<()> {
     // Config already fetched and injected above
-    // Check if SUI_ADDRESS and SUI_SECRET_KEY are set, generate if not
+    // Check if credentials are set, generate if not
     let env_file_path = std::path::Path::new(".env");
-    if std::env::var("SUI_ADDRESS").is_err() || std::env::var("SUI_SECRET_KEY").is_err() {
+    let sui_missing =
+        std::env::var("SUI_ADDRESS").is_err() || std::env::var("SUI_SECRET_KEY").is_err();
+    let eth_missing = std::env::var("ETHEREUM_ADDRESS").is_err()
+        || std::env::var("ETHEREUM_PRIVATE_KEY").is_err();
+
+    if sui_missing || eth_missing {
         // Check if .env file exists
         if !env_file_path.exists() {
-            println!("🔑 SUI credentials not found, generating new keypair...");
+            println!("🔑 Credentials not found, generating new keypairs...");
 
-            // Generate a new Sui keypair
-            let sui_keypair = example::generate_sui_keypair("coordinator")
-                .map_err(|e| anyhow!("Failed to generate Sui keypair: {}", e))?;
+            // Generate Sui keypair if missing
+            let sui_keypair = if sui_missing {
+                let keypair = example::generate_sui_keypair("coordinator")
+                    .map_err(|e| anyhow!("Failed to generate Sui keypair: {}", e))?;
+                println!("✅ Generated new Sui keypair:");
+                println!("   Address: {}", keypair.address);
+                Some(keypair)
+            } else {
+                None
+            };
 
-            println!("✅ Generated new Sui keypair:");
-            println!("   Address: {}", sui_keypair.address);
+            // Generate Ethereum keypair if missing
+            let eth_keypair = if eth_missing {
+                let keypair = ethereum::keypair::generate_ethereum_keypair()
+                    .map_err(|e| anyhow!("Failed to generate Ethereum keypair: {}", e))?;
+                println!("✅ Generated new Ethereum keypair:");
+                println!("   Address: {}", keypair.address);
+                Some(keypair)
+            } else {
+                None
+            };
 
             // Set the environment variables for the current session
             unsafe {
-                std::env::set_var("SUI_ADDRESS", &sui_keypair.address);
-                std::env::set_var("SUI_SECRET_KEY", &sui_keypair.private_key);
+                if let Some(ref sui) = sui_keypair {
+                    std::env::set_var("SUI_ADDRESS", &sui.address);
+                    std::env::set_var("SUI_SECRET_KEY", &sui.private_key);
+                }
+                if let Some(ref eth) = eth_keypair {
+                    std::env::set_var("ETHEREUM_ADDRESS", &eth.address);
+                    std::env::set_var("ETHEREUM_PRIVATE_KEY", &eth.private_key);
+                }
             }
 
-            // Write to .env file
-            let env_content = format!(
-                "# Auto-generated Sui credentials\n\
-                SUI_ADDRESS={}\n\
-                SUI_SECRET_KEY={}\n\
-                SUI_CHAIN={}\n",
-                sui_keypair.address, sui_keypair.private_key, chain
-            );
+            // Build .env content
+            let mut env_lines = Vec::new();
+            env_lines.push("# Auto-generated credentials".to_string());
+
+            if let Some(ref sui) = sui_keypair {
+                env_lines.push(format!("SUI_ADDRESS={}", sui.address));
+                env_lines.push(format!("SUI_SECRET_KEY={}", sui.private_key));
+                env_lines.push(format!("SUI_CHAIN={}", chain));
+            }
+
+            if let Some(ref eth) = eth_keypair {
+                env_lines.push(format!("ETHEREUM_ADDRESS={}", eth.address));
+                env_lines.push(format!("ETHEREUM_PRIVATE_KEY={}", eth.private_key));
+            }
+
+            let env_content = env_lines.join("\n") + "\n";
 
             std::fs::write(env_file_path, env_content)
                 .map_err(|e| anyhow!("Failed to write .env file: {}", e))?;
@@ -52,42 +86,61 @@ pub async fn handle_start_command(
 
             // Auto-fund on devnet
             if chain == "devnet" {
-                println!("💰 Requesting funds from devnet faucet...");
-                match sui::request_tokens_from_faucet("devnet", &sui_keypair.address, Some(10.0))
-                    .await
-                {
-                    Ok(tx_digest) => {
-                        println!("✅ Faucet request successful!");
-                        if tx_digest != "unknown" {
-                            println!("   Transaction: {}", tx_digest);
-                            println!(
-                                "   🔗 Explorer: https://suiscan.xyz/devnet/tx/{}",
-                                tx_digest
-                            );
-                        } else {
-                            println!(
-                                "   🔗 Explorer: https://suiscan.xyz/devnet/account/{}",
-                                sui_keypair.address
+                if let Some(ref sui) = sui_keypair {
+                    println!("💰 Requesting SUI funds from devnet faucet...");
+                    match sui::request_tokens_from_faucet("devnet", &sui.address, Some(10.0)).await
+                    {
+                        Ok(tx_digest) => {
+                            println!("✅ SUI faucet request successful!");
+                            if tx_digest != "unknown" {
+                                println!("   Transaction: {}", tx_digest);
+                                println!(
+                                    "   🔗 Explorer: https://suiscan.xyz/devnet/tx/{}",
+                                    tx_digest
+                                );
+                            } else {
+                                println!(
+                                    "   🔗 Explorer: https://suiscan.xyz/devnet/account/{}",
+                                    sui.address
+                                );
+                            }
+                            println!("   Waiting for transaction to be processed...");
+                            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Failed to request SUI funds from faucet: {}", e);
+                            eprintln!("   Please manually fund the address:");
+                            eprintln!(
+                                "   silvana faucet sui --address {} --amount 10",
+                                sui.address
                             );
                         }
-                        println!("   Waiting for transaction to be processed...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️  Failed to request funds from faucet: {}", e);
-                        eprintln!("   Please manually fund the address:");
-                        eprintln!(
-                            "   silvana faucet sui --address {} --amount 10",
-                            sui_keypair.address
-                        );
                     }
                 }
             } else {
-                println!("⚠️  Please fund this address before running operations:");
-                println!("   silvana faucet sui --address {}", sui_keypair.address);
+                if let Some(ref sui) = sui_keypair {
+                    println!("⚠️  Please fund this SUI address before running operations:");
+                    println!("   silvana faucet sui --address {}", sui.address);
+                }
             }
         } else {
-            eprintln!("❌ SUI_ADDRESS or SUI_SECRET_KEY not set, but .env file exists");
+            // .env file exists but some credentials are missing
+            let mut missing = Vec::new();
+            if std::env::var("SUI_ADDRESS").is_err() {
+                missing.push("SUI_ADDRESS");
+            }
+            if std::env::var("SUI_SECRET_KEY").is_err() {
+                missing.push("SUI_SECRET_KEY");
+            }
+            if std::env::var("ETHEREUM_ADDRESS").is_err() {
+                missing.push("ETHEREUM_ADDRESS");
+            }
+            if std::env::var("ETHEREUM_PRIVATE_KEY").is_err() {
+                missing.push("ETHEREUM_PRIVATE_KEY");
+            }
+
+            eprintln!("❌ Missing environment variables, but .env file exists");
+            eprintln!("   Missing: {}", missing.join(", "));
             eprintln!("   Please check your .env file or set these environment variables");
             std::process::exit(1);
         }
