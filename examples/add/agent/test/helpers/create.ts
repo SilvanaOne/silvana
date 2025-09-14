@@ -123,6 +123,7 @@ export async function createApp(params: {
     const transaction = new Transaction();
     registry.createDeveloper({
       name: developerName,
+      developerOwner: address, // Use the sender's address as the developer owner
       github: "",
       image: "",
       description: "",
@@ -142,6 +143,7 @@ export async function createApp(params: {
     // Create app
     registry.createApp({
       name: appName,
+      owner: address, // Use the sender's address as the app owner
       description: appDescription,
       transaction,
     });
@@ -242,7 +244,6 @@ export async function createApp(params: {
   let appID: string | undefined = undefined;
 
   // Create app
-  console.log("Creating app instance...");
   const tx = new Transaction();
 
   // Call create_app with the registry, settlement info, and clock
@@ -251,6 +252,8 @@ export async function createApp(params: {
   const addresses = params.contractAddress
     ? [params.contractAddress] // Will be wrapped as Some(address) in the vector
     : []; // Empty vector if no address
+
+  console.log("Creating app instance:", { registryAddress, chains, addresses });
 
   const app = tx.moveCall({
     target: `${packageID}::main::create_app`,

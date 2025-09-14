@@ -8,10 +8,10 @@ use prost_reflect::DescriptorPool;
 use prost_reflect::ReflectMessage;
 
 pub mod events {
-    tonic::include_proto!("silvana.events.v1");
+    tonic::include_proto!("silvana.rpc.v1");
 
     // File descriptor set for gRPC reflection
-    pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("events_descriptor");
+    pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("rpc_descriptor");
 }
 
 // Descriptor pool for prost-reflect
@@ -31,7 +31,7 @@ pub use events::*;
 /// use proto::{get_protobuf_full_name, CoordinatorStartedEvent};
 ///
 /// let full_name = get_protobuf_full_name::<CoordinatorStartedEvent>();
-/// assert_eq!(full_name, "silvana.events.v1.CoordinatorStartedEvent");
+/// assert_eq!(full_name, "silvana.rpc.v1.CoordinatorStartedEvent");
 /// ```
 pub fn get_protobuf_full_name<T: ReflectMessage + Default>() -> String {
     let instance = T::default();
@@ -47,7 +47,7 @@ pub fn get_protobuf_full_name<T: ReflectMessage + Default>() -> String {
 ///
 /// let event = CoordinatorStartedEvent::default();
 /// let full_name = get_protobuf_full_name_from_instance(&event);
-/// assert_eq!(full_name, "silvana.events.v1.CoordinatorStartedEvent");
+/// assert_eq!(full_name, "silvana.rpc.v1.CoordinatorStartedEvent");
 /// ```
 pub fn get_protobuf_full_name_from_instance<T: ReflectMessage>(instance: &T) -> String {
     instance.descriptor().full_name().to_string()
@@ -65,21 +65,21 @@ mod tests {
         let descriptor = coordinator_event.descriptor();
         let full_name = descriptor.full_name().to_string();
         println!("CoordinatorStartedEvent full name: {}", full_name);
-        assert_eq!(full_name, "silvana.events.v1.CoordinatorStartedEvent");
+        assert_eq!(full_name, "silvana.rpc.v1.CoordinatorStartedEvent");
 
         // Test AgentStartedJobEvent
         let agent_event = AgentStartedJobEvent::default();
         let descriptor = agent_event.descriptor();
         let full_name = descriptor.full_name().to_string();
         println!("AgentStartedJobEvent full name: {}", full_name);
-        assert_eq!(full_name, "silvana.events.v1.AgentStartedJobEvent");
+        assert_eq!(full_name, "silvana.rpc.v1.AgentStartedJobEvent");
 
         // Test Event (the main event wrapper)
         let event = Event::default();
         let descriptor = event.descriptor();
         let full_name = descriptor.full_name().to_string();
         println!("Event full name: {}", full_name);
-        assert_eq!(full_name, "silvana.events.v1.Event");
+        assert_eq!(full_name, "silvana.rpc.v1.Event");
     }
 
     #[test]
@@ -103,7 +103,7 @@ mod tests {
         }
 
         assert_eq!(descriptor.name(), "CoordinatorStartedEvent");
-        assert_eq!(descriptor.package_name(), "silvana.events.v1");
+        assert_eq!(descriptor.package_name(), "silvana.rpc.v1");
         assert!(descriptor.fields().len() > 0, "Should have fields defined");
     }
 
@@ -126,13 +126,13 @@ mod tests {
 
         // Find our message in the pool
         let message_descriptor = pool
-            .get_message_by_name("silvana.events.v1.CoordinatorStartedEvent")
+            .get_message_by_name("silvana.rpc.v1.CoordinatorStartedEvent")
             .expect("Should find CoordinatorStartedEvent in descriptor pool");
 
         println!("Found message: {}", message_descriptor.full_name());
         assert_eq!(
             message_descriptor.full_name(),
-            "silvana.events.v1.CoordinatorStartedEvent"
+            "silvana.rpc.v1.CoordinatorStartedEvent"
         );
     }
 
@@ -145,12 +145,12 @@ mod tests {
         let coordinator_event = CoordinatorStartedEvent::default();
         let descriptor = coordinator_event.descriptor();
         let full_name = descriptor.full_name();
-        println!("{}", full_name); // "silvana.events.v1.CoordinatorStartedEvent"
+        println!("{}", full_name); // "silvana.rpc.v1.CoordinatorStartedEvent"
 
         // Test with another message type
         let agent_event = AgentStartedJobEvent::default();
         let descriptor = agent_event.descriptor();
-        println!("{}", descriptor.full_name()); // "silvana.events.v1.AgentStartedJobEvent"
+        println!("{}", descriptor.full_name()); // "silvana.rpc.v1.AgentStartedJobEvent"
 
         // Show more reflection capabilities
         println!("Message details for {}:", full_name);
@@ -163,11 +163,11 @@ mod tests {
     fn test_utility_functions() {
         // Test the new utility functions
         let full_name = get_protobuf_full_name::<CoordinatorStartedEvent>();
-        assert_eq!(full_name, "silvana.events.v1.CoordinatorStartedEvent");
+        assert_eq!(full_name, "silvana.rpc.v1.CoordinatorStartedEvent");
 
         let event = AgentStartedJobEvent::default();
         let full_name = get_protobuf_full_name_from_instance(&event);
-        assert_eq!(full_name, "silvana.events.v1.AgentStartedJobEvent");
+        assert_eq!(full_name, "silvana.rpc.v1.AgentStartedJobEvent");
 
         println!("Utility function results:");
         println!(

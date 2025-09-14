@@ -1,24 +1,17 @@
-//! AgentTransactionEvent entity
-//! Generated from proto definition: AgentTransactionEvent
+//! JobFinishedEvent entity
+//! Generated from proto definition: JobFinishedEvent
 
 use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "agent_transaction_event")]
+#[sea_orm(table_name = "job_finished_event")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub coordinator_id: String,
-    pub tx_type: String,
-    pub developer: String,
-    pub agent: String,
-    pub app: String,
-    pub job_sequence: String,
+    pub job_id: String,
+    pub duration: i64,
     pub event_timestamp: i64,
-    pub tx_hash: String,
-    pub chain: String,
-    pub network: String,
-    pub memo: String,
-    pub metadata: Option<String>,
+    pub result: String,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,
 }

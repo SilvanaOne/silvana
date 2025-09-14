@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep, Duration};
 use tonic::Request;
 
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use proto::*;
 
 // Configuration
@@ -52,7 +52,7 @@ async fn test_submit_and_get_proof() {
     println!("🎯 Server address: {}", server_addr);
     
     // Connect to the gRPC server
-    let mut client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let mut client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
@@ -241,7 +241,7 @@ async fn test_proof_storage_concurrent() {
     println!("🎯 Server address: {}", server_addr);
     
     // Connect to the gRPC server
-    let client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
@@ -394,7 +394,7 @@ async fn test_proof_storage_large_data() {
     println!("🎯 Server address: {}", server_addr);
     
     // Connect to the gRPC server
-    let mut client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let mut client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
@@ -489,7 +489,7 @@ async fn test_proof_with_special_characters() {
     println!("🎯 Server address: {}", server_addr);
     
     // Connect to the gRPC server
-    let mut client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let mut client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client

@@ -118,12 +118,7 @@ public struct DefaultMethodRemovedEvent has copy, drop {
     removed_at: u64,
 }
 
-// Error codes
-#[error]
-const EInvalidOwner: vector<u8> = b"Invalid owner";
-
 public(package) fun create_agent(
-    developer_owner: address,
     name: String,
     image: Option<String>,
     description: Option<String>,
@@ -132,7 +127,6 @@ public(package) fun create_agent(
     clock: &Clock,
     ctx: &mut TxContext,
 ): Agent {
-    assert!(developer_owner == ctx.sender(), EInvalidOwner);
     let agent_id = object::new(ctx);
     let address = agent_id.to_address();
     let timestamp = clock.timestamp_ms();
@@ -163,15 +157,12 @@ public(package) fun create_agent(
 
 public(package) fun update_agent(
     agent: &mut Agent,
-    owner: address,
     image: Option<String>,
     description: Option<String>,
     site: Option<String>,
     chains: vector<String>,
     clock: &Clock,
-    ctx: &TxContext,
 ) {
-    assert!(owner == ctx.sender(), EInvalidOwner);
     let timestamp = clock.timestamp_ms();
     agent.image = image;
     agent.description = description;
@@ -192,14 +183,7 @@ public(package) fun update_agent(
     });
 }
 
-public(package) fun delete_agent(
-    agent: Agent,
-    owner: address,
-    clock: &Clock,
-    admin_address: address,
-    ctx: &TxContext,
-) {
-    assert!(owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
+public(package) fun delete_agent(agent: Agent, clock: &Clock) {
     let timestamp = clock.timestamp_ms();
     event::emit(AgentDeletedEvent {
         id: agent.id.to_address(),
@@ -217,7 +201,6 @@ public(package) fun delete_agent(
 
 public(package) fun add_method(
     agent: &mut Agent,
-    owner: address,
     developer_name: String,
     method_name: String,
     docker_image: String,
@@ -226,10 +209,7 @@ public(package) fun add_method(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
-    ctx: &TxContext,
 ) {
-    assert!(owner == ctx.sender(), EInvalidOwner);
-
     let method = AgentMethod {
         docker_image,
         docker_sha256,
@@ -270,7 +250,6 @@ public(package) fun add_method(
 
 public(package) fun update_method(
     agent: &mut Agent,
-    owner: address,
     developer_name: String,
     method_name: String,
     docker_image: String,
@@ -279,10 +258,7 @@ public(package) fun update_method(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
-    ctx: &TxContext,
 ) {
-    assert!(owner == ctx.sender(), EInvalidOwner);
-
     let method = AgentMethod {
         docker_image,
         docker_sha256,
@@ -324,14 +300,10 @@ public(package) fun update_method(
 
 public(package) fun remove_method(
     agent: &mut Agent,
-    owner: address,
     developer_name: String,
     method_name: String,
     clock: &Clock,
-    ctx: &TxContext,
 ) {
-    assert!(owner == ctx.sender(), EInvalidOwner);
-
     let (_, _) = agent.methods.remove(&method_name);
     agent.updated_at = clock.timestamp_ms();
     agent.version = agent.version + 1;
@@ -359,14 +331,10 @@ public(package) fun remove_method(
 
 public(package) fun set_default_method(
     agent: &mut Agent,
-    owner: address,
     developer_name: String,
     method_name: String,
     clock: &Clock,
-    ctx: &TxContext,
 ) {
-    assert!(owner == ctx.sender(), EInvalidOwner);
-
     let method = *agent.methods.get(&method_name);
     agent.default_method = option::some(method);
     agent.updated_at = clock.timestamp_ms();
@@ -400,13 +368,9 @@ public(package) fun set_default_method(
 
 public(package) fun remove_default_method(
     agent: &mut Agent,
-    owner: address,
     developer_name: String,
     clock: &Clock,
-    ctx: &TxContext,
 ) {
-    assert!(owner == ctx.sender(), EInvalidOwner);
-
     agent.default_method = option::none();
     agent.updated_at = clock.timestamp_ms();
     agent.version = agent.version + 1;

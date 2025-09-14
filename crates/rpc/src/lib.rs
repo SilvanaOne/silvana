@@ -6,7 +6,7 @@ pub mod storage;
 // Service implementations
 pub mod rpc;
 
-pub use rpc::SilvanaEventsServiceImpl;
+pub use rpc::SilvanaRpcServiceImpl;
 
 // Re-export common types
 pub use database::EventDatabase;

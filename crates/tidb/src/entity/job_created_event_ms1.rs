@@ -1,18 +1,13 @@
-//! AgentMessageEvent entity
-//! Generated from proto definition: AgentMessageEvent
+//! Child entity for `merged_sequences_1`. `JobCreatedEvent` -> `job_created_event_ms1`
 
 use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "agent_message_event")]
+#[sea_orm(table_name = "job_created_event_ms1")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub coordinator_id: String,
-    pub session_id: String,
-    pub job_id: Option<String>,
-    pub event_timestamp: i64,
-    pub level: i32,
-    pub message: String,
+    pub job_created_event_id: i64,
+    pub merged_sequences_1: i64,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,
 }

@@ -1,21 +1,18 @@
-//! ClientTransactionEvent entity
-//! Generated from proto definition: ClientTransactionEvent
+//! SettlementTransactionEvent entity
+//! Generated from proto definition: SettlementTransactionEvent
 
 use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "client_transaction_event")]
+#[sea_orm(table_name = "settlement_transaction_event")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub coordinator_id: String,
-    pub developer: String,
-    pub agent: String,
-    pub app: String,
-    pub client_ip_address: String,
-    pub method: String,
-    pub data: Vec<u8>,
+    pub session_id: String,
+    pub app_instance_id: String,
+    pub job_id: String,
+    pub block_number: i64,
     pub tx_hash: String,
-    pub sequence: i64,
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,

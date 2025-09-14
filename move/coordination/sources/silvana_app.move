@@ -66,12 +66,9 @@ public struct AppNamesUpdatedEvent has copy, drop {
     version: u64,
 }
 
-// Error codes
-#[error]
-const EInvalidOwner: vector<u8> = b"Invalid owner";
-
 public(package) fun create_app(
     name: String,
+    owner: address,
     description: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -84,7 +81,7 @@ public(package) fun create_app(
         name,
         description,
         methods: sui::vec_map::empty(),
-        owner: ctx.sender(),
+        owner,
         created_at: timestamp,
         updated_at: timestamp,
         version: 1,
@@ -94,7 +91,7 @@ public(package) fun create_app(
         id: address,
         name,
         description,
-        owner: ctx.sender(),
+        owner,
         created_at: timestamp,
     });
     app
@@ -104,10 +101,7 @@ public(package) fun update_app(
     app: &mut SilvanaApp,
     description: Option<String>,
     clock: &Clock,
-    admin_address: address,
-    ctx: &TxContext,
 ) {
-    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     app.description = description;
     app.updated_at = clock.timestamp_ms();
     app.version = app.version + 1;
@@ -116,18 +110,13 @@ public(package) fun update_app(
         id: app.id.to_address(),
         name: app.name,
         description,
-        owner: ctx.sender(),
+        owner: app.owner,
         updated_at: app.updated_at,
         version: app.version,
     });
 }
 
-public(package) fun delete_app(
-    app: SilvanaApp,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    assert!(app.owner == ctx.sender(), EInvalidOwner);
+public(package) fun delete_app(app: SilvanaApp, clock: &Clock) {
     event::emit(AppDeletedEvent {
         id: app.owner,
         name: app.name,
@@ -164,9 +153,7 @@ public(package) fun create_app_names(
 public(package) fun update_app_names(
     app_names: &mut AppNames,
     names: vector<String>,
-    ctx: &TxContext,
 ) {
-    assert!(app_names.app_owner == ctx.sender(), EInvalidOwner);
     app_names.names = names;
     app_names.version = app_names.version + 1;
     event::emit(AppNamesUpdatedEvent {
@@ -180,9 +167,7 @@ public(package) fun update_app_names(
 public(package) fun add_name_to_app_names(
     app_names: &mut AppNames,
     name: String,
-    ctx: &TxContext,
 ) {
-    assert!(app_names.app_owner == ctx.sender(), EInvalidOwner);
     app_names.names.push_back(name);
     app_names.version = app_names.version + 1;
     event::emit(AppNamesUpdatedEvent {
@@ -196,9 +181,7 @@ public(package) fun add_name_to_app_names(
 public(package) fun remove_name_from_app_names(
     app_names: &mut AppNames,
     name: String,
-    ctx: &TxContext,
 ) {
-    assert!(app_names.app_owner == ctx.sender(), EInvalidOwner);
     let (found, index) = vector::index_of(&app_names.names, &name);
     if (found) {
         vector::remove(&mut app_names.names, index);
@@ -212,8 +195,7 @@ public(package) fun remove_name_from_app_names(
     });
 }
 
-public(package) fun delete_app_names(app_names: AppNames, ctx: &TxContext) {
-    assert!(app_names.app_owner == ctx.sender(), EInvalidOwner);
+public(package) fun delete_app_names(app_names: AppNames) {
     let AppNames { id, .. } = app_names;
     object::delete(id);
 }
@@ -273,23 +255,15 @@ public(package) fun add_method_to_app(
     app: &mut SilvanaApp,
     method_name: String,
     method: AppMethod,
-    admin_address: address,
-    ctx: &TxContext,
 ) {
-    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     app.methods.insert(method_name, method);
-    app.version = app.version + 1;
 }
 
 public(package) fun remove_method_from_app(
     app: &mut SilvanaApp,
     method_name: String,
-    admin_address: address,
-    ctx: &TxContext,
 ): AppMethod {
-    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
     let (_, method) = app.methods.remove(&method_name);
-    app.version = app.version + 1;
     method
 }
 
@@ -303,33 +277,21 @@ public(package) fun get_method_from_app(
 public(package) fun get_method_from_app_mut(
     app: &mut SilvanaApp,
     method_name: &String,
-    ctx: &TxContext,
-): &mut AppMethod {
-    assert!(app.owner == ctx.sender(), EInvalidOwner);
-    app.methods.get_mut(method_name)
-}
+): &mut AppMethod { app.methods.get_mut(method_name) }
 
 // Instance management functions
 public(package) fun add_instance_to_app(
     app: &mut SilvanaApp,
-    instance_owner: address,
-    admin_address: address,
-    ctx: &TxContext,
+    instance_address: address,
 ) {
-    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
-    app.instances.insert(instance_owner);
-    app.version = app.version + 1;
+    app.instances.insert(instance_address);
 }
 
 public(package) fun remove_instance_from_app(
     app: &mut SilvanaApp,
-    instance_owner: address,
-    admin_address: address,
-    ctx: &TxContext,
+    instance_address: address,
 ) {
-    assert!(app.owner == ctx.sender() || admin_address == ctx.sender(), EInvalidOwner);
-    app.instances.remove(&instance_owner);
-    app.version = app.version + 1;
+    app.instances.remove(&instance_address);
 }
 
 public(package) fun has_instance_in_app(
@@ -349,7 +311,9 @@ public fun get_app_methods(app: &SilvanaApp): &VecMap<String, AppMethod> {
 }
 
 // Clone methods for app instance creation
-public(package) fun clone_app_methods(app: &SilvanaApp): VecMap<String, AppMethod> {
+public(package) fun clone_app_methods(
+    app: &SilvanaApp,
+): VecMap<String, AppMethod> {
     let mut cloned = sui::vec_map::empty<String, AppMethod>();
     let keys = sui::vec_map::keys(&app.methods);
     let mut i = 0;

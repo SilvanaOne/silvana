@@ -74,7 +74,9 @@ pub(crate) async fn create_registry(
         env::var("SILVANA_REGISTRY_PACKAGE").unwrap_or_else(|_| {
             // Fall back to the coordination package if registry package not set
             let shared_state = SharedSuiState::get_instance();
-            shared_state.get_coordination_package_id_required().to_string()
+            shared_state
+                .get_coordination_package_id_required()
+                .to_string()
         })
     });
 
@@ -298,6 +300,7 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
 ///
 /// # Arguments
 /// * `registry_id` - The registry object ID
+/// * `developer_owner` - The owner address for the developer
 /// * `name` - Developer name
 /// * `github` - GitHub username
 /// * `image` - Optional image URL
@@ -308,6 +311,7 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
 /// Transaction digest on success
 pub(crate) async fn add_developer(
     registry_id: &str,
+    developer_owner: sui::Address,
     name: String,
     github: String,
     image: Option<String>,
@@ -321,6 +325,9 @@ pub(crate) async fn add_developer(
         "add_developer",
         move |tb, object_args, clock_arg| {
             let registry_arg = *object_args.get(0).expect("Registry argument required");
+
+            // Create owner address argument
+            let owner_arg = tb.input(sui_transaction_builder::Serialized(&developer_owner));
 
             // Create string arguments
             let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
@@ -360,9 +367,10 @@ pub(crate) async fn add_developer(
             }));
 
             // Return arguments in the order expected by the Move function:
-            // registry, name, github, image, description, site, clock
+            // registry, developer_owner, name, github, image, description, site, clock
             vec![
                 registry_arg,
+                owner_arg,
                 name_arg,
                 github_arg,
                 image_arg,
@@ -695,6 +703,7 @@ pub(crate) async fn remove_agent(
 pub(crate) async fn add_app(
     registry_id: &str,
     name: String,
+    owner: sui::Address,
     description: Option<String>,
 ) -> Result<String> {
     info!("Adding app '{}' to registry '{}'", name, registry_id);
@@ -705,6 +714,7 @@ pub(crate) async fn add_app(
         let name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
             bytes: name.clone().into_bytes(),
         }));
+        let owner_arg = tb.input(sui_transaction_builder::Serialized(&owner));
         let description_arg = tb.input(sui_transaction_builder::Serialized(&MoveOption {
             vec: description
                 .clone()
@@ -715,7 +725,13 @@ pub(crate) async fn add_app(
                 .collect(),
         }));
 
-        vec![registry_arg, name_arg, description_arg, clock_arg]
+        vec![
+            registry_arg,
+            name_arg,
+            owner_arg,
+            description_arg,
+            clock_arg,
+        ]
     })
     .await
     .map_err(|e| {
@@ -781,6 +797,254 @@ pub(crate) async fn remove_app(registry_id: &str, name: String) -> Result<String
     .await
     .map_err(|e| {
         debug!("Failed to remove app: {}", e);
+        e
+    })
+}
+
+/// Add a method to an agent in the registry
+pub(crate) async fn add_method(
+    registry_id: &str,
+    developer: String,
+    agent_name: String,
+    method_name: String,
+    docker_image: String,
+    docker_sha256: String,
+    min_memory_mb: u32,
+    min_cpu_cores: u16,
+    requires_tee: bool,
+) -> Result<String> {
+    info!(
+        "Adding method '{}' to agent '{}' for developer '{}' in registry '{}'",
+        method_name, agent_name, developer, registry_id
+    );
+
+    execute_registry_function(
+        registry_id,
+        "add_method",
+        move |tb, object_args, clock_arg| {
+            let registry_arg = *object_args.get(0).expect("Registry argument required");
+
+            let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: developer.clone().into_bytes(),
+            }));
+            let agent_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: agent_name.clone().into_bytes(),
+            }));
+            let method_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: method_name.clone().into_bytes(),
+            }));
+            let docker_image_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: docker_image.clone().into_bytes(),
+            }));
+            let docker_sha256_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: docker_sha256.clone().into_bytes(),
+            }));
+            let min_memory_mb_arg = tb.input(sui_transaction_builder::Serialized(&min_memory_mb));
+            let min_cpu_cores_arg = tb.input(sui_transaction_builder::Serialized(&min_cpu_cores));
+            let requires_tee_arg = tb.input(sui_transaction_builder::Serialized(&requires_tee));
+
+            vec![
+                registry_arg,
+                developer_arg,
+                agent_name_arg,
+                method_name_arg,
+                docker_image_arg,
+                docker_sha256_arg,
+                min_memory_mb_arg,
+                min_cpu_cores_arg,
+                requires_tee_arg,
+                clock_arg,
+            ]
+        },
+    )
+    .await
+    .map_err(|e| {
+        debug!("Failed to add method: {}", e);
+        e
+    })
+}
+
+/// Update a method on an agent in the registry
+pub(crate) async fn update_method(
+    registry_id: &str,
+    developer: String,
+    agent_name: String,
+    method_name: String,
+    docker_image: String,
+    docker_sha256: String,
+    min_memory_mb: u32,
+    min_cpu_cores: u16,
+    requires_tee: bool,
+) -> Result<String> {
+    info!(
+        "Updating method '{}' on agent '{}' for developer '{}' in registry '{}'",
+        method_name, agent_name, developer, registry_id
+    );
+
+    execute_registry_function(
+        registry_id,
+        "update_method",
+        move |tb, object_args, clock_arg| {
+            let registry_arg = *object_args.get(0).expect("Registry argument required");
+
+            let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: developer.clone().into_bytes(),
+            }));
+            let agent_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: agent_name.clone().into_bytes(),
+            }));
+            let method_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: method_name.clone().into_bytes(),
+            }));
+            let docker_image_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: docker_image.clone().into_bytes(),
+            }));
+            let docker_sha256_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: docker_sha256.clone().into_bytes(),
+            }));
+            let min_memory_mb_arg = tb.input(sui_transaction_builder::Serialized(&min_memory_mb));
+            let min_cpu_cores_arg = tb.input(sui_transaction_builder::Serialized(&min_cpu_cores));
+            let requires_tee_arg = tb.input(sui_transaction_builder::Serialized(&requires_tee));
+
+            vec![
+                registry_arg,
+                developer_arg,
+                agent_name_arg,
+                method_name_arg,
+                docker_image_arg,
+                docker_sha256_arg,
+                min_memory_mb_arg,
+                min_cpu_cores_arg,
+                requires_tee_arg,
+                clock_arg,
+            ]
+        },
+    )
+    .await
+    .map_err(|e| {
+        debug!("Failed to update method: {}", e);
+        e
+    })
+}
+
+/// Remove a method from an agent in the registry
+pub(crate) async fn remove_method(
+    registry_id: &str,
+    developer: String,
+    agent_name: String,
+    method_name: String,
+) -> Result<String> {
+    info!(
+        "Removing method '{}' from agent '{}' for developer '{}' in registry '{}'",
+        method_name, agent_name, developer, registry_id
+    );
+
+    execute_registry_function(
+        registry_id,
+        "remove_method",
+        move |tb, object_args, clock_arg| {
+            let registry_arg = *object_args.get(0).expect("Registry argument required");
+
+            let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: developer.clone().into_bytes(),
+            }));
+            let agent_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: agent_name.clone().into_bytes(),
+            }));
+            let method_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: method_name.clone().into_bytes(),
+            }));
+
+            vec![
+                registry_arg,
+                developer_arg,
+                agent_name_arg,
+                method_name_arg,
+                clock_arg,
+            ]
+        },
+    )
+    .await
+    .map_err(|e| {
+        debug!("Failed to remove method: {}", e);
+        e
+    })
+}
+
+/// Set the default method on an agent in the registry
+pub(crate) async fn set_default_method(
+    registry_id: &str,
+    developer: String,
+    agent_name: String,
+    method_name: String,
+) -> Result<String> {
+    info!(
+        "Setting default method '{}' on agent '{}' for developer '{}' in registry '{}'",
+        method_name, agent_name, developer, registry_id
+    );
+
+    execute_registry_function(
+        registry_id,
+        "set_default_method",
+        move |tb, object_args, clock_arg| {
+            let registry_arg = *object_args.get(0).expect("Registry argument required");
+
+            let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: developer.clone().into_bytes(),
+            }));
+            let agent_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: agent_name.clone().into_bytes(),
+            }));
+            let method_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: method_name.clone().into_bytes(),
+            }));
+
+            vec![
+                registry_arg,
+                developer_arg,
+                agent_name_arg,
+                method_name_arg,
+                clock_arg,
+            ]
+        },
+    )
+    .await
+    .map_err(|e| {
+        debug!("Failed to set default method: {}", e);
+        e
+    })
+}
+
+/// Remove the default method from an agent in the registry
+pub(crate) async fn remove_default_method(
+    registry_id: &str,
+    developer: String,
+    agent_name: String,
+) -> Result<String> {
+    info!(
+        "Removing default method from agent '{}' for developer '{}' in registry '{}'",
+        agent_name, developer, registry_id
+    );
+
+    execute_registry_function(
+        registry_id,
+        "remove_default_method",
+        move |tb, object_args, clock_arg| {
+            let registry_arg = *object_args.get(0).expect("Registry argument required");
+
+            let developer_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: developer.clone().into_bytes(),
+            }));
+            let agent_name_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: agent_name.clone().into_bytes(),
+            }));
+
+            vec![registry_arg, developer_arg, agent_name_arg, clock_arg]
+        },
+    )
+    .await
+    .map_err(|e| {
+        debug!("Failed to remove default method: {}", e);
         e
     })
 }

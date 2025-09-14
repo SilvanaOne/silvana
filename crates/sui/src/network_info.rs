@@ -201,13 +201,8 @@ pub async fn print_network_info() -> Result<()> {
     }
     
     if let Some(ref chain_id) = info.chain_id {
-        // Show first 16 chars of chain ID for brevity
-        let short_id = if chain_id.len() > 16 {
-            format!("{}...", &chain_id[..16])
-        } else {
-            chain_id.clone()
-        };
-        println!("  Chain ID: {}", short_id);
+        // Show full chain ID
+        println!("  Chain ID: {}", chain_id);
     }
     
     // Show server version if available

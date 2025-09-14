@@ -4,7 +4,7 @@ import "google/protobuf/descriptor.proto";
 
 package silvana.options.v1;
 
-option go_package = "github.com/SilvanaOne/zk-tests/packages/avs/rpc/proto;options";
+option go_package = "github.com/SilvanaOne/silvana/proto;options";
 
 // Custom field options for Silvana events
 extend google.protobuf.FieldOptions {

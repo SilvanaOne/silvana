@@ -27,7 +27,7 @@ impl EventNatsPublisher {
     pub async fn new() -> Result<Self> {
         let nats_url = env::var("NATS_URL")?;
         let stream_name = "silvana".to_string();
-        let stream_prefix = format!("{}.events.v1.", stream_name);
+        let stream_prefix = format!("{}.rpc.v1.", stream_name);
         let subject = format!("{}>", stream_prefix);
 
         info!("🔄 Connecting to NATS server at: {}", nats_url);

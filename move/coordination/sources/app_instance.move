@@ -112,7 +112,6 @@ public struct BlockCleanupEvent has copy, drop {
     settlements_count: u64,
 }
 
-
 public struct APP_INSTANCE has drop {}
 
 // Constants
@@ -270,8 +269,7 @@ public fun create_app_instance(
     app_instance.blocks.add(0u64, block_0);
 
     // Track the instance in the SilvanaApp
-    // Pass @0x0 as admin_address since this is the app owner creating their own instance
-    silvana_app::add_instance_to_app(app, instance_address, @0x0, ctx);
+    silvana_app::add_instance_to_app(app, instance_address);
 
     event::emit(AppInstanceCreatedEvent {
         app_instance_address: instance_address,
@@ -1145,7 +1143,7 @@ public fun create_app_job(
             );
             return option::none()
         };
-        
+
         // Check that there's no existing settlement job for this chain BEFORE creating job
         let settlement = vec_map::get(&app_instance.settlements, &chain);
         let existing_job = settlement::get_settlement_job(settlement);
@@ -1189,7 +1187,7 @@ public fun create_app_job(
         return option::none()
     };
 
-    // If this is a settlement job, update the settlement_job field in the Settlement struct  
+    // If this is a settlement job, update the settlement_job field in the Settlement struct
     if (option::is_some(&settlement_chain)) {
         let chain = *option::borrow(&settlement_chain);
         let settlement = vec_map::get_mut(

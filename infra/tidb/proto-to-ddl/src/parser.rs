@@ -250,7 +250,16 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
         // Child tables for each field with sequences option
         // ------------------------------------------------------------------
         for field in sequence_fields {
-            let child_table_name = format!("{}_{}", table_name, field.name.to_snake_case());
+            // Shorten long field names to avoid MySQL constraint name length limits
+            let field_suffix = if field.name == "merged_sequences_1" {
+                "ms1".to_string()
+            } else if field.name == "merged_sequences_2" {
+                "ms2".to_string()
+            } else {
+                field.name.to_snake_case()
+            };
+
+            let child_table_name = format!("{}_{}", table_name, field_suffix);
             let parent_fk = format!("{}_id", table_name); // e.g. agent_message_event_id
             let value_col = field.name.to_singular().to_snake_case(); // e.g. sequences -> sequence
 
@@ -335,10 +344,19 @@ fn generate_mod_file(messages: &[ProtoMessage], output_dir: &str) -> Result<()> 
     for message in messages {
         for field in &message.fields {
             if field.has_sequences_option {
+                // Shorten long field names to avoid MySQL constraint name length limits
+                let field_suffix = if field.name == "merged_sequences_1" {
+                    "ms1".to_string()
+                } else if field.name == "merged_sequences_2" {
+                    "ms2".to_string()
+                } else {
+                    field.name.to_snake_case()
+                };
+
                 let child_mod = format!(
                     "{}_{}",
                     message.name.to_snake_case(),
-                    field.name.to_snake_case()
+                    field_suffix
                 );
                 content.push_str(&format!("pub mod {};\n", child_mod));
             }
@@ -437,10 +455,19 @@ fn generate_child_entity_file(
     field: &ProtoField,
     output_dir: &str,
 ) -> Result<()> {
+    // Shorten long field names to avoid MySQL constraint name length limits
+    let field_suffix = if field.name == "merged_sequences_1" {
+        "ms1".to_string()
+    } else if field.name == "merged_sequences_2" {
+        "ms2".to_string()
+    } else {
+        field.name.to_snake_case()
+    };
+
     let module_name = format!(
         "{}_{}",
         parent.name.to_snake_case(),
-        field.name.to_snake_case()
+        field_suffix
     );
     let table_name = module_name.clone();
     let parent_fk = format!("{}_id", parent.name.to_snake_case());

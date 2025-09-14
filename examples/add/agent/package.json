@@ -13,23 +13,24 @@
     "batch": "npm run test test/batch.test.ts",
     "multiply": "npm run test test/multiply.test.ts",
     "deploy": "MINA_CHAIN=mina:devnet npm run test test/deploy.test.ts",
-    "compile": "npm run test test/compile.test.ts"
+    "compile": "npm run test test/compile.test.ts",
+    "update": "ncu -i"
   },
   "node": {
     "version": ">=22.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.3.1",
+    "@types/node": "^24.4.0",
     "dotenv": "^17.2.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@mysten/sui": "^1.37.6",
-    "@silvana-one/agent": "^1.0.36",
-    "@silvana-one/coordination": "^1.0.36",
-    "@silvana-one/mina-utils": "^1.0.36",
-    "@silvana-one/storage": "^1.0.36",
+    "@mysten/sui": "^1.38.0",
+    "@silvana-one/agent": "^1.0.37",
+    "@silvana-one/coordination": "^1.0.37",
+    "@silvana-one/mina-utils": "^1.0.37",
+    "@silvana-one/storage": "^1.0.37",
     "o1js": "2.4.0"
   }
 }

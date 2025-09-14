@@ -5,6 +5,17 @@ use tracing::{debug, info, warn};
 use crate::state::SharedSuiState;
 use crate::transactions::{execute_transaction_block, get_object_id};
 
+/// Define Move types for serialization
+#[derive(serde::Serialize)]
+struct MoveString {
+    bytes: Vec<u8>,
+}
+
+#[derive(serde::Serialize)]
+struct MoveOption<T> {
+    vec: Vec<T>,
+}
+
 /// Create and submit a transaction to start a job
 pub(crate) async fn start_job_tx(app_instance_str: &str, job_sequence: u64) -> Result<String> {
     debug!(
@@ -79,7 +90,10 @@ pub(crate) async fn fail_job_tx(
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
-            let error_arg = tb.input(sui_transaction_builder::Serialized(&error_msg));
+            // Use MoveString for proper serialization
+            let error_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: error_msg.clone().into_bytes(),
+            }));
             vec![app_instance_arg, job_sequence_arg, error_arg, clock_arg]
         },
     )
@@ -185,7 +199,11 @@ pub(crate) async fn multicall_job_operations_tx(
                     let complete_arg = tb.input(sui_transaction_builder::Serialized(&complete));
                     let fail_sequences_arg =
                         tb.input(sui_transaction_builder::Serialized(&fail_seqs));
-                    let fail_errors_arg = tb.input(sui_transaction_builder::Serialized(&fail_errs));
+                    // Convert Vec<String> to Vec<MoveString> for proper serialization
+                    let fail_errors_move: Vec<MoveString> = fail_errs.iter().map(|s| MoveString {
+                        bytes: s.clone().into_bytes(),
+                    }).collect();
+                    let fail_errors_arg = tb.input(sui_transaction_builder::Serialized(&fail_errors_move));
                     let terminate_arg = tb.input(sui_transaction_builder::Serialized(&terminate));
                     let start_arg = tb.input(sui_transaction_builder::Serialized(&start));
                     let start_memory_arg =
@@ -223,7 +241,11 @@ pub(crate) async fn multicall_job_operations_tx(
                     let app_instance_arg = *object_args.get(0).expect("App instance argument required");
                     let sequence_arg = tb.input(sui_transaction_builder::Serialized(&seq));
                     let state_data_arg = tb.input(sui_transaction_builder::Serialized(&state_data));
-                    let da_hash_arg = tb.input(sui_transaction_builder::Serialized(&da_hash));
+                    // Convert Option<String> to MoveOption<MoveString> for proper serialization
+                    let da_hash_move = MoveOption {
+                        vec: da_hash.clone().map(|s| MoveString { bytes: s.into_bytes() }).into_iter().collect(),
+                    };
+                    let da_hash_arg = tb.input(sui_transaction_builder::Serialized(&da_hash_move));
 
                     vec![
                         app_instance_arg,
@@ -269,14 +291,28 @@ pub(crate) async fn multicall_job_operations_tx(
                     let app_instance_arg = *object_args.get(0).expect("App instance argument required");
                     let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
                     let sequences_arg = tb.input(sui_transaction_builder::Serialized(&seqs));
+                    // Convert Option<Vec<u64>> to MoveOption<Vec<u64>>
+                    let merged_seqs_1_move = MoveOption {
+                        vec: merged_seqs_1.clone().into_iter().collect(),
+                    };
                     let merged_seqs_1_arg =
-                        tb.input(sui_transaction_builder::Serialized(&merged_seqs_1));
+                        tb.input(sui_transaction_builder::Serialized(&merged_seqs_1_move));
+                    let merged_seqs_2_move = MoveOption {
+                        vec: merged_seqs_2.clone().into_iter().collect(),
+                    };
                     let merged_seqs_2_arg =
-                        tb.input(sui_transaction_builder::Serialized(&merged_seqs_2));
-                    let job_arg = tb.input(sui_transaction_builder::Serialized(&job));
-                    let hash_arg = tb.input(sui_transaction_builder::Serialized(&hash));
+                        tb.input(sui_transaction_builder::Serialized(&merged_seqs_2_move));
+                    // Use MoveString for string parameters
+                    let job_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                        bytes: job.clone().into_bytes(),
+                    }));
+                    let hash_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                        bytes: hash.clone().into_bytes(),
+                    }));
                     let cores_arg = tb.input(sui_transaction_builder::Serialized(&cores));
-                    let arch_arg = tb.input(sui_transaction_builder::Serialized(&arch));
+                    let arch_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                        bytes: arch.clone().into_bytes(),
+                    }));
                     let memory_arg = tb.input(sui_transaction_builder::Serialized(&memory));
                     let time_arg = tb.input(sui_transaction_builder::Serialized(&time));
 
@@ -329,16 +365,29 @@ pub(crate) async fn multicall_job_operations_tx(
                 "create_app_job".to_string(),
                 Box::new(move |tb, object_args, clock_arg| {
                     let app_instance_arg = *object_args.get(0).expect("App instance argument required");
-                    let method_arg = tb.input(sui_transaction_builder::Serialized(&method));
-                    let description_arg = tb.input(sui_transaction_builder::Serialized(&desc));
+                    let method_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                        bytes: method.clone().into_bytes(),
+                    }));
+                    // Convert Option<String> to MoveOption<MoveString>
+                    let desc_move = MoveOption {
+                        vec: desc.clone().map(|s| MoveString { bytes: s.into_bytes() }).into_iter().collect(),
+                    };
+                    let description_arg = tb.input(sui_transaction_builder::Serialized(&desc_move));
                     let block_arg = tb.input(sui_transaction_builder::Serialized(&block));
                     let sequences_arg = tb.input(sui_transaction_builder::Serialized(&seqs));
                     let sequences1_arg = tb.input(sui_transaction_builder::Serialized(&seqs1));
                     let sequences2_arg = tb.input(sui_transaction_builder::Serialized(&seqs2));
-                    let data_arg = tb.input(sui_transaction_builder::Serialized(&job_data));
+                    // job_data is already Vec<u8>, so use MoveString directly with it
+                    let data_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                        bytes: job_data.clone(),
+                    }));
                     let interval_arg = tb.input(sui_transaction_builder::Serialized(&interval));
                     let scheduled_arg = tb.input(sui_transaction_builder::Serialized(&scheduled));
-                    let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
+                    // Convert Option<String> to MoveOption<MoveString>
+                    let chain_move = MoveOption {
+                        vec: chain.clone().map(|s| MoveString { bytes: s.into_bytes() }).into_iter().collect(),
+                    };
+                    let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain_move));
 
                     vec![
                         app_instance_arg,
@@ -931,10 +980,14 @@ pub async fn update_block_settlement_tx_hash_tx(
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             // Order must match Move function signature: chain, block_number, settlement_tx_hash
-            let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
+            let chain_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: chain.clone().into_bytes(),
+            }));
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let settlement_tx_hash_arg =
-                tb.input(sui_transaction_builder::Serialized(&settlement_tx_hash));
+                tb.input(sui_transaction_builder::Serialized(&MoveString {
+                    bytes: settlement_tx_hash.clone().into_bytes(),
+                }));
 
             vec![
                 app_instance_arg,
@@ -966,7 +1019,9 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             // Order must match Move function signature: chain, block_number, settled_at
-            let chain_arg = tb.input(sui_transaction_builder::Serialized(&chain));
+            let chain_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: chain.clone().into_bytes(),
+            }));
             let block_number_arg = tb.input(sui_transaction_builder::Serialized(&block_number));
             let settled_at_arg = tb.input(sui_transaction_builder::Serialized(&settled_at));
 
@@ -1088,15 +1143,20 @@ pub async fn try_create_block_tx(app_instance_str: &str) -> Result<String> {
 
 /// Set a key-value pair in the app instance KV store
 pub async fn set_kv_tx(app_instance_str: &str, key: String, value: String) -> Result<String> {
-    debug!("Creating set_kv transaction for key: {}", key);
+    debug!("Creating set_kv transaction for key: {} with value length: {}", key, value.len());
 
     execute_app_instance_function(
         app_instance_str,
         "set_kv",
         move |tb, object_args, _clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
-            let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
-            let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
+            // Use MoveString for proper serialization
+            let key_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: key.clone().into_bytes(),
+            }));
+            let value_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: value.clone().into_bytes(),
+            }));
             vec![app_instance_arg, key_arg, value_arg]
         },
     )
@@ -1112,7 +1172,10 @@ pub async fn delete_kv_tx(app_instance_str: &str, key: String) -> Result<String>
         "delete_kv",
         move |tb, object_args, _clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
-            let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
+            // Use MoveString for proper serialization
+            let key_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: key.clone().into_bytes(),
+            }));
             vec![app_instance_arg, key_arg]
         },
     )
@@ -1128,8 +1191,13 @@ pub async fn add_metadata_tx(app_instance_str: &str, key: String, value: String)
         "add_metadata",
         move |tb, object_args, _clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
-            let key_arg = tb.input(sui_transaction_builder::Serialized(&key));
-            let value_arg = tb.input(sui_transaction_builder::Serialized(&value));
+            // Use MoveString for proper serialization
+            let key_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: key.clone().into_bytes(),
+            }));
+            let value_arg = tb.input(sui_transaction_builder::Serialized(&MoveString {
+                bytes: value.clone().into_bytes(),
+            }));
             vec![app_instance_arg, key_arg, value_arg]
         },
     )

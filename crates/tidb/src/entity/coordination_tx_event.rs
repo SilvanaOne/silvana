@@ -8,11 +8,6 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub coordinator_id: String,
-    pub developer: String,
-    pub agent: String,
-    pub app: String,
-    pub job_sequence: String,
-    pub memo: String,
     pub tx_hash: String,
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,

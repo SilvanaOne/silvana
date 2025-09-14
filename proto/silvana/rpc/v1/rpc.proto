@@ -3,10 +3,9 @@ syntax = "proto3";
 import "google/protobuf/descriptor.proto";
 import "silvana/options/v1/options.proto";
 
-package silvana.events.v1;
+package silvana.rpc.v1;
 
-option go_package = "github.com/SilvanaOne/zk-tests/packages/avs/rpc/proto;events";
-
+option go_package = "github.com/SilvanaOne/silvana/proto;events";
 
 // Log level enumeration for messages
 enum LogLevel {
@@ -18,42 +17,72 @@ enum LogLevel {
   LOG_LEVEL_FATAL = 5;
 }
 
+// Job result enumeration
+enum JobResult {
+  JOB_RESULT_COMPLETED = 0;
+  JOB_RESULT_FAILED = 1;
+  JOB_RESULT_TERMINATED = 2;
+}
+
 // Coordinator Events
 message CoordinatorStartedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string ethereum_address = 2;
-  string sui_ed25519_address = 3;
-  uint64 event_timestamp = 4;
+  uint64 event_timestamp = 3;
 }
 
-message AgentStartedJobEvent {
+message CoordinatorActiveEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 2;
+}
+
+message CoordinatorShutdownEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 2;
+}
+
+message AgentSessionStartedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string developer = 2 [ (silvana.options.v1.search) = true];
   string agent = 3 [ (silvana.options.v1.search) = true];
-  string app = 4 [ (silvana.options.v1.search) = true];
-  string job_sequence = 5 [ (silvana.options.v1.search) = true];
+  string agent_method = 4 [ (silvana.options.v1.search) = true];
+  string session_id = 5 [ (silvana.options.v1.search) = true];
   uint64 event_timestamp = 6;
 }
 
-message AgentFinishedJobEvent {
+message JobCreatedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
-  string developer = 2 [ (silvana.options.v1.search) = true];
-  string agent = 3 [ (silvana.options.v1.search) = true];
-  string app = 4 [ (silvana.options.v1.search) = true];
-  string job_sequence = 5 [ (silvana.options.v1.search) = true];
-  uint64 duration = 6;
-  uint64 event_timestamp = 7;
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  string app_instance_id = 3 [ (silvana.options.v1.search) = true];
+  string app_method = 4 [ (silvana.options.v1.search) = true];
+  uint64 job_sequence = 5 [ (silvana.options.v1.search) = true];
+  repeated uint64 sequences = 6 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_1 = 7 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_2 = 8 [ (silvana.options.v1.sequences) = true];
+  string job_id = 9 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 10;
+}
+
+message JobStartedEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  string app_instance_id = 3 [ (silvana.options.v1.search) = true];
+  string job_id = 4 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 5;
+}
+
+message JobFinishedEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  string job_id = 2 [ (silvana.options.v1.search) = true];
+  uint64 duration = 3;
+  uint64 event_timestamp = 4;
+  JobResult result = 5;
 }
 
 message CoordinationTxEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
-  string developer = 2 [ (silvana.options.v1.search) = true];
-  string agent = 3 [ (silvana.options.v1.search) = true];
-  string app = 4 [ (silvana.options.v1.search) = true];
-  string job_sequence = 5 [ (silvana.options.v1.search) = true];
-  string memo = 6 [ (silvana.options.v1.search) = true];
-  string tx_hash = 7 [ (silvana.options.v1.search) = true];
-  uint64 event_timestamp = 8;
+  string tx_hash = 2 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 3;
 }
 
 message CoordinatorMessageEvent {
@@ -63,74 +92,71 @@ message CoordinatorMessageEvent {
   string message = 4 [ (silvana.options.v1.search) = true];
 }
 
-message ClientTransactionEvent {
+message ProofSubmittedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
-  string developer = 2 [ (silvana.options.v1.search) = true];
-  string agent = 3 [ (silvana.options.v1.search) = true];
-  string app = 4 [ (silvana.options.v1.search) = true];
-  string client_ip_address = 5;
-  string method = 6 [ (silvana.options.v1.search) = true];
-  bytes data = 7;
-  string tx_hash = 8 [ (silvana.options.v1.search) = true];
-  uint64 sequence = 9;
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  string app_instance_id = 3 [ (silvana.options.v1.search) = true];
+  string job_id = 4 [ (silvana.options.v1.search) = true];
+  string data_availability = 5;
+  uint64 block_number = 6;
+  repeated uint64 sequences = 7 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_1 = 8 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_2 = 9 [ (silvana.options.v1.sequences) = true];
   uint64 event_timestamp = 10;
 }
 
-// Union type for all coordinator events
-message CoordinatorEvent {
-  oneof event {
-    CoordinatorStartedEvent coordinator_started = 1;
-    AgentStartedJobEvent agent_started_job = 2;
-    AgentFinishedJobEvent agent_finished_job = 3;
-    CoordinationTxEvent coordination_tx = 4;
-    CoordinatorMessageEvent coordinator_error = 5;
-    ClientTransactionEvent client_transaction = 6;
-  }
+message SettlementTransactionEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  string app_instance_id = 3 [ (silvana.options.v1.search) = true];
+  string job_id = 4 [ (silvana.options.v1.search) = true];
+  uint64 block_number = 5;
+  string tx_hash = 6 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 7;
+}
+
+message SettlementTransactionIncludedInBlockEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  string app_instance_id = 3 [ (silvana.options.v1.search) = true];
+  string job_id = 4 [ (silvana.options.v1.search) = true];
+  uint64 block_number = 5;
+  uint64 event_timestamp = 6;
 }
 
 // Agent Events
 message AgentMessageEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
-  string developer = 2 [ (silvana.options.v1.search) = true];
-  string agent = 3 [ (silvana.options.v1.search) = true];
-  string app = 4 [ (silvana.options.v1.search) = true];
-  string job_sequence = 5 [ (silvana.options.v1.search) = true];
-  repeated uint64 sequences = 6 [ (silvana.options.v1.sequences) = true];
-  uint64 event_timestamp = 7;
-  LogLevel level = 8;
-  string message = 9 [ (silvana.options.v1.search) = true];
-}
-
-
-message AgentTransactionEvent {
-  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
-  string tx_type = 2 [ (silvana.options.v1.search) = true];
-  string developer = 3 [ (silvana.options.v1.search) = true];
-  string agent = 4 [ (silvana.options.v1.search) = true];
-  string app = 5 [ (silvana.options.v1.search) = true];
-  string job_sequence = 6 [ (silvana.options.v1.search) = true];
-  repeated uint64 sequences = 7 [ (silvana.options.v1.sequences) = true];
-  uint64 event_timestamp = 8;
-  string tx_hash = 9 [ (silvana.options.v1.search) = true];
-  string chain = 10 [ (silvana.options.v1.search) = true];
-  string network = 11 [ (silvana.options.v1.search) = true];
-  string memo = 12 [ (silvana.options.v1.search) = true];
-  optional string metadata = 13 [ (silvana.options.v1.search) = true]; // JSON string
-}
-
-// Union type for all agent events
-message AgentEvent {
-  oneof event {
-    AgentMessageEvent message = 1;
-    AgentTransactionEvent transaction = 2;
-  }
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  optional string job_id = 3 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 4;
+  LogLevel level = 5;
+  string message = 6 [ (silvana.options.v1.search) = true];
 }
 
 // Main event wrapper
 message Event {
-  oneof event_type {
-    CoordinatorEvent coordinator = 1;
-    AgentEvent agent = 2;
+  oneof event {
+    // Coordinator lifecycle events
+    CoordinatorStartedEvent coordinator_started = 1;
+    CoordinatorActiveEvent coordinator_active = 2;
+    CoordinatorShutdownEvent coordinator_shutdown = 3;
+
+    // Session and job events
+    AgentSessionStartedEvent agent_session_started = 4;
+    JobCreatedEvent job_created = 5;
+    JobStartedEvent job_started = 6;
+    JobFinishedEvent job_finished = 7;
+
+    // Transaction and proof events
+    CoordinationTxEvent coordination_tx = 8;
+    ProofSubmittedEvent proof_submitted = 9;
+    SettlementTransactionEvent settlement_transaction = 10;
+    SettlementTransactionIncludedInBlockEvent settlement_transaction_included = 11;
+
+    // Message events
+    CoordinatorMessageEvent coordinator_message = 12;
+    AgentMessageEvent agent_message = 13;
   }
 }
 
@@ -157,97 +183,40 @@ message SubmitEventResponse {
 }
 
 // Query request/response messages for getting events by sequence
-message GetAgentTransactionEventsBySequenceRequest {
+message GetEventsByAppInstanceSequenceRequest {
   uint64 sequence = 1;
   optional uint32 limit = 2;    // Optional pagination limit
   optional uint32 offset = 3;   // Optional pagination offset
-  optional string coordinator_id = 4; // Optional filter by coordinator
-  optional string developer = 5;      // Optional filter by developer
-  optional string agent = 6;          // Optional filter by agent
-  optional string app = 7;            // Optional filter by app
+  string app_instance_id = 4;
 }
 
-message AgentTransactionEventWithId {
-  int64 id = 1;                     // Database ID
-  string coordinator_id = 2;
-  string tx_type = 3;
-  string developer = 4;
-  string agent = 5;
-  string app = 6;
-  string job_sequence = 7;
-  repeated uint64 sequences = 8;    // All sequences for this event
-  uint64 event_timestamp = 9;
-  string tx_hash = 10;
-  string chain = 11;
-  string network = 12;
-  string memo = 13;
-  string metadata = 14;
-  int64 created_at_timestamp = 15;  // Database timestamp
-}
 
-message GetAgentTransactionEventsBySequenceResponse {
+message GetEventsByAppInstanceSequenceResponse {
   bool success = 1;
   string message = 2;
-  repeated AgentTransactionEventWithId events = 3;
+  repeated Event events = 3;
   uint32 total_count = 4;    // Total matching events (for pagination)
   uint32 returned_count = 5; // Number of events in this response
 }
 
-// Query request/response messages for getting agent message events by sequence
-message GetAgentMessageEventsBySequenceRequest {
-  uint64 sequence = 1;
-  optional uint32 limit = 2;
-  optional uint32 offset = 3;
-  optional string coordinator_id = 4;
-  optional string developer = 5;
-  optional string agent = 6;
-  optional string app = 7;
-}
-
-message AgentMessageEventWithId {
-  int64 id = 1;
-  string coordinator_id = 2;
-  string developer = 3;
-  string agent = 4;
-  string app = 5;
-  string job_sequence = 6;
-  repeated uint64 sequences = 7;
-  uint64 event_timestamp = 8;
-  LogLevel level = 9;
-  string message = 10;
-  int64 created_at_timestamp = 11;
-}
-
-message GetAgentMessageEventsBySequenceResponse {
-  bool success = 1;
-  string message = 2;
-  repeated AgentMessageEventWithId events = 3;
-  uint32 total_count = 4;
-  uint32 returned_count = 5;
-}
-
 // Full-text search request/response messages for CoordinatorMessageEvent
-message SearchCoordinatorMessageEventsRequest {
+message SearchEventsRequest {
   string search_query = 1;              // Search terms for full-text search
   optional uint32 limit = 2;            // Optional pagination limit
   optional uint32 offset = 3;           // Optional pagination offset
   optional string coordinator_id = 4;   // Optional filter by coordinator
 }
 
-message CoordinatorMessageEventWithRelevance {
+message EventWithRelevance {
   int64 id = 1;                          // Database ID
-  string coordinator_id = 2;
-  uint64 event_timestamp = 3;
-  LogLevel level = 4;
-  string message = 5;
-  int64 created_at_timestamp = 6;        // Database timestamp
-  double relevance_score = 7;            // TiDB FTS relevance score (BM25)
+  Event event = 2;
+  double relevance_score = 3;            // TiDB FTS relevance score (BM25)
 }
 
-message SearchCoordinatorMessageEventsResponse {
+message SearchEventsResponse {
   bool success = 1;
   string message = 2;
-  repeated CoordinatorMessageEventWithRelevance events = 3;
+  repeated EventWithRelevance events = 3;
   uint32 total_count = 4;                // Total matching events (for pagination)
   uint32 returned_count = 5;             // Number of events in this response
 }
@@ -379,29 +348,28 @@ message RetrieveSecretResponse {
 }
 
 // gRPC service definition
-service SilvanaEventsService {
+service SilvanaRpcService {
   rpc SubmitEvents(SubmitEventsRequest) returns (SubmitEventsResponse);
   rpc SubmitEvent(SubmitEventRequest) returns (SubmitEventResponse);
-  
+
   // Query methods for retrieving events by sequence
-  rpc GetAgentTransactionEventsBySequence(GetAgentTransactionEventsBySequenceRequest) returns (GetAgentTransactionEventsBySequenceResponse);
-  rpc GetAgentMessageEventsBySequence(GetAgentMessageEventsBySequenceRequest) returns (GetAgentMessageEventsBySequenceResponse);
-  
+  rpc GetEventsByAppInstanceSequence(GetEventsByAppInstanceSequenceRequest) returns (GetEventsByAppInstanceSequenceResponse);
+
   // Full-text search methods
-  rpc SearchCoordinatorMessageEvents(SearchCoordinatorMessageEventsRequest) returns (SearchCoordinatorMessageEventsResponse);
-  
+  rpc SearchEvents(SearchEventsRequest) returns (SearchEventsResponse);
+
   // Proof cache methods
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
-  
+
   // Secrets storage methods
   rpc StoreSecret(StoreSecretRequest) returns (StoreSecretResponse);
   rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
-  
+
   // Binary storage methods
   rpc WriteBinary(WriteBinaryRequest) returns (WriteBinaryResponse);
   rpc ReadBinary(ReadBinaryRequest) returns (ReadBinaryResponse);
-  
+
   // Configuration storage methods
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
   rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse);

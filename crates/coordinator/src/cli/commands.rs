@@ -479,6 +479,119 @@ pub enum RegistryCommands {
         /// App name
         name: String,
     },
+
+    /// Add a method to an agent
+    AddMethod {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+
+        /// Developer name
+        developer: String,
+
+        /// Agent name
+        agent: String,
+
+        /// Method name
+        method: String,
+
+        /// Docker image
+        docker_image: String,
+
+        /// Docker SHA256 hash
+        docker_sha256: String,
+
+        /// Minimum memory in MB
+        #[arg(long, default_value = "512")]
+        min_memory_mb: u32,
+
+        /// Minimum CPU cores
+        #[arg(long, default_value = "1")]
+        min_cpu_cores: u16,
+
+        /// Whether TEE is required
+        #[arg(long, default_value = "false")]
+        requires_tee: bool,
+    },
+
+    /// Update a method on an agent
+    UpdateMethod {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+
+        /// Developer name
+        developer: String,
+
+        /// Agent name
+        agent: String,
+
+        /// Method name
+        method: String,
+
+        /// Docker image
+        docker_image: String,
+
+        /// Docker SHA256 hash
+        docker_sha256: String,
+
+        /// Minimum memory in MB
+        #[arg(long, default_value = "512")]
+        min_memory_mb: u32,
+
+        /// Minimum CPU cores
+        #[arg(long, default_value = "1")]
+        min_cpu_cores: u16,
+
+        /// Whether TEE is required
+        #[arg(long, default_value = "false")]
+        requires_tee: bool,
+    },
+
+    /// Remove a method from an agent
+    RemoveMethod {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+
+        /// Developer name
+        developer: String,
+
+        /// Agent name
+        agent: String,
+
+        /// Method name
+        method: String,
+    },
+
+    /// Set the default method for an agent
+    SetDefaultMethod {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+
+        /// Developer name
+        developer: String,
+
+        /// Agent name
+        agent: String,
+
+        /// Method name
+        method: String,
+    },
+
+    /// Remove the default method from an agent
+    RemoveDefaultMethod {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+
+        /// Developer name
+        developer: String,
+
+        /// Agent name
+        agent: String,
+    },
 }
 
 #[derive(Subcommand)]

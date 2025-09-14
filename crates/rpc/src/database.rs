@@ -83,71 +83,90 @@ impl EventDatabase {
 
         // Group events by type for batch insertion
         let mut coordinator_started_events = Vec::new();
-        let mut agent_started_job_events = Vec::new();
-        let mut agent_finished_job_events = Vec::new();
+        let mut coordinator_active_events = Vec::new();
+        let mut coordinator_shutdown_events = Vec::new();
+        let mut agent_session_started_events = Vec::new();
+        let mut job_created_events = Vec::new();
+        let mut job_started_events = Vec::new();
+        let mut job_finished_events = Vec::new();
         let mut coordination_tx_events = Vec::new();
         let mut coordinator_message_events = Vec::new();
-        let mut client_transaction_events = Vec::new();
+        let mut proof_submitted_events = Vec::new();
+        let mut settlement_transaction_events = Vec::new();
+        let mut settlement_transaction_included_events = Vec::new();
         let mut agent_message_events = Vec::new();
-        let mut agent_transaction_events = Vec::new();
 
         // Store sequences separately for child table insertion
-        let mut agent_message_sequences = Vec::new();
-        let mut agent_transaction_sequences = Vec::new();
+        let mut job_created_sequences = Vec::new();
+        let mut job_created_ms1 = Vec::new();
+        let mut job_created_ms2 = Vec::new();
+        let mut proof_submitted_sequences = Vec::new();
+        let mut proof_submitted_ms1 = Vec::new();
+        let mut proof_submitted_ms2 = Vec::new();
 
         // Categorize events by type
         for event in events {
-            if let Some(event_type) = &event.event_type {
+            if let Some(event_type) = &event.event {
+                use proto::event::Event as EventType;
                 match event_type {
-                    proto::events::event::EventType::Coordinator(coordinator_event) => {
-                        if let Some(coord_event) = &coordinator_event.event {
-                            use proto::events::coordinator_event::Event as CoordEvent;
-                            match coord_event {
-                                CoordEvent::CoordinatorStarted(event) => {
-                                    coordinator_started_events
-                                        .push(convert_coordinator_started_event(event));
-                                }
-                                CoordEvent::AgentStartedJob(event) => {
-                                    agent_started_job_events
-                                        .push(convert_agent_started_job_event(event));
-                                }
-                                CoordEvent::AgentFinishedJob(event) => {
-                                    agent_finished_job_events
-                                        .push(convert_agent_finished_job_event(event));
-                                }
-                                CoordEvent::CoordinationTx(event) => {
-                                    coordination_tx_events
-                                        .push(convert_coordination_tx_event(event));
-                                }
-                                CoordEvent::CoordinatorError(event) => {
-                                    coordinator_message_events
-                                        .push(convert_coordinator_message_event(event));
-                                }
-                                CoordEvent::ClientTransaction(event) => {
-                                    client_transaction_events
-                                        .push(convert_client_transaction_event(event));
-                                }
-                            }
+                    EventType::CoordinatorStarted(e) => {
+                        coordinator_started_events.push(convert_coordinator_started_event(e));
+                    }
+                    EventType::CoordinatorActive(e) => {
+                        coordinator_active_events.push(convert_coordinator_active_event(e));
+                    }
+                    EventType::CoordinatorShutdown(e) => {
+                        coordinator_shutdown_events.push(convert_coordinator_shutdown_event(e));
+                    }
+                    EventType::AgentSessionStarted(e) => {
+                        agent_session_started_events.push(convert_agent_session_started_event(e));
+                    }
+                    EventType::JobCreated(e) => {
+                        let (main_event, sequences, ms1, ms2) = convert_job_created_event(e);
+                        job_created_events.push(main_event);
+                        if !sequences.is_empty() {
+                            job_created_sequences.push(sequences);
+                        }
+                        if !ms1.is_empty() {
+                            job_created_ms1.push(ms1);
+                        }
+                        if !ms2.is_empty() {
+                            job_created_ms2.push(ms2);
                         }
                     }
-                    proto::events::event::EventType::Agent(agent_event) => {
-                        if let Some(agent_event_type) = &agent_event.event {
-                            use proto::events::agent_event::Event as AgentEventType;
-                            match agent_event_type {
-                                AgentEventType::Message(event) => {
-                                    let (main_event, sequences) =
-                                        convert_agent_message_event(event);
-                                    agent_message_events.push(main_event);
-                                    agent_message_sequences.push(sequences);
-                                }
-                                AgentEventType::Transaction(event) => {
-                                    let (main_event, sequences) =
-                                        convert_agent_transaction_event(event);
-                                    agent_transaction_events.push(main_event);
-                                    agent_transaction_sequences.push(sequences);
-                                }
-                            }
+                    EventType::JobStarted(e) => {
+                        job_started_events.push(convert_job_started_event(e));
+                    }
+                    EventType::JobFinished(e) => {
+                        job_finished_events.push(convert_job_finished_event(e));
+                    }
+                    EventType::CoordinationTx(e) => {
+                        coordination_tx_events.push(convert_coordination_tx_event(e));
+                    }
+                    EventType::CoordinatorMessage(e) => {
+                        coordinator_message_events.push(convert_coordinator_message_event(e));
+                    }
+                    EventType::ProofSubmitted(e) => {
+                        let (main_event, sequences, ms1, ms2) = convert_proof_submitted_event(e);
+                        proof_submitted_events.push(main_event);
+                        if !sequences.is_empty() {
+                            proof_submitted_sequences.push(sequences);
                         }
+                        if !ms1.is_empty() {
+                            proof_submitted_ms1.push(ms1);
+                        }
+                        if !ms2.is_empty() {
+                            proof_submitted_ms2.push(ms2);
+                        }
+                    }
+                    EventType::SettlementTransaction(e) => {
+                        settlement_transaction_events.push(convert_settlement_transaction_event(e));
+                    }
+                    EventType::SettlementTransactionIncluded(e) => {
+                        settlement_transaction_included_events.push(convert_settlement_transaction_included_event(e));
+                    }
+                    EventType::AgentMessage(e) => {
+                        agent_message_events.push(convert_agent_message_event(e));
                     }
                 }
             }
@@ -157,11 +176,16 @@ impl EventDatabase {
         //debug!("Phase 1: Running main table insertions in parallel");
         let _independent_results = tokio::try_join!(
             self.insert_coordinator_started_events(&txn, coordinator_started_events),
-            self.insert_agent_started_job_events(&txn, agent_started_job_events),
-            self.insert_agent_finished_job_events(&txn, agent_finished_job_events),
+            self.insert_coordinator_active_events(&txn, coordinator_active_events),
+            self.insert_coordinator_shutdown_events(&txn, coordinator_shutdown_events),
+            self.insert_agent_session_started_events(&txn, agent_session_started_events),
+            self.insert_job_started_events(&txn, job_started_events),
+            self.insert_job_finished_events(&txn, job_finished_events),
             self.insert_coordination_tx_events(&txn, coordination_tx_events),
             self.insert_coordinator_message_events(&txn, coordinator_message_events),
-            self.insert_client_transaction_events(&txn, client_transaction_events),
+            self.insert_settlement_transaction_events(&txn, settlement_transaction_events),
+            self.insert_settlement_transaction_included_events(&txn, settlement_transaction_included_events),
+            self.insert_agent_message_events(&txn, agent_message_events),
         )?;
 
         // Sum up results from independent insertions
@@ -175,15 +199,19 @@ impl EventDatabase {
         // Phase 2: Handle parent-child relationships for events with sequences
         //debug!("Phase 2: Running parent-child table insertions");
         let _parent_child_results = tokio::try_join!(
-            self.insert_agent_message_events_with_sequences(
+            self.insert_job_created_events_with_sequences(
                 &txn,
-                agent_message_events,
-                &agent_message_sequences
+                job_created_events,
+                &job_created_sequences,
+                &job_created_ms1,
+                &job_created_ms2
             ),
-            self.insert_agent_transaction_events_with_sequences(
+            self.insert_proof_submitted_events_with_sequences(
                 &txn,
-                agent_transaction_events,
-                &agent_transaction_sequences
+                proof_submitted_events,
+                &proof_submitted_sequences,
+                &proof_submitted_ms1,
+                &proof_submitted_ms2
             ),
         )?;
 
@@ -246,79 +274,131 @@ impl EventDatabase {
         }
     }
 
-    async fn insert_agent_started_job_events(
+    async fn insert_coordinator_active_events(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::agent_started_job_event::ActiveModel>,
+        events: Vec<entities::coordinator_active_event::ActiveModel>,
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
 
-        debug!(
-            "Parallel inserting {} agent_started_job_events",
-            events.len()
-        );
+        debug!("Inserting {} coordinator_active_events", events.len());
         let events_len = events.len();
-        match entities::agent_started_job_event::Entity::insert_many(events)
+        match entities::coordinator_active_event::Entity::insert_many(events)
             .exec(txn)
             .await
         {
-            Ok(result) => {
-                debug!("Successfully inserted agent_started_job_events");
-                let count =
-                    if result.last_insert_id >= 0 && result.last_insert_id <= i64::MAX as i64 {
-                        result.last_insert_id as usize
-                    } else {
-                        warn!(
-                            "Invalid last_insert_id value: {}, defaulting to events count",
-                            result.last_insert_id
-                        );
-                        events_len
-                    };
-                Ok(count)
+            Ok(_) => {
+                debug!("Successfully inserted coordinator_active_events");
+                Ok(events_len)
             }
             Err(e) => {
-                error!("Failed to batch insert agent_started_job_events: {}", e);
+                error!("Failed to batch insert coordinator_active_events: {}", e);
                 Err(e.into())
             }
         }
     }
 
-    async fn insert_agent_finished_job_events(
+    async fn insert_coordinator_shutdown_events(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::agent_finished_job_event::ActiveModel>,
+        events: Vec<entities::coordinator_shutdown_event::ActiveModel>,
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
 
-        debug!(
-            "Parallel inserting {} agent_finished_job_events",
-            events.len()
-        );
+        debug!("Inserting {} coordinator_shutdown_events", events.len());
         let events_len = events.len();
-        match entities::agent_finished_job_event::Entity::insert_many(events)
+        match entities::coordinator_shutdown_event::Entity::insert_many(events)
             .exec(txn)
             .await
         {
-            Ok(result) => {
-                debug!("Successfully inserted agent_finished_job_events");
-                let count =
-                    if result.last_insert_id >= 0 && result.last_insert_id <= i64::MAX as i64 {
-                        result.last_insert_id as usize
-                    } else {
-                        warn!(
-                            "Invalid last_insert_id value: {}, defaulting to events count",
-                            result.last_insert_id
-                        );
-                        events_len
-                    };
-                Ok(count)
+            Ok(_) => {
+                debug!("Successfully inserted coordinator_shutdown_events");
+                Ok(events_len)
             }
             Err(e) => {
-                error!("Failed to batch insert agent_finished_job_events: {}", e);
+                error!("Failed to batch insert coordinator_shutdown_events: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn insert_agent_session_started_events(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        events: Vec<entities::agent_session_started_event::ActiveModel>,
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        debug!("Inserting {} agent_session_started_events", events.len());
+        let events_len = events.len();
+        match entities::agent_session_started_event::Entity::insert_many(events)
+            .exec(txn)
+            .await
+        {
+            Ok(_) => {
+                debug!("Successfully inserted agent_session_started_events");
+                Ok(events_len)
+            }
+            Err(e) => {
+                error!("Failed to batch insert agent_session_started_events: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn insert_job_started_events(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        events: Vec<entities::job_started_event::ActiveModel>,
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        debug!("Inserting {} job_started_events", events.len());
+        let events_len = events.len();
+        match entities::job_started_event::Entity::insert_many(events)
+            .exec(txn)
+            .await
+        {
+            Ok(_) => {
+                debug!("Successfully inserted job_started_events");
+                Ok(events_len)
+            }
+            Err(e) => {
+                error!("Failed to batch insert job_started_events: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn insert_job_finished_events(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        events: Vec<entities::job_finished_event::ActiveModel>,
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        debug!("Inserting {} job_finished_events", events.len());
+        let events_len = events.len();
+        match entities::job_finished_event::Entity::insert_many(events)
+            .exec(txn)
+            .await
+        {
+            Ok(_) => {
+                debug!("Successfully inserted job_finished_events");
+                Ok(events_len)
+            }
+            Err(e) => {
+                error!("Failed to batch insert job_finished_events: {}", e);
                 Err(e.into())
             }
         }
@@ -399,160 +479,207 @@ impl EventDatabase {
         }
     }
 
-    async fn insert_client_transaction_events(
+    async fn insert_settlement_transaction_events(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::client_transaction_event::ActiveModel>,
+        events: Vec<entities::settlement_transaction_event::ActiveModel>,
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
 
-        debug!(
-            "Parallel inserting {} client_transaction_events",
-            events.len()
-        );
+        debug!("Inserting {} settlement_transaction_events", events.len());
         let events_len = events.len();
-        match entities::client_transaction_event::Entity::insert_many(events)
+        match entities::settlement_transaction_event::Entity::insert_many(events)
             .exec(txn)
             .await
         {
-            Ok(result) => {
-                debug!("Successfully inserted client_transaction_events");
-                let count =
-                    if result.last_insert_id >= 0 && result.last_insert_id <= i64::MAX as i64 {
-                        result.last_insert_id as usize
-                    } else {
-                        warn!(
-                            "Invalid last_insert_id value: {}, defaulting to events count",
-                            result.last_insert_id
-                        );
-                        events_len
-                    };
-                Ok(count)
+            Ok(_) => {
+                debug!("Successfully inserted settlement_transaction_events");
+                Ok(events_len)
             }
             Err(e) => {
-                error!("Failed to batch insert client_transaction_events: {}", e);
+                error!("Failed to batch insert settlement_transaction_events: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn insert_settlement_transaction_included_events(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        events: Vec<entities::settlement_transaction_included_in_block_event::ActiveModel>,
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        debug!("Inserting {} settlement_transaction_included_events", events.len());
+        let events_len = events.len();
+        match entities::settlement_transaction_included_in_block_event::Entity::insert_many(events)
+            .exec(txn)
+            .await
+        {
+            Ok(_) => {
+                debug!("Successfully inserted settlement_transaction_included_events");
+                Ok(events_len)
+            }
+            Err(e) => {
+                error!("Failed to batch insert settlement_transaction_included_events: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn insert_agent_message_events(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        events: Vec<entities::agent_message_event::ActiveModel>,
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        debug!("Inserting {} agent_message_events", events.len());
+        let events_len = events.len();
+        match entities::agent_message_event::Entity::insert_many(events)
+            .exec(txn)
+            .await
+        {
+            Ok(_) => {
+                debug!("Successfully inserted agent_message_events");
+                Ok(events_len)
+            }
+            Err(e) => {
+                error!("Failed to batch insert agent_message_events: {}", e);
                 Err(e.into())
             }
         }
     }
 
     // Parent-child table insertion methods - handle sequences
-    async fn insert_agent_message_events_with_sequences(
+    async fn insert_job_created_events_with_sequences(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::agent_message_event::ActiveModel>,
+        events: Vec<entities::job_created_event::ActiveModel>,
         sequences_per_event: &[Vec<u64>],
+        ms1_per_event: &[Vec<u64>],
+        ms2_per_event: &[Vec<u64>],
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
 
-        debug!(
-            "Parallel inserting {} agent_message_events with sequences",
-            events.len()
-        );
-
-        // FIXED: Save length before move to prevent borrow after move
+        debug!("Inserting {} job_created_events with sequences", events.len());
         let events_len = events.len();
 
         // Insert parent records first
-        let parent_result = entities::agent_message_event::Entity::insert_many(events)
+        let parent_result = entities::job_created_event::Entity::insert_many(events)
             .exec(txn)
             .await?;
 
         let base_id = parent_result.last_insert_id;
-        let sequence_records =
-            self.create_agent_message_sequence_records(base_id, sequences_per_event);
 
-        // Insert child records if any
-        if !sequence_records.is_empty() {
-            debug!(
-                "Inserting {} agent_message_event_sequences records",
-                sequence_records.len()
-            );
-            entities::agent_message_event_sequences::Entity::insert_many(sequence_records)
-                .exec(txn)
-                .await?;
-            debug!("Successfully inserted agent message sequences");
+        // Insert sequences child records
+        if !sequences_per_event.is_empty() {
+            let sequence_records = self.create_job_created_sequence_records(base_id, sequences_per_event);
+            if !sequence_records.is_empty() {
+                debug!("Inserting {} job_created_event_sequences records", sequence_records.len());
+                entities::job_created_event_sequences::Entity::insert_many(sequence_records)
+                    .exec(txn)
+                    .await?;
+            }
         }
 
-        // FIXED: Safe casting to prevent panic
-        let count = if parent_result.last_insert_id >= 0
-            && parent_result.last_insert_id <= i64::MAX as i64
-        {
-            parent_result.last_insert_id as usize
-        } else {
-            warn!(
-                "Invalid last_insert_id value: {}, defaulting to events count",
-                parent_result.last_insert_id
-            );
-            events_len
-        };
-        Ok(count)
+        // Insert ms1 child records
+        if !ms1_per_event.is_empty() {
+            let ms1_records = self.create_job_created_ms1_records(base_id, ms1_per_event);
+            if !ms1_records.is_empty() {
+                debug!("Inserting {} job_created_event_ms1 records", ms1_records.len());
+                entities::job_created_event_ms1::Entity::insert_many(ms1_records)
+                    .exec(txn)
+                    .await?;
+            }
+        }
+
+        // Insert ms2 child records
+        if !ms2_per_event.is_empty() {
+            let ms2_records = self.create_job_created_ms2_records(base_id, ms2_per_event);
+            if !ms2_records.is_empty() {
+                debug!("Inserting {} job_created_event_ms2 records", ms2_records.len());
+                entities::job_created_event_ms2::Entity::insert_many(ms2_records)
+                    .exec(txn)
+                    .await?;
+            }
+        }
+
+        Ok(events_len)
     }
 
-    async fn insert_agent_transaction_events_with_sequences(
+    async fn insert_proof_submitted_events_with_sequences(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::agent_transaction_event::ActiveModel>,
+        events: Vec<entities::proof_submitted_event::ActiveModel>,
         sequences_per_event: &[Vec<u64>],
+        ms1_per_event: &[Vec<u64>],
+        ms2_per_event: &[Vec<u64>],
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
 
-        debug!(
-            "Parallel inserting {} agent_transaction_events with sequences",
-            events.len()
-        );
-
-        // FIXED: Save length before move to prevent borrow after move
+        debug!("Inserting {} proof_submitted_events with sequences", events.len());
         let events_len = events.len();
 
         // Insert parent records first
-        let parent_result = entities::agent_transaction_event::Entity::insert_many(events)
+        let parent_result = entities::proof_submitted_event::Entity::insert_many(events)
             .exec(txn)
             .await?;
 
         let base_id = parent_result.last_insert_id;
-        let sequence_records =
-            self.create_agent_transaction_sequence_records(base_id, sequences_per_event);
 
-        // Insert child records if any
-        if !sequence_records.is_empty() {
-            debug!(
-                "Inserting {} agent_transaction_event_sequences records",
-                sequence_records.len()
-            );
-            entities::agent_transaction_event_sequences::Entity::insert_many(sequence_records)
-                .exec(txn)
-                .await?;
-            debug!("Successfully inserted agent transaction sequences");
+        // Insert sequences child records
+        if !sequences_per_event.is_empty() {
+            let sequence_records = self.create_proof_submitted_sequence_records(base_id, sequences_per_event);
+            if !sequence_records.is_empty() {
+                debug!("Inserting {} proof_submitted_event_sequences records", sequence_records.len());
+                entities::proof_submitted_event_sequences::Entity::insert_many(sequence_records)
+                    .exec(txn)
+                    .await?;
+            }
         }
 
-        // FIXED: Safe casting to prevent panic
-        let count = if parent_result.last_insert_id >= 0
-            && parent_result.last_insert_id <= i64::MAX as i64
-        {
-            parent_result.last_insert_id as usize
-        } else {
-            warn!(
-                "Invalid last_insert_id value: {}, defaulting to events count",
-                parent_result.last_insert_id
-            );
-            events_len
-        };
-        Ok(count)
+        // Insert ms1 child records
+        if !ms1_per_event.is_empty() {
+            let ms1_records = self.create_proof_submitted_ms1_records(base_id, ms1_per_event);
+            if !ms1_records.is_empty() {
+                debug!("Inserting {} proof_submitted_event_ms1 records", ms1_records.len());
+                entities::proof_submitted_event_ms1::Entity::insert_many(ms1_records)
+                    .exec(txn)
+                    .await?;
+            }
+        }
+
+        // Insert ms2 child records
+        if !ms2_per_event.is_empty() {
+            let ms2_records = self.create_proof_submitted_ms2_records(base_id, ms2_per_event);
+            if !ms2_records.is_empty() {
+                debug!("Inserting {} proof_submitted_event_ms2 records", ms2_records.len());
+                entities::proof_submitted_event_ms2::Entity::insert_many(ms2_records)
+                    .exec(txn)
+                    .await?;
+            }
+        }
+
+        Ok(events_len)
     }
 
-    fn create_agent_message_sequence_records(
+    fn create_job_created_sequence_records(
         &self,
         base_id: i64,
         sequences_per_event: &[Vec<u64>],
-    ) -> Vec<entities::agent_message_event_sequences::ActiveModel> {
-        use entities::agent_message_event_sequences::*;
+    ) -> Vec<entities::job_created_event_sequences::ActiveModel> {
+        use entities::job_created_event_sequences::*;
         use sea_orm::ActiveValue;
 
         let mut records = Vec::new();
@@ -560,38 +687,77 @@ impl EventDatabase {
 
         for sequences in sequences_per_event {
             for &sequence in sequences {
-                // FIXED: Safe casting to prevent overflow
-                let safe_sequence = if sequence <= i64::MAX as u64 {
-                    sequence as i64
-                } else {
-                    warn!(
-                        "Sequence value {} exceeds i64::MAX, clamping to maximum",
-                        sequence
-                    );
-                    i64::MAX
-                };
-
                 records.push(ActiveModel {
                     id: ActiveValue::NotSet,
-                    agent_message_event_id: ActiveValue::Set(current_id),
-                    sequence: ActiveValue::Set(safe_sequence),
+                    job_created_event_id: ActiveValue::Set(current_id),
+                    sequence: ActiveValue::Set(sequence as i64),
                     created_at: ActiveValue::NotSet,
                     updated_at: ActiveValue::NotSet,
                 });
             }
-            // FIXED: Protect against overflow
             current_id = current_id.saturating_add(1);
         }
-
         records
     }
 
-    fn create_agent_transaction_sequence_records(
+    fn create_job_created_ms1_records(
+        &self,
+        base_id: i64,
+        ms1_per_event: &[Vec<u64>],
+    ) -> Vec<entities::job_created_event_ms1::ActiveModel> {
+        use entities::job_created_event_ms1::*;
+        use sea_orm::ActiveValue;
+
+        let mut records = Vec::new();
+        let mut current_id = base_id;
+
+        for ms1_values in ms1_per_event {
+            for &value in ms1_values {
+                records.push(ActiveModel {
+                    id: ActiveValue::NotSet,
+                    job_created_event_id: ActiveValue::Set(current_id),
+                    merged_sequences_1: ActiveValue::Set(value as i64),
+                    created_at: ActiveValue::NotSet,
+                    updated_at: ActiveValue::NotSet,
+                });
+            }
+            current_id = current_id.saturating_add(1);
+        }
+        records
+    }
+
+    fn create_job_created_ms2_records(
+        &self,
+        base_id: i64,
+        ms2_per_event: &[Vec<u64>],
+    ) -> Vec<entities::job_created_event_ms2::ActiveModel> {
+        use entities::job_created_event_ms2::*;
+        use sea_orm::ActiveValue;
+
+        let mut records = Vec::new();
+        let mut current_id = base_id;
+
+        for ms2_values in ms2_per_event {
+            for &value in ms2_values {
+                records.push(ActiveModel {
+                    id: ActiveValue::NotSet,
+                    job_created_event_id: ActiveValue::Set(current_id),
+                    merged_sequences_2: ActiveValue::Set(value as i64),
+                    created_at: ActiveValue::NotSet,
+                    updated_at: ActiveValue::NotSet,
+                });
+            }
+            current_id = current_id.saturating_add(1);
+        }
+        records
+    }
+
+    fn create_proof_submitted_sequence_records(
         &self,
         base_id: i64,
         sequences_per_event: &[Vec<u64>],
-    ) -> Vec<entities::agent_transaction_event_sequences::ActiveModel> {
-        use entities::agent_transaction_event_sequences::*;
+    ) -> Vec<entities::proof_submitted_event_sequences::ActiveModel> {
+        use entities::proof_submitted_event_sequences::*;
         use sea_orm::ActiveValue;
 
         let mut records = Vec::new();
@@ -599,29 +765,68 @@ impl EventDatabase {
 
         for sequences in sequences_per_event {
             for &sequence in sequences {
-                // FIXED: Safe casting to prevent overflow
-                let safe_sequence = if sequence <= i64::MAX as u64 {
-                    sequence as i64
-                } else {
-                    warn!(
-                        "Sequence value {} exceeds i64::MAX, clamping to maximum",
-                        sequence
-                    );
-                    i64::MAX
-                };
-
                 records.push(ActiveModel {
                     id: ActiveValue::NotSet,
-                    agent_transaction_event_id: ActiveValue::Set(current_id),
-                    sequence: ActiveValue::Set(safe_sequence),
+                    proof_submitted_event_id: ActiveValue::Set(current_id),
+                    sequence: ActiveValue::Set(sequence as i64),
                     created_at: ActiveValue::NotSet,
                     updated_at: ActiveValue::NotSet,
                 });
             }
-            // FIXED: Protect against overflow
             current_id = current_id.saturating_add(1);
         }
+        records
+    }
 
+    fn create_proof_submitted_ms1_records(
+        &self,
+        base_id: i64,
+        ms1_per_event: &[Vec<u64>],
+    ) -> Vec<entities::proof_submitted_event_ms1::ActiveModel> {
+        use entities::proof_submitted_event_ms1::*;
+        use sea_orm::ActiveValue;
+
+        let mut records = Vec::new();
+        let mut current_id = base_id;
+
+        for ms1_values in ms1_per_event {
+            for &value in ms1_values {
+                records.push(ActiveModel {
+                    id: ActiveValue::NotSet,
+                    proof_submitted_event_id: ActiveValue::Set(current_id),
+                    merged_sequences_1: ActiveValue::Set(value as i64),
+                    created_at: ActiveValue::NotSet,
+                    updated_at: ActiveValue::NotSet,
+                });
+            }
+            current_id = current_id.saturating_add(1);
+        }
+        records
+    }
+
+    fn create_proof_submitted_ms2_records(
+        &self,
+        base_id: i64,
+        ms2_per_event: &[Vec<u64>],
+    ) -> Vec<entities::proof_submitted_event_ms2::ActiveModel> {
+        use entities::proof_submitted_event_ms2::*;
+        use sea_orm::ActiveValue;
+
+        let mut records = Vec::new();
+        let mut current_id = base_id;
+
+        for ms2_values in ms2_per_event {
+            for &value in ms2_values {
+                records.push(ActiveModel {
+                    id: ActiveValue::NotSet,
+                    proof_submitted_event_id: ActiveValue::Set(current_id),
+                    merged_sequences_2: ActiveValue::Set(value as i64),
+                    created_at: ActiveValue::NotSet,
+                    updated_at: ActiveValue::NotSet,
+                });
+            }
+            current_id = current_id.saturating_add(1);
+        }
         records
     }
 
@@ -1079,7 +1284,7 @@ impl EventDatabase {
 // Conversion functions from protobuf messages to Sea-ORM entities
 
 fn convert_coordinator_started_event(
-    event: &proto::events::CoordinatorStartedEvent,
+    event: &proto::CoordinatorStartedEvent,
 ) -> entities::coordinator_started_event::ActiveModel {
     use entities::coordinator_started_event::*;
     use sea_orm::ActiveValue;
@@ -1088,7 +1293,6 @@ fn convert_coordinator_started_event(
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         ethereum_address: ActiveValue::Set(event.ethereum_address.clone()),
-        sui_ed_25519_address: ActiveValue::Set(event.sui_ed25519_address.clone()),
         event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
             event.event_timestamp as i64
         } else {
@@ -1103,29 +1307,40 @@ fn convert_coordinator_started_event(
     }
 }
 
-fn convert_agent_started_job_event(
-    event: &proto::events::AgentStartedJobEvent,
-) -> entities::agent_started_job_event::ActiveModel {
-    use entities::agent_started_job_event::*;
+fn convert_coordinator_active_event(
+    event: &proto::CoordinatorActiveEvent,
+) -> entities::coordinator_active_event::ActiveModel {
+    use entities::coordinator_active_event::*;
     use sea_orm::ActiveValue;
 
     ActiveModel {
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
-        developer: ActiveValue::Set(event.developer.clone()),
-        agent: ActiveValue::Set(event.agent.clone()),
-        app: ActiveValue::Set(event.app.clone()),
-        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     }
 }
 
-fn convert_agent_finished_job_event(
-    event: &proto::events::AgentFinishedJobEvent,
-) -> entities::agent_finished_job_event::ActiveModel {
-    use entities::agent_finished_job_event::*;
+fn convert_coordinator_shutdown_event(
+    event: &proto::CoordinatorShutdownEvent,
+) -> entities::coordinator_shutdown_event::ActiveModel {
+    use entities::coordinator_shutdown_event::*;
+    use sea_orm::ActiveValue;
+
+    ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    }
+}
+
+fn convert_agent_session_started_event(
+    event: &proto::AgentSessionStartedEvent,
+) -> entities::agent_session_started_event::ActiveModel {
+    use entities::agent_session_started_event::*;
     use sea_orm::ActiveValue;
 
     ActiveModel {
@@ -1133,33 +1348,82 @@ fn convert_agent_finished_job_event(
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         developer: ActiveValue::Set(event.developer.clone()),
         agent: ActiveValue::Set(event.agent.clone()),
-        app: ActiveValue::Set(event.app.clone()),
-        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
-        duration: ActiveValue::Set(if event.duration <= i64::MAX as u64 {
-            event.duration as i64
-        } else {
-            warn!(
-                "Duration {} exceeds i64::MAX, clamping to maximum",
-                event.duration
-            );
-            i64::MAX
-        }),
-        event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
-            event.event_timestamp as i64
-        } else {
-            warn!(
-                "Event timestamp {} exceeds i64::MAX, clamping to maximum",
-                event.event_timestamp
-            );
-            i64::MAX
-        }),
+        agent_method: ActiveValue::Set(event.agent_method.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    }
+}
+
+fn convert_job_created_event(
+    event: &proto::JobCreatedEvent,
+) -> (
+    entities::job_created_event::ActiveModel,
+    Vec<u64>,  // sequences
+    Vec<u64>,  // merged_sequences_1
+    Vec<u64>,  // merged_sequences_2
+) {
+    use entities::job_created_event::*;
+    use sea_orm::ActiveValue;
+
+    let active_model = ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
+        app_method: ActiveValue::Set(event.app_method.clone()),
+        job_sequence: ActiveValue::Set(event.job_sequence as i64),
+        job_id: ActiveValue::Set(event.job_id.clone()),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    };
+
+    (active_model, event.sequences.clone(), event.merged_sequences_1.clone(), event.merged_sequences_2.clone())
+}
+
+fn convert_job_started_event(
+    event: &proto::JobStartedEvent,
+) -> entities::job_started_event::ActiveModel {
+    use entities::job_started_event::*;
+    use sea_orm::ActiveValue;
+
+    ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
+        job_id: ActiveValue::Set(event.job_id.clone()),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    }
+}
+
+fn convert_job_finished_event(
+    event: &proto::JobFinishedEvent,
+) -> entities::job_finished_event::ActiveModel {
+    use entities::job_finished_event::*;
+    use sea_orm::ActiveValue;
+    use serde_json::json;
+
+    ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        job_id: ActiveValue::Set(event.job_id.clone()),
+        duration: ActiveValue::Set(event.duration as i64),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        result: ActiveValue::Set(json!({
+            "result": event.result as i32
+        }).to_string()),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     }
 }
 
 fn convert_coordination_tx_event(
-    event: &proto::events::CoordinationTxEvent,
+    event: &proto::CoordinationTxEvent,
 ) -> entities::coordination_tx_event::ActiveModel {
     use entities::coordination_tx_event::*;
     use sea_orm::ActiveValue;
@@ -1167,28 +1431,15 @@ fn convert_coordination_tx_event(
     ActiveModel {
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
-        developer: ActiveValue::Set(event.developer.clone()),
-        agent: ActiveValue::Set(event.agent.clone()),
-        app: ActiveValue::Set(event.app.clone()),
-        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
-        memo: ActiveValue::Set(event.memo.clone()),
         tx_hash: ActiveValue::Set(event.tx_hash.clone()),
-        event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
-            event.event_timestamp as i64
-        } else {
-            warn!(
-                "Event timestamp {} exceeds i64::MAX, clamping to maximum",
-                event.event_timestamp
-            );
-            i64::MAX
-        }),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     }
 }
 
 fn convert_coordinator_message_event(
-    event: &proto::events::CoordinatorMessageEvent,
+    event: &proto::CoordinatorMessageEvent,
 ) -> entities::coordinator_message_event::ActiveModel {
     use entities::coordinator_message_event::*;
     use sea_orm::ActiveValue;
@@ -1196,129 +1447,97 @@ fn convert_coordinator_message_event(
     ActiveModel {
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
-        event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
-            event.event_timestamp as i64
-        } else {
-            warn!(
-                "Event timestamp {} exceeds i64::MAX, clamping to maximum",
-                event.event_timestamp
-            );
-            i64::MAX
-        }),
-        level: ActiveValue::Set(event.level().into()),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        level: ActiveValue::Set(event.level as i32),
         message: ActiveValue::Set(event.message.clone()),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     }
 }
 
-fn convert_client_transaction_event(
-    event: &proto::events::ClientTransactionEvent,
-) -> entities::client_transaction_event::ActiveModel {
-    use entities::client_transaction_event::*;
+fn convert_proof_submitted_event(
+    event: &proto::ProofSubmittedEvent,
+) -> (
+    entities::proof_submitted_event::ActiveModel,
+    Vec<u64>,  // sequences
+    Vec<u64>,  // merged_sequences_1
+    Vec<u64>,  // merged_sequences_2
+) {
+    use entities::proof_submitted_event::*;
+    use sea_orm::ActiveValue;
+
+    let active_model = ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
+        job_id: ActiveValue::Set(event.job_id.clone()),
+        data_availability: ActiveValue::Set(event.data_availability.clone()),
+        block_number: ActiveValue::Set(event.block_number as i64),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    };
+
+    (active_model, event.sequences.clone(), event.merged_sequences_1.clone(), event.merged_sequences_2.clone())
+}
+
+fn convert_settlement_transaction_event(
+    event: &proto::SettlementTransactionEvent,
+) -> entities::settlement_transaction_event::ActiveModel {
+    use entities::settlement_transaction_event::*;
     use sea_orm::ActiveValue;
 
     ActiveModel {
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
-        developer: ActiveValue::Set(event.developer.clone()),
-        agent: ActiveValue::Set(event.agent.clone()),
-        app: ActiveValue::Set(event.app.clone()),
-        client_ip_address: ActiveValue::Set(event.client_ip_address.clone()),
-        method: ActiveValue::Set(event.method.clone()),
-        data: ActiveValue::Set(event.data.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
+        job_id: ActiveValue::Set(event.job_id.clone()),
+        block_number: ActiveValue::Set(event.block_number as i64),
         tx_hash: ActiveValue::Set(event.tx_hash.clone()),
-        sequence: ActiveValue::Set(if event.sequence <= i64::MAX as u64 {
-            event.sequence as i64
-        } else {
-            warn!(
-                "Sequence {} exceeds i64::MAX, clamping to maximum",
-                event.sequence
-            );
-            i64::MAX
-        }),
-        event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
-            event.event_timestamp as i64
-        } else {
-            warn!(
-                "Event timestamp {} exceeds i64::MAX, clamping to maximum",
-                event.event_timestamp
-            );
-            i64::MAX
-        }),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    }
+}
+
+fn convert_settlement_transaction_included_event(
+    event: &proto::SettlementTransactionIncludedInBlockEvent,
+) -> entities::settlement_transaction_included_in_block_event::ActiveModel {
+    use entities::settlement_transaction_included_in_block_event::*;
+    use sea_orm::ActiveValue;
+
+    ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
+        job_id: ActiveValue::Set(event.job_id.clone()),
+        block_number: ActiveValue::Set(event.block_number as i64),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     }
 }
 
 fn convert_agent_message_event(
-    event: &proto::events::AgentMessageEvent,
-) -> (entities::agent_message_event::ActiveModel, Vec<u64>) {
+    event: &proto::AgentMessageEvent,
+) -> entities::agent_message_event::ActiveModel {
     use entities::agent_message_event::*;
     use sea_orm::ActiveValue;
 
-    let sequences = event.sequences.clone();
-
-    let active_model = ActiveModel {
+    ActiveModel {
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
-        developer: ActiveValue::Set(event.developer.clone()),
-        agent: ActiveValue::Set(event.agent.clone()),
-        app: ActiveValue::Set(event.app.clone()),
-        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
-        event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
-            event.event_timestamp as i64
-        } else {
-            warn!(
-                "Event timestamp {} exceeds i64::MAX, clamping to maximum",
-                event.event_timestamp
-            );
-            i64::MAX
-        }),
-        level: ActiveValue::Set(event.level().into()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        job_id: ActiveValue::Set(event.job_id.clone()),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        level: ActiveValue::Set(event.level as i32),
         message: ActiveValue::Set(event.message.clone()),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
-    };
-
-    (active_model, sequences)
-}
-
-fn convert_agent_transaction_event(
-    event: &proto::events::AgentTransactionEvent,
-) -> (entities::agent_transaction_event::ActiveModel, Vec<u64>) {
-    use entities::agent_transaction_event::*;
-    use sea_orm::ActiveValue;
-
-    let sequences = event.sequences.clone();
-
-    let active_model = ActiveModel {
-        id: ActiveValue::NotSet,
-        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
-        tx_type: ActiveValue::Set(event.tx_type.clone()),
-        developer: ActiveValue::Set(event.developer.clone()),
-        agent: ActiveValue::Set(event.agent.clone()),
-        app: ActiveValue::Set(event.app.clone()),
-        job_sequence: ActiveValue::Set(event.job_sequence.clone()),
-        event_timestamp: ActiveValue::Set(if event.event_timestamp <= i64::MAX as u64 {
-            event.event_timestamp as i64
-        } else {
-            warn!(
-                "Event timestamp {} exceeds i64::MAX, clamping to maximum",
-                event.event_timestamp
-            );
-            i64::MAX
-        }),
-        tx_hash: ActiveValue::Set(event.tx_hash.clone()),
-        chain: ActiveValue::Set(event.chain.clone()),
-        network: ActiveValue::Set(event.network.clone()),
-        memo: ActiveValue::Set(event.memo.clone()),
-        metadata: ActiveValue::Set(event.metadata.clone()),
-        created_at: ActiveValue::NotSet,
-        updated_at: ActiveValue::NotSet,
-    };
-
-    (active_model, sequences)
+    }
 }
 
 #[cfg(test)]
@@ -1393,4 +1612,140 @@ mod tests {
         };
         assert_eq!(safe_count, u32::MAX);
     }
+}
+
+// Search result structure
+pub struct SearchResult {
+    pub events: Vec<proto::EventWithRelevance>,
+    pub total_count: usize,
+    pub returned_count: usize,
+}
+
+// Search function for coordinator messages using TiDB's fulltext search
+pub async fn search_coordinator_messages(
+    database: &EventDatabase,
+    search_query: &str,
+    coordinator_id: Option<&str>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<SearchResult> {
+    use sea_orm::{ConnectionTrait, Statement};
+
+    let start_time = Instant::now();
+
+    if search_query.trim().is_empty() {
+        return Ok(SearchResult {
+            events: vec![],
+            total_count: 0,
+            returned_count: 0,
+        });
+    }
+
+    // Escape single quotes in search query to prevent SQL injection
+    let escaped_query = search_query.replace("'", "''");
+
+    // Build the WHERE clause - TiDB uses fts_match_word for fulltext search
+    let mut where_conditions = vec![format!("fts_match_word('{}', message)", escaped_query)];
+    let mut params: Vec<sea_orm::Value> = Vec::new();
+
+    if let Some(coord_id) = coordinator_id {
+        where_conditions.push("coordinator_id = ?".to_string());
+        params.push(coord_id.into());
+    }
+
+    let where_clause = where_conditions.join(" AND ");
+
+    // First, get the count for pagination
+    let count_query = format!(
+        "SELECT COUNT(*) as count FROM coordinator_message_event WHERE {}",
+        where_clause
+    );
+
+    let count_stmt = Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::MySql,
+        &count_query,
+        params.clone(),
+    );
+
+    let count_result = database.connection.query_one(count_stmt).await?;
+    let total_count = count_result
+        .and_then(|row| row.try_get::<i64>("", "count").ok())
+        .unwrap_or(0) as usize;
+
+    if total_count == 0 {
+        return Ok(SearchResult {
+            events: vec![],
+            total_count: 0,
+            returned_count: 0,
+        });
+    }
+
+    // Build the main query with full-text search and relevance scoring
+    let mut main_query = format!(
+        "SELECT id, coordinator_id, event_timestamp, level, message, created_at,
+                fts_match_word('{}', message) as relevance_score
+         FROM coordinator_message_event
+         WHERE {}
+         ORDER BY fts_match_word('{}', message) DESC, created_at DESC",
+        escaped_query, where_clause, escaped_query
+    );
+
+    // Add pagination
+    let limit_val = limit.unwrap_or(100).min(1000);
+    main_query.push_str(&format!(" LIMIT {}", limit_val));
+    if let Some(offset_val) = offset {
+        main_query.push_str(&format!(" OFFSET {}", offset_val));
+    }
+
+    let main_stmt = Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::MySql,
+        &main_query,
+        params
+    );
+
+    let results = database.connection.query_all(main_stmt).await?;
+
+    // Convert to proto events with relevance scores
+    let mut events = Vec::new();
+    for row in results.iter() {
+        let id = row.try_get::<i64>("", "id").unwrap_or(0);
+        let coordinator_id = row.try_get::<String>("", "coordinator_id").unwrap_or_default();
+        let event_timestamp = row.try_get::<i64>("", "event_timestamp").unwrap_or(0) as u64;
+        let level = row.try_get::<i8>("", "level").unwrap_or(0) as i32;
+        let message = row.try_get::<String>("", "message").unwrap_or_default();
+        let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
+
+        let event = proto::Event {
+            event: Some(proto::event::Event::CoordinatorMessage(
+                proto::CoordinatorMessageEvent {
+                    coordinator_id,
+                    event_timestamp,
+                    level,
+                    message,
+                }
+            )),
+        };
+
+        events.push(proto::EventWithRelevance {
+            id,
+            event: Some(event),
+            relevance_score,
+        });
+    }
+
+    let returned_count = events.len();
+
+    debug!(
+        "Search completed in {}ms: query='{}', found={}/{} events",
+        start_time.elapsed().as_millis(),
+        search_query,
+        returned_count,
+        total_count
+    );
+
+    Ok(SearchResult {
+        events,
+        total_count,
+        returned_count,
+    })
 }

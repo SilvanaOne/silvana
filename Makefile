@@ -3,7 +3,7 @@
 # This Makefile implements the workflow where proto files are the single source of truth
 
 # Configuration
-PROTO_FILE := proto/silvana/events/v1/events.proto
+PROTO_FILE := proto/silvana/rpc/v1/rpc.proto
 SQL_DIR := proto/sql
 MIGR_DIR := infra/tidb/migration/sql
 ENTITY_DIR := crates/tidb/src/entity
@@ -265,8 +265,8 @@ proto2sql: check-database-url ## Generate DDL from proto files and apply to data
 	@mkdir -p $(SQL_DIR)
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- generate \
 		--proto-file $(PROTO_FILE) \
-		--output $(SQL_DIR)/events.sql
-	@echo "✅ DDL generated in $(SQL_DIR)/events.sql"
+		--output $(SQL_DIR)/rpc.sql
+	@echo "✅ DDL generated in $(SQL_DIR)/rpc.sql"
 	@echo ""
 	@echo "📊 Applying schema changes to database..."
 	@DB_URL="$(call load_database_url)"; \
@@ -276,7 +276,7 @@ proto2sql: check-database-url ## Generate DDL from proto files and apply to data
 	export DB_PORT=$$(echo "$$DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
 	export DB_NAME=$$(echo "$$DB_URL" | sed 's|.*/||'); \
 	mysqldef --user=$$DB_USER --password=$$DB_PASS --host=$$DB_HOST --port=$$DB_PORT $$DB_NAME \
-		--file $(SQL_DIR)/events.sql \
+		--file $(SQL_DIR)/rpc.sql \
 		--dry-run > $(MIGR_DIR)/$$(date +%s)_proto_diff.sql
 	@echo "🔍 Migration diff saved to $(MIGR_DIR)/"
 	@echo "📊 Applying changes to database..."
@@ -287,7 +287,7 @@ proto2sql: check-database-url ## Generate DDL from proto files and apply to data
 	export DB_PORT=$$(echo "$$DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
 	export DB_NAME=$$(echo "$$DB_URL" | sed 's|.*/||'); \
 	mysqldef --user=$$DB_USER --password=$$DB_PASS --host=$$DB_HOST --port=$$DB_PORT $$DB_NAME \
-		--file $(SQL_DIR)/events.sql
+		--file $(SQL_DIR)/rpc.sql
 	@echo "✅ Database schema updated"
 
 proto2entities: ## Generate both DDL and entities from proto files (combined)
@@ -296,10 +296,10 @@ proto2entities: ## Generate both DDL and entities from proto files (combined)
 	@rm -rf $(ENTITY_DIR)/*
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- generate \
 		--proto-file $(PROTO_FILE) \
-		--output $(SQL_DIR)/events.sql \
+		--output $(SQL_DIR)/rpc.sql \
 		--entities \
 		--entity-dir $(ENTITY_DIR)
-	@echo "✅ Generated DDL in $(SQL_DIR)/events.sql"
+	@echo "✅ Generated DDL in $(SQL_DIR)/rpc.sql"
 	@echo "✅ Generated entities in $(ENTITY_DIR)/"
 
 apply-ddl: check-database-url ## Apply generated DDL to database
@@ -311,7 +311,7 @@ apply-ddl: check-database-url ## Apply generated DDL to database
 	export DB_PORT=$$(echo "$$DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
 	export DB_NAME=$$(echo "$$DB_URL" | sed 's|.*/||'); \
 	mysqldef --user=$$DB_USER --password=$$DB_PASS --host=$$DB_HOST --port=$$DB_PORT $$DB_NAME \
-		--file $(SQL_DIR)/events.sql \
+		--file $(SQL_DIR)/rpc.sql \
 		--dry-run > $(MIGR_DIR)/$$(date +%s)_proto_diff.sql
 	@echo "🔍 Migration diff saved to $(MIGR_DIR)/"
 	@echo "📊 Applying changes to database..."
@@ -322,7 +322,7 @@ apply-ddl: check-database-url ## Apply generated DDL to database
 	export DB_PORT=$$(echo "$$DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
 	export DB_NAME=$$(echo "$$DB_URL" | sed 's|.*/||'); \
 	mysqldef --user=$$DB_USER --password=$$DB_PASS --host=$$DB_HOST --port=$$DB_PORT $$DB_NAME \
-		--file $(SQL_DIR)/events.sql
+		--file $(SQL_DIR)/rpc.sql
 	@echo "✅ Database schema updated"
 
 entities: ## Generate Sea-ORM entities from proto file
@@ -435,8 +435,6 @@ validate-schema: check-database-url check-tools ## Validate that database schema
 		--proto-file $(PROTO_FILE) \
 		--database-url "$$DB_URL"
 
-check-schema: check-database-url check-tools ## Quick schema validation check
-	@./infra/tidb/check_schema.sh
 
 # Example targets
 example-archive: ## Prepare archive with example project (examples/add)

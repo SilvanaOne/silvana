@@ -1,24 +1,23 @@
 use anyhow::Result;
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use std::sync::Once;
 use tonic::transport::Channel;
 use tracing::{error, info};
 
 // Re-export proto types for convenience
 pub use proto::{
-    AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
-    Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
-    GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
+    Event, EventWithRelevance,
+    GetEventsByAppInstanceSequenceRequest, GetEventsByAppInstanceSequenceResponse,
+    SearchEventsRequest, SearchEventsResponse,
     GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
     ReadBinaryRequest, ReadBinaryResponse, WriteBinaryRequest, WriteBinaryResponse,
-    RetrieveSecretRequest, RetrieveSecretResponse, SearchCoordinatorMessageEventsRequest,
-    SearchCoordinatorMessageEventsResponse, SecretReference, StoreSecretRequest,
+    RetrieveSecretRequest, RetrieveSecretResponse, SecretReference, StoreSecretRequest,
     StoreSecretResponse, SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest,
-    SubmitEventsResponse,
+    SubmitEventsResponse, GetProofRequest, GetProofResponse, SubmitProofRequest, SubmitProofResponse,
 };
 
-// Re-export the proto events module
-pub use proto::events;
+// Re-export the proto module
+pub use proto;
 
 // Shared client module
 pub mod shared;
@@ -46,7 +45,7 @@ pub enum RpcClientError {
 }
 
 /// Type alias for the gRPC client
-pub type RpcClient = SilvanaEventsServiceClient<Channel>;
+pub type RpcClient = SilvanaRpcServiceClient<Channel>;
 
 /// Configuration for the RPC client
 #[derive(Debug, Clone)]
@@ -88,7 +87,7 @@ pub async fn create_rpc_client(
     info!("Connecting to Silvana RPC service at: {}", config.endpoint);
 
     // Connect using the same method as integration tests
-    let client = SilvanaEventsServiceClient::connect(config.endpoint.clone())
+    let client = SilvanaRpcServiceClient::connect(config.endpoint.clone())
         .await
         .map_err(RpcClientError::TransportError)?;
 
@@ -229,30 +228,39 @@ impl SilvanaRpcClient {
         Ok(response.into_inner())
     }
 
-    /// Search coordinator message events
-    pub async fn search_coordinator_messages(
+    /// Search events using full-text search
+    pub async fn search_events(
         &mut self,
-        request: SearchCoordinatorMessageEventsRequest,
-    ) -> Result<SearchCoordinatorMessageEventsResponse, RpcClientError> {
-        let response = self.inner.search_coordinator_message_events(request).await?;
+        request: SearchEventsRequest,
+    ) -> Result<SearchEventsResponse, RpcClientError> {
+        let response = self.inner.search_events(request).await?;
         Ok(response.into_inner())
     }
 
-    /// Get agent message events by sequence
-    pub async fn get_agent_messages_by_sequence(
+    /// Get events by app instance and sequence
+    pub async fn get_events_by_app_instance_sequence(
         &mut self,
-        request: GetAgentMessageEventsBySequenceRequest,
-    ) -> Result<GetAgentMessageEventsBySequenceResponse, RpcClientError> {
-        let response = self.inner.get_agent_message_events_by_sequence(request).await?;
+        request: GetEventsByAppInstanceSequenceRequest,
+    ) -> Result<GetEventsByAppInstanceSequenceResponse, RpcClientError> {
+        let response = self.inner.get_events_by_app_instance_sequence(request).await?;
         Ok(response.into_inner())
     }
 
-    /// Get agent transaction events by sequence
-    pub async fn get_agent_transactions_by_sequence(
+    /// Submit a proof
+    pub async fn submit_proof(
         &mut self,
-        request: GetAgentTransactionEventsBySequenceRequest,
-    ) -> Result<GetAgentTransactionEventsBySequenceResponse, RpcClientError> {
-        let response = self.inner.get_agent_transaction_events_by_sequence(request).await?;
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, RpcClientError> {
+        let response = self.inner.submit_proof(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Get a proof
+    pub async fn get_proof(
+        &mut self,
+        request: GetProofRequest,
+    ) -> Result<GetProofResponse, RpcClientError> {
+        let response = self.inner.get_proof(request).await?;
         Ok(response.into_inner())
     }
 

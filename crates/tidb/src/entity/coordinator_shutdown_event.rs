@@ -1,18 +1,14 @@
-//! AgentMessageEvent entity
-//! Generated from proto definition: AgentMessageEvent
+//! CoordinatorShutdownEvent entity
+//! Generated from proto definition: CoordinatorShutdownEvent
 
 use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "agent_message_event")]
+#[sea_orm(table_name = "coordinator_shutdown_event")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub coordinator_id: String,
-    pub session_id: String,
-    pub job_id: Option<String>,
     pub event_timestamp: i64,
-    pub level: i32,
-    pub message: String,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,
 }

@@ -9,7 +9,6 @@ pub struct Model {
     pub id: i64,
     pub coordinator_id: String,
     pub ethereum_address: String,
-    pub sui_ed_25519_address: String,
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,
