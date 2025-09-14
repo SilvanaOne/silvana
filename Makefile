@@ -94,7 +94,7 @@ help: ## Show this help message
 	@echo ""
 	@echo "  Build and Release:"
 	@echo "    make build-all                    # Build for all platforms"
-	@echo "    make github-release VERSION=v1.0.0 # Create GitHub release"
+	@echo "    make github-release VERSION=v0.1.5 # Create GitHub release"
 	@echo ""
 	@echo "⚙️  CONFIGURATION:"
 	@echo "  .env              Contains DATABASE_URL (REQUIRED)"

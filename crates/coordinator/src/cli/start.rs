@@ -23,7 +23,7 @@ pub async fn handle_start_command(
     let eth_missing = std::env::var("ETHEREUM_ADDRESS").is_err()
         || std::env::var("ETHEREUM_PRIVATE_KEY").is_err();
 
-    if sui_missing || eth_missing {
+    if sui_missing {
         // Check if .env file exists
         if !env_file_path.exists() {
             println!("🔑 Credentials not found, generating new keypairs...");
