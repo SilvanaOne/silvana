@@ -21,6 +21,9 @@ pub async fn handle_registry_command(
         .await
         .map_err(CoordinatorError::Other)?;
 
+    // Get the current Sui address to use as owner
+    let owner_address = sui::SharedSuiState::get_instance().get_sui_address_required();
+
     // Create interface
     let mut interface = sui::SilvanaSuiInterface::new();
 
@@ -82,6 +85,7 @@ pub async fn handle_registry_command(
             match interface
                 .add_developer_to_registry(
                     &registry_id,
+                    owner_address,
                     name,
                     github,
                     image,
@@ -320,7 +324,7 @@ pub async fn handle_registry_command(
             println!();
 
             match interface
-                .add_app_to_registry(&registry_id, name, description)
+                .add_app_to_registry(&registry_id, name, owner_address, description)
                 .await
             {
                 Ok(tx_digest) => {
@@ -383,6 +387,204 @@ pub async fn handle_registry_command(
                 }
                 Err(e) => {
                     eprintln!("❌ Failed to remove app: {}", e);
+                    return Err(anyhow!(e).into());
+                }
+            }
+        }
+
+        RegistryCommands::AddMethod {
+            registry,
+            developer,
+            agent,
+            method,
+            docker_image,
+            docker_sha256,
+            min_memory_mb,
+            min_cpu_cores,
+            requires_tee,
+        } => {
+            let registry_id = registry.ok_or_else(|| {
+                anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
+            })?;
+
+            println!("📝 Adding method to agent...\n");
+            println!("   Registry: {}", registry_id);
+            println!("   Developer: {}", developer);
+            println!("   Agent: {}", agent);
+            println!("   Method: {}", method);
+            println!("   Docker Image: {}", docker_image);
+            println!("   Docker SHA256: {}", docker_sha256);
+            println!("   Min Memory: {} MB", min_memory_mb);
+            println!("   Min CPU Cores: {}", min_cpu_cores);
+            println!("   Requires TEE: {}", requires_tee);
+            println!();
+
+            match interface
+                .add_method_to_agent(
+                    &registry_id,
+                    developer,
+                    agent,
+                    method,
+                    docker_image,
+                    docker_sha256,
+                    min_memory_mb,
+                    min_cpu_cores,
+                    requires_tee,
+                )
+                .await
+            {
+                Ok(tx_digest) => {
+                    println!("✅ Method added successfully!");
+                    println!("   Transaction: {}", tx_digest);
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to add method: {}", e);
+                    return Err(anyhow!(e).into());
+                }
+            }
+        }
+
+        RegistryCommands::UpdateMethod {
+            registry,
+            developer,
+            agent,
+            method,
+            docker_image,
+            docker_sha256,
+            min_memory_mb,
+            min_cpu_cores,
+            requires_tee,
+        } => {
+            let registry_id = registry.ok_or_else(|| {
+                anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
+            })?;
+
+            println!("📝 Updating method on agent...\n");
+            println!("   Registry: {}", registry_id);
+            println!("   Developer: {}", developer);
+            println!("   Agent: {}", agent);
+            println!("   Method: {}", method);
+            println!("   Docker Image: {}", docker_image);
+            println!("   Docker SHA256: {}", docker_sha256);
+            println!("   Min Memory: {} MB", min_memory_mb);
+            println!("   Min CPU Cores: {}", min_cpu_cores);
+            println!("   Requires TEE: {}", requires_tee);
+            println!();
+
+            match interface
+                .update_method_on_agent(
+                    &registry_id,
+                    developer,
+                    agent,
+                    method,
+                    docker_image,
+                    docker_sha256,
+                    min_memory_mb,
+                    min_cpu_cores,
+                    requires_tee,
+                )
+                .await
+            {
+                Ok(tx_digest) => {
+                    println!("✅ Method updated successfully!");
+                    println!("   Transaction: {}", tx_digest);
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to update method: {}", e);
+                    return Err(anyhow!(e).into());
+                }
+            }
+        }
+
+        RegistryCommands::RemoveMethod {
+            registry,
+            developer,
+            agent,
+            method,
+        } => {
+            let registry_id = registry.ok_or_else(|| {
+                anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
+            })?;
+
+            println!("🗑️  Removing method from agent...\n");
+            println!("   Registry: {}", registry_id);
+            println!("   Developer: {}", developer);
+            println!("   Agent: {}", agent);
+            println!("   Method: {}", method);
+            println!();
+
+            match interface
+                .remove_method_from_agent(&registry_id, developer, agent, method)
+                .await
+            {
+                Ok(tx_digest) => {
+                    println!("✅ Method removed successfully!");
+                    println!("   Transaction: {}", tx_digest);
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to remove method: {}", e);
+                    return Err(anyhow!(e).into());
+                }
+            }
+        }
+
+        RegistryCommands::SetDefaultMethod {
+            registry,
+            developer,
+            agent,
+            method,
+        } => {
+            let registry_id = registry.ok_or_else(|| {
+                anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
+            })?;
+
+            println!("⭐ Setting default method for agent...\n");
+            println!("   Registry: {}", registry_id);
+            println!("   Developer: {}", developer);
+            println!("   Agent: {}", agent);
+            println!("   Method: {}", method);
+            println!();
+
+            match interface
+                .set_default_method_on_agent(&registry_id, developer, agent, method)
+                .await
+            {
+                Ok(tx_digest) => {
+                    println!("✅ Default method set successfully!");
+                    println!("   Transaction: {}", tx_digest);
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to set default method: {}", e);
+                    return Err(anyhow!(e).into());
+                }
+            }
+        }
+
+        RegistryCommands::RemoveDefaultMethod {
+            registry,
+            developer,
+            agent,
+        } => {
+            let registry_id = registry.ok_or_else(|| {
+                anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
+            })?;
+
+            println!("⭐ Removing default method from agent...\n");
+            println!("   Registry: {}", registry_id);
+            println!("   Developer: {}", developer);
+            println!("   Agent: {}", agent);
+            println!();
+
+            match interface
+                .remove_default_method_from_agent(&registry_id, developer, agent)
+                .await
+            {
+                Ok(tx_digest) => {
+                    println!("✅ Default method removed successfully!");
+                    println!("   Transaction: {}", tx_digest);
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to remove default method: {}", e);
                     return Err(anyhow!(e).into());
                 }
             }

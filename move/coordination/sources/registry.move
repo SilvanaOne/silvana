@@ -31,9 +31,8 @@ public struct RegistryCreatedEvent has copy, drop {
 
 public struct REGISTRY has drop {}
 
-// Error codes
 #[error]
-const ENotAdmin: vector<u8> = b"Not admin";
+const ENotAuthorized: vector<u8> = b"Not authorized";
 
 fun init(otw: REGISTRY, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
@@ -136,6 +135,7 @@ public fun create_registry(name: String, ctx: &mut TxContext) {
 
 public fun add_developer(
     registry: &mut SilvanaRegistry,
+    developer_owner: address,
     name: String,
     github: String,
     image: Option<String>,
@@ -144,12 +144,17 @@ public fun add_developer(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     let developer = coordination::developer::create_developer(
         name,
         github,
         image,
         description,
         site,
+        developer_owner,
         clock,
         ctx,
     );
@@ -163,7 +168,6 @@ public fun add_developer(
         coordination::developer::add_name_to_developer_names(
             developer_names,
             name,
-            ctx,
         );
     } else {
         let developer_names = coordination::developer::create_developer_names(
@@ -186,6 +190,11 @@ public fun update_developer(
     ctx: &mut TxContext,
 ) {
     let developer = registry.developers.borrow_mut(name);
+    let developer_owner = coordination::developer::developer_owner(developer);
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::developer::update_developer(
         developer,
         github,
@@ -193,8 +202,6 @@ public fun update_developer(
         description,
         site,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -205,9 +212,12 @@ public fun remove_developer(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    assert!(registry.admin == ctx.sender(), ENotAdmin);
     let developer = registry.developers.remove(name);
     let developer_owner = coordination::developer::developer_owner(&developer);
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
 
     if (registry.developers_index.contains(developer_owner)) {
         let developer_names = registry
@@ -252,9 +262,12 @@ public fun add_agent(
     let developer_owner = coordination::developer::developer_owner(
         developer_object,
     );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
 
     let agent = coordination::agent::create_agent(
-        developer_owner,
         name,
         image,
         description,
@@ -267,8 +280,6 @@ public fun add_agent(
     coordination::developer::add_agent_to_developer(
         developer_object,
         agent,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -281,8 +292,16 @@ public fun update_agent(
     site: Option<String>,
     chains: vector<String>,
     clock: &Clock,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
+    let developer_object = registry.developers.borrow_mut(developer);
+    let developer_owner = coordination::developer::developer_owner(
+        developer_object,
+    );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::developer::registry_update_agent(
         &mut registry.developers,
         developer,
@@ -292,8 +311,6 @@ public fun update_agent(
         site,
         chains,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -302,20 +319,25 @@ public fun remove_agent(
     developer: String,
     name: String,
     clock: &Clock,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
     let developer_object = registry.developers.borrow_mut(developer);
     let developer_owner = coordination::developer::developer_owner(
         developer_object,
     );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     let agent = coordination::developer::remove_agent_from_developer(
         developer_object,
         name,
-        registry.admin,
-        ctx,
     );
 
-    coordination::agent::delete_agent(agent, developer_owner, clock, registry.admin, ctx);
+    coordination::agent::delete_agent(
+        agent,
+        clock,
+    );
 }
 
 public fun add_method(
@@ -329,8 +351,16 @@ public fun add_method(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
+    let developer_object = registry.developers.borrow_mut(developer);
+    let developer_owner = coordination::developer::developer_owner(
+        developer_object,
+    );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::developer::registry_add_method(
         &mut registry.developers,
         developer,
@@ -342,8 +372,6 @@ public fun add_method(
         min_cpu_cores,
         requires_tee,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -358,8 +386,16 @@ public fun update_method(
     min_cpu_cores: u16,
     requires_tee: bool,
     clock: &Clock,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
+    let developer_object = registry.developers.borrow_mut(developer);
+    let developer_owner = coordination::developer::developer_owner(
+        developer_object,
+    );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::developer::registry_update_method(
         &mut registry.developers,
         developer,
@@ -371,8 +407,6 @@ public fun update_method(
         min_cpu_cores,
         requires_tee,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -382,16 +416,22 @@ public fun remove_method(
     agent_name: String,
     method_name: String,
     clock: &Clock,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
+    let developer_object = registry.developers.borrow_mut(developer);
+    let developer_owner = coordination::developer::developer_owner(
+        developer_object,
+    );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::developer::registry_remove_method(
         &mut registry.developers,
         developer,
         agent_name,
         method_name,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -403,14 +443,20 @@ public fun set_default_method(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    let developer_object = registry.developers.borrow_mut(developer);
+    let developer_owner = coordination::developer::developer_owner(
+        developer_object,
+    );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::developer::registry_set_default_method(
         &mut registry.developers,
         developer,
         agent_name,
         method_name,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -419,15 +465,21 @@ public fun remove_default_method(
     developer: String,
     agent_name: String,
     clock: &Clock,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
+    let developer_object = registry.developers.borrow_mut(developer);
+    let developer_owner = coordination::developer::developer_owner(
+        developer_object,
+    );
+    assert!(
+        registry.admin == ctx.sender() || developer_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::developer::registry_remove_default_method(
         &mut registry.developers,
         developer,
         agent_name,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -449,12 +501,18 @@ public fun get_agent(
 public fun add_app(
     registry: &mut SilvanaRegistry,
     name: String,
+    owner: address,
     description: Option<String>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    assert!(
+        registry.admin == ctx.sender() || owner == ctx.sender(),
+        ENotAuthorized,
+    );
     let app = coordination::silvana_app::create_app(
         name,
+        owner,
         description,
         clock,
         ctx,
@@ -467,7 +525,6 @@ public fun add_app(
         coordination::silvana_app::add_name_to_app_names(
             app_names,
             name,
-            ctx,
         );
     } else {
         let app_names = coordination::silvana_app::create_app_names(
@@ -484,15 +541,18 @@ public fun update_app(
     name: String,
     description: Option<String>,
     clock: &Clock,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
     let app = registry.apps.borrow_mut(name);
+    let app_owner = coordination::silvana_app::app_owner(app);
+    assert!(
+        registry.admin == ctx.sender() || app_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::silvana_app::update_app(
         app,
         description,
         clock,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -502,7 +562,12 @@ public fun remove_app(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    assert!(registry.admin == ctx.sender(), ENotAdmin);
+    let app = registry.apps.borrow_mut(name);
+    let app_owner = coordination::silvana_app::app_owner(app);
+    assert!(
+        registry.admin == ctx.sender() || app_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     let app = registry.apps.remove(name);
     let app_owner = coordination::silvana_app::app_owner(&app);
 
@@ -539,12 +604,15 @@ public fun add_method_to_app(
     ctx: &mut TxContext,
 ) {
     let app = registry.apps.borrow_mut(app_name);
+    let app_owner = coordination::silvana_app::app_owner(app);
+    assert!(
+        registry.admin == ctx.sender() || app_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::silvana_app::add_method_to_app(
         app,
         method_name,
         method,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -555,11 +623,14 @@ public fun remove_method_from_app(
     ctx: &mut TxContext,
 ): AppMethod {
     let app = registry.apps.borrow_mut(app_name);
+    let app_owner = coordination::silvana_app::app_owner(app);
+    assert!(
+        registry.admin == ctx.sender() || app_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::silvana_app::remove_method_from_app(
         app,
         method_name,
-        registry.admin,
-        ctx,
     )
 }
 
@@ -570,11 +641,14 @@ public fun add_instance_to_app(
     ctx: &mut TxContext,
 ) {
     let app = registry.apps.borrow_mut(app_name);
+    let app_owner = coordination::silvana_app::app_owner(app);
+    assert!(
+        registry.admin == ctx.sender() || app_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::silvana_app::add_instance_to_app(
         app,
         instance_owner,
-        registry.admin,
-        ctx,
     );
 }
 
@@ -582,14 +656,17 @@ public fun remove_instance_from_app(
     registry: &mut SilvanaRegistry,
     app_name: String,
     instance_owner: address,
-    ctx: &mut TxContext,
+    ctx: &TxContext,
 ) {
     let app = registry.apps.borrow_mut(app_name);
+    let app_owner = coordination::silvana_app::app_owner(app);
+    assert!(
+        registry.admin == ctx.sender() || app_owner == ctx.sender(),
+        ENotAuthorized,
+    );
     coordination::silvana_app::remove_instance_from_app(
         app,
         instance_owner,
-        registry.admin,
-        ctx,
     );
 }
 

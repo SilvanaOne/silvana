@@ -8,9 +8,11 @@ use crate::app_instance::{
     update_state_for_sequence_tx,
 };
 use crate::registry::{
-    CreateRegistryResult, add_agent, add_app, add_developer, create_registry, remove_agent,
-    remove_app, remove_developer, update_agent, update_app, update_developer,
+    CreateRegistryResult, add_agent, add_app, add_developer, add_method, create_registry,
+    remove_agent, remove_app, remove_developer, remove_default_method, remove_method,
+    set_default_method, update_agent, update_app, update_developer, update_method,
 };
+use sui_sdk_types as sui;
 use tracing::{debug, error, info, warn};
 
 /// Interface for calling Sui Move functions related to job management
@@ -1236,6 +1238,7 @@ impl SilvanaSuiInterface {
     pub async fn add_developer_to_registry(
         &mut self,
         registry_id: &str,
+        developer_owner: sui::Address,
         name: String,
         github: String,
         image: Option<String>,
@@ -1244,7 +1247,7 @@ impl SilvanaSuiInterface {
     ) -> Result<String, String> {
         debug!("Adding developer '{}' to registry '{}'", name, registry_id);
 
-        match add_developer(registry_id, name.clone(), github, image, description, site).await {
+        match add_developer(registry_id, developer_owner, name.clone(), github, image, description, site).await {
             Ok(tx_digest) => {
                 info!(
                     "Successfully added developer '{}' to registry '{}' (tx: {})",
@@ -1448,11 +1451,12 @@ impl SilvanaSuiInterface {
         &mut self,
         registry_id: &str,
         name: String,
+        owner: sui::Address,
         description: Option<String>,
     ) -> Result<String, String> {
         debug!("Adding app '{}' to registry '{}'", name, registry_id);
 
-        match add_app(registry_id, name.clone(), description).await {
+        match add_app(registry_id, name.clone(), owner, description).await {
             Ok(tx_digest) => {
                 info!(
                     "Successfully added app '{}' to registry '{}' (tx: {})",
@@ -1517,6 +1521,214 @@ impl SilvanaSuiInterface {
                 error!(
                     "Failed to remove app '{}' from registry '{}': {}",
                     name, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Add a method to an agent in the registry
+    pub async fn add_method_to_agent(
+        &mut self,
+        registry_id: &str,
+        developer: String,
+        agent_name: String,
+        method_name: String,
+        docker_image: String,
+        docker_sha256: String,
+        min_memory_mb: u32,
+        min_cpu_cores: u16,
+        requires_tee: bool,
+    ) -> Result<String, String> {
+        debug!(
+            "Adding method '{}' to agent '{}' for developer '{}' in registry '{}'",
+            method_name, agent_name, developer, registry_id
+        );
+
+        match add_method(
+            registry_id,
+            developer.clone(),
+            agent_name.clone(),
+            method_name.clone(),
+            docker_image,
+            docker_sha256,
+            min_memory_mb,
+            min_cpu_cores,
+            requires_tee,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully added method '{}' to agent '{}' for developer '{}' in registry '{}' (tx: {})",
+                    method_name, agent_name, developer, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to add method '{}' to agent '{}' for developer '{}' in registry '{}': {}",
+                    method_name, agent_name, developer, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Update a method on an agent in the registry
+    pub async fn update_method_on_agent(
+        &mut self,
+        registry_id: &str,
+        developer: String,
+        agent_name: String,
+        method_name: String,
+        docker_image: String,
+        docker_sha256: String,
+        min_memory_mb: u32,
+        min_cpu_cores: u16,
+        requires_tee: bool,
+    ) -> Result<String, String> {
+        debug!(
+            "Updating method '{}' on agent '{}' for developer '{}' in registry '{}'",
+            method_name, agent_name, developer, registry_id
+        );
+
+        match update_method(
+            registry_id,
+            developer.clone(),
+            agent_name.clone(),
+            method_name.clone(),
+            docker_image,
+            docker_sha256,
+            min_memory_mb,
+            min_cpu_cores,
+            requires_tee,
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully updated method '{}' on agent '{}' for developer '{}' in registry '{}' (tx: {})",
+                    method_name, agent_name, developer, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to update method '{}' on agent '{}' for developer '{}' in registry '{}': {}",
+                    method_name, agent_name, developer, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Remove a method from an agent in the registry
+    pub async fn remove_method_from_agent(
+        &mut self,
+        registry_id: &str,
+        developer: String,
+        agent_name: String,
+        method_name: String,
+    ) -> Result<String, String> {
+        debug!(
+            "Removing method '{}' from agent '{}' for developer '{}' in registry '{}'",
+            method_name, agent_name, developer, registry_id
+        );
+
+        match remove_method(
+            registry_id,
+            developer.clone(),
+            agent_name.clone(),
+            method_name.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully removed method '{}' from agent '{}' for developer '{}' in registry '{}' (tx: {})",
+                    method_name, agent_name, developer, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to remove method '{}' from agent '{}' for developer '{}' in registry '{}': {}",
+                    method_name, agent_name, developer, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Set the default method on an agent in the registry
+    pub async fn set_default_method_on_agent(
+        &mut self,
+        registry_id: &str,
+        developer: String,
+        agent_name: String,
+        method_name: String,
+    ) -> Result<String, String> {
+        debug!(
+            "Setting default method '{}' on agent '{}' for developer '{}' in registry '{}'",
+            method_name, agent_name, developer, registry_id
+        );
+
+        match set_default_method(
+            registry_id,
+            developer.clone(),
+            agent_name.clone(),
+            method_name.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully set default method '{}' on agent '{}' for developer '{}' in registry '{}' (tx: {})",
+                    method_name, agent_name, developer, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to set default method '{}' on agent '{}' for developer '{}' in registry '{}': {}",
+                    method_name, agent_name, developer, registry_id, e
+                );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Remove the default method from an agent in the registry
+    pub async fn remove_default_method_from_agent(
+        &mut self,
+        registry_id: &str,
+        developer: String,
+        agent_name: String,
+    ) -> Result<String, String> {
+        debug!(
+            "Removing default method from agent '{}' for developer '{}' in registry '{}'",
+            agent_name, developer, registry_id
+        );
+
+        match remove_default_method(
+            registry_id,
+            developer.clone(),
+            agent_name.clone(),
+        )
+        .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "Successfully removed default method from agent '{}' for developer '{}' in registry '{}' (tx: {})",
+                    agent_name, developer, registry_id, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to remove default method from agent '{}' for developer '{}' in registry '{}': {}",
+                    agent_name, developer, registry_id, e
                 );
                 Err(e.to_string())
             }
