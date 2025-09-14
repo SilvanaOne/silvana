@@ -81,11 +81,12 @@ pub struct SchemaValidator {
 
 impl SchemaValidator {
     pub async fn new(database_url: &str, proto_file_path: &str) -> Result<Self> {
+        // Handle potential whitespace in URL
+        let database_url = database_url.trim();
+
         let connection = Database::connect(database_url)
             .await
             .context("Failed to connect to database")?;
-
-        // Extract database name from URL
         let database_name = database_url
             .split('/')
             .last()
@@ -105,10 +106,13 @@ impl SchemaValidator {
     /// Get all tables that match the pattern *_event (our proto-generated tables)
     pub async fn get_event_tables(&self) -> Result<Vec<String>> {
         let query = r#"
-            SELECT TABLE_NAME 
-            FROM INFORMATION_SCHEMA.TABLES 
-            WHERE TABLE_SCHEMA = ? 
-            AND TABLE_NAME LIKE '%_event'
+            SELECT TABLE_NAME
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = ?
+            AND (TABLE_NAME LIKE '%_event'
+                OR TABLE_NAME LIKE '%_event_ms1'
+                OR TABLE_NAME LIKE '%_event_ms2'
+                OR TABLE_NAME LIKE '%_event_sequences')
             ORDER BY TABLE_NAME
         "#;
 
@@ -314,8 +318,17 @@ impl SchemaValidator {
                 },
             ];
 
+            // Track fields with sequences option for child table creation
+            let mut sequence_fields = Vec::new();
+
             // Add proto-defined fields
-            for field in message.fields {
+            for field in message.fields.clone() {
+                // Skip fields with sequences option - they become separate child tables
+                if field.has_sequences_option {
+                    sequence_fields.push(field);
+                    continue;
+                }
+
                 columns.push(ExpectedColumn {
                     name: field.name.to_snake_case(),
                     data_type: proto_type_to_mysql_with_options(
@@ -328,7 +341,58 @@ impl SchemaValidator {
                 });
             }
 
-            schema.insert(table_name, columns);
+            schema.insert(table_name.clone(), columns);
+
+            // Add child tables for fields with sequences option
+            for field in sequence_fields {
+                // Shorten long field names to avoid MySQL constraint name length limits
+                let field_suffix = if field.name == "merged_sequences_1" {
+                    "ms1".to_string()
+                } else if field.name == "merged_sequences_2" {
+                    "ms2".to_string()
+                } else {
+                    field.name.to_snake_case()
+                };
+
+                let child_table_name = format!("{}_{}", table_name, field_suffix);
+                let parent_fk = format!("{}_id", table_name);
+                let value_col = field.name.to_singular().to_snake_case();
+
+                let child_columns = vec![
+                    ExpectedColumn {
+                        name: "id".to_string(),
+                        data_type: "bigint".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: parent_fk,
+                        data_type: "bigint".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: value_col,
+                        data_type: proto_type_to_mysql_with_options(
+                            &field.field_type,
+                            false,  // Not repeated in child table
+                            false,
+                            field.name.contains("metadata") || field.name.contains("message"),
+                        ),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "created_at".to_string(),
+                        data_type: "timestamp".to_string(),
+                        is_nullable: true,
+                    },
+                    ExpectedColumn {
+                        name: "updated_at".to_string(),
+                        data_type: "timestamp".to_string(),
+                        is_nullable: true,
+                    },
+                ];
+
+                schema.insert(child_table_name, child_columns);
+            }
         }
 
         Ok(schema)
@@ -407,9 +471,14 @@ impl SchemaValidator {
             }
         }
 
-        // Check for extra indexes (excluding PRIMARY which is always present)
+        // Check for extra indexes (excluding PRIMARY which is always present and fulltext indexes)
         for actual in actual_indexes {
-            if actual.name != "PRIMARY" && !expected_index_set.contains(&actual.name) {
+            // Skip PRIMARY index and fulltext indexes (ft_idx_*) as they're not defined in proto
+            if actual.name == "PRIMARY" || actual.name.starts_with("ft_idx_") {
+                continue;
+            }
+
+            if !expected_index_set.contains(&actual.name) {
                 discrepancies.push(SchemaDiscrepancy::ExtraIndex {
                     index: actual.name.clone(),
                 });
@@ -439,9 +508,24 @@ impl SchemaValidator {
     /// This matches the logic in parser.rs for generating indexes
     fn get_expected_indexes_for_table(
         &self,
-        _table_name: &str,
+        table_name: &str,
         expected_columns: &[ExpectedColumn],
     ) -> Result<Vec<String>> {
+        // Check if this is a child table (ends with _ms1, _ms2, or _sequences)
+        if table_name.ends_with("_ms1") || table_name.ends_with("_ms2") || table_name.ends_with("_sequences") {
+            // Child tables have different index naming convention
+            let mut indexes = vec![];
+
+            // Add parent index (e.g., idx_job_created_event_ms1_parent)
+            indexes.push(format!("idx_{}_parent", table_name));
+
+            // Add value index (e.g., idx_job_created_event_ms1_value)
+            indexes.push(format!("idx_{}_value", table_name));
+
+            return Ok(indexes);
+        }
+
+        // Main tables use the regular pattern
         let mut indexes = vec!["idx_created_at".to_string()];
 
         // Generate indexes based on field patterns (same logic as in parser.rs)

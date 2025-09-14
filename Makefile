@@ -435,8 +435,6 @@ validate-schema: check-database-url check-tools ## Validate that database schema
 		--proto-file $(PROTO_FILE) \
 		--database-url "$$DB_URL"
 
-check-schema: check-database-url check-tools ## Quick schema validation check
-	@./infra/tidb/check_schema.sh
 
 # Example targets
 example-archive: ## Prepare archive with example project (examples/add)
