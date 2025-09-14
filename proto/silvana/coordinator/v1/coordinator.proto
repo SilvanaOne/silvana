@@ -4,7 +4,7 @@ import "google/protobuf/descriptor.proto";
 
 package silvana.coordinator.v1;
 
-option go_package = "github.com/SilvanaOne/zk-tests/packages/avs/rpc/proto;coordinator";
+option go_package = "github.com/SilvanaOne/silvana/proto;coordinator";
 
 
 // Job message matching the partial Move struct
