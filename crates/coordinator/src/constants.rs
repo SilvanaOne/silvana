@@ -237,6 +237,14 @@ pub const WALRUS_QUILT_BLOCK_INTERVAL: u64 = 100;
 pub const WALRUS_TEST: bool = false;
 
 // =============================================================================
+// Coordinator Status Events
+// =============================================================================
+
+/// Interval for sending coordinator active events (in seconds).
+/// The coordinator sends an active event at this interval to indicate it's still running.
+pub const COORDINATOR_ACTIVE_EVENT_INTERVAL_SECS: u64 = 600; // 10 minutes
+
+// =============================================================================
 // Testing and CLI
 // =============================================================================
 

@@ -1,8 +1,9 @@
 use crate::config::Config;
 use crate::constants::{
-    BALANCE_CHECK_INTERVAL_SECS, GRACEFUL_SHUTDOWN_TIMEOUT_SECS,
-    JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS, PROOF_ANALYSIS_INTERVAL_SECS, RECONCILIATION_INTERVAL_SECS,
-    SHUTDOWN_CLEANUP_DELAY_MS, SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
+    BALANCE_CHECK_INTERVAL_SECS, COORDINATOR_ACTIVE_EVENT_INTERVAL_SECS,
+    GRACEFUL_SHUTDOWN_TIMEOUT_SECS, JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS,
+    PROOF_ANALYSIS_INTERVAL_SECS, RECONCILIATION_INTERVAL_SECS, SHUTDOWN_CLEANUP_DELAY_MS,
+    SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
 };
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
@@ -123,14 +124,20 @@ pub async fn start_coordinator(
         let mut sigint = match signal::unix::signal(signal::unix::SignalKind::interrupt()) {
             Ok(sig) => sig,
             Err(e) => {
-                error!("Failed to create SIGINT handler: {}. Graceful shutdown disabled.", e);
+                error!(
+                    "Failed to create SIGINT handler: {}. Graceful shutdown disabled.",
+                    e
+                );
                 return;
             }
         };
         let mut sigterm = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
             Ok(sig) => sig,
             Err(e) => {
-                error!("Failed to create SIGTERM handler: {}. Graceful shutdown disabled.", e);
+                error!(
+                    "Failed to create SIGTERM handler: {}. Graceful shutdown disabled.",
+                    e
+                );
                 return;
             }
         };
@@ -175,6 +182,105 @@ pub async fn start_coordinator(
     });
 
     info!("✅ Coordinator initialized, starting services...");
+
+    // Send coordinator started event
+    let coordinator_id = sui::get_current_address();
+    let ethereum_address = std::env::var("ETHEREUM_ADDRESS")
+        .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string());
+
+    // Send coordinator started event
+    {
+        let rpc_client = state.get_rpc_client().await;
+        if let Some(mut client) = rpc_client {
+            let event = proto::Event {
+                event: Some(proto::event::Event::CoordinatorStarted(
+                    proto::CoordinatorStartedEvent {
+                        coordinator_id: coordinator_id.clone(),
+                        ethereum_address: ethereum_address.clone(),
+                        event_timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    },
+                )),
+            };
+
+            let request = proto::SubmitEventRequest { event: Some(event) };
+
+            match client.submit_event(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        info!("✅ Sent coordinator started event");
+                    } else {
+                        warn!(
+                            "⚠️ Failed to send coordinator started event: {}",
+                            resp.message
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to send coordinator started event: {}", e);
+                }
+            }
+        } else {
+            warn!("⚠️ RPC client not available, skipping coordinator started event");
+        }
+    }
+
+    // Start periodic coordinator active events
+    let active_state = state.clone();
+    let active_coordinator_id = coordinator_id.clone();
+    let active_handle = task::spawn(async move {
+        info!(
+            "📡 Starting coordinator active event task (sends every {} minutes)...",
+            COORDINATOR_ACTIVE_EVENT_INTERVAL_SECS / 60
+        );
+
+        let mut interval =
+            tokio::time::interval(Duration::from_secs(COORDINATOR_ACTIVE_EVENT_INTERVAL_SECS));
+        interval.tick().await; // Skip the first immediate tick
+
+        loop {
+            if active_state.is_shutting_down() {
+                info!("Coordinator active event task shutting down");
+                break;
+            }
+
+            interval.tick().await;
+
+            let rpc_client = active_state.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::CoordinatorActive(
+                        proto::CoordinatorActiveEvent {
+                            coordinator_id: active_coordinator_id.clone(),
+                            event_timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent coordinator active event");
+                        } else {
+                            warn!("Failed to send coordinator active event: {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send coordinator active event: {}", e);
+                    }
+                }
+            }
+        }
+    });
 
     // 1. Start gRPC server in a separate thread
     let grpc_state = state.clone();
@@ -568,6 +674,7 @@ pub async fn start_coordinator(
     block_creation_handle.abort();
     proof_analysis_handle.abort();
     balance_check_handle.abort();
+    active_handle.abort();
 
     // Shutdown sequence:
     // 1. Job searcher stops immediately (no new jobs)
@@ -639,6 +746,43 @@ pub async fn start_coordinator(
     info!("  ⏳ Stopping gRPC server...");
     grpc_handle.abort();
     info!("  ✅ gRPC server stopped");
+
+    // Send coordinator shutdown event
+    {
+        let rpc_client = state.get_rpc_client().await;
+        if let Some(mut client) = rpc_client {
+            let event = proto::Event {
+                event: Some(proto::event::Event::CoordinatorShutdown(
+                    proto::CoordinatorShutdownEvent {
+                        coordinator_id: coordinator_id.clone(),
+                        event_timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    },
+                )),
+            };
+
+            let request = proto::SubmitEventRequest { event: Some(event) };
+
+            match client.submit_event(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        info!("✅ Sent coordinator shutdown event");
+                    } else {
+                        warn!(
+                            "⚠️ Failed to send coordinator shutdown event: {}",
+                            resp.message
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("⚠️ Failed to send coordinator shutdown event: {}", e);
+                }
+            }
+        }
+    }
 
     info!("✅ Graceful shutdown complete");
     println!("✅ Graceful shutdown complete");
