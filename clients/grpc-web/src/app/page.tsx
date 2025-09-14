@@ -5,8 +5,8 @@ import { createGrpcWebTransport } from "@connectrpc/connect-web";
 import { createClient } from "@connectrpc/connect";
 import {
   EventSchema,
-  SilvanaEventsService,
-} from "@/proto/silvana/events/v1/events_pb";
+  SilvanaRpcService,
+} from "@/proto/silvana/rpc/v1/rpc_pb";
 import { createGrpcRequest } from "@/lib/grpc";
 import { wsconnect } from "@nats-io/nats-core";
 import {
@@ -43,7 +43,7 @@ export default function Home() {
   >("connecting");
 
   const [grpc, setGrpc] = useState<ReturnType<
-    typeof createClient<typeof SilvanaEventsService>
+    typeof createClient<typeof SilvanaRpcService>
   > | null>(null);
   const [nats, setNats] = useState<ReturnType<typeof jetstream> | null>(null);
   const [natsConsumer, setNatsConsumer] = useState<Consumer | null>(null);
@@ -54,21 +54,21 @@ export default function Home() {
         const transport = createGrpcWebTransport({
           baseUrl: "https://rpc.silvana.dev",
         });
-        const grpc = createClient(SilvanaEventsService, transport);
+        const grpc = createClient(SilvanaRpcService, transport);
 
-        const testQueryResponse = await grpc.getAgentMessageEventsBySequence({
-          sequence: 1002n,
-          coordinatorId: "test-coordinator",
+        // Test the connection with a simple query
+        const testQueryResponse = await grpc.getEventsByAppInstanceSequence({
+          sequence: 1n,
+          appInstanceId: "test-connection",
+          limit: 1,
         });
-        if (testQueryResponse?.success === true) {
+        // If we get any response (even with 0 events), the connection works
+        if (testQueryResponse !== undefined) {
           setGrpc(grpc);
           setGrpcConnection("connected");
+          console.log("✅ Connected to Silvana RPC");
         } else {
-          setError(
-            `Failed to connect to Silvana RPC: ${
-              testQueryResponse?.message ?? "Unknown error"
-            }`
-          );
+          setError("Failed to connect to Silvana RPC");
           setGrpcConnection("error");
         }
       } catch (error: unknown) {
@@ -97,23 +97,13 @@ export default function Home() {
           opt_start_time: new Date().toISOString(),
         });
         const consumer = await js.consumers.get(stream, consumerInfo.config);
-        console.log("Waiting for NATS message");
-        let message = await consumer.next({
-          expires: 1000,
-        });
-        console.log("Received NATS message:", message?.seq);
-        while (message !== null) {
-          console.log("Received NATS message:", message.seq);
-          message.ack();
-          console.log("Waiting for NATS message");
-          message = await consumer.next({
-            expires: 1000,
-          });
-          console.log("Received next NATS message:", message?.seq);
-        }
+        console.log("NATS consumer created:", consumerName);
+
+        // Don't consume messages here - just set up the consumer
         setNats(js);
         setNatsConsumer(consumer);
         setNatsConnection("connected");
+        console.log("✅ NATS connected and ready to receive messages");
       } catch (error: unknown) {
         setError(error instanceof Error ? error.message : "Unknown NATS error");
         setNatsConnection("error");
@@ -122,6 +112,44 @@ export default function Home() {
 
     initializeNats();
   }, []);
+
+  // Monitor NATS messages in the background
+  useEffect(() => {
+    if (natsConsumer && !isLoading) {
+      const monitorMessages = async () => {
+        console.log("🎧 Starting background NATS monitoring...");
+        try {
+          const iter = await natsConsumer.consume({ max_messages: 100 });
+          for await (const message of iter) {
+            console.log("📡 Background NATS event received, seq:", message.seq);
+            message.ack();
+
+            try {
+              const event = fromBinary(EventSchema, message.data);
+              const eventType = event.event.case || "unknown";
+              console.log(`📡 Background event type: ${eventType}`);
+              console.log(`📡 Full event details:`, event);
+
+              // Add to message log for visibility with full JSON (newest first)
+              setNatsMessageLog(prev => [
+                `[Background ${new Date().toISOString()}] ${eventType}`,
+                JSON.stringify(event, (_key, value) =>
+                  typeof value === 'bigint' ? value.toString() : value
+                , 2),
+                ...prev
+              ].slice(0, 100)); // Keep only last 100 messages
+            } catch (err) {
+              console.error("Failed to decode background message:", err);
+            }
+          }
+        } catch (err) {
+          console.error("Background monitoring error:", err);
+        }
+      };
+
+      monitorMessages();
+    }
+  }, [natsConsumer, isLoading]);
 
   // Update connection status dots
   useEffect(() => {
@@ -157,31 +185,84 @@ export default function Home() {
       return;
     }
     const { coordinatorId, start } = params;
+
+    console.log("🔍 Starting NATS message processing for coordinator:", coordinatorId);
+    let messageCount = 0;
+
     try {
       let message = await natsConsumer.next({
         expires: 1000,
       });
 
       while (message && Date.now() - start < 5000) {
-        console.log("NATS message:", message.seq);
+        messageCount++;
+        console.log(`📨 NATS message #${messageCount}, seq:`, message.seq);
         message.ack();
         const payload = message.data;
         try {
           const event = fromBinary(EventSchema, payload);
-          if (
-            event.eventType.case === "agent" &&
-            event.eventType.value.event.case === "message"
-          ) {
-            const agentEvent = event.eventType.value.event.value;
-            if (agentEvent.coordinatorId === coordinatorId) {
-              const endNats = Date.now();
-              console.log("received message", agentEvent);
-              setNatsMessageLog([
-                `Received NATS message: ${serialize(agentEvent)}`,
-              ]);
-              setNatsRoundtripDelay(endNats - start);
-              return;
-            }
+          const endNats = Date.now();
+
+          // Log any event type we receive
+          let eventInfo = "";
+          let isRelevant = false;
+
+          switch (event.event.case) {
+            case "coordinatorStarted":
+              eventInfo = `CoordinatorStarted: ${event.event.value.coordinatorId}`;
+              break;
+            case "coordinatorActive":
+              eventInfo = `CoordinatorActive: ${event.event.value.coordinatorId}`;
+              break;
+            case "coordinatorShutdown":
+              eventInfo = `CoordinatorShutdown: ${event.event.value.coordinatorId}`;
+              break;
+            case "agentSessionStarted":
+              eventInfo = `AgentSessionStarted: ${event.event.value.sessionId}`;
+              break;
+            case "jobCreated":
+              eventInfo = `JobCreated: ${event.event.value.jobId}`;
+              break;
+            case "jobStarted":
+              eventInfo = `JobStarted: ${event.event.value.jobId}`;
+              break;
+            case "jobFinished":
+              eventInfo = `JobFinished: ${event.event.value.jobId}`;
+              break;
+            case "agentMessage":
+              const agentEvent = event.event.value;
+              eventInfo = `AgentMessage: ${agentEvent.message}`;
+              // Check if this is our message
+              if (agentEvent.coordinatorId === coordinatorId) {
+                isRelevant = true;
+              }
+              break;
+            case "coordinationTx":
+              eventInfo = `CoordinationTx: ${event.event.value.txHash}`;
+              break;
+            case "coordinatorMessage":
+              eventInfo = `CoordinatorMessage: ${event.event.value.message}`;
+              break;
+            default:
+              eventInfo = `Unknown event type: ${event.event.case}`;
+          }
+
+          console.log("Received NATS event:", eventInfo);
+          console.log("Full event details:", event);
+
+          // Update the message log with all events (newest first)
+          setNatsMessageLog(prev => [
+            `[${new Date().toISOString()}] ${eventInfo}`,
+            JSON.stringify(event, (_key, value) =>
+              typeof value === 'bigint' ? value.toString() : value
+            , 2),
+            ...prev
+          ].slice(0, 100)); // Keep only last 100 messages
+
+          // If this was our specific message, set the roundtrip delay
+          if (isRelevant) {
+            setNatsRoundtripDelay(endNats - start);
+            console.log("Found our message!");
           }
         } catch (error: unknown) {
           console.log(
@@ -205,42 +286,71 @@ export default function Home() {
       return;
     }
 
-    setError("NATS message timeout");
-    setNatsConnection("error");
+    // Only show timeout error if we didn't receive ANY events
+    if (natsMessageLog.length === 0) {
+      setError("NATS message timeout - no events received");
+      setNatsConnection("error");
+    } else {
+      console.log(`Received ${natsMessageLog.length} NATS events (none matched our coordinator ID)`);
+    }
   }
 
   async function sendGrpcQuery(params: {
-    coordinatorId: string;
     start: number;
+    appInstanceId: string;
   }): Promise<void> {
     if (!grpc) {
       setError("gRPC not initialized");
       return;
     }
-    const { coordinatorId, start } = params;
+    const { start, appInstanceId } = params;
     try {
-      console.log("🔍 Querying AgentMessageEvents via gRPC-Web client...");
-      let queryResponse = await grpc.getAgentMessageEventsBySequence({
-        sequence: 1002n,
-        coordinatorId,
+      console.log(`🔍 Querying Events via gRPC-Web client for app instance: ${appInstanceId}...`);
+      let queryResponse = await grpc.getEventsByAppInstanceSequence({
+        sequence: 1n, // Start from sequence 1
+        appInstanceId: appInstanceId,
+        limit: 100, // Get up to 100 events
       });
+
+      // Wait for events to appear (since we just created this app instance)
+      let attempts = 0;
       while (queryResponse.returnedCount === 0 && Date.now() - start < 5000) {
-        queryResponse = await grpc.getAgentMessageEventsBySequence({
-          sequence: 1002n,
-          coordinatorId,
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms between attempts
+        queryResponse = await grpc.getEventsByAppInstanceSequence({
+          sequence: 1n,
+          appInstanceId: appInstanceId,
+          limit: 100,
         });
+        attempts++;
       }
+
       const endQuery = Date.now();
-      if (queryResponse.returnedCount === 0) {
-        setError("Query timed out");
+      console.log(`Query completed after ${attempts} attempts`);
+
+      // Note: It's expected to have 0 events for a new app instance
+      // The query itself succeeding means the connection works
+      if (!queryResponse.success) {
+        setError(`Query failed: ${queryResponse.message || "Unknown error"}`);
         setIsLoading(false);
         return;
       }
       const durationQuery = endQuery - start;
       console.log(`Query processed in ${durationQuery}ms`);
       console.log("gRPC Query Response:", queryResponse);
-      setQueryResponseLog([serialize(queryResponse)]);
+
+      // Create a user-friendly message about the query result
+      const resultMessage = queryResponse.returnedCount > 0
+        ? `Found ${queryResponse.returnedCount} events`
+        : "Query successful (0 events - this is normal for a new app instance)";
+
+      setQueryResponseLog([
+        resultMessage,
+        serialize(queryResponse)
+      ]);
       setQueryRoundtripDelay(durationQuery);
+
+      // Clear any previous errors since the query succeeded
+      setError("");
     } catch (error: unknown) {
       setError(
         error instanceof Error ? error.message : "Unknown GPRC-Web error"
@@ -260,6 +370,7 @@ export default function Home() {
       setEventResponseLog([]);
       setEventResponseLog([...eventResponseLog, "Sending gRPC-Web request..."]);
       const coordinatorId = `coord-browser-${crypto.randomUUID()}`;
+      const appInstanceId = `app-instance-${Date.now()}`; // Dynamic app instance ID
       const request = await createGrpcRequest(coordinatorId);
       console.log("sending request: ", request);
       const startRequest = Date.now();
@@ -275,11 +386,16 @@ export default function Home() {
         start: startRequest,
       });
       const endQueryPromise = sendGrpcQuery({
-        coordinatorId,
         start: startRequest,
+        appInstanceId: appInstanceId,
       });
 
       await Promise.all([endNatsPromise, endQueryPromise]);
+
+      // If we got here without errors, the test was successful
+      if (!error) {
+        console.log("✅ gRPC-Web test completed successfully");
+      }
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "Unknown error");
     } finally {

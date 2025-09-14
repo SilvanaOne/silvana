@@ -183,50 +183,10 @@ pub async fn start_coordinator(
 
     info!("✅ Coordinator initialized, starting services...");
 
-    // Send coordinator started event
+    // Get coordinator ID and ethereum address for events
     let coordinator_id = sui::get_current_address();
     let ethereum_address = std::env::var("ETHEREUM_ADDRESS")
         .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string());
-
-    // Send coordinator started event
-    {
-        let rpc_client = state.get_rpc_client().await;
-        if let Some(mut client) = rpc_client {
-            let event = proto::Event {
-                event: Some(proto::event::Event::CoordinatorStarted(
-                    proto::CoordinatorStartedEvent {
-                        coordinator_id: coordinator_id.clone(),
-                        ethereum_address: ethereum_address.clone(),
-                        event_timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    },
-                )),
-            };
-
-            let request = proto::SubmitEventRequest { event: Some(event) };
-
-            match client.submit_event(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
-                    if resp.success {
-                        info!("✅ Sent coordinator started event");
-                    } else {
-                        warn!(
-                            "⚠️ Failed to send coordinator started event: {}",
-                            resp.message
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!("⚠️ Failed to send coordinator started event: {}", e);
-                }
-            }
-        } else {
-            warn!("⚠️ RPC client not available, skipping coordinator started event");
-        }
-    }
 
     // Start periodic coordinator active events
     let active_state = state.clone();
@@ -535,6 +495,58 @@ pub async fn start_coordinator(
 
     // Run processor in a task so we can monitor shutdown
     let processor_handle = task::spawn(async move { processor.run().await });
+
+    // Send coordinator started event now that everything is initialized
+    {
+        // Wait for RPC client to be initialized (up to 10 seconds)
+        let mut rpc_client_initialized = false;
+        for _ in 0..20 {
+            if state.get_rpc_client().await.is_some() {
+                rpc_client_initialized = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+        }
+
+        if rpc_client_initialized {
+            let rpc_client = state.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::CoordinatorStarted(
+                        proto::CoordinatorStartedEvent {
+                            coordinator_id: coordinator_id.clone(),
+                            ethereum_address: ethereum_address.clone(),
+                            event_timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            info!("✅ Sent coordinator started event");
+                        } else {
+                            warn!(
+                                "⚠️ Failed to send coordinator started event: {}",
+                                resp.message
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!("⚠️ Failed to send coordinator started event: {}", e);
+                    }
+                }
+            }
+        } else {
+            warn!("⚠️ RPC client initialization timed out, skipping coordinator started event");
+        }
+    }
 
     // Monitor for shutdown or processor exit
     loop {
