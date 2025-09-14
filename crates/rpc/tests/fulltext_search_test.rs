@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 use tonic::Request;
 
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use proto::*;
 
 // Test configuration
@@ -25,7 +25,7 @@ async fn test_fulltext_search_coordinator_messages() {
     println!("🎯 Server address: {}", server_addr);
 
     // Connect to the gRPC server
-    let mut client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let mut client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
@@ -153,7 +153,7 @@ async fn test_fulltext_search_coordinator_messages() {
 }
 
 async fn verify_indexing_with_polling(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     coordinator_id: &str,
     last_send_time: std::time::Instant,
 ) -> bool {
@@ -217,7 +217,7 @@ async fn verify_indexing_with_polling(
 }
 
 async fn test_basic_search(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     coordinator_id: &str,
     search_term: &str,
     expected_count: usize,
@@ -336,7 +336,7 @@ async fn test_basic_search(
 }
 
 async fn test_coordinator_filtered_search(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     coordinator_id: &str,
 ) {
     println!("🔍 Testing coordinator-filtered search");
@@ -392,7 +392,7 @@ async fn test_coordinator_filtered_search(
 }
 
 async fn test_search_pagination(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     coordinator_id: &str,
 ) {
     println!("🔍 Testing search pagination");
@@ -473,7 +473,7 @@ async fn test_search_pagination(
 }
 
 async fn test_empty_query_handling(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
 ) {
     println!("🔍 Testing empty query handling");
 
@@ -502,7 +502,7 @@ async fn test_empty_query_handling(
 }
 
 async fn test_relevance_scoring(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     coordinator_id: &str,
 ) {
     println!("🔍 Testing relevance scoring");
@@ -558,7 +558,7 @@ async fn test_relevance_scoring(
 }
 
 async fn test_multilanguage_search(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     coordinator_id: &str,
 ) {
     println!("🔍 Testing multi-language search");

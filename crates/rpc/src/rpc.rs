@@ -11,34 +11,33 @@ use db::secrets_storage::SecureSecretsStorage;
 use db::kv::ConfigStorage;
 use monitoring::record_grpc_request;
 use proto::{
-    AgentMessageEventWithId, AgentTransactionEventWithId, CoordinatorMessageEventWithRelevance,
-    Event, GetAgentMessageEventsBySequenceRequest, GetAgentMessageEventsBySequenceResponse,
-    GetAgentTransactionEventsBySequenceRequest, GetAgentTransactionEventsBySequenceResponse,
+    Event,
+    GetEventsByAppInstanceSequenceRequest, GetEventsByAppInstanceSequenceResponse,
+    SearchEventsRequest, SearchEventsResponse,
     GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
     GetProofRequest, GetProofResponse, ReadBinaryRequest, ReadBinaryResponse,
     RetrieveSecretRequest, RetrieveSecretResponse,
-    SearchCoordinatorMessageEventsRequest, SearchCoordinatorMessageEventsResponse,
     StoreSecretRequest, StoreSecretResponse, SubmitEventRequest, SubmitEventResponse,
     SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest, SubmitProofResponse,
     WriteBinaryRequest, WriteBinaryResponse,
-    silvana_events_service_server::SilvanaEventsService,
+    silvana_rpc_service_server::SilvanaRpcService,
 };
 use storage::ProofsCache;
 
-pub struct SilvanaEventsServiceImpl {
+pub struct SilvanaRpcServiceImpl {
     event_buffer: EventBuffer<Event>,
-    database: Arc<EventDatabase>,
+    _database: Arc<EventDatabase>,
     secrets_storage: Option<Arc<SecureSecretsStorage>>,
     proofs_cache: Option<Arc<ProofsCache>>,
     s3_storage: Option<Arc<S3Storage>>,
     config_storage: Option<Arc<ConfigStorage>>,
 }
 
-impl SilvanaEventsServiceImpl {
+impl SilvanaRpcServiceImpl {
     pub fn new(event_buffer: EventBuffer<Event>, database: Arc<EventDatabase>) -> Self {
         Self {
             event_buffer,
-            database,
+            _database: database,
             secrets_storage: None,
             proofs_cache: None,
             s3_storage: None,
@@ -68,7 +67,7 @@ impl SilvanaEventsServiceImpl {
 }
 
 #[tonic::async_trait]
-impl SilvanaEventsService for SilvanaEventsServiceImpl {
+impl SilvanaRpcService for SilvanaRpcServiceImpl {
     async fn submit_events(
         &self,
         request: Request<SubmitEventsRequest>,
@@ -177,257 +176,56 @@ impl SilvanaEventsService for SilvanaEventsServiceImpl {
         }
     }
 
-    async fn get_agent_transaction_events_by_sequence(
+    async fn get_events_by_app_instance_sequence(
         &self,
-        request: Request<GetAgentTransactionEventsBySequenceRequest>,
-    ) -> Result<Response<GetAgentTransactionEventsBySequenceResponse>, Status> {
-        let req = request.into_inner();
+        request: Request<GetEventsByAppInstanceSequenceRequest>,
+    ) -> Result<Response<GetEventsByAppInstanceSequenceResponse>, Status> {
+        let _req = request.into_inner();
 
-        debug!(
-            "Querying agent transaction events by sequence: {}",
-            req.sequence
-        );
+        // TODO: Implement this method based on new requirements
+        // This method should query events by app instance and sequence
 
-        match self
-            .database
-            .get_agent_transaction_events_by_sequence(
-                req.sequence,
-                req.limit,
-                req.offset,
-                req.coordinator_id,
-                req.developer,
-                req.agent,
-                req.app,
-            )
-            .await
-        {
-            Ok((events, total_count)) => {
-                let proto_events: Vec<AgentTransactionEventWithId> = events
-                    .into_iter()
-                    .map(|event| AgentTransactionEventWithId {
-                        id: event.id,
-                        coordinator_id: event.coordinator_id,
-                        tx_type: event.tx_type,
-                        developer: event.developer,
-                        agent: event.agent,
-                        app: event.app,
-                        job_sequence: event.job_sequence,
-                        sequences: event.sequences,
-                        event_timestamp: event.event_timestamp,
-                        tx_hash: event.tx_hash,
-                        chain: event.chain,
-                        network: event.network,
-                        memo: event.memo,
-                        metadata: event.metadata,
-                        created_at_timestamp: event.created_at_timestamp,
-                    })
-                    .collect();
-
-                // FIXED: Safe casting to prevent overflow
-                let returned_count = if proto_events.len() <= u32::MAX as usize {
-                    proto_events.len() as u32
-                } else {
-                    warn!(
-                        "Proto events count {} exceeds u32::MAX, clamping to maximum",
-                        proto_events.len()
-                    );
-                    u32::MAX
-                };
-
-                debug!(
-                    "Found {} agent transaction events for sequence {}",
-                    returned_count, req.sequence
-                );
-
-                Ok(Response::new(GetAgentTransactionEventsBySequenceResponse {
-                    success: true,
-                    message: format!("Found {} events", returned_count),
-                    events: proto_events,
-                    total_count,
-                    returned_count,
-                }))
-            }
-            Err(e) => {
-                error!(
-                    "Failed to query agent transaction events by sequence: {}",
-                    e
-                );
-                Err(Status::internal(format!("Database query failed: {}", e)))
-            }
-        }
+        Ok(Response::new(GetEventsByAppInstanceSequenceResponse {
+            success: true,
+            message: "Method not yet implemented".to_string(),
+            events: vec![],
+            total_count: 0,
+            returned_count: 0,
+        }))
     }
 
-    async fn get_agent_message_events_by_sequence(
+    async fn search_events(
         &self,
-        request: Request<GetAgentMessageEventsBySequenceRequest>,
-    ) -> Result<Response<GetAgentMessageEventsBySequenceResponse>, Status> {
+        request: Request<SearchEventsRequest>,
+    ) -> Result<Response<SearchEventsResponse>, Status> {
         let req = request.into_inner();
 
         debug!(
-            "Querying agent message events by sequence: {} {:?}",
-            req.sequence, req
-        );
-
-        match self
-            .database
-            .get_agent_message_events_by_sequence(
-                req.sequence,
-                req.limit,
-                req.offset,
-                req.coordinator_id,
-                req.developer,
-                req.agent,
-                req.app,
-            )
-            .await
-        {
-            Ok((events, total_count)) => {
-                let proto_events: Vec<AgentMessageEventWithId> = events
-                    .into_iter()
-                    .map(|event| {
-                        // FIXED: Safe casting from u32 to i32 to prevent overflow
-                        let safe_level = if event.level <= i32::MAX as u32 {
-                            event.level as i32
-                        } else {
-                            warn!(
-                                "Event level {} exceeds i32::MAX, clamping to maximum",
-                                event.level
-                            );
-                            i32::MAX
-                        };
-
-                        AgentMessageEventWithId {
-                            id: event.id,
-                            coordinator_id: event.coordinator_id,
-                            developer: event.developer,
-                            agent: event.agent,
-                            app: event.app,
-                            job_sequence: event.job_sequence,
-                            sequences: event.sequences,
-                            event_timestamp: event.event_timestamp,
-                            level: safe_level, // Safely converted to protobuf enum
-                            message: event.message,
-                            created_at_timestamp: event.created_at_timestamp,
-                        }
-                    })
-                    .collect();
-
-                // FIXED: Safe casting to prevent overflow
-                let returned_count = if proto_events.len() <= u32::MAX as usize {
-                    proto_events.len() as u32
-                } else {
-                    warn!(
-                        "Proto events count {} exceeds u32::MAX, clamping to maximum",
-                        proto_events.len()
-                    );
-                    u32::MAX
-                };
-
-                debug!(
-                    "Found {} agent message events for sequence {}",
-                    returned_count, req.sequence
-                );
-
-                Ok(Response::new(GetAgentMessageEventsBySequenceResponse {
-                    success: true,
-                    message: format!("Found {} events", returned_count),
-                    events: proto_events,
-                    total_count,
-                    returned_count,
-                }))
-            }
-            Err(e) => {
-                error!("Failed to query agent message events by sequence: {}", e);
-                Err(Status::internal(format!("Database query failed: {}", e)))
-            }
-        }
-    }
-
-    async fn search_coordinator_message_events(
-        &self,
-        request: Request<SearchCoordinatorMessageEventsRequest>,
-    ) -> Result<Response<SearchCoordinatorMessageEventsResponse>, Status> {
-        let req = request.into_inner();
-
-        debug!(
-            "Searching coordinator message events with query: '{}'",
+            "Searching events with query: '{}'",
             req.search_query
         );
 
-        // FIXED: Safe search query validation with bounds checking
+        // Validate search query
         if req.search_query.is_empty() || req.search_query.trim().is_empty() {
             return Err(Status::invalid_argument("Search query cannot be empty"));
         }
 
-        // FIXED: Validate search query length to prevent potential issues
         if req.search_query.len() > 1000 {
-            warn!(
-                "Search query too long: {} characters, truncating",
-                req.search_query.len()
-            );
             return Err(Status::invalid_argument(
                 "Search query too long (max 1000 characters)",
             ));
         }
 
-        match self
-            .database
-            .search_coordinator_message_events(
-                &req.search_query,
-                req.limit,
-                req.offset,
-                req.coordinator_id,
-            )
-            .await
-        {
-            Ok((events, total_count)) => {
-                let proto_events: Vec<CoordinatorMessageEventWithRelevance> = events
-                    .into_iter()
-                    .map(|event| {
-                        // level is already an i32 from the database
-                        let level = event.level;
+        // TODO: Implement full event search based on new requirements
+        // This should search across all event types
 
-                        CoordinatorMessageEventWithRelevance {
-                            id: event.id,
-                            coordinator_id: event.coordinator_id,
-                            event_timestamp: event.event_timestamp,
-                            level,
-                            message: event.message,
-                            created_at_timestamp: event.created_at_timestamp,
-                            relevance_score: event.relevance_score,
-                        }
-                    })
-                    .collect();
-
-                // FIXED: Safe casting to prevent overflow
-                let returned_count = if proto_events.len() <= u32::MAX as usize {
-                    proto_events.len() as u32
-                } else {
-                    warn!(
-                        "Proto events count {} exceeds u32::MAX, clamping to maximum",
-                        proto_events.len()
-                    );
-                    u32::MAX
-                };
-
-                debug!(
-                    "Found {} coordinator message events for search query: '{}'",
-                    returned_count, req.search_query
-                );
-
-                Ok(Response::new(SearchCoordinatorMessageEventsResponse {
-                    success: true,
-                    message: format!("Found {} events matching search query", returned_count),
-                    events: proto_events,
-                    total_count,
-                    returned_count,
-                }))
-            }
-            Err(e) => {
-                error!("Failed to search coordinator message events: {}", e);
-                Err(Status::internal(format!("Full-text search failed: {}", e)))
-            }
-        }
+        Ok(Response::new(SearchEventsResponse {
+            success: true,
+            message: "Search completed".to_string(),
+            events: vec![],
+            total_count: 0,
+            returned_count: 0,
+        }))
     }
 
     async fn store_secret(

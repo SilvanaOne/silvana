@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, timeout};
 use tonic::Request;
 
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use proto::*;
 
 // Test configuration
@@ -47,7 +47,7 @@ async fn test_nats_roundtrip_latency() {
     let jetstream = async_nats::jetstream::new(nats_client);
 
     // Step 2: Connect to gRPC server
-    let mut grpc_client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let mut grpc_client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to gRPC server successfully");
             client

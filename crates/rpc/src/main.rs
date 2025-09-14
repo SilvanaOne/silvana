@@ -12,8 +12,8 @@ use tracing::{info, warn, error};
 
 use monitoring::{init_monitoring, spawn_monitoring_tasks, start_metrics_server};
 use proto::Event;
-use proto::events::silvana_events_service_server::SilvanaEventsServiceServer;
-use rpc::SilvanaEventsServiceImpl;
+use proto::silvana_rpc_service_server::SilvanaRpcServiceServer;
+use rpc::SilvanaRpcServiceImpl;
 use rpc::database::EventDatabase;
 use rpc::storage::S3Storage;
 use db::secrets_storage::SecureSecretsStorage;
@@ -152,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     spawn_monitoring_tasks(event_buffer.clone());
 
     // Initialize secrets storage if configured
-    let mut events_service = SilvanaEventsServiceImpl::new(event_buffer, Arc::clone(&database));
+    let mut events_service = SilvanaRpcServiceImpl::new(event_buffer, Arc::clone(&database));
     
     // Check if secrets storage is configured via environment variables
     let secrets_table = env::var("SECRETS_TABLE_NAME").ok();
@@ -221,11 +221,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create gRPC service with Prometheus metrics layer
-    let grpc_service = SilvanaEventsServiceServer::new(events_service);
+    let grpc_service = SilvanaRpcServiceServer::new(events_service);
 
     // Create reflection service
     let reflection_service = ReflectionBuilder::configure()
-        .register_encoded_file_descriptor_set(proto::events::FILE_DESCRIPTOR_SET)
+        .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1()
         .map_err(|e| anyhow::anyhow!("Failed to build reflection service: {}", e))?;
 

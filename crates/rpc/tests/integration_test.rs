@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 use tonic::Request;
 
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use proto::*;
 
 // Configuration - easily changeable parameters
@@ -112,7 +112,7 @@ async fn test_send_coordinator_and_agent_events() {
     };
 
     // Connect to the gRPC server
-    let client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
@@ -656,7 +656,7 @@ fn events_match_content(sent: &Event, received: &Event) -> bool {
 }
 
 async fn test_coordinator_events(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     sent_events: SentEventsCollector,
 ) {
     let start_time = Instant::now();
@@ -770,7 +770,7 @@ async fn test_coordinator_events(
 }
 
 async fn test_agent_events(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     sent_events: SentEventsCollector,
 ) {
     let start_time = Instant::now();
@@ -880,7 +880,7 @@ async fn test_agent_events(
 }
 
 async fn test_batch_events(
-    client: &mut SilvanaEventsServiceClient<tonic::transport::Channel>,
+    client: &mut SilvanaRpcServiceClient<tonic::transport::Channel>,
     sent_events: SentEventsCollector,
 ) {
     let start_time = Instant::now();

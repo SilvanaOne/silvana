@@ -1,15 +1,15 @@
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tonic::transport::Channel;
 use tracing::info;
 
 /// Shared gRPC client instance for thread-safe access across crates
-static SHARED_CLIENT: OnceCell<Arc<SilvanaEventsServiceClient<Channel>>> = OnceCell::const_new();
+static SHARED_CLIENT: OnceCell<Arc<SilvanaRpcServiceClient<Channel>>> = OnceCell::const_new();
 
 /// Get or create a shared gRPC client instance
 /// This ensures only one connection is created and reused across all components
-pub async fn get_shared_client() -> Result<SilvanaEventsServiceClient<Channel>, crate::RpcClientError> {
+pub async fn get_shared_client() -> Result<SilvanaRpcServiceClient<Channel>, crate::RpcClientError> {
     // Try to get the existing client
     if let Some(client) = SHARED_CLIENT.get() {
         return Ok((**client).clone());
@@ -24,7 +24,7 @@ pub async fn get_shared_client() -> Result<SilvanaEventsServiceClient<Channel>, 
     info!("Creating shared gRPC client connection to: {}", config.endpoint);
     
     // Create the client
-    let client = SilvanaEventsServiceClient::connect(config.endpoint.clone())
+    let client = SilvanaRpcServiceClient::connect(config.endpoint.clone())
         .await
         .map_err(crate::RpcClientError::TransportError)?;
     

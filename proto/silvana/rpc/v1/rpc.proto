@@ -348,7 +348,7 @@ message RetrieveSecretResponse {
 }
 
 // gRPC service definition
-service SilvanaEventsService {
+service SilvanaRpcService {
   rpc SubmitEvents(SubmitEventsRequest) returns (SubmitEventsResponse);
   rpc SubmitEvent(SubmitEventRequest) returns (SubmitEventResponse);
 

@@ -1,6 +1,6 @@
 use crate::agent::AgentJobDatabase;
 use crate::jobs::JobsTracker;
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -160,7 +160,7 @@ pub struct SharedState {
     jobs_tracker: JobsTracker,
     agent_job_db: AgentJobDatabase, // Memory database for agent job tracking
     has_pending_jobs: Arc<AtomicBool>, // Fast check for pending jobs availability
-    rpc_client: Arc<RwLock<Option<SilvanaEventsServiceClient<Channel>>>>, // Silvana RPC service client
+    rpc_client: Arc<RwLock<Option<SilvanaRpcServiceClient<Channel>>>>, // Silvana RPC service client
     shutdown_flag: Arc<AtomicBool>, // Global shutdown flag for graceful shutdown
     force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
     app_instance_filter: Arc<RwLock<Option<String>>>, // Optional filter to only process jobs from a specific app instance
@@ -432,7 +432,7 @@ impl SharedState {
     }
 
     /// Get the Silvana RPC client (if initialized)
-    pub async fn get_rpc_client(&self) -> Option<SilvanaEventsServiceClient<Channel>> {
+    pub async fn get_rpc_client(&self) -> Option<SilvanaRpcServiceClient<Channel>> {
         let lock = self.rpc_client.read().await;
         lock.clone()
     }

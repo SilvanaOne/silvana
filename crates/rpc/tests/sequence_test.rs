@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tonic::Request;
 
-use proto::silvana_events_service_client::SilvanaEventsServiceClient;
+use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use proto::*;
 
 // Test configuration
@@ -36,7 +36,7 @@ async fn test_sequence_events_round_trip() {
     // Connect to the gRPC server (tonic handles TLS automatically for https:// URLs)
     println!("🔗 Attempting to connect to: {}", server_addr);
 
-    let mut client = match SilvanaEventsServiceClient::connect(server_addr.clone()).await {
+    let mut client = match SilvanaRpcServiceClient::connect(server_addr.clone()).await {
         Ok(client) => {
             println!("✅ Connected to RPC server successfully");
             client
@@ -140,14 +140,14 @@ async fn test_sequence_events_round_trip() {
             let query_start = std::time::Instant::now();
 
             // Query AgentMessageEvents by sequence
-            let message_request = Request::new(GetAgentMessageEventsBySequenceRequest {
-                sequence,
-                limit: None,
+            // Query message events by sequence
+            // Note: Since the new API only has GetEventsByAppInstanceSequence,
+            // we'll need to adapt the test to use SearchEvents instead
+            let message_search_request = Request::new(SearchEventsRequest {
+                search_query: format!("coordinator_id:{} sequence:{}", coordinator_id, sequence),
+                limit: Some(100),
                 offset: None,
                 coordinator_id: Some(coordinator_id.clone()),
-                developer: None,
-                agent: None,
-                app: None,
             });
 
             println!("Message request: {:?}", &message_request);
@@ -165,14 +165,14 @@ async fn test_sequence_events_round_trip() {
             };
 
             // Query AgentTransactionEvents by sequence
-            let tx_request = Request::new(GetAgentTransactionEventsBySequenceRequest {
-                sequence,
-                limit: None,
+            // Query transaction events by sequence
+            // Note: Since the new API only has GetEventsByAppInstanceSequence,
+            // we'll need to adapt the test to use SearchEvents instead
+            let tx_search_request = Request::new(SearchEventsRequest {
+                search_query: format!("coordinator_id:{} sequence:{}", coordinator_id, sequence),
+                limit: Some(100),
                 offset: None,
                 coordinator_id: Some(coordinator_id.clone()),
-                developer: None,
-                agent: None,
-                app: None,
             });
 
             let tx_response = match client
