@@ -45,6 +45,8 @@ export default function Home() {
   > | null>(null);
   const [nats, setNats] = useState<ReturnType<typeof jetstream> | null>(null);
   const [natsConsumer, setNatsConsumer] = useState<Consumer | null>(null);
+  const [backgroundMonitoringPaused, setBackgroundMonitoringPaused] =
+    useState<boolean>(false);
 
   useEffect(() => {
     const initializeGrpc = async () => {
@@ -122,6 +124,12 @@ export default function Home() {
           // Use fetch instead of consume for simpler message retrieval
           // This avoids the concurrent consume issue with ordered consumers
           while (isActive) {
+            // Skip fetching if background monitoring is paused
+            if (backgroundMonitoringPaused) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              continue;
+            }
+
             try {
               // Fetch up to 10 messages with a 1 second timeout
               const messages = await natsConsumer.fetch({
@@ -185,7 +193,7 @@ export default function Home() {
     return () => {
       isActive = false;
     };
-  }, [natsConsumer, isLoading]);
+  }, [natsConsumer, isLoading, backgroundMonitoringPaused]);
 
   // Update connection status dots
   useEffect(() => {
@@ -222,11 +230,18 @@ export default function Home() {
     }
     const { coordinatorId, start } = params;
 
+    // Pause background monitoring
+    setBackgroundMonitoringPaused(true);
+    console.log(
+      "⏸️ Pausing background monitoring for button-triggered processing"
+    );
+
     console.log(
       "🔍 Starting NATS message processing for coordinator:",
       coordinatorId
     );
     let messageCount = 0;
+    let foundOurMessage = false;
 
     try {
       let message = await natsConsumer.next({
@@ -307,6 +322,7 @@ export default function Home() {
           if (isRelevant) {
             setNatsRoundtripDelay(endNats - start);
             console.log("Found our message!");
+            foundOurMessage = true;
           }
         } catch (error: unknown) {
           console.log(
@@ -327,16 +343,27 @@ export default function Home() {
       );
       setError(error instanceof Error ? error.message : "Unknown NATS error");
       setNatsConnection("error");
+      // Resume background monitoring even on error
+      setBackgroundMonitoringPaused(false);
+      console.log("▶️ Resuming background monitoring after error");
       return;
+    } finally {
+      // Always resume background monitoring
+      setBackgroundMonitoringPaused(false);
+      console.log("▶️ Resuming background monitoring");
     }
 
     // Only show timeout error if we didn't receive ANY events
-    if (natsMessageLog.length === 0) {
+    if (messageCount === 0) {
       setError("NATS message timeout - no events received");
       setNatsConnection("error");
+    } else if (!foundOurMessage) {
+      console.log(
+        `Received ${messageCount} NATS events (none matched our coordinator ID)`
+      );
     } else {
       console.log(
-        `Received ${natsMessageLog.length} NATS events (none matched our coordinator ID)`
+        `Successfully received our message among ${messageCount} NATS events`
       );
     }
   }

@@ -46,6 +46,7 @@ pub async fn search_all_events_parallel(
 
         // Use different query strategy based on field type
         let query = if is_id_field(index.column_name) {
+            debug!("Creating LIKE query for ID field {} in table {}", index.column_name, index.table_name);
             // For ID fields (hex strings), use LIKE query
             format!(
                 "SELECT {} as pk, '{}' as table_name, '{}' as matched_column, \
@@ -87,11 +88,14 @@ pub async fn search_all_events_parallel(
         queries.push((index.table_name, index.column_name, query));
     }
 
+    debug!("Executing {} parallel queries", queries.len());
+
     // Execute all queries in parallel
     let conn = crate::database::get_connection(database);
     let mut futures = Vec::new();
 
-    for (_table, _column, query) in queries {
+    for (table, column, query) in queries {
+        debug!("Executing query for table {} column {}: {}", table, column, &query[..query.len().min(200)]);
         let conn_clone = conn.clone();
         let query_clone = query.clone();
         futures.push(async move { execute_search_query(&conn_clone, &query_clone).await });
@@ -111,18 +115,26 @@ pub async fn search_all_events_parallel(
 
     for result in results {
         if let Ok(rows) = result {
+            debug!("Got {} rows from a query", rows.len());
             for row in rows {
-                if let Ok(pk) = row.try_get::<String>("", "pk") {
-                    let table_name = row.try_get::<String>("", "table_name").unwrap_or_default();
-                    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
+                // Try to get values by column index instead of name
+                if let Ok(pk) = row.try_get_by_index::<String>(0) {
+                    let table_name = row.try_get_by_index::<String>(1).unwrap_or_default();
+                    let _matched_column = row.try_get_by_index::<String>(2).unwrap_or_default();
+                    let relevance_score = row.try_get_by_index::<f64>(3).unwrap_or(0.0);
 
+                    debug!("Found match: table={}, pk={}, score={}", table_name, pk, relevance_score);
                     matches.push(SearchMatch {
                         table_name,
                         primary_key: pk,
                         relevance_score,
                     });
+                } else {
+                    debug!("Failed to get pk from row");
                 }
             }
+        } else if let Err(e) = result {
+            debug!("Query failed: {:?}", e);
         }
     }
 
