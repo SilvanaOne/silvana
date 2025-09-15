@@ -5820,6 +5820,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "kms",
+ "lazy_static",
  "monitoring",
  "nats",
  "prost",

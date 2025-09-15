@@ -2,6 +2,7 @@
 pub mod adapters;
 pub mod database;
 pub mod database_search;
+pub mod fulltext_indexes;
 pub mod storage;
 
 // Service implementations

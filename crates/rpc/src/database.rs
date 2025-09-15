@@ -3,7 +3,7 @@ use proto::Event;
 use sea_orm::{Database, DatabaseConnection, EntityTrait, TransactionTrait};
 use std::time::Instant;
 use tidb as entities;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 // Result structs for query responses
 #[derive(Debug, Clone)]
@@ -123,7 +123,8 @@ impl EventDatabase {
                         agent_session_finished_events.push(convert_agent_session_finished_event(e));
                     }
                     EventType::JobCreated(e) => {
-                        let (main_event, sequences, merged_sequences_1, merged_sequences_2) = convert_job_created_event(e);
+                        let (main_event, sequences, merged_sequences_1, merged_sequences_2) =
+                            convert_job_created_event(e);
                         jobs_events.push(main_event);
 
                         let mut sequences_vec = Vec::new();
@@ -163,7 +164,8 @@ impl EventDatabase {
                         settlement_transaction_events.push(convert_settlement_transaction_event(e));
                     }
                     EventType::SettlementTransactionIncluded(e) => {
-                        settlement_transaction_included_events.push(convert_settlement_transaction_included_event(e));
+                        settlement_transaction_included_events
+                            .push(convert_settlement_transaction_included_event(e));
                     }
                     EventType::AgentMessage(e) => {
                         agent_message_events.push(convert_agent_message_event(e));
@@ -185,7 +187,10 @@ impl EventDatabase {
             self.insert_coordination_tx_events(&txn, coordination_tx_events),
             self.insert_coordinator_message_events(&txn, coordinator_message_events),
             self.insert_settlement_transaction_events(&txn, settlement_transaction_events),
-            self.insert_settlement_transaction_included_events(&txn, settlement_transaction_included_events),
+            self.insert_settlement_transaction_included_events(
+                &txn,
+                settlement_transaction_included_events
+            ),
             self.insert_agent_message_events(&txn, agent_message_events),
         )?;
 
@@ -200,11 +205,7 @@ impl EventDatabase {
         // Phase 2: Handle parent-child relationships for events with sequences
         //debug!("Phase 2: Running parent-child table insertions");
         let _parent_child_results = tokio::try_join!(
-            self.insert_jobs_with_sequences(
-                &txn,
-                jobs_events,
-                &job_sequences_data
-            ),
+            self.insert_jobs_with_sequences(&txn, jobs_events, &job_sequences_data),
             self.insert_proof_events_with_sequences(
                 &txn,
                 proof_events,
@@ -369,7 +370,10 @@ impl EventDatabase {
                 Ok(events_len)
             }
             Err(e) => {
-                error!("Failed to batch insert agent_session_finished_events: {}", e);
+                error!(
+                    "Failed to batch insert agent_session_finished_events: {}",
+                    e
+                );
                 Err(e.into())
             }
         }
@@ -522,7 +526,10 @@ impl EventDatabase {
                 Ok(events_len)
             }
             Err(e) => {
-                error!("Failed to batch insert settlement_transaction_events: {}", e);
+                error!(
+                    "Failed to batch insert settlement_transaction_events: {}",
+                    e
+                );
                 Err(e.into())
             }
         }
@@ -537,7 +544,10 @@ impl EventDatabase {
             return Ok(0);
         }
 
-        debug!("Inserting {} settlement_transaction_included_events", events.len());
+        debug!(
+            "Inserting {} settlement_transaction_included_events",
+            events.len()
+        );
         let events_len = events.len();
         match entities::settlement_transaction_included_in_block_event::Entity::insert_many(events)
             .exec(txn)
@@ -548,7 +558,10 @@ impl EventDatabase {
                 Ok(events_len)
             }
             Err(e) => {
-                error!("Failed to batch insert settlement_transaction_included_events: {}", e);
+                error!(
+                    "Failed to batch insert settlement_transaction_included_events: {}",
+                    e
+                );
                 Err(e.into())
             }
         }
@@ -603,7 +616,8 @@ impl EventDatabase {
 
         // Insert sequences child records
         if !sequences_data_per_event.is_empty() {
-            let sequence_records = self.create_job_sequence_records(&events, sequences_data_per_event);
+            let sequence_records =
+                self.create_job_sequence_records(&events, sequences_data_per_event);
             if !sequence_records.is_empty() {
                 debug!("Inserting {} job_sequences records", sequence_records.len());
                 entities::job_sequences::Entity::insert_many(sequence_records)
@@ -637,9 +651,16 @@ impl EventDatabase {
 
         // Insert sequences child records
         if !sequences_data_per_event.is_empty() {
-            let sequence_records = self.create_proof_event_sequence_records(&events, base_id, sequences_data_per_event);
+            let sequence_records = self.create_proof_event_sequence_records(
+                &events,
+                base_id,
+                sequences_data_per_event,
+            );
             if !sequence_records.is_empty() {
-                debug!("Inserting {} proof_event_sequences records", sequence_records.len());
+                debug!(
+                    "Inserting {} proof_event_sequences records",
+                    sequence_records.len()
+                );
                 entities::proof_event_sequences::Entity::insert_many(sequence_records)
                     .exec(txn)
                     .await?;
@@ -1279,9 +1300,9 @@ fn convert_job_created_event(
     event: &proto::JobCreatedEvent,
 ) -> (
     entities::jobs::ActiveModel,
-    Vec<u64>,  // sequences
-    Vec<u64>,  // merged_sequences_1
-    Vec<u64>,  // merged_sequences_2
+    Vec<u64>, // sequences
+    Vec<u64>, // merged_sequences_1
+    Vec<u64>, // merged_sequences_2
 ) {
     use entities::jobs::*;
     use sea_orm::ActiveValue;
@@ -1319,7 +1340,12 @@ fn convert_job_created_event(
         updated_at: ActiveValue::NotSet,
     };
 
-    (active_model, event.sequences.clone(), event.merged_sequences_1.clone(), event.merged_sequences_2.clone())
+    (
+        active_model,
+        event.sequences.clone(),
+        event.merged_sequences_1.clone(),
+        event.merged_sequences_2.clone(),
+    )
 }
 
 fn convert_job_started_event(
@@ -1412,7 +1438,7 @@ fn convert_proof_event(
     event: &proto::ProofEvent,
 ) -> (
     entities::proof_event::ActiveModel,
-    Vec<(u64, String)>,  // (sequence, sequence_type) for child table
+    Vec<(u64, String)>, // (sequence, sequence_type) for child table
 ) {
     use entities::proof_event::*;
     use sea_orm::ActiveValue;
@@ -1706,11 +1732,8 @@ pub async fn search_coordinator_messages(
         main_query.push_str(&format!(" OFFSET {}", offset_val));
     }
 
-    let main_stmt = Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::MySql,
-        &main_query,
-        params
-    );
+    let main_stmt =
+        Statement::from_sql_and_values(sea_orm::DatabaseBackend::MySql, &main_query, params);
 
     let results = database.connection.query_all(main_stmt).await?;
 
@@ -1718,7 +1741,9 @@ pub async fn search_coordinator_messages(
     let mut events = Vec::new();
     for row in results.iter() {
         let id = row.try_get::<i64>("", "id").unwrap_or(0);
-        let coordinator_id = row.try_get::<String>("", "coordinator_id").unwrap_or_default();
+        let coordinator_id = row
+            .try_get::<String>("", "coordinator_id")
+            .unwrap_or_default();
         let event_timestamp = row.try_get::<i64>("", "event_timestamp").unwrap_or(0) as u64;
         let level = row.try_get::<i8>("", "level").unwrap_or(0) as i32;
         let message = row.try_get::<String>("", "message").unwrap_or_default();
@@ -1731,7 +1756,7 @@ pub async fn search_coordinator_messages(
                     event_timestamp,
                     level,
                     message,
-                }
+                },
             )),
         };
 
