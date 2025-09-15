@@ -211,10 +211,11 @@ message SubmitEventResponse {
 
 // Query request/response messages for getting events by sequence
 message GetEventsByAppInstanceSequenceRequest {
-  uint64 sequence = 1;
-  optional uint32 limit = 2;    // Optional pagination limit
-  optional uint32 offset = 3;   // Optional pagination offset
-  string app_instance_id = 4;
+  string app_instance_id = 1;
+  uint64 sequence = 2;
+  optional uint32 limit = 3;    // Optional pagination limit
+  optional uint32 offset = 4;   // Optional pagination offset
+  
 }
 
 
@@ -229,9 +230,7 @@ message GetEventsByAppInstanceSequenceResponse {
 // Full-text search request/response messages for CoordinatorMessageEvent
 message SearchEventsRequest {
   string search_query = 1;              // Search terms for full-text search
-  optional uint32 limit = 2;            // Optional pagination limit
-  optional uint32 offset = 3;           // Optional pagination offset
-  optional string coordinator_id = 4;   // Optional filter by coordinator
+  optional uint32 limit = 2;            // Optional limit per fulltext index
 }
 
 message EventWithRelevance {
@@ -244,8 +243,6 @@ message SearchEventsResponse {
   bool success = 1;
   string message = 2;
   repeated EventWithRelevance events = 3;
-  uint32 total_count = 4;                // Total matching events (for pagination)
-  uint32 returned_count = 5;             // Number of events in this response
 }
 
 // Proof cache messages

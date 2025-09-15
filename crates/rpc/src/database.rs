@@ -1357,6 +1357,7 @@ fn convert_job_finished_event(
         job_id: ActiveValue::Set(event.job_id.clone()), // Primary key
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         duration: ActiveValue::Set(event.duration as i64),
+        cost: ActiveValue::Set(event.cost as i64),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         result: ActiveValue::Set(result_str.to_string()),
         created_at: ActiveValue::NotSet,
@@ -1756,4 +1757,29 @@ pub async fn search_coordinator_messages(
         total_count,
         returned_count,
     })
+}
+
+/// Helper function to parse JSON array of u64 values
+pub fn parse_json_array(json_str: &str) -> Result<Vec<u64>> {
+    if json_str.is_empty() || json_str == "null" {
+        return Ok(Vec::new());
+    }
+
+    serde_json::from_str::<Vec<u64>>(json_str)
+        .map_err(|e| anyhow::anyhow!("Failed to parse JSON array: {}", e))
+}
+
+/// Get database connection
+pub fn get_connection(database: &EventDatabase) -> &sea_orm::DatabaseConnection {
+    &database.connection
+}
+
+/// Search all tables with fulltext indexes and return the most relevant events (deprecated - use search_all_events_parallel)
+pub async fn search_all_events(
+    database: &EventDatabase,
+    search_query: &str,
+    limit: Option<u32>,
+) -> Result<SearchResult> {
+    // Redirect to the parallel implementation
+    crate::database_search::search_all_events_parallel(database, search_query, limit).await
 }
