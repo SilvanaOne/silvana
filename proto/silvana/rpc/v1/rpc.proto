@@ -25,6 +25,17 @@ enum JobResult {
   JOB_RESULT_TERMINATED = 3;
 }
 
+// Job result enumeration
+enum ProofEventType {
+  PROOF_EVENT_TYPE_UNSPECIFIED = 0;
+  PROOF_SUBMITTED = 1;
+  PROOF_FETCHED = 2;
+  PROOF_VERIFIED = 3;
+  PROOF_UNAVAILABLE = 5;
+  PROOF_REJECTED = 6;
+}
+
+
 // Coordinator Events
 message CoordinatorStartedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
@@ -48,6 +59,15 @@ message AgentSessionStartedEvent {
   string agent = 3 [ (silvana.options.v1.search) = true];
   string agent_method = 4 [ (silvana.options.v1.search) = true];
   string session_id = 5 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 6;
+}
+
+message AgentSessionFinishedEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  string session_log = 3;
+  uint64 duration = 4;
+  uint64 cost = 5;
   uint64 event_timestamp = 6;
 }
 
@@ -76,8 +96,9 @@ message JobFinishedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string job_id = 2 [ (silvana.options.v1.search) = true];
   uint64 duration = 3;
-  uint64 event_timestamp = 4;
-  JobResult result = 5;
+  uint64 cost = 4;
+  uint64 event_timestamp = 5;
+  JobResult result = 6;
 }
 
 message CoordinationTxEvent {
@@ -93,36 +114,40 @@ message CoordinatorMessageEvent {
   string message = 4 [ (silvana.options.v1.search) = true];
 }
 
-message ProofSubmittedEvent {
+message ProofEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string session_id = 2 [ (silvana.options.v1.search) = true];
   string app_instance_id = 3 [ (silvana.options.v1.search) = true];
   string job_id = 4 [ (silvana.options.v1.search) = true];
   string data_availability = 5;
   uint64 block_number = 6;
-  repeated uint64 sequences = 7 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_1 = 8 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_2 = 9 [ (silvana.options.v1.sequences) = true];
-  uint64 event_timestamp = 10;
+  optional bool block_proof = 7;
+  ProofEventType proof_event_type = 8;
+  repeated uint64 sequences = 9 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_1 = 10 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_2 = 11 [ (silvana.options.v1.sequences) = true];
+  uint64 event_timestamp = 12;
 }
 
 message SettlementTransactionEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string session_id = 2 [ (silvana.options.v1.search) = true];
   string app_instance_id = 3 [ (silvana.options.v1.search) = true];
-  string job_id = 4 [ (silvana.options.v1.search) = true];
-  uint64 block_number = 5;
-  string tx_hash = 6 [ (silvana.options.v1.search) = true];
-  uint64 event_timestamp = 7;
+  string chain = 4;
+  string job_id = 5 [ (silvana.options.v1.search) = true];
+  uint64 block_number = 6;
+  string tx_hash = 7 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 8;
 }
 
 message SettlementTransactionIncludedInBlockEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string session_id = 2 [ (silvana.options.v1.search) = true];
   string app_instance_id = 3 [ (silvana.options.v1.search) = true];
-  string job_id = 4 [ (silvana.options.v1.search) = true];
-  uint64 block_number = 5;
-  uint64 event_timestamp = 6;
+  string chain = 4;
+  string job_id = 5 [ (silvana.options.v1.search) = true];
+  uint64 block_number = 6;
+  uint64 event_timestamp = 7;
 }
 
 // Agent Events
@@ -145,13 +170,14 @@ message Event {
 
     // Session and job events
     AgentSessionStartedEvent agent_session_started = 4;
+    AgentSessionFinishedEvent agent_session_finished = 14;
     JobCreatedEvent job_created = 5;
     JobStartedEvent job_started = 6;
     JobFinishedEvent job_finished = 7;
 
     // Transaction and proof events
     CoordinationTxEvent coordination_tx = 8;
-    ProofSubmittedEvent proof_submitted = 9;
+    ProofEvent proof_event = 9;
     SettlementTransactionEvent settlement_transaction = 10;
     SettlementTransactionIncludedInBlockEvent settlement_transaction_included = 11;
 
@@ -185,10 +211,11 @@ message SubmitEventResponse {
 
 // Query request/response messages for getting events by sequence
 message GetEventsByAppInstanceSequenceRequest {
-  uint64 sequence = 1;
-  optional uint32 limit = 2;    // Optional pagination limit
-  optional uint32 offset = 3;   // Optional pagination offset
-  string app_instance_id = 4;
+  string app_instance_id = 1;
+  uint64 sequence = 2;
+  optional uint32 limit = 3;    // Optional pagination limit
+  optional uint32 offset = 4;   // Optional pagination offset
+  
 }
 
 
@@ -203,9 +230,7 @@ message GetEventsByAppInstanceSequenceResponse {
 // Full-text search request/response messages for CoordinatorMessageEvent
 message SearchEventsRequest {
   string search_query = 1;              // Search terms for full-text search
-  optional uint32 limit = 2;            // Optional pagination limit
-  optional uint32 offset = 3;           // Optional pagination offset
-  optional string coordinator_id = 4;   // Optional filter by coordinator
+  optional uint32 limit = 2;            // Optional limit per fulltext index
 }
 
 message EventWithRelevance {
@@ -218,8 +243,6 @@ message SearchEventsResponse {
   bool success = 1;
   string message = 2;
   repeated EventWithRelevance events = 3;
-  uint32 total_count = 4;                // Total matching events (for pagination)
-  uint32 returned_count = 5;             // Number of events in this response
 }
 
 // Proof cache messages

@@ -138,7 +138,13 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
 
     // Generate individual event tables based on proto messages
     for message in messages {
-        let table_name = message.name.to_snake_case();
+        let table_name = if message.name == "JobCreatedEvent" {
+            "jobs".to_string()
+        } else if message.name == "AgentSessionStartedEvent" {
+            "agent_session".to_string()
+        } else {
+            message.name.to_snake_case()
+        };
 
         // Collect fields with `sequences` option – these will become child tables and NOT columns
         let mut sequence_fields: Vec<&ProtoField> = Vec::new();
@@ -156,12 +162,31 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
             }
         ));
 
-        // Add auto-increment primary key
-        ddl.push_str("    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,\n");
+        // Special case: JobCreatedEvent, JobStartedEvent, JobFinishedEvent use job_id as primary key
+        // AgentSessionStartedEvent, AgentSessionFinishedEvent use session_id as primary key
+        if message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent"
+            || message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent" {
+            // Don't add auto-increment id, job_id or session_id will be the primary key
+        } else {
+            // Add auto-increment primary key for other tables
+            ddl.push_str("    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,\n");
+        }
 
         // Convert proto fields to MySQL columns
         for field in &message.fields {
-            // Fields with sequences option are extracted into child tables
+            // Special handling for JobCreatedEvent and ProofEvent - keep sequences in both main table and child table
+            if (message.name == "JobCreatedEvent" || message.name == "ProofEvent") && field.has_sequences_option {
+                sequence_fields.push(field);
+                // Also add as JSON column in main table (array of u64/BIGINT UNSIGNED)
+                let column_name = field.name.to_snake_case();
+                ddl.push_str(&format!(
+                    "    `{}` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',\n",
+                    column_name
+                ));
+                continue;
+            }
+
+            // For other tables, fields with sequences option are only in child tables
             if field.has_sequences_option {
                 sequence_fields.push(field);
                 continue;
@@ -185,11 +210,23 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                 "NOT NULL"
             };
 
-            // Wrap column name in backticks to handle reserved keywords
-            ddl.push_str(&format!(
-                "    `{}` {} {},\n",
-                column_name, mysql_type, nullable
-            ));
+            // Special handling for job_id as primary key in job-related tables
+            // and session_id as primary key in agent session tables
+            if ((message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent")
+                && field.name == "job_id")
+                || ((message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent")
+                && field.name == "session_id") {
+                ddl.push_str(&format!(
+                    "    `{}` {} {} PRIMARY KEY,\n",
+                    column_name, mysql_type, nullable
+                ));
+            } else {
+                // Wrap column name in backticks to handle reserved keywords
+                ddl.push_str(&format!(
+                    "    `{}` {} {},\n",
+                    column_name, mysql_type, nullable
+                ));
+            }
         }
 
         // Add metadata columns
@@ -247,33 +284,13 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
         ddl.push_str("\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n");
 
         // ------------------------------------------------------------------
-        // Child tables for each field with sequences option
+        // Child tables for fields with sequences option
         // ------------------------------------------------------------------
-        for field in sequence_fields {
-            // Shorten long field names to avoid MySQL constraint name length limits
-            let field_suffix = if field.name == "merged_sequences_1" {
-                "ms1".to_string()
-            } else if field.name == "merged_sequences_2" {
-                "ms2".to_string()
-            } else {
-                field.name.to_snake_case()
-            };
+        // Special handling for JobCreatedEvent - single merged table for all sequences
+        if message.name == "JobCreatedEvent" && !sequence_fields.is_empty() {
+            let child_table_name = "job_sequences".to_string();
 
-            let child_table_name = format!("{}_{}", table_name, field_suffix);
-            let parent_fk = format!("{}_id", table_name); // e.g. agent_message_event_id
-            let value_col = field.name.to_singular().to_snake_case(); // e.g. sequences -> sequence
-
-            let mysql_type = proto_type_to_mysql_with_options(
-                &field.field_type,
-                /* is_repeated = */ false,
-                false,
-                field.name.contains("metadata") || field.name.contains("message"),
-            );
-
-            ddl.push_str(&format!(
-                "-- Child table for repeated field `{}`\n",
-                field.name
-            ));
+            ddl.push_str("-- Job sequences table for mapping (app_instance_id, sequence) => job_id\n");
             ddl.push_str(&format!(
                 "CREATE TABLE IF NOT EXISTS {} (\n",
                 if database.is_empty() {
@@ -282,24 +299,105 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                     format!("`{}`.`{}`", database, child_table_name)
                 }
             ));
+
+            // Allow multiple job_ids for same (app_instance_id, sequence) combination
             ddl.push_str("    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,\n");
-            ddl.push_str(&format!("    `{}` BIGINT NOT NULL,\n", parent_fk));
-            ddl.push_str(&format!("    `{}` {} NOT NULL,\n", value_col, mysql_type));
+            ddl.push_str("    `app_instance_id` VARCHAR(255) NOT NULL,\n");
+            ddl.push_str("    `sequence` BIGINT NOT NULL,\n");
+            ddl.push_str("    `job_id` VARCHAR(255) NOT NULL,\n");
+            ddl.push_str("    `sequence_type` ENUM('sequences', 'merged_sequences_1', 'merged_sequences_2') NOT NULL,\n");
             ddl.push_str("    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n");
             ddl.push_str("    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n");
-            ddl.push_str(&format!(
-                "    INDEX idx_{}_parent (`{}`),\n",
-                child_table_name, parent_fk
-            ));
-            ddl.push_str(&format!(
-                "    INDEX idx_{}_value (`{}`),\n",
-                child_table_name, value_col
-            ));
-            ddl.push_str(&format!(
-                "    CONSTRAINT fk_{}_{} FOREIGN KEY (`{}`) REFERENCES {} (`id`) ON DELETE CASCADE\n",
-                child_table_name, parent_fk, parent_fk, table_name
-            ));
+            ddl.push_str("    INDEX idx_job_sequences_lookup (`app_instance_id`, `sequence`, `sequence_type`),\n");
+            ddl.push_str("    INDEX idx_job_sequences_job_id (`job_id`),\n");
+            ddl.push_str("    UNIQUE KEY uk_job_sequences (`app_instance_id`, `sequence`, `sequence_type`, `job_id`),\n");
+            ddl.push_str(
+                "    CONSTRAINT fk_job_sequences_job_id FOREIGN KEY (`job_id`) REFERENCES jobs (`job_id`) ON DELETE CASCADE\n"
+            );
             ddl.push_str(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n");
+        // Special handling for ProofEvent - single merged table for all sequences
+        } else if message.name == "ProofEvent" && !sequence_fields.is_empty() {
+            let child_table_name = "proof_event_sequences".to_string();
+
+            ddl.push_str("-- Proof event sequences table for mapping (app_instance_id, sequence) => proof_event_id\n");
+            ddl.push_str(&format!(
+                "CREATE TABLE IF NOT EXISTS {} (\n",
+                if database.is_empty() {
+                    child_table_name.clone()
+                } else {
+                    format!("`{}`.`{}`", database, child_table_name)
+                }
+            ));
+
+            // Allow multiple proof_event_ids for same (app_instance_id, sequence) combination
+            ddl.push_str("    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,\n");
+            ddl.push_str("    `app_instance_id` VARCHAR(255) NOT NULL,\n");
+            ddl.push_str("    `sequence` BIGINT NOT NULL,\n");
+            ddl.push_str("    `proof_event_id` BIGINT NOT NULL,\n");
+            ddl.push_str("    `sequence_type` ENUM('sequences', 'merged_sequences_1', 'merged_sequences_2') NOT NULL,\n");
+            ddl.push_str("    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n");
+            ddl.push_str("    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n");
+            ddl.push_str("    INDEX idx_proof_event_sequences_lookup (`app_instance_id`, `sequence`, `sequence_type`),\n");
+            ddl.push_str("    INDEX idx_proof_event_sequences_proof_event_id (`proof_event_id`),\n");
+            ddl.push_str("    UNIQUE KEY uk_proof_event_sequences (`app_instance_id`, `sequence`, `sequence_type`, `proof_event_id`),\n");
+            ddl.push_str(
+                "    CONSTRAINT fk_proof_event_sequences_proof_event_id FOREIGN KEY (`proof_event_id`) REFERENCES proof_event (`id`) ON DELETE CASCADE\n"
+            );
+            ddl.push_str(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n");
+        } else {
+            // Normal handling for other tables - create separate child tables for each sequence field
+            for field in sequence_fields {
+                // Shorten long field names to avoid MySQL constraint name length limits
+                let field_suffix = if field.name == "merged_sequences_1" {
+                    "ms1".to_string()
+                } else if field.name == "merged_sequences_2" {
+                    "ms2".to_string()
+                } else {
+                    field.name.to_snake_case()
+                };
+
+                let child_table_name = format!("{}_{}", table_name, field_suffix);
+                let parent_fk = format!("{}_id", table_name); // e.g. agent_message_event_id
+                let value_col = field.name.to_singular().to_snake_case(); // e.g. sequences -> sequence
+
+                let mysql_type = proto_type_to_mysql_with_options(
+                    &field.field_type,
+                    /* is_repeated = */ false,
+                    false,
+                    field.name.contains("metadata") || field.name.contains("message"),
+                );
+
+                ddl.push_str(&format!(
+                    "-- Child table for repeated field `{}`\n",
+                    field.name
+                ));
+                ddl.push_str(&format!(
+                    "CREATE TABLE IF NOT EXISTS {} (\n",
+                    if database.is_empty() {
+                        child_table_name.clone()
+                    } else {
+                        format!("`{}`.`{}`", database, child_table_name)
+                    }
+                ));
+                ddl.push_str("    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,\n");
+                ddl.push_str(&format!("    `{}` BIGINT NOT NULL,\n", parent_fk));
+                ddl.push_str(&format!("    `{}` {} NOT NULL,\n", value_col, mysql_type));
+                ddl.push_str("    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n");
+                ddl.push_str("    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n");
+                ddl.push_str(&format!(
+                    "    INDEX idx_{}_parent (`{}`),\n",
+                    child_table_name, parent_fk
+                ));
+                ddl.push_str(&format!(
+                    "    INDEX idx_{}_value (`{}`),\n",
+                    child_table_name, value_col
+                ));
+                ddl.push_str(&format!(
+                    "    CONSTRAINT fk_{}_{} FOREIGN KEY (`{}`) REFERENCES {} (`id`) ON DELETE CASCADE\n",
+                    child_table_name, parent_fk, parent_fk, table_name
+                ));
+                ddl.push_str(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n");
+            }
         }
     }
 
@@ -317,10 +415,24 @@ pub fn generate_entities(messages: &[ProtoMessage], output_dir: &str) -> Result<
     for message in messages {
         generate_entity_file(message, output_dir)?;
 
-        // Also generate entities for each field with sequences option (child tables)
-        for field in &message.fields {
-            if field.has_sequences_option {
-                generate_child_entity_file(message, field, output_dir)?;
+        // Special handling for JobCreatedEvent - only one child entity
+        if message.name == "JobCreatedEvent" {
+            let has_sequences = message.fields.iter().any(|f| f.has_sequences_option);
+            if has_sequences {
+                generate_job_created_sequences_entity(message, output_dir)?;
+            }
+        // Special handling for ProofEvent - only one child entity
+        } else if message.name == "ProofEvent" {
+            let has_sequences = message.fields.iter().any(|f| f.has_sequences_option);
+            if has_sequences {
+                generate_proof_event_sequences_entity(message, output_dir)?;
+            }
+        } else {
+            // For other tables, generate child entities for each field with sequences option
+            for field in &message.fields {
+                if field.has_sequences_option {
+                    generate_child_entity_file(message, field, output_dir)?;
+                }
             }
         }
     }
@@ -336,29 +448,48 @@ fn generate_mod_file(messages: &[ProtoMessage], output_dir: &str) -> Result<()> 
 
     // Module declarations
     for message in messages {
-        let module_name = message.name.to_snake_case();
+        let module_name = if message.name == "JobCreatedEvent" {
+            "jobs".to_string()
+        } else {
+            message.name.to_snake_case()
+        };
         content.push_str(&format!("pub mod {};\n", module_name));
     }
 
     // Child modules for fields with sequences option
     for message in messages {
-        for field in &message.fields {
-            if field.has_sequences_option {
-                // Shorten long field names to avoid MySQL constraint name length limits
-                let field_suffix = if field.name == "merged_sequences_1" {
-                    "ms1".to_string()
-                } else if field.name == "merged_sequences_2" {
-                    "ms2".to_string()
-                } else {
-                    field.name.to_snake_case()
-                };
+        if message.name == "JobCreatedEvent" {
+            // Special case: JobCreatedEvent has a single sequences table
+            let has_sequences = message.fields.iter().any(|f| f.has_sequences_option);
+            if has_sequences {
+                content.push_str("pub mod job_sequences;\n");
+            }
+        } else if message.name == "ProofEvent" {
+            // Special case: ProofEvent has a single sequences table
+            let has_sequences = message.fields.iter().any(|f| f.has_sequences_option);
+            if has_sequences {
+                content.push_str("pub mod proof_event_sequences;\n");
+            }
+        } else {
+            // Normal case: separate child table for each sequence field
+            for field in &message.fields {
+                if field.has_sequences_option {
+                    // Shorten long field names to avoid MySQL constraint name length limits
+                    let field_suffix = if field.name == "merged_sequences_1" {
+                        "ms1".to_string()
+                    } else if field.name == "merged_sequences_2" {
+                        "ms2".to_string()
+                    } else {
+                        field.name.to_snake_case()
+                    };
 
-                let child_mod = format!(
-                    "{}_{}",
-                    message.name.to_snake_case(),
-                    field_suffix
-                );
-                content.push_str(&format!("pub mod {};\n", child_mod));
+                    let child_mod = format!(
+                        "{}_{}",
+                        message.name.to_snake_case(),
+                        field_suffix
+                    );
+                    content.push_str(&format!("pub mod {};\n", child_mod));
+                }
             }
         }
     }
@@ -395,8 +526,16 @@ fn generate_mod_file(messages: &[ProtoMessage], output_dir: &str) -> Result<()> 
 }
 
 fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> {
-    let module_name = message.name.to_snake_case();
-    let table_name = message.name.to_snake_case();
+    let module_name = if message.name == "JobCreatedEvent" {
+        "jobs"
+    } else {
+        &message.name.to_snake_case()
+    };
+    let table_name = if message.name == "JobCreatedEvent" {
+        "jobs".to_string()
+    } else {
+        message.name.to_snake_case()
+    };
 
     let mut content = String::new();
 
@@ -417,20 +556,46 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
     content.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", table_name));
     content.push_str("pub struct Model {\n");
 
-    // Primary key
-    content.push_str("    #[sea_orm(primary_key)]\n");
-    content.push_str("    pub id: i64,\n");
+    // Primary key - special handling for job-related events
+    if message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent" {
+        // job_id is the primary key, added with other fields
+    } else {
+        content.push_str("    #[sea_orm(primary_key)]\n");
+        content.push_str("    pub id: i64,\n");
+    }
 
     // Proto fields
     for field in &message.fields {
-        // Skip fields with sequences option - they are handled by child tables
-        if field.has_sequences_option {
-            continue;
-        }
-
         let field_name = field.name.to_snake_case();
-        let rust_type = proto_type_to_rust(&field.field_type, field.is_repeated, field.is_optional);
-        content.push_str(&format!("    pub {}: {},\n", field_name, rust_type));
+
+        // Special handling for JobCreatedEvent and ProofEvent
+        if message.name == "JobCreatedEvent" {
+            if field.has_sequences_option {
+                // Include sequences as JSON columns in JobCreatedEvent (arrays of u64)
+                content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
+            } else if field.name == "job_id" {
+                // job_id is the primary key
+                content.push_str("    #[sea_orm(primary_key)]\n");
+                content.push_str("    pub job_id: String,\n");
+            } else {
+                let rust_type = proto_type_to_rust(&field.field_type, field.is_repeated, field.is_optional);
+                content.push_str(&format!("    pub {}: {},\n", field_name, rust_type));
+            }
+        } else if message.name == "ProofEvent" && field.has_sequences_option {
+            // Include sequences as JSON columns in ProofEvent (arrays of u64)
+            content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
+        } else if (message.name == "JobStartedEvent" || message.name == "JobFinishedEvent") && field.name == "job_id" {
+            // job_id is the primary key for JobStartedEvent and JobFinishedEvent
+            content.push_str("    #[sea_orm(primary_key)]\n");
+            content.push_str("    pub job_id: String,\n");
+        } else {
+            // Normal handling for other entities
+            if field.has_sequences_option {
+                continue; // Skip sequence fields for other tables
+            }
+            let rust_type = proto_type_to_rust(&field.field_type, field.is_repeated, field.is_optional);
+            content.push_str(&format!("    pub {}: {},\n", field_name, rust_type));
+        }
     }
 
     // Metadata fields
@@ -510,6 +675,78 @@ fn generate_child_entity_file(
     Ok(())
 }
 
+fn generate_job_created_sequences_entity(_message: &ProtoMessage, output_dir: &str) -> Result<()> {
+    let module_name = "job_sequences";
+    let table_name = "job_sequences";
+
+    let mut content = String::new();
+    content.push_str(
+        "//! Job sequences entity\n//! Maps (app_instance_id, sequence) => job_id (many-to-many)\n\n"
+    );
+    content.push_str("use sea_orm::entity::prelude::*;\n");
+
+    // Model struct
+    content.push_str(
+        "#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]\n",
+    );
+    content.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", table_name));
+    content.push_str("pub struct Model {\n");
+    content.push_str("    #[sea_orm(primary_key)]\n");
+    content.push_str("    pub id: i64,\n");
+    content.push_str("    pub app_instance_id: String,\n");
+    content.push_str("    pub sequence: i64,\n");
+    content.push_str("    pub job_id: String,\n");
+    content.push_str("    pub sequence_type: String,\n");
+    content.push_str("    pub created_at: Option<DateTimeUtc>,\n");
+    content.push_str("    pub updated_at: Option<DateTimeUtc>,\n");
+    content.push_str("}\n\n");
+
+    // Relations
+    content.push_str("#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]\n");
+    content.push_str("pub enum Relation {}\n\n");
+
+    content.push_str("impl ActiveModelBehavior for ActiveModel {}\n");
+
+    std::fs::write(format!("{}/{}.rs", output_dir, module_name), content)?;
+    Ok(())
+}
+
+fn generate_proof_event_sequences_entity(_message: &ProtoMessage, output_dir: &str) -> Result<()> {
+    let module_name = "proof_event_sequences";
+    let table_name = "proof_event_sequences";
+
+    let mut content = String::new();
+    content.push_str(
+        "//! Proof event sequences entity\n//! Maps (app_instance_id, sequence) => proof_event_id (many-to-many)\n\n"
+    );
+    content.push_str("use sea_orm::entity::prelude::*;\n");
+
+    // Model struct
+    content.push_str(
+        "#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]\n",
+    );
+    content.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", table_name));
+    content.push_str("pub struct Model {\n");
+    content.push_str("    #[sea_orm(primary_key)]\n");
+    content.push_str("    pub id: i64,\n");
+    content.push_str("    pub app_instance_id: String,\n");
+    content.push_str("    pub sequence: i64,\n");
+    content.push_str("    pub proof_event_id: i64,\n");
+    content.push_str("    pub sequence_type: String,\n");
+    content.push_str("    pub created_at: Option<DateTimeUtc>,\n");
+    content.push_str("    pub updated_at: Option<DateTimeUtc>,\n");
+    content.push_str("}\n\n");
+
+    // Relations
+    content.push_str("#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]\n");
+    content.push_str("pub enum Relation {}\n\n");
+
+    content.push_str("impl ActiveModelBehavior for ActiveModel {}\n");
+
+    std::fs::write(format!("{}/{}.rs", output_dir, module_name), content)?;
+    Ok(())
+}
+
 pub fn proto_type_to_mysql_with_options(
     proto_type: &str,
     is_repeated: bool,
@@ -542,7 +779,9 @@ pub fn proto_type_to_mysql_with_options(
         "bool" => "BOOLEAN".to_string(),
 
         // Handle known enum types
-        "LogLevel" => "TINYINT".to_string(),
+        "LogLevel" => "ENUM('LOG_LEVEL_UNSPECIFIED', 'LOG_LEVEL_DEBUG', 'LOG_LEVEL_INFO', 'LOG_LEVEL_WARN', 'LOG_LEVEL_ERROR', 'LOG_LEVEL_FATAL')".to_string(),
+        "JobResult" => "ENUM('JOB_RESULT_UNSPECIFIED', 'JOB_RESULT_COMPLETED', 'JOB_RESULT_FAILED', 'JOB_RESULT_TERMINATED')".to_string(),
+        "ProofEventType" => "ENUM('PROOF_EVENT_TYPE_UNSPECIFIED', 'PROOF_SUBMITTED', 'PROOF_FETCHED', 'PROOF_VERIFIED', 'PROOF_UNAVAILABLE', 'PROOF_REJECTED')".to_string(),
 
         // Handle custom message types as JSON for now
         _ if proto_type.chars().next().unwrap().is_uppercase() => "JSON".to_string(),
@@ -563,7 +802,9 @@ pub fn proto_type_to_rust(proto_type: &str, _is_repeated: bool, is_optional: boo
         "bool" => "bool".to_string(),
 
         // Handle known enum types
-        "LogLevel" => "i32".to_string(), // Protobuf enums are typically i32
+        "LogLevel" => "String".to_string(), // Store as string for enum
+        "JobResult" => "String".to_string(), // Store as string for enum
+        "ProofEventType" => "String".to_string(), // Store as string for enum
         _ => "String".to_string(),
     };
 

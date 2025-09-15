@@ -33,6 +33,22 @@ pub struct SilvanaRpcServiceImpl {
     config_storage: Option<Arc<ConfigStorage>>,
 }
 
+/// Helper function to parse JSON array strings into Vec<u64>
+fn parse_json_array(json_str: &Option<String>) -> Vec<u64> {
+    match json_str {
+        Some(s) if !s.is_empty() => {
+            match serde_json::from_str::<Vec<u64>>(s) {
+                Ok(vec) => vec,
+                Err(e) => {
+                    warn!("Failed to parse JSON array: {}, error: {}", s, e);
+                    vec![]
+                }
+            }
+        }
+        _ => vec![],
+    }
+}
+
 impl SilvanaRpcServiceImpl {
     pub fn new(event_buffer: EventBuffer<Event>, database: Arc<EventDatabase>) -> Self {
         Self {
@@ -180,17 +196,149 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         &self,
         request: Request<GetEventsByAppInstanceSequenceRequest>,
     ) -> Result<Response<GetEventsByAppInstanceSequenceResponse>, Status> {
-        let _req = request.into_inner();
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use tidb::entity::{job_sequences, proof_event_sequences, jobs, proof_event};
 
-        // TODO: Implement this method based on new requirements
-        // This method should query events by app instance and sequence
+        let req = request.into_inner();
+        let start = Instant::now();
+
+        debug!(
+            "get_events_by_app_instance_sequence: app_instance_id={}, sequence={}",
+            req.app_instance_id, req.sequence
+        );
+
+        // Get database connection
+        let db = self._database.get_connection().await;
+
+        let mut all_events = Vec::new();
+
+        // Query job_sequences table to find job_ids for this (app_instance_id, sequence)
+        let job_sequence_results = job_sequences::Entity::find()
+            .filter(job_sequences::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(job_sequences::Column::Sequence.eq(req.sequence as i64))
+            .all(db)
+            .await
+            .map_err(|e| {
+                error!("Failed to query job_sequences: {}", e);
+                Status::internal(format!("Database query failed: {}", e))
+            })?;
+
+        debug!("Found {} job_sequences entries", job_sequence_results.len());
+
+        // For each job_id found, fetch the job from jobs table
+        for job_seq in job_sequence_results {
+            let job_result = jobs::Entity::find()
+                .filter(jobs::Column::JobId.eq(&job_seq.job_id))
+                .one(db)
+                .await
+                .map_err(|e| {
+                    error!("Failed to query jobs table: {}", e);
+                    Status::internal(format!("Database query failed: {}", e))
+                })?;
+
+            if let Some(job) = job_result {
+                // Convert job to Event
+                let event = proto::Event {
+                    event: Some(proto::event::Event::JobCreated(
+                        proto::JobCreatedEvent {
+                            coordinator_id: job.coordinator_id,
+                            session_id: job.session_id,
+                            app_instance_id: job.app_instance_id,
+                            app_method: job.app_method,
+                            job_sequence: job.job_sequence as u64,
+                            sequences: parse_json_array(&job.sequences),
+                            merged_sequences_1: parse_json_array(&job.merged_sequences_1),
+                            merged_sequences_2: parse_json_array(&job.merged_sequences_2),
+                            job_id: job.job_id,
+                            event_timestamp: job.event_timestamp as u64,
+                        }
+                    )),
+                };
+                all_events.push(event);
+            }
+        }
+
+        // Query proof_event_sequences table to find proof_event_ids
+        let proof_sequence_results = proof_event_sequences::Entity::find()
+            .filter(proof_event_sequences::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_event_sequences::Column::Sequence.eq(req.sequence as i64))
+            .all(db)
+            .await
+            .map_err(|e| {
+                error!("Failed to query proof_event_sequences: {}", e);
+                Status::internal(format!("Database query failed: {}", e))
+            })?;
+
+        debug!("Found {} proof_event_sequences entries", proof_sequence_results.len());
+
+        // For each proof_event_id found, fetch the proof event
+        for proof_seq in proof_sequence_results {
+            let proof_result = proof_event::Entity::find_by_id(proof_seq.proof_event_id)
+                .one(db)
+                .await
+                .map_err(|e| {
+                    error!("Failed to query proof_event table: {}", e);
+                    Status::internal(format!("Database query failed: {}", e))
+                })?;
+
+            if let Some(proof) = proof_result {
+                // Convert ProofEventType from string to enum
+                let proof_event_type = match proof.proof_event_type.as_str() {
+                    "PROOF_SUBMITTED" => proto::ProofEventType::ProofSubmitted as i32,
+                    "PROOF_FETCHED" => proto::ProofEventType::ProofFetched as i32,
+                    "PROOF_VERIFIED" => proto::ProofEventType::ProofVerified as i32,
+                    "PROOF_UNAVAILABLE" => proto::ProofEventType::ProofUnavailable as i32,
+                    "PROOF_REJECTED" => proto::ProofEventType::ProofRejected as i32,
+                    _ => proto::ProofEventType::Unspecified as i32,
+                };
+
+                let event = proto::Event {
+                    event: Some(proto::event::Event::ProofEvent(
+                        proto::ProofEvent {
+                            coordinator_id: proof.coordinator_id,
+                            session_id: proof.session_id,
+                            app_instance_id: proof.app_instance_id,
+                            job_id: proof.job_id,
+                            data_availability: proof.data_availability,
+                            block_number: proof.block_number as u64,
+                            block_proof: proof.block_proof,
+                            proof_event_type,
+                            sequences: parse_json_array(&proof.sequences),
+                            merged_sequences_1: parse_json_array(&proof.merged_sequences_1),
+                            merged_sequences_2: parse_json_array(&proof.merged_sequences_2),
+                            event_timestamp: proof.event_timestamp as u64,
+                        }
+                    )),
+                };
+                all_events.push(event);
+            }
+        }
+
+        // Apply pagination if requested
+        let total_count = all_events.len() as u32;
+        let offset = req.offset.unwrap_or(0) as usize;
+        let limit = req.limit.unwrap_or(100) as usize;
+
+        let paginated_events: Vec<Event> = all_events
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+
+        let returned_count = paginated_events.len() as u32;
+
+        let elapsed = start.elapsed();
+        debug!(
+            "get_events_by_app_instance_sequence completed in {:?}: found {} total events, returned {}",
+            elapsed, total_count, returned_count
+        );
 
         Ok(Response::new(GetEventsByAppInstanceSequenceResponse {
             success: true,
-            message: "Method not yet implemented".to_string(),
-            events: vec![],
-            total_count: 0,
-            returned_count: 0,
+            message: format!("Found {} events", total_count),
+            events: paginated_events,
+            total_count,
+            returned_count,
         }))
     }
 
@@ -216,13 +364,11 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             ));
         }
 
-        // Search coordinator_message_event table using fulltext search
-        let search_result = crate::database::search_coordinator_messages(
+        // Search all tables with fulltext indexes in parallel
+        let search_result = crate::database_search::search_all_events_parallel(
             &self._database,
             &req.search_query,
-            req.coordinator_id.as_deref(),
             req.limit,
-            req.offset,
         )
         .await
         .map_err(|e| {
@@ -234,8 +380,6 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             success: true,
             message: "Search completed".to_string(),
             events: search_result.events,
-            total_count: search_result.total_count as u32,
-            returned_count: search_result.returned_count as u32,
         }))
     }
 

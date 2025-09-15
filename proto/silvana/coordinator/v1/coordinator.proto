@@ -6,6 +6,41 @@ package silvana.coordinator.v1;
 
 option go_package = "github.com/SilvanaOne/silvana/proto;coordinator";
 
+// Log level enumeration for messages
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+  LOG_LEVEL_FATAL = 5;
+}
+
+// Job result enumeration
+enum ProofEventType {
+  PROOF_EVENT_TYPE_UNSPECIFIED = 0;
+  PROOF_SUBMITTED = 1;
+  PROOF_FETCHED = 2;
+  PROOF_VERIFIED = 3;
+  PROOF_UNAVAILABLE = 5;
+  PROOF_REJECTED = 6;
+}
+
+message ProofEventRequest {
+  string data_availability = 1;
+  uint64 block_number = 2;
+  optional bool block_proof = 3;
+  ProofEventType proof_event_type = 4;
+  repeated uint64 sequences = 5;
+  repeated uint64 merged_sequences_1 = 6;
+  repeated uint64 merged_sequences_2 = 7;
+}
+
+// Response message for job completion
+message ProofEventResponse {
+  bool success = 1;
+  string message = 2;
+}
 
 // Job message matching the partial Move struct
 message Job {
@@ -394,6 +429,19 @@ message UpdateBlockSettlementTxIncludedInBlockResponse {
   string tx_hash = 3;
 }
 
+// Agent Events
+message AgentMessageRequest {
+  LogLevel level = 1;
+  string message = 2;
+}
+
+
+// Response message for agent message
+message AgentMessageResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // Request message for creating an app job
 message CreateAppJobRequest {
   string job_id = 1;
@@ -521,6 +569,8 @@ service CoordinatorService {
   rpc UpdateBlockProofDataAvailability(UpdateBlockProofDataAvailabilityRequest) returns (UpdateBlockProofDataAvailabilityResponse);
   rpc UpdateBlockSettlementTxHash(UpdateBlockSettlementTxHashRequest) returns (UpdateBlockSettlementTxHashResponse);
   rpc UpdateBlockSettlementTxIncludedInBlock(UpdateBlockSettlementTxIncludedInBlockRequest) returns (UpdateBlockSettlementTxIncludedInBlockResponse);
+  rpc AgentMessage(AgentMessageRequest) returns (AgentMessageResponse);
+  rpc ProofEvent(ProofEventRequest) returns (ProofEventResponse);
   rpc CreateAppJob(CreateAppJobRequest) returns (CreateAppJobResponse);
   rpc GetBlock(GetBlockRequest) returns (GetBlockResponse);
   // New BlockSettlement RPCs for multi-chain support

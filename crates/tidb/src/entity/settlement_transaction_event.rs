@@ -10,6 +10,7 @@ pub struct Model {
     pub coordinator_id: String,
     pub session_id: String,
     pub app_instance_id: String,
+    pub chain: String,
     pub job_id: String,
     pub block_number: i64,
     pub tx_hash: String,

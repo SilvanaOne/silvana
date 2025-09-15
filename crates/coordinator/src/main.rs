@@ -21,7 +21,7 @@ mod multicall;
 mod processor;
 mod proof;
 mod proofs_storage;
-mod session_id;
+mod session;
 mod settlement;
 mod state;
 mod stuck_jobs;

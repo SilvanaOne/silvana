@@ -33,13 +33,12 @@ CREATE TABLE IF NOT EXISTS coordinator_shutdown_event (
     INDEX idx_event_timestamp (`event_timestamp`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS agent_session_started_event (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS agent_session (
     `coordinator_id` VARCHAR(255) NOT NULL,
     `developer` VARCHAR(255) NOT NULL,
     `agent` VARCHAR(255) NOT NULL,
     `agent_method` VARCHAR(255) NOT NULL,
-    `session_id` VARCHAR(255) NOT NULL,
+    `session_id` VARCHAR(255) NOT NULL PRIMARY KEY,
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -53,14 +52,32 @@ CREATE TABLE IF NOT EXISTS agent_session_started_event (
     FULLTEXT INDEX ft_idx_agent_method (`agent_method`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS job_created_event (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS agent_session_finished_event (
+    `coordinator_id` VARCHAR(255) NOT NULL,
+    `session_id` VARCHAR(255) NOT NULL PRIMARY KEY,
+    `session_log` VARCHAR(255) NOT NULL,
+    `duration` BIGINT NOT NULL,
+    `cost` BIGINT NOT NULL,
+    `event_timestamp` BIGINT NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_created_at (`created_at`),
+    INDEX idx_coordinator_id (`coordinator_id`),
+    INDEX idx_session_id (`session_id`),
+    INDEX idx_event_timestamp (`event_timestamp`),
+    FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
+    FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS jobs (
     `coordinator_id` VARCHAR(255) NOT NULL,
     `session_id` VARCHAR(255) NOT NULL,
     `app_instance_id` VARCHAR(255) NOT NULL,
     `app_method` VARCHAR(255) NOT NULL,
     `job_sequence` BIGINT NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `sequences` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
+    `merged_sequences_1` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
+    `merged_sequences_2` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
+    `job_id` VARCHAR(255) NOT NULL PRIMARY KEY,
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -76,42 +93,24 @@ CREATE TABLE IF NOT EXISTS job_created_event (
     FULLTEXT INDEX ft_idx_app_method (`app_method`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS job_created_event_sequences (
+CREATE TABLE IF NOT EXISTS job_sequences (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `job_created_event_id` BIGINT NOT NULL,
+    `app_instance_id` VARCHAR(255) NOT NULL,
     `sequence` BIGINT NOT NULL,
+    `job_id` VARCHAR(255) NOT NULL,
+    `sequence_type` ENUM('sequences', 'merged_sequences_1', 'merged_sequences_2') NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_job_created_event_sequences_parent (`job_created_event_id`),
-    INDEX idx_job_created_event_sequences_value (`sequence`),
-    CONSTRAINT fk_job_created_event_sequences_job_created_event_id FOREIGN KEY (`job_created_event_id`) REFERENCES job_created_event (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS job_created_event_ms1 (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `job_created_event_id` BIGINT NOT NULL,
-    `merged_sequences_1` BIGINT NOT NULL,
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_job_created_event_ms1_parent (`job_created_event_id`),
-    INDEX idx_job_created_event_ms1_value (`merged_sequences_1`),
-    CONSTRAINT fk_job_created_event_ms1_job_created_event_id FOREIGN KEY (`job_created_event_id`) REFERENCES job_created_event (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS job_created_event_ms2 (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `job_created_event_id` BIGINT NOT NULL,
-    `merged_sequences_2` BIGINT NOT NULL,
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_job_created_event_ms2_parent (`job_created_event_id`),
-    INDEX idx_job_created_event_ms2_value (`merged_sequences_2`),
-    CONSTRAINT fk_job_created_event_ms2_job_created_event_id FOREIGN KEY (`job_created_event_id`) REFERENCES job_created_event (`id`) ON DELETE CASCADE
+    INDEX idx_job_sequences_lookup (`app_instance_id`, `sequence`, `sequence_type`),
+    INDEX idx_job_sequences_job_id (`job_id`),
+    UNIQUE KEY uk_job_sequences (`app_instance_id`, `sequence`, `sequence_type`, `job_id`),
+    CONSTRAINT fk_job_sequences_job_id FOREIGN KEY (`job_id`) REFERENCES jobs (`job_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS job_started_event (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `coordinator_id` VARCHAR(255) NOT NULL,
     `session_id` VARCHAR(255) NOT NULL,
     `app_instance_id` VARCHAR(255) NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `job_id` VARCHAR(255) NOT NULL PRIMARY KEY,
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -127,12 +126,12 @@ CREATE TABLE IF NOT EXISTS job_started_event (
     FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS job_finished_event (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `coordinator_id` VARCHAR(255) NOT NULL,
-    `job_id` VARCHAR(255) NOT NULL,
+    `job_id` VARCHAR(255) NOT NULL PRIMARY KEY,
     `duration` BIGINT NOT NULL,
+    `cost` BIGINT NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
-    `result` JSON NOT NULL,
+    `result` ENUM('JOB_RESULT_UNSPECIFIED', 'JOB_RESULT_COMPLETED', 'JOB_RESULT_FAILED', 'JOB_RESULT_TERMINATED') NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
@@ -160,7 +159,7 @@ CREATE TABLE IF NOT EXISTS coordinator_message_event (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `coordinator_id` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
-    `level` TINYINT NOT NULL,
+    `level` ENUM('LOG_LEVEL_UNSPECIFIED', 'LOG_LEVEL_DEBUG', 'LOG_LEVEL_INFO', 'LOG_LEVEL_WARN', 'LOG_LEVEL_ERROR', 'LOG_LEVEL_FATAL') NOT NULL,
     `message` TEXT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -170,7 +169,7 @@ CREATE TABLE IF NOT EXISTS coordinator_message_event (
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_message (`message`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS proof_submitted_event (
+CREATE TABLE IF NOT EXISTS proof_event (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `coordinator_id` VARCHAR(255) NOT NULL,
     `session_id` VARCHAR(255) NOT NULL,
@@ -178,6 +177,11 @@ CREATE TABLE IF NOT EXISTS proof_submitted_event (
     `job_id` VARCHAR(255) NOT NULL,
     `data_availability` VARCHAR(255) NOT NULL,
     `block_number` BIGINT NOT NULL,
+    `block_proof` BOOLEAN NULL,
+    `proof_event_type` ENUM('PROOF_EVENT_TYPE_UNSPECIFIED', 'PROOF_SUBMITTED', 'PROOF_FETCHED', 'PROOF_VERIFIED', 'PROOF_UNAVAILABLE', 'PROOF_REJECTED') NOT NULL,
+    `sequences` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
+    `merged_sequences_1` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
+    `merged_sequences_2` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -192,41 +196,25 @@ CREATE TABLE IF NOT EXISTS proof_submitted_event (
     FULLTEXT INDEX ft_idx_app_instance_id (`app_instance_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS proof_submitted_event_sequences (
+CREATE TABLE IF NOT EXISTS proof_event_sequences (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `proof_submitted_event_id` BIGINT NOT NULL,
+    `app_instance_id` VARCHAR(255) NOT NULL,
     `sequence` BIGINT NOT NULL,
+    `proof_event_id` BIGINT NOT NULL,
+    `sequence_type` ENUM('sequences', 'merged_sequences_1', 'merged_sequences_2') NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_proof_submitted_event_sequences_parent (`proof_submitted_event_id`),
-    INDEX idx_proof_submitted_event_sequences_value (`sequence`),
-    CONSTRAINT fk_proof_submitted_event_sequences_proof_submitted_event_id FOREIGN KEY (`proof_submitted_event_id`) REFERENCES proof_submitted_event (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS proof_submitted_event_ms1 (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `proof_submitted_event_id` BIGINT NOT NULL,
-    `merged_sequences_1` BIGINT NOT NULL,
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_proof_submitted_event_ms1_parent (`proof_submitted_event_id`),
-    INDEX idx_proof_submitted_event_ms1_value (`merged_sequences_1`),
-    CONSTRAINT fk_proof_submitted_event_ms1_proof_submitted_event_id FOREIGN KEY (`proof_submitted_event_id`) REFERENCES proof_submitted_event (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS proof_submitted_event_ms2 (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `proof_submitted_event_id` BIGINT NOT NULL,
-    `merged_sequences_2` BIGINT NOT NULL,
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_proof_submitted_event_ms2_parent (`proof_submitted_event_id`),
-    INDEX idx_proof_submitted_event_ms2_value (`merged_sequences_2`),
-    CONSTRAINT fk_proof_submitted_event_ms2_proof_submitted_event_id FOREIGN KEY (`proof_submitted_event_id`) REFERENCES proof_submitted_event (`id`) ON DELETE CASCADE
+    INDEX idx_proof_event_sequences_lookup (`app_instance_id`, `sequence`, `sequence_type`),
+    INDEX idx_proof_event_sequences_proof_event_id (`proof_event_id`),
+    UNIQUE KEY uk_proof_event_sequences (`app_instance_id`, `sequence`, `sequence_type`, `proof_event_id`),
+    CONSTRAINT fk_proof_event_sequences_proof_event_id FOREIGN KEY (`proof_event_id`) REFERENCES proof_event (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS settlement_transaction_event (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `coordinator_id` VARCHAR(255) NOT NULL,
     `session_id` VARCHAR(255) NOT NULL,
     `app_instance_id` VARCHAR(255) NOT NULL,
+    `chain` VARCHAR(255) NOT NULL,
     `job_id` VARCHAR(255) NOT NULL,
     `block_number` BIGINT NOT NULL,
     `tx_hash` VARCHAR(255) NOT NULL,
@@ -251,6 +239,7 @@ CREATE TABLE IF NOT EXISTS settlement_transaction_included_in_block_event (
     `coordinator_id` VARCHAR(255) NOT NULL,
     `session_id` VARCHAR(255) NOT NULL,
     `app_instance_id` VARCHAR(255) NOT NULL,
+    `chain` VARCHAR(255) NOT NULL,
     `job_id` VARCHAR(255) NOT NULL,
     `block_number` BIGINT NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
@@ -273,7 +262,7 @@ CREATE TABLE IF NOT EXISTS agent_message_event (
     `session_id` VARCHAR(255) NOT NULL,
     `job_id` VARCHAR(255) NULL,
     `event_timestamp` BIGINT NOT NULL,
-    `level` TINYINT NOT NULL,
+    `level` ENUM('LOG_LEVEL_UNSPECIFIED', 'LOG_LEVEL_DEBUG', 'LOG_LEVEL_INFO', 'LOG_LEVEL_WARN', 'LOG_LEVEL_ERROR', 'LOG_LEVEL_FATAL') NOT NULL,
     `message` TEXT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

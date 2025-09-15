@@ -1,6 +1,7 @@
 // Application modules - explicitly public for external access
 pub mod adapters;
 pub mod database;
+pub mod database_search;
 pub mod storage;
 
 // Service implementations

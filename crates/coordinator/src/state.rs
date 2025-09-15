@@ -1148,4 +1148,111 @@ impl SharedState {
     ) -> tokio::sync::MutexGuard<'_, HashMap<String, MulticallRequests>> {
         self.multicall_requests.lock().await
     }
+
+    /// Send CoordinationTxEvent to RPC service (fire and forget)
+    pub fn send_coordination_tx_event(&self, tx_hash: String) {
+        // Get coordinator ID
+        let coordinator_id = match self.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send CoordinationTxEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let self_clone = self.clone();
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = self_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::CoordinationTx(
+                        proto::CoordinationTxEvent {
+                            coordinator_id,
+                            tx_hash: tx_hash.clone(),
+                            event_timestamp,
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent CoordinationTxEvent for tx_hash {}", tx_hash);
+                        } else {
+                            warn!("Failed to send CoordinationTxEvent: {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send CoordinationTxEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send CoordinationTxEvent");
+            }
+        });
+    }
+
+    /// Send CoordinatorMessageEvent to RPC service (fire and forget)
+    pub fn send_coordinator_message_event(&self, level: proto::LogLevel, message: String) {
+        // Get coordinator ID
+        let coordinator_id = match self.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send CoordinatorMessageEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let self_clone = self.clone();
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = self_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::CoordinatorMessage(
+                        proto::CoordinatorMessageEvent {
+                            coordinator_id,
+                            event_timestamp,
+                            level: level as i32,
+                            message: message.clone(),
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent CoordinatorMessageEvent: {}", message);
+                        } else {
+                            warn!("Failed to send CoordinatorMessageEvent: {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send CoordinatorMessageEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send CoordinatorMessageEvent");
+            }
+        });
+    }
 }

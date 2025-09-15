@@ -50,6 +50,12 @@ enum Commands {
         #[arg(short, long)]
         database_url: Option<String>,
     },
+    /// List all tables in the database
+    ListTables {
+        /// Database URL (can also be set via DATABASE_URL env var)
+        #[arg(short, long)]
+        database_url: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -74,6 +80,7 @@ async fn main() -> Result<()> {
             proto_file,
             database_url,
         } => validate_command(proto_file, database_url).await,
+        Commands::ListTables { database_url } => list_tables_command(database_url).await,
     }
 }
 
@@ -133,6 +140,38 @@ async fn validate_command(proto_file: String, database_url: Option<String>) -> R
         info!("🎉 Schema validation passed!");
         Ok(())
     }
+}
+
+async fn list_tables_command(database_url: Option<String>) -> Result<()> {
+    use sea_orm::{ConnectionTrait, Database, Statement};
+
+    let db_url = database_url
+        .or_else(|| std::env::var("DATABASE_URL").ok())
+        .context("Database URL not provided and DATABASE_URL env var not set")?;
+
+    // Trim any whitespace from the URL
+    let db_url = db_url.trim().to_string();
+
+    let connection = Database::connect(&db_url)
+        .await
+        .context("Failed to connect to database")?;
+
+    let stmt = Statement::from_string(
+        sea_orm::DatabaseBackend::MySql,
+        "SHOW TABLES".to_string(),
+    );
+
+    let result = connection.query_all(stmt).await?;
+
+    println!("Tables in database:");
+    println!("------------------");
+    for row in result {
+        if let Ok(table_name) = row.try_get::<String>("", "Tables_in_test") {
+            println!("  - {}", table_name);
+        }
+    }
+
+    Ok(())
 }
 
 /// Mask password in database URL for safe logging

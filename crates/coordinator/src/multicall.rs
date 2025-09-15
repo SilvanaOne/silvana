@@ -223,6 +223,9 @@ impl MulticallProcessor {
                     current_operation_count, result.tx_digest
                 );
 
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(result.tx_digest.clone());
+
                 // Report successful multicall metrics
                 if let Some(ref metrics) = self.metrics {
                     metrics.increment_multicall_batch_executed(
@@ -279,9 +282,16 @@ impl MulticallProcessor {
                 self.state.update_last_multicall_timestamp().await;
             }
             Err((error_msg, tx_digest_opt)) => {
-                error!(
+                let full_error = format!(
                     "Batch multicall failed: {} (tx: {:?})",
                     error_msg, tx_digest_opt
+                );
+                error!("{}", full_error);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    full_error
                 );
 
                 // Report failed multicall metrics

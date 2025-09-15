@@ -86,23 +86,20 @@ impl EventDatabase {
         let mut coordinator_active_events = Vec::new();
         let mut coordinator_shutdown_events = Vec::new();
         let mut agent_session_started_events = Vec::new();
-        let mut job_created_events = Vec::new();
+        let mut agent_session_finished_events = Vec::new();
+        let mut jobs_events = Vec::new();
         let mut job_started_events = Vec::new();
         let mut job_finished_events = Vec::new();
         let mut coordination_tx_events = Vec::new();
         let mut coordinator_message_events = Vec::new();
-        let mut proof_submitted_events = Vec::new();
+        let mut proof_events = Vec::new();
         let mut settlement_transaction_events = Vec::new();
         let mut settlement_transaction_included_events = Vec::new();
         let mut agent_message_events = Vec::new();
 
         // Store sequences separately for child table insertion
-        let mut job_created_sequences = Vec::new();
-        let mut job_created_ms1 = Vec::new();
-        let mut job_created_ms2 = Vec::new();
-        let mut proof_submitted_sequences = Vec::new();
-        let mut proof_submitted_ms1 = Vec::new();
-        let mut proof_submitted_ms2 = Vec::new();
+        let mut job_sequences_data = Vec::new();
+        let mut proof_event_sequences_data = Vec::new();
 
         // Categorize events by type
         for event in events {
@@ -121,17 +118,26 @@ impl EventDatabase {
                     EventType::AgentSessionStarted(e) => {
                         agent_session_started_events.push(convert_agent_session_started_event(e));
                     }
+                    EventType::AgentSessionFinished(e) => {
+                        // Handle AgentSessionFinishedEvent
+                        agent_session_finished_events.push(convert_agent_session_finished_event(e));
+                    }
                     EventType::JobCreated(e) => {
-                        let (main_event, sequences, ms1, ms2) = convert_job_created_event(e);
-                        job_created_events.push(main_event);
-                        if !sequences.is_empty() {
-                            job_created_sequences.push(sequences);
+                        let (main_event, sequences, merged_sequences_1, merged_sequences_2) = convert_job_created_event(e);
+                        jobs_events.push(main_event);
+
+                        let mut sequences_vec = Vec::new();
+                        for seq in sequences {
+                            sequences_vec.push((seq, "sequences".to_string()));
                         }
-                        if !ms1.is_empty() {
-                            job_created_ms1.push(ms1);
+                        for seq in merged_sequences_1 {
+                            sequences_vec.push((seq, "merged_sequences_1".to_string()));
                         }
-                        if !ms2.is_empty() {
-                            job_created_ms2.push(ms2);
+                        for seq in merged_sequences_2 {
+                            sequences_vec.push((seq, "merged_sequences_2".to_string()));
+                        }
+                        if !sequences_vec.is_empty() {
+                            job_sequences_data.push(sequences_vec);
                         }
                     }
                     EventType::JobStarted(e) => {
@@ -146,17 +152,11 @@ impl EventDatabase {
                     EventType::CoordinatorMessage(e) => {
                         coordinator_message_events.push(convert_coordinator_message_event(e));
                     }
-                    EventType::ProofSubmitted(e) => {
-                        let (main_event, sequences, ms1, ms2) = convert_proof_submitted_event(e);
-                        proof_submitted_events.push(main_event);
-                        if !sequences.is_empty() {
-                            proof_submitted_sequences.push(sequences);
-                        }
-                        if !ms1.is_empty() {
-                            proof_submitted_ms1.push(ms1);
-                        }
-                        if !ms2.is_empty() {
-                            proof_submitted_ms2.push(ms2);
+                    EventType::ProofEvent(e) => {
+                        let (main_event, sequences_data) = convert_proof_event(e);
+                        proof_events.push(main_event);
+                        if !sequences_data.is_empty() {
+                            proof_event_sequences_data.push(sequences_data);
                         }
                     }
                     EventType::SettlementTransaction(e) => {
@@ -179,6 +179,7 @@ impl EventDatabase {
             self.insert_coordinator_active_events(&txn, coordinator_active_events),
             self.insert_coordinator_shutdown_events(&txn, coordinator_shutdown_events),
             self.insert_agent_session_started_events(&txn, agent_session_started_events),
+            self.insert_agent_session_finished_events(&txn, agent_session_finished_events),
             self.insert_job_started_events(&txn, job_started_events),
             self.insert_job_finished_events(&txn, job_finished_events),
             self.insert_coordination_tx_events(&txn, coordination_tx_events),
@@ -199,19 +200,15 @@ impl EventDatabase {
         // Phase 2: Handle parent-child relationships for events with sequences
         //debug!("Phase 2: Running parent-child table insertions");
         let _parent_child_results = tokio::try_join!(
-            self.insert_job_created_events_with_sequences(
+            self.insert_jobs_with_sequences(
                 &txn,
-                job_created_events,
-                &job_created_sequences,
-                &job_created_ms1,
-                &job_created_ms2
+                jobs_events,
+                &job_sequences_data
             ),
-            self.insert_proof_submitted_events_with_sequences(
+            self.insert_proof_events_with_sequences(
                 &txn,
-                proof_submitted_events,
-                &proof_submitted_sequences,
-                &proof_submitted_ms1,
-                &proof_submitted_ms2
+                proof_events,
+                &proof_event_sequences_data
             ),
         )?;
 
@@ -347,6 +344,32 @@ impl EventDatabase {
             }
             Err(e) => {
                 error!("Failed to batch insert agent_session_started_events: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn insert_agent_session_finished_events(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        events: Vec<entities::agent_session_finished_event::ActiveModel>,
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        debug!("Inserting {} agent_session_finished_events", events.len());
+        let events_len = events.len();
+        match entities::agent_session_finished_event::Entity::insert_many(events)
+            .exec(txn)
+            .await
+        {
+            Ok(_) => {
+                debug!("Successfully inserted agent_session_finished_events");
+                Ok(events_len)
+            }
+            Err(e) => {
+                error!("Failed to batch insert agent_session_finished_events: {}", e);
                 Err(e.into())
             }
         }
@@ -558,56 +581,32 @@ impl EventDatabase {
     }
 
     // Parent-child table insertion methods - handle sequences
-    async fn insert_job_created_events_with_sequences(
+    async fn insert_jobs_with_sequences(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::job_created_event::ActiveModel>,
-        sequences_per_event: &[Vec<u64>],
-        ms1_per_event: &[Vec<u64>],
-        ms2_per_event: &[Vec<u64>],
+        events: Vec<entities::jobs::ActiveModel>,
+        sequences_data_per_event: &[Vec<(u64, String)>], // (sequence, sequence_type)
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
 
-        debug!("Inserting {} job_created_events with sequences", events.len());
+        debug!("Inserting {} jobs with sequences", events.len());
         let events_len = events.len();
 
         // Insert parent records first
-        let parent_result = entities::job_created_event::Entity::insert_many(events)
+        let _parent_result = entities::jobs::Entity::insert_many(events.clone())
             .exec(txn)
             .await?;
 
-        let base_id = parent_result.last_insert_id;
+        // Note: For jobs table, we don't use base_id since job_id is the primary key
 
         // Insert sequences child records
-        if !sequences_per_event.is_empty() {
-            let sequence_records = self.create_job_created_sequence_records(base_id, sequences_per_event);
+        if !sequences_data_per_event.is_empty() {
+            let sequence_records = self.create_job_sequence_records(&events, sequences_data_per_event);
             if !sequence_records.is_empty() {
-                debug!("Inserting {} job_created_event_sequences records", sequence_records.len());
-                entities::job_created_event_sequences::Entity::insert_many(sequence_records)
-                    .exec(txn)
-                    .await?;
-            }
-        }
-
-        // Insert ms1 child records
-        if !ms1_per_event.is_empty() {
-            let ms1_records = self.create_job_created_ms1_records(base_id, ms1_per_event);
-            if !ms1_records.is_empty() {
-                debug!("Inserting {} job_created_event_ms1 records", ms1_records.len());
-                entities::job_created_event_ms1::Entity::insert_many(ms1_records)
-                    .exec(txn)
-                    .await?;
-            }
-        }
-
-        // Insert ms2 child records
-        if !ms2_per_event.is_empty() {
-            let ms2_records = self.create_job_created_ms2_records(base_id, ms2_per_event);
-            if !ms2_records.is_empty() {
-                debug!("Inserting {} job_created_event_ms2 records", ms2_records.len());
-                entities::job_created_event_ms2::Entity::insert_many(ms2_records)
+                debug!("Inserting {} job_sequences records", sequence_records.len());
+                entities::job_sequences::Entity::insert_many(sequence_records)
                     .exec(txn)
                     .await?;
             }
@@ -616,56 +615,32 @@ impl EventDatabase {
         Ok(events_len)
     }
 
-    async fn insert_proof_submitted_events_with_sequences(
+    async fn insert_proof_events_with_sequences(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::proof_submitted_event::ActiveModel>,
-        sequences_per_event: &[Vec<u64>],
-        ms1_per_event: &[Vec<u64>],
-        ms2_per_event: &[Vec<u64>],
+        events: Vec<entities::proof_event::ActiveModel>,
+        sequences_data_per_event: &[Vec<(u64, String)>], // (sequence, sequence_type)
     ) -> Result<usize> {
         if events.is_empty() {
             return Ok(0);
         }
 
-        debug!("Inserting {} proof_submitted_events with sequences", events.len());
+        debug!("Inserting {} proof_events with sequences", events.len());
         let events_len = events.len();
 
         // Insert parent records first
-        let parent_result = entities::proof_submitted_event::Entity::insert_many(events)
+        let parent_result = entities::proof_event::Entity::insert_many(events.clone())
             .exec(txn)
             .await?;
 
         let base_id = parent_result.last_insert_id;
 
         // Insert sequences child records
-        if !sequences_per_event.is_empty() {
-            let sequence_records = self.create_proof_submitted_sequence_records(base_id, sequences_per_event);
+        if !sequences_data_per_event.is_empty() {
+            let sequence_records = self.create_proof_event_sequence_records(&events, base_id, sequences_data_per_event);
             if !sequence_records.is_empty() {
-                debug!("Inserting {} proof_submitted_event_sequences records", sequence_records.len());
-                entities::proof_submitted_event_sequences::Entity::insert_many(sequence_records)
-                    .exec(txn)
-                    .await?;
-            }
-        }
-
-        // Insert ms1 child records
-        if !ms1_per_event.is_empty() {
-            let ms1_records = self.create_proof_submitted_ms1_records(base_id, ms1_per_event);
-            if !ms1_records.is_empty() {
-                debug!("Inserting {} proof_submitted_event_ms1 records", ms1_records.len());
-                entities::proof_submitted_event_ms1::Entity::insert_many(ms1_records)
-                    .exec(txn)
-                    .await?;
-            }
-        }
-
-        // Insert ms2 child records
-        if !ms2_per_event.is_empty() {
-            let ms2_records = self.create_proof_submitted_ms2_records(base_id, ms2_per_event);
-            if !ms2_records.is_empty() {
-                debug!("Inserting {} proof_submitted_event_ms2 records", ms2_records.len());
-                entities::proof_submitted_event_ms2::Entity::insert_many(ms2_records)
+                debug!("Inserting {} proof_event_sequences records", sequence_records.len());
+                entities::proof_event_sequences::Entity::insert_many(sequence_records)
                     .exec(txn)
                     .await?;
             }
@@ -674,159 +649,84 @@ impl EventDatabase {
         Ok(events_len)
     }
 
-    fn create_job_created_sequence_records(
+    fn create_job_sequence_records(
         &self,
-        base_id: i64,
-        sequences_per_event: &[Vec<u64>],
-    ) -> Vec<entities::job_created_event_sequences::ActiveModel> {
-        use entities::job_created_event_sequences::*;
+        events: &[entities::jobs::ActiveModel],
+        sequences_data_per_event: &[Vec<(u64, String)>],
+    ) -> Vec<entities::job_sequences::ActiveModel> {
+        use entities::job_sequences::*;
         use sea_orm::ActiveValue;
 
         let mut records = Vec::new();
-        let mut current_id = base_id;
 
-        for sequences in sequences_per_event {
-            for &sequence in sequences {
-                records.push(ActiveModel {
-                    id: ActiveValue::NotSet,
-                    job_created_event_id: ActiveValue::Set(current_id),
-                    sequence: ActiveValue::Set(sequence as i64),
-                    created_at: ActiveValue::NotSet,
-                    updated_at: ActiveValue::NotSet,
-                });
+        for (event_idx, sequences_data) in sequences_data_per_event.iter().enumerate() {
+            if let Some(event) = events.get(event_idx) {
+                // Extract job_id and app_instance_id from the event
+                let job_id = if let ActiveValue::Set(ref id) = event.job_id {
+                    id.clone()
+                } else {
+                    continue; // Skip if job_id is not set
+                };
+
+                let app_instance_id = if let ActiveValue::Set(ref id) = event.app_instance_id {
+                    id.clone()
+                } else {
+                    continue; // Skip if app_instance_id is not set
+                };
+
+                for (sequence, sequence_type) in sequences_data {
+                    records.push(ActiveModel {
+                        id: ActiveValue::NotSet,
+                        app_instance_id: ActiveValue::Set(app_instance_id.clone()),
+                        sequence: ActiveValue::Set(*sequence as i64),
+                        job_id: ActiveValue::Set(job_id.clone()),
+                        sequence_type: ActiveValue::Set(sequence_type.clone()),
+                        created_at: ActiveValue::NotSet,
+                        updated_at: ActiveValue::NotSet,
+                    });
+                }
             }
-            current_id = current_id.saturating_add(1);
         }
+
         records
     }
 
-    fn create_job_created_ms1_records(
+    fn create_proof_event_sequence_records(
         &self,
+        events: &[entities::proof_event::ActiveModel],
         base_id: i64,
-        ms1_per_event: &[Vec<u64>],
-    ) -> Vec<entities::job_created_event_ms1::ActiveModel> {
-        use entities::job_created_event_ms1::*;
+        sequences_data_per_event: &[Vec<(u64, String)>],
+    ) -> Vec<entities::proof_event_sequences::ActiveModel> {
+        use entities::proof_event_sequences::*;
         use sea_orm::ActiveValue;
 
         let mut records = Vec::new();
         let mut current_id = base_id;
 
-        for ms1_values in ms1_per_event {
-            for &value in ms1_values {
-                records.push(ActiveModel {
-                    id: ActiveValue::NotSet,
-                    job_created_event_id: ActiveValue::Set(current_id),
-                    merged_sequences_1: ActiveValue::Set(value as i64),
-                    created_at: ActiveValue::NotSet,
-                    updated_at: ActiveValue::NotSet,
-                });
+        for (event_idx, sequences_data) in sequences_data_per_event.iter().enumerate() {
+            if let Some(event) = events.get(event_idx) {
+                // Extract app_instance_id from the event
+                let app_instance_id = if let ActiveValue::Set(ref id) = event.app_instance_id {
+                    id.clone()
+                } else {
+                    continue; // Skip if app_instance_id is not set
+                };
+
+                for (sequence, sequence_type) in sequences_data {
+                    records.push(ActiveModel {
+                        id: ActiveValue::NotSet,
+                        app_instance_id: ActiveValue::Set(app_instance_id.clone()),
+                        sequence: ActiveValue::Set(*sequence as i64),
+                        proof_event_id: ActiveValue::Set(current_id),
+                        sequence_type: ActiveValue::Set(sequence_type.clone()),
+                        created_at: ActiveValue::NotSet,
+                        updated_at: ActiveValue::NotSet,
+                    });
+                }
             }
             current_id = current_id.saturating_add(1);
         }
-        records
-    }
 
-    fn create_job_created_ms2_records(
-        &self,
-        base_id: i64,
-        ms2_per_event: &[Vec<u64>],
-    ) -> Vec<entities::job_created_event_ms2::ActiveModel> {
-        use entities::job_created_event_ms2::*;
-        use sea_orm::ActiveValue;
-
-        let mut records = Vec::new();
-        let mut current_id = base_id;
-
-        for ms2_values in ms2_per_event {
-            for &value in ms2_values {
-                records.push(ActiveModel {
-                    id: ActiveValue::NotSet,
-                    job_created_event_id: ActiveValue::Set(current_id),
-                    merged_sequences_2: ActiveValue::Set(value as i64),
-                    created_at: ActiveValue::NotSet,
-                    updated_at: ActiveValue::NotSet,
-                });
-            }
-            current_id = current_id.saturating_add(1);
-        }
-        records
-    }
-
-    fn create_proof_submitted_sequence_records(
-        &self,
-        base_id: i64,
-        sequences_per_event: &[Vec<u64>],
-    ) -> Vec<entities::proof_submitted_event_sequences::ActiveModel> {
-        use entities::proof_submitted_event_sequences::*;
-        use sea_orm::ActiveValue;
-
-        let mut records = Vec::new();
-        let mut current_id = base_id;
-
-        for sequences in sequences_per_event {
-            for &sequence in sequences {
-                records.push(ActiveModel {
-                    id: ActiveValue::NotSet,
-                    proof_submitted_event_id: ActiveValue::Set(current_id),
-                    sequence: ActiveValue::Set(sequence as i64),
-                    created_at: ActiveValue::NotSet,
-                    updated_at: ActiveValue::NotSet,
-                });
-            }
-            current_id = current_id.saturating_add(1);
-        }
-        records
-    }
-
-    fn create_proof_submitted_ms1_records(
-        &self,
-        base_id: i64,
-        ms1_per_event: &[Vec<u64>],
-    ) -> Vec<entities::proof_submitted_event_ms1::ActiveModel> {
-        use entities::proof_submitted_event_ms1::*;
-        use sea_orm::ActiveValue;
-
-        let mut records = Vec::new();
-        let mut current_id = base_id;
-
-        for ms1_values in ms1_per_event {
-            for &value in ms1_values {
-                records.push(ActiveModel {
-                    id: ActiveValue::NotSet,
-                    proof_submitted_event_id: ActiveValue::Set(current_id),
-                    merged_sequences_1: ActiveValue::Set(value as i64),
-                    created_at: ActiveValue::NotSet,
-                    updated_at: ActiveValue::NotSet,
-                });
-            }
-            current_id = current_id.saturating_add(1);
-        }
-        records
-    }
-
-    fn create_proof_submitted_ms2_records(
-        &self,
-        base_id: i64,
-        ms2_per_event: &[Vec<u64>],
-    ) -> Vec<entities::proof_submitted_event_ms2::ActiveModel> {
-        use entities::proof_submitted_event_ms2::*;
-        use sea_orm::ActiveValue;
-
-        let mut records = Vec::new();
-        let mut current_id = base_id;
-
-        for ms2_values in ms2_per_event {
-            for &value in ms2_values {
-                records.push(ActiveModel {
-                    id: ActiveValue::NotSet,
-                    proof_submitted_event_id: ActiveValue::Set(current_id),
-                    merged_sequences_2: ActiveValue::Set(value as i64),
-                    created_at: ActiveValue::NotSet,
-                    updated_at: ActiveValue::NotSet,
-                });
-            }
-            current_id = current_id.saturating_add(1);
-        }
         records
     }
 
@@ -1356,24 +1256,63 @@ fn convert_agent_session_started_event(
     }
 }
 
+fn convert_agent_session_finished_event(
+    event: &proto::AgentSessionFinishedEvent,
+) -> entities::agent_session_finished_event::ActiveModel {
+    use entities::agent_session_finished_event::*;
+    use sea_orm::ActiveValue;
+
+    ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        session_log: ActiveValue::Set(event.session_log.clone()),
+        duration: ActiveValue::Set(event.duration as i64),
+        cost: ActiveValue::Set(event.cost as i64),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    }
+}
+
 fn convert_job_created_event(
     event: &proto::JobCreatedEvent,
 ) -> (
-    entities::job_created_event::ActiveModel,
+    entities::jobs::ActiveModel,
     Vec<u64>,  // sequences
     Vec<u64>,  // merged_sequences_1
     Vec<u64>,  // merged_sequences_2
 ) {
-    use entities::job_created_event::*;
+    use entities::jobs::*;
     use sea_orm::ActiveValue;
 
+    let sequences_json = if !event.sequences.is_empty() {
+        Some(serde_json::to_string(&event.sequences).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        None
+    };
+
+    let merged_sequences_1_json = if !event.merged_sequences_1.is_empty() {
+        Some(serde_json::to_string(&event.merged_sequences_1).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        None
+    };
+
+    let merged_sequences_2_json = if !event.merged_sequences_2.is_empty() {
+        Some(serde_json::to_string(&event.merged_sequences_2).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        None
+    };
+
     let active_model = ActiveModel {
-        id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
         app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
         app_method: ActiveValue::Set(event.app_method.clone()),
         job_sequence: ActiveValue::Set(event.job_sequence as i64),
+        sequences: ActiveValue::Set(sequences_json),
+        merged_sequences_1: ActiveValue::Set(merged_sequences_1_json),
+        merged_sequences_2: ActiveValue::Set(merged_sequences_2_json),
         job_id: ActiveValue::Set(event.job_id.clone()),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
@@ -1390,7 +1329,6 @@ fn convert_job_started_event(
     use sea_orm::ActiveValue;
 
     ActiveModel {
-        id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
         app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
@@ -1406,17 +1344,22 @@ fn convert_job_finished_event(
 ) -> entities::job_finished_event::ActiveModel {
     use entities::job_finished_event::*;
     use sea_orm::ActiveValue;
-    use serde_json::json;
+
+    // Convert JobResult enum to string for ENUM column
+    let result_str = match event.result() {
+        proto::JobResult::Unspecified => "JOB_RESULT_UNSPECIFIED",
+        proto::JobResult::Completed => "JOB_RESULT_COMPLETED",
+        proto::JobResult::Failed => "JOB_RESULT_FAILED",
+        proto::JobResult::Terminated => "JOB_RESULT_TERMINATED",
+    };
 
     ActiveModel {
-        id: ActiveValue::NotSet,
+        job_id: ActiveValue::Set(event.job_id.clone()), // Primary key
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
-        job_id: ActiveValue::Set(event.job_id.clone()),
         duration: ActiveValue::Set(event.duration as i64),
+        cost: ActiveValue::Set(event.cost as i64),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
-        result: ActiveValue::Set(json!({
-            "result": event.result as i32
-        }).to_string()),
+        result: ActiveValue::Set(result_str.to_string()),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     }
@@ -1444,27 +1387,64 @@ fn convert_coordinator_message_event(
     use entities::coordinator_message_event::*;
     use sea_orm::ActiveValue;
 
+    // Convert LogLevel enum to string for ENUM column
+    let level_str = match event.level() {
+        proto::LogLevel::Unspecified => "LOG_LEVEL_UNSPECIFIED",
+        proto::LogLevel::Debug => "LOG_LEVEL_DEBUG",
+        proto::LogLevel::Info => "LOG_LEVEL_INFO",
+        proto::LogLevel::Warn => "LOG_LEVEL_WARN",
+        proto::LogLevel::Error => "LOG_LEVEL_ERROR",
+        proto::LogLevel::Fatal => "LOG_LEVEL_FATAL",
+    };
+
     ActiveModel {
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
-        level: ActiveValue::Set(event.level as i32),
+        level: ActiveValue::Set(level_str.to_string()),
         message: ActiveValue::Set(event.message.clone()),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     }
 }
 
-fn convert_proof_submitted_event(
-    event: &proto::ProofSubmittedEvent,
+fn convert_proof_event(
+    event: &proto::ProofEvent,
 ) -> (
-    entities::proof_submitted_event::ActiveModel,
-    Vec<u64>,  // sequences
-    Vec<u64>,  // merged_sequences_1
-    Vec<u64>,  // merged_sequences_2
+    entities::proof_event::ActiveModel,
+    Vec<(u64, String)>,  // (sequence, sequence_type) for child table
 ) {
-    use entities::proof_submitted_event::*;
+    use entities::proof_event::*;
     use sea_orm::ActiveValue;
+
+    // Convert sequences to JSON strings for storage
+    let sequences_json = if !event.sequences.is_empty() {
+        Some(serde_json::to_string(&event.sequences).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        None
+    };
+
+    let merged_sequences_1_json = if !event.merged_sequences_1.is_empty() {
+        Some(serde_json::to_string(&event.merged_sequences_1).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        None
+    };
+
+    let merged_sequences_2_json = if !event.merged_sequences_2.is_empty() {
+        Some(serde_json::to_string(&event.merged_sequences_2).unwrap_or_else(|_| "[]".to_string()))
+    } else {
+        None
+    };
+
+    // Convert ProofEventType enum to string for ENUM column
+    let proof_type_str = match event.proof_event_type() {
+        proto::ProofEventType::Unspecified => "PROOF_EVENT_TYPE_UNSPECIFIED",
+        proto::ProofEventType::ProofSubmitted => "PROOF_SUBMITTED",
+        proto::ProofEventType::ProofFetched => "PROOF_FETCHED",
+        proto::ProofEventType::ProofVerified => "PROOF_VERIFIED",
+        proto::ProofEventType::ProofUnavailable => "PROOF_UNAVAILABLE",
+        proto::ProofEventType::ProofRejected => "PROOF_REJECTED",
+    };
 
     let active_model = ActiveModel {
         id: ActiveValue::NotSet,
@@ -1474,12 +1454,29 @@ fn convert_proof_submitted_event(
         job_id: ActiveValue::Set(event.job_id.clone()),
         data_availability: ActiveValue::Set(event.data_availability.clone()),
         block_number: ActiveValue::Set(event.block_number as i64),
+        block_proof: ActiveValue::Set(event.block_proof),
+        proof_event_type: ActiveValue::Set(proof_type_str.to_string()),
+        sequences: ActiveValue::Set(sequences_json),
+        merged_sequences_1: ActiveValue::Set(merged_sequences_1_json),
+        merged_sequences_2: ActiveValue::Set(merged_sequences_2_json),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
     };
 
-    (active_model, event.sequences.clone(), event.merged_sequences_1.clone(), event.merged_sequences_2.clone())
+    // Prepare data for child table
+    let mut child_sequences = Vec::new();
+    for seq in &event.sequences {
+        child_sequences.push((*seq, "sequences".to_string()));
+    }
+    for seq in &event.merged_sequences_1 {
+        child_sequences.push((*seq, "merged_sequences_1".to_string()));
+    }
+    for seq in &event.merged_sequences_2 {
+        child_sequences.push((*seq, "merged_sequences_2".to_string()));
+    }
+
+    (active_model, child_sequences)
 }
 
 fn convert_settlement_transaction_event(
@@ -1493,6 +1490,7 @@ fn convert_settlement_transaction_event(
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
         app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
+        chain: ActiveValue::Set(event.chain.clone()),
         job_id: ActiveValue::Set(event.job_id.clone()),
         block_number: ActiveValue::Set(event.block_number as i64),
         tx_hash: ActiveValue::Set(event.tx_hash.clone()),
@@ -1513,6 +1511,7 @@ fn convert_settlement_transaction_included_event(
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
         app_instance_id: ActiveValue::Set(event.app_instance_id.clone()),
+        chain: ActiveValue::Set(event.chain.clone()),
         job_id: ActiveValue::Set(event.job_id.clone()),
         block_number: ActiveValue::Set(event.block_number as i64),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
@@ -1527,13 +1526,23 @@ fn convert_agent_message_event(
     use entities::agent_message_event::*;
     use sea_orm::ActiveValue;
 
+    // Convert LogLevel enum to string for ENUM column
+    let level_str = match event.level() {
+        proto::LogLevel::Unspecified => "LOG_LEVEL_UNSPECIFIED",
+        proto::LogLevel::Debug => "LOG_LEVEL_DEBUG",
+        proto::LogLevel::Info => "LOG_LEVEL_INFO",
+        proto::LogLevel::Warn => "LOG_LEVEL_WARN",
+        proto::LogLevel::Error => "LOG_LEVEL_ERROR",
+        proto::LogLevel::Fatal => "LOG_LEVEL_FATAL",
+    };
+
     ActiveModel {
         id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
         job_id: ActiveValue::Set(event.job_id.clone()),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
-        level: ActiveValue::Set(event.level as i32),
+        level: ActiveValue::Set(level_str.to_string()),
         message: ActiveValue::Set(event.message.clone()),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
@@ -1748,4 +1757,29 @@ pub async fn search_coordinator_messages(
         total_count,
         returned_count,
     })
+}
+
+/// Helper function to parse JSON array of u64 values
+pub fn parse_json_array(json_str: &str) -> Result<Vec<u64>> {
+    if json_str.is_empty() || json_str == "null" {
+        return Ok(Vec::new());
+    }
+
+    serde_json::from_str::<Vec<u64>>(json_str)
+        .map_err(|e| anyhow::anyhow!("Failed to parse JSON array: {}", e))
+}
+
+/// Get database connection
+pub fn get_connection(database: &EventDatabase) -> &sea_orm::DatabaseConnection {
+    &database.connection
+}
+
+/// Search all tables with fulltext indexes and return the most relevant events (deprecated - use search_all_events_parallel)
+pub async fn search_all_events(
+    database: &EventDatabase,
+    search_query: &str,
+    limit: Option<u32>,
+) -> Result<SearchResult> {
+    // Redirect to the parallel implementation
+    crate::database_search::search_all_events_parallel(database, search_query, limit).await
 }
