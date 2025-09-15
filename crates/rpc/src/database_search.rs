@@ -46,7 +46,6 @@ pub async fn search_all_events_parallel(
 
         // Use different query strategy based on field type
         let query = if is_id_field(index.column_name) {
-            debug!("Creating LIKE query for ID field {} in table {}", index.column_name, index.table_name);
             // For ID fields (hex strings), use LIKE query
             format!(
                 "SELECT {} as pk, '{}' as table_name, '{}' as matched_column, \
@@ -88,14 +87,11 @@ pub async fn search_all_events_parallel(
         queries.push((index.table_name, index.column_name, query));
     }
 
-    debug!("Executing {} parallel queries", queries.len());
-
     // Execute all queries in parallel
     let conn = crate::database::get_connection(database);
     let mut futures = Vec::new();
 
-    for (table, column, query) in queries {
-        debug!("Executing query for table {} column {}: {}", table, column, &query[..query.len().min(200)]);
+    for (_table, _column, query) in queries {
         let conn_clone = conn.clone();
         let query_clone = query.clone();
         futures.push(async move { execute_search_query(&conn_clone, &query_clone).await });
@@ -115,22 +111,47 @@ pub async fn search_all_events_parallel(
 
     for result in results {
         if let Ok(rows) = result {
-            debug!("Got {} rows from a query", rows.len());
             for row in rows {
                 // Try to get values by column index instead of name
-                if let Ok(pk) = row.try_get_by_index::<String>(0) {
-                    let table_name = row.try_get_by_index::<String>(1).unwrap_or_default();
-                    let _matched_column = row.try_get_by_index::<String>(2).unwrap_or_default();
-                    let relevance_score = row.try_get_by_index::<f64>(3).unwrap_or(0.0);
+                match row.try_get_by_index::<String>(0) {
+                    Ok(pk) => {
+                        let table_name = row.try_get_by_index::<String>(1).unwrap_or_default();
+                        let _matched_column = row.try_get_by_index::<String>(2).unwrap_or_default();
+                        // Relevance score might be returned as integer (1) for LIKE queries
+                        let relevance_score = row
+                            .try_get_by_index::<f64>(3)
+                            .or_else(|_| row.try_get_by_index::<i64>(3).map(|v| v as f64))
+                            .or_else(|_| row.try_get_by_index::<f32>(3).map(|v| v as f64))
+                            .unwrap_or(1.0); // Default to 1.0 for ID field matches
 
-                    debug!("Found match: table={}, pk={}, score={}", table_name, pk, relevance_score);
-                    matches.push(SearchMatch {
-                        table_name,
-                        primary_key: pk,
-                        relevance_score,
-                    });
-                } else {
-                    debug!("Failed to get pk from row");
+                        matches.push(SearchMatch {
+                            table_name,
+                            primary_key: pk,
+                            relevance_score,
+                        });
+                    }
+                    Err(e) => {
+                        // Try to get as i64 for numeric primary keys
+                        if let Ok(pk_num) = row.try_get_by_index::<i64>(0) {
+                            let table_name = row.try_get_by_index::<String>(1).unwrap_or_default();
+                            let _matched_column =
+                                row.try_get_by_index::<String>(2).unwrap_or_default();
+                            // Relevance score might be returned as integer (1) for LIKE queries
+                            let relevance_score = row
+                                .try_get_by_index::<f64>(3)
+                                .or_else(|_| row.try_get_by_index::<i64>(3).map(|v| v as f64))
+                                .or_else(|_| row.try_get_by_index::<f32>(3).map(|v| v as f64))
+                                .unwrap_or(1.0); // Default to 1.0 for ID field matches
+
+                            matches.push(SearchMatch {
+                                table_name,
+                                primary_key: pk_num.to_string(),
+                                relevance_score,
+                            });
+                        } else {
+                            debug!("Failed to get pk from row: {:?}", e);
+                        }
+                    }
                 }
             }
         } else if let Err(e) = result {
@@ -164,15 +185,30 @@ pub async fn search_all_events_parallel(
     let mut all_events: Vec<proto::EventWithRelevance> = Vec::new();
 
     for match_ in unique_matches {
-        if let Some(event) = fetch_full_event(
+        match fetch_full_event(
             conn,
             &match_.table_name,
             &match_.primary_key,
             match_.relevance_score,
         )
-        .await?
+        .await
         {
-            all_events.push(event);
+            Ok(Some(event)) => {
+                all_events.push(event);
+            }
+            Ok(None) => {
+                debug!(
+                    "No event found for table={}, pk={}",
+                    match_.table_name, match_.primary_key
+                );
+            }
+            Err(e) => {
+                debug!(
+                    "Failed to fetch event from table={}, pk={}: {:?}",
+                    match_.table_name, match_.primary_key, e
+                );
+                return Err(e);
+            }
         }
     }
 
@@ -197,6 +233,7 @@ pub async fn search_all_events_parallel(
 fn get_primary_key_column(table_name: &str) -> &'static str {
     match table_name {
         "jobs" => "job_id",
+        "job_started_event" => "job_id",
         "job_finished_event" => "job_id",
         "agent_session" => "session_id",
         "agent_session_finished_event" => "session_id",
@@ -224,10 +261,20 @@ async fn fetch_full_event(
 ) -> Result<Option<proto::EventWithRelevance>> {
     let pk_column = get_primary_key_column(table_name);
 
-    let query = format!(
-        "SELECT * FROM {} WHERE {} = '{}'",
-        table_name, pk_column, primary_key
-    );
+    // Check if primary key is numeric (for id columns) or string (for job_id, session_id)
+    let query = if pk_column == "id" {
+        // Numeric primary key - don't quote
+        format!(
+            "SELECT * FROM {} WHERE {} = {}",
+            table_name, pk_column, primary_key
+        )
+    } else {
+        // String primary key - quote it
+        format!(
+            "SELECT * FROM {} WHERE {} = '{}'",
+            table_name, pk_column, primary_key
+        )
+    };
 
     let stmt = Statement::from_sql_and_values(sea_orm::DatabaseBackend::MySql, &query, vec![]);
 
@@ -300,13 +347,26 @@ fn parse_agent_message_event(
     row: &QueryResult,
     relevance_score: f64,
 ) -> Option<proto::EventWithRelevance> {
-    let id = row.try_get::<i64>("", "id").ok()?;
-    let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
-    let session_id = row.try_get::<String>("", "session_id").ok()?;
-    let job_id = row.try_get::<Option<String>>("", "job_id").ok()?;
-    let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let level = row.try_get::<i8>("", "level").ok()? as i32;
-    let message = row.try_get::<String>("", "message").ok()?;
+    // The columns from the SELECT * are in table order:
+    // id, coordinator_id, session_id, job_id, event_timestamp, level, message, created_at, updated_at
+    let id = row.try_get_by_index::<i64>(0).ok()?;
+    let coordinator_id = row.try_get_by_index::<String>(1).ok()?;
+    let session_id = row.try_get_by_index::<String>(2).ok()?;
+    let job_id = row.try_get_by_index::<Option<String>>(3).ok()?;
+    let event_timestamp = row.try_get_by_index::<i64>(4).ok()? as u64;
+    let level_str = row.try_get_by_index::<String>(5).ok()?;
+    let message = row.try_get_by_index::<String>(6).ok()?;
+
+    // Convert level string enum to i32
+    let level = match level_str.as_str() {
+        "LOG_LEVEL_UNSPECIFIED" => 0,
+        "LOG_LEVEL_DEBUG" => 1,
+        "LOG_LEVEL_INFO" => 2,
+        "LOG_LEVEL_WARN" => 3,
+        "LOG_LEVEL_ERROR" => 4,
+        "LOG_LEVEL_FATAL" => 5,
+        _ => 2, // Default to INFO
+    } as i32;
 
     let event = proto::Event {
         event: Some(proto::event::Event::AgentMessage(

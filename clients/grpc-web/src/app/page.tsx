@@ -126,7 +126,7 @@ export default function Home() {
           while (isActive) {
             // Skip fetching if background monitoring is paused
             if (backgroundMonitoringPaused) {
-              await new Promise((resolve) => setTimeout(resolve, 100));
+              await new Promise((resolve) => setTimeout(resolve, 1000));
               continue;
             }
 
@@ -178,7 +178,7 @@ export default function Home() {
 
             // Small delay between fetch attempts
             if (isActive) {
-              await new Promise((resolve) => setTimeout(resolve, 500));
+              await new Promise((resolve) => setTimeout(resolve, 2000));
             }
           }
         } catch (err) {
