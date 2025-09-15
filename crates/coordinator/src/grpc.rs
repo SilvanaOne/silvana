@@ -1156,6 +1156,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match tx_result {
             Ok(tx_hash) => {
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(tx_hash.clone());
+
                 let elapsed = start_time.elapsed();
                 info!(
                     "✅ RejectProof: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, block={}, seqs={:?}, tx={}, time={:?}",
@@ -2655,6 +2658,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(tx_hash.clone());
+
                 info!("✅ TryCreateBlock successful, tx: {}", tx_hash);
                 // TODO: Parse event to get block number if created
                 Ok(Response::new(TryCreateBlockResponse {
@@ -2786,6 +2792,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(tx_hash.clone());
+
                 info!(
                     "✅ UpdateBlockStateDataAvailability successful, block: {}, descriptor: {}, tx: {}",
                     req.block_number, descriptor_str, tx_hash
@@ -3178,6 +3187,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(tx_hash.clone());
+
                 info!(
                     "✅ UpdateBlockProofDataAvailability successful, block: {}, descriptor: {}, tx: {}",
                     req.block_number, final_descriptor_str, tx_hash
@@ -3247,6 +3259,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(tx_hash.clone());
+
                 info!("✅ UpdateBlockSettlementTxHash successful, tx: {}", tx_hash);
                 Ok(Response::new(UpdateBlockSettlementTxHashResponse {
                     success: true,
@@ -3313,6 +3328,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(tx_hash.clone());
+
                 info!(
                     "✅ UpdateBlockSettlementTxIncludedInBlock successful, tx: {}",
                     tx_hash
@@ -3389,6 +3407,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .await
         {
             Ok(tx_hash) => {
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(tx_hash.clone());
+
                 info!("✅ CreateAppJob successful, tx: {}", tx_hash);
                 // TODO: Parse event to get job sequence
                 Ok(Response::new(CreateAppJobResponse {

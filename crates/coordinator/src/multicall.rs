@@ -223,6 +223,9 @@ impl MulticallProcessor {
                     current_operation_count, result.tx_digest
                 );
 
+                // Send CoordinationTxEvent
+                self.state.send_coordination_tx_event(result.tx_digest.clone());
+
                 // Report successful multicall metrics
                 if let Some(ref metrics) = self.metrics {
                     metrics.increment_multicall_batch_executed(
