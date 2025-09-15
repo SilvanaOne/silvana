@@ -9,6 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub job_id: String,
     pub duration: i64,
+    pub cost: i64,
     pub event_timestamp: i64,
     pub result: String,
     pub created_at: Option<DateTimeUtc>,

@@ -16,13 +16,14 @@ pub mod coordinator {
 }
 
 use coordinator::{
-    AddMetadataRequest, AddMetadataResponse, Block, BlockSettlement, CompleteJobRequest,
+    AddMetadataRequest, AddMetadataResponse, AgentMessageRequest, AgentMessageResponse, Block, BlockSettlement, CompleteJobRequest,
     CompleteJobResponse, CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest,
     DeleteKvResponse, FailJobRequest, FailJobResponse, GetBlockProofRequest, GetBlockProofResponse,
     GetBlockRequest, GetBlockResponse, GetBlockSettlementRequest, GetBlockSettlementResponse,
     GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
     GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
-    GetSequenceStatesResponse, Job, Metadata, ReadDataAvailabilityRequest,
+    GetSequenceStatesResponse, Job, LogLevel, Metadata, ProofEventRequest, ProofEventResponse,
+    ProofEventType, ReadDataAvailabilityRequest,
     ReadDataAvailabilityResponse, RejectProofRequest, RejectProofResponse, RetrieveSecretRequest,
     RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
     SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
@@ -176,6 +177,415 @@ impl CoordinatorServiceImpl {
                 }
             } else {
                 debug!("No RPC client available to send JobFinishedEvent");
+            }
+        });
+    }
+
+    /// Send ProofEvent to RPC service for rejection (fire and forget)
+    fn send_proof_event_for_rejection(
+        &self,
+        agent_job: &crate::agent::AgentJob,
+        block_number: u64,
+        sequences: Vec<u64>,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match self.state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send ProofEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+        let session_id = agent_job.session_id.clone();
+        let app_instance_id = agent_job.app_instance.clone();
+        let job_id = agent_job.job_id.clone();
+
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::ProofEvent(
+                        proto::ProofEvent {
+                            coordinator_id,
+                            session_id,
+                            app_instance_id,
+                            job_id: job_id.clone(),
+                            data_availability: String::new(), // No DA for rejected proofs
+                            block_number,
+                            block_proof: Some(false), // Regular proof rejection
+                            proof_event_type: proto::ProofEventType::ProofRejected as i32,
+                            sequences,
+                            merged_sequences_1: vec![],
+                            merged_sequences_2: vec![],
+                            event_timestamp,
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent ProofEvent (rejection) for job_id {}", job_id);
+                        } else {
+                            warn!("Failed to send ProofEvent (rejection): {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send ProofEvent (rejection): {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send ProofEvent");
+            }
+        });
+    }
+
+    /// Send ProofEvent to RPC service (fire and forget)
+    fn send_proof_event(
+        &self,
+        agent_job: &crate::agent::AgentJob,
+        req: &SubmitProofRequest,
+        data_availability: String,
+        proof_event_type: proto::ProofEventType,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match self.state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send ProofEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+        let session_id = agent_job.session_id.clone();
+        let app_instance_id = agent_job.app_instance.clone();
+        let job_id = agent_job.job_id.clone();
+        let block_number = req.block_number;
+        let sequences = req.sequences.clone();
+        let merged_sequences_1 = req.merged_sequences_1.clone();
+        let merged_sequences_2 = req.merged_sequences_2.clone();
+
+        // Determine if this is a block proof based on sequences
+        let block_proof = if !merged_sequences_1.is_empty() || !merged_sequences_2.is_empty() {
+            Some(true)  // It's a merge/block proof
+        } else {
+            Some(false) // It's a regular proof
+        };
+
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::ProofEvent(
+                        proto::ProofEvent {
+                            coordinator_id,
+                            session_id,
+                            app_instance_id,
+                            job_id: job_id.clone(),
+                            data_availability,
+                            block_number,
+                            block_proof,
+                            proof_event_type: proof_event_type as i32,
+                            sequences,
+                            merged_sequences_1,
+                            merged_sequences_2,
+                            event_timestamp,
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent ProofEvent for job_id {}", job_id);
+                        } else {
+                            warn!("Failed to send ProofEvent: {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send ProofEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send ProofEvent");
+            }
+        });
+    }
+
+    /// Send SettlementTransactionEvent to RPC service (fire and forget)
+    fn send_settlement_transaction_event(
+        &self,
+        agent_job: &crate::agent::AgentJob,
+        req: &UpdateBlockSettlementTxHashRequest,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match self.state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send SettlementTransactionEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+        let session_id = agent_job.session_id.clone();
+        let app_instance_id = agent_job.app_instance.clone();
+        let chain = req.chain.clone();
+        let job_id = agent_job.job_id.clone();
+        let block_number = req.block_number;
+        let tx_hash = req.settlement_tx_hash.clone();
+
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::SettlementTransaction(
+                        proto::SettlementTransactionEvent {
+                            coordinator_id,
+                            session_id,
+                            app_instance_id,
+                            chain,
+                            job_id: job_id.clone(),
+                            block_number,
+                            tx_hash,
+                            event_timestamp,
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent SettlementTransactionEvent for job_id {}", job_id);
+                        } else {
+                            warn!("Failed to send SettlementTransactionEvent: {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send SettlementTransactionEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send SettlementTransactionEvent");
+            }
+        });
+    }
+
+    /// Send SettlementTransactionIncludedInBlockEvent to RPC service (fire and forget)
+    fn send_settlement_transaction_included_in_block_event(
+        &self,
+        agent_job: &crate::agent::AgentJob,
+        req: &UpdateBlockSettlementTxIncludedInBlockRequest,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match self.state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send SettlementTransactionIncludedInBlockEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+        let session_id = agent_job.session_id.clone();
+        let app_instance_id = agent_job.app_instance.clone();
+        let chain = req.chain.clone();
+        let job_id = agent_job.job_id.clone();
+        let block_number = req.block_number;
+
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::SettlementTransactionIncluded(
+                        proto::SettlementTransactionIncludedInBlockEvent {
+                            coordinator_id,
+                            session_id,
+                            app_instance_id,
+                            chain,
+                            job_id: job_id.clone(),
+                            block_number,
+                            event_timestamp,
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        if response.into_inner().success {
+                            debug!("SettlementTransactionIncludedInBlockEvent sent successfully for job {}", job_id);
+                        } else {
+                            warn!("Failed to send SettlementTransactionIncludedInBlockEvent for job {}", job_id);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send SettlementTransactionIncludedInBlockEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send SettlementTransactionIncludedInBlockEvent");
+            }
+        });
+    }
+
+    /// Send AgentMessageEvent to RPC service (fire and forget)
+    fn send_agent_message_event(
+        &self,
+        coordinator_id: String,
+        session_id: String,
+        job_id: Option<String>,
+        level: proto::LogLevel,
+        message: String,
+    ) {
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::AgentMessage(
+                        proto::AgentMessageEvent {
+                            coordinator_id,
+                            session_id,
+                            job_id,
+                            event_timestamp,
+                            level: level as i32,
+                            message: message.clone(),
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        if response.into_inner().success {
+                            debug!("AgentMessageEvent sent successfully: {}", message);
+                        } else {
+                            warn!("Failed to send AgentMessageEvent: {}", message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send AgentMessageEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send AgentMessageEvent");
+            }
+        });
+    }
+
+    /// Send ProofEvent to RPC service from ProofEventRequest (fire and forget)
+    fn send_proof_event_from_request(
+        &self,
+        coordinator_id: String,
+        session_id: String,
+        app_instance_id: String,
+        job_id: String,
+        data_availability: String,
+        block_number: u64,
+        block_proof: Option<bool>,
+        proof_event_type: proto::ProofEventType,
+        sequences: Vec<u64>,
+        merged_sequences_1: Vec<u64>,
+        merged_sequences_2: Vec<u64>,
+    ) {
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::ProofEvent(
+                        proto::ProofEvent {
+                            coordinator_id,
+                            session_id,
+                            app_instance_id,
+                            job_id,
+                            data_availability,
+                            block_number,
+                            block_proof,
+                            proof_event_type: proof_event_type as i32,
+                            sequences,
+                            merged_sequences_1,
+                            merged_sequences_2,
+                            event_timestamp,
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        if response.into_inner().success {
+                            debug!("ProofEvent sent successfully for block {}", block_number);
+                        } else {
+                            warn!("Failed to send ProofEvent for block {}", block_number);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send ProofEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send ProofEvent");
             }
         });
     }
@@ -888,10 +1298,10 @@ impl CoordinatorService for CoordinatorServiceImpl {
         );
 
         // Validate sequences are sorted
-        let sequences = req.sequences;
-        if !sequences.windows(2).all(|w| w[0] <= w[1]) {
+        if !req.sequences.windows(2).all(|w| w[0] <= w[1]) {
             return Err(Status::invalid_argument("Sequences must be sorted"));
         }
+        let sequences = req.sequences.clone();
 
         // Validate merged sequences are sorted if provided
         if !req.merged_sequences_1.is_empty() {
@@ -1005,12 +1415,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
         let merged_sequences_1 = if req.merged_sequences_1.is_empty() {
             None
         } else {
-            Some(req.merged_sequences_1)
+            Some(req.merged_sequences_1.clone())
         };
         let merged_sequences_2 = if req.merged_sequences_2.is_empty() {
             None
         } else {
-            Some(req.merged_sequences_2)
+            Some(req.merged_sequences_2.clone())
         };
 
         // Fetch the real ProofCalculation from blockchain to get start_sequence and end_sequence
@@ -1040,6 +1450,14 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         match tx_result {
             Ok(tx_hash) => {
+                // Send ProofEvent
+                self.send_proof_event(
+                    &agent_job,
+                    &req,
+                    descriptor.to_string(),
+                    proto::ProofEventType::ProofSubmitted,
+                );
+
                 let elapsed = start_time.elapsed();
                 info!(
                     "✅ SubmitProof: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, block={}, seqs={:?}, da={}, tx={}, time={:?}",
@@ -1158,6 +1576,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(tx_hash) => {
                 // Send CoordinationTxEvent
                 self.state.send_coordination_tx_event(tx_hash.clone());
+
+                // Send ProofEvent for rejection
+                self.send_proof_event_for_rejection(
+                    &agent_job,
+                    req.block_number,
+                    sequences.clone(),
+                );
 
                 let elapsed = start_time.elapsed();
                 info!(
@@ -3286,13 +3711,19 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 &agent_job.app_instance,
                 req.block_number,
                 req.chain.clone(),
-                req.settlement_tx_hash,
+                req.settlement_tx_hash.clone(),
             )
             .await
         {
             Ok(tx_hash) => {
                 // Send CoordinationTxEvent
                 self.state.send_coordination_tx_event(tx_hash.clone());
+
+                // Send SettlementTransactionEvent
+                self.send_settlement_transaction_event(
+                    &agent_job,
+                    &req,
+                );
 
                 info!("✅ UpdateBlockSettlementTxHash successful, tx: {}", tx_hash);
                 Ok(Response::new(UpdateBlockSettlementTxHashResponse {
@@ -3370,6 +3801,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
             Ok(tx_hash) => {
                 // Send CoordinationTxEvent
                 self.state.send_coordination_tx_event(tx_hash.clone());
+
+                // Send SettlementTransactionIncludedInBlockEvent
+                self.send_settlement_transaction_included_in_block_event(
+                    &agent_job,
+                    &req,
+                );
 
                 info!(
                     "✅ UpdateBlockSettlementTxIncludedInBlock successful, tx: {}",
@@ -3704,6 +4141,139 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 req.block_number, req.chain
             ),
             tx_hash: String::new(), // Placeholder for now
+        }))
+    }
+
+    async fn agent_message(
+        &self,
+        request: Request<AgentMessageRequest>,
+    ) -> Result<Response<AgentMessageResponse>, Status> {
+        // Get metadata from the request before consuming it
+        let metadata = request.metadata().clone();
+
+        let req = request.into_inner();
+
+        // Get coordinator ID
+        let coordinator_id = self.state.get_coordinator_id().unwrap_or_else(|| {
+            warn!("Coordinator ID not available for AgentMessage");
+            String::new()
+        });
+
+        // Try to extract session_id and job_id from metadata or use defaults
+        let session_id = metadata
+            .get("session-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| String::new());
+
+        let job_id = metadata
+            .get("job-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        // Convert coordinator LogLevel to RPC LogLevel
+        let rpc_log_level = match LogLevel::try_from(req.level).unwrap_or(LogLevel::Unspecified) {
+            LogLevel::Debug => proto::LogLevel::Debug,
+            LogLevel::Info => proto::LogLevel::Info,
+            LogLevel::Warn => proto::LogLevel::Warn,
+            LogLevel::Error => proto::LogLevel::Error,
+            LogLevel::Fatal => proto::LogLevel::Fatal,
+            _ => proto::LogLevel::Info,
+        };
+
+        // Send AgentMessageEvent
+        self.send_agent_message_event(
+            coordinator_id,
+            session_id,
+            job_id,
+            rpc_log_level,
+            req.message.clone(),
+        );
+
+        // Log the message locally as well
+        match LogLevel::try_from(req.level).unwrap_or(LogLevel::Unspecified) {
+            LogLevel::Debug => debug!("Agent message: {}", req.message),
+            LogLevel::Info => info!("Agent message: {}", req.message),
+            LogLevel::Warn => warn!("Agent message: {}", req.message),
+            LogLevel::Error => error!("Agent message: {}", req.message),
+            LogLevel::Fatal => error!("Agent FATAL message: {}", req.message),
+            _ => info!("Agent message: {}", req.message),
+        }
+
+        Ok(Response::new(AgentMessageResponse {
+            success: true,
+            message: "Message received and forwarded".to_string(),
+        }))
+    }
+
+    async fn proof_event(
+        &self,
+        request: Request<ProofEventRequest>,
+    ) -> Result<Response<ProofEventResponse>, Status> {
+        // Get metadata from the request before consuming it
+        let metadata = request.metadata().clone();
+
+        let req = request.into_inner();
+
+        // Get coordinator ID
+        let coordinator_id = self.state.get_coordinator_id().unwrap_or_else(|| {
+            warn!("Coordinator ID not available for ProofEvent");
+            String::new()
+        });
+
+        // Try to extract session_id, app_instance_id and job_id from metadata
+        let session_id = metadata
+            .get("session-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| String::new());
+
+        let app_instance_id = metadata
+            .get("app-instance-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| String::new());
+
+        let job_id = metadata
+            .get("job-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| String::new());
+
+        // Convert coordinator ProofEventType to RPC ProofEventType
+        let rpc_proof_event_type = match ProofEventType::try_from(req.proof_event_type).unwrap_or(ProofEventType::Unspecified) {
+            ProofEventType::ProofSubmitted => proto::ProofEventType::ProofSubmitted,
+            ProofEventType::ProofFetched => proto::ProofEventType::ProofFetched,
+            ProofEventType::ProofVerified => proto::ProofEventType::ProofVerified,
+            ProofEventType::ProofUnavailable => proto::ProofEventType::ProofUnavailable,
+            ProofEventType::ProofRejected => proto::ProofEventType::ProofRejected,
+            _ => proto::ProofEventType::ProofSubmitted,
+        };
+
+        // Send ProofEvent to RPC
+        self.send_proof_event_from_request(
+            coordinator_id,
+            session_id,
+            app_instance_id,
+            job_id,
+            req.data_availability.clone(),
+            req.block_number,
+            req.block_proof,
+            rpc_proof_event_type,
+            req.sequences.clone(),
+            req.merged_sequences_1.clone(),
+            req.merged_sequences_2.clone(),
+        );
+
+        // Log the event locally
+        info!(
+            "ProofEvent: type={:?}, block={}, da={}, sequences={:?}",
+            rpc_proof_event_type, req.block_number, req.data_availability, req.sequences
+        );
+
+        Ok(Response::new(ProofEventResponse {
+            success: true,
+            message: "Proof event received and forwarded".to_string(),
         }))
     }
 }
