@@ -1,5 +1,6 @@
 use crate::job_id::generate_job_id;
 use crate::state::SharedState;
+use proto;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,12 +19,21 @@ pub struct AgentJob {
     pub agent: String,
     pub agent_method: String,
     pub job: Job,
-    #[allow(dead_code)]
-    pub memory_requirement: u64,
+    pub min_memory_gb: u16,
+    pub min_cpu_cores: u16,
+    pub requires_tee: bool,
+    pub job_start_time: std::time::SystemTime,
 }
 
 impl AgentJob {
-    pub fn new(job: Job, session_id: String, state: &SharedState, memory_requirement: u64) -> Result<Self, String> {
+    pub fn new(
+        job: Job,
+        session_id: String,
+        state: &SharedState,
+        min_memory_gb: u16,
+        min_cpu_cores: u16,
+        requires_tee: bool,
+    ) -> Result<Self, String> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -39,6 +49,14 @@ impl AgentJob {
             timestamp,
         ).ok_or_else(|| format!("Cannot create agent job {}: coordinator_id not available", job.job_sequence))?;
 
+        // Send JobCreatedEvent
+        Self::send_job_created_event(
+            state,
+            &session_id,
+            &job_id,
+            &job,
+        );
+
         Ok(Self {
             session_id: session_id.clone(),
             job_id,
@@ -48,8 +66,83 @@ impl AgentJob {
             agent: job.agent.clone(),
             agent_method: job.agent_method.clone(),
             job,
-            memory_requirement,
+            min_memory_gb,
+            min_cpu_cores,
+            requires_tee,
+            job_start_time: SystemTime::now(),
         })
+    }
+
+    /// Send JobCreatedEvent to RPC service (fire and forget)
+    fn send_job_created_event(
+        state: &SharedState,
+        session_id: &str,
+        job_id: &str,
+        job: &Job,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send JobCreatedEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let state_clone = state.clone();
+        let session_id = session_id.to_string();
+        let job_id = job_id.to_string();
+        let app_instance = job.app_instance.clone();
+        let app_method = job.app_instance_method.clone();
+        let job_sequence = job.job_sequence;
+        let sequences = job.sequences.clone().unwrap_or_default();
+        let sequences1 = job.sequences1.clone().unwrap_or_default();
+        let sequences2 = job.sequences2.clone().unwrap_or_default();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::JobCreated(
+                        proto::JobCreatedEvent {
+                            coordinator_id,
+                            session_id,
+                            app_instance_id: app_instance,
+                            app_method,
+                            job_sequence,
+                            sequences,
+                            merged_sequences_1: sequences1,
+                            merged_sequences_2: sequences2,
+                            job_id: job_id.clone(),
+                            event_timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent JobCreatedEvent for job_id {}", job_id);
+                        } else {
+                            warn!("Failed to send JobCreatedEvent: {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send JobCreatedEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send JobCreatedEvent");
+            }
+        });
     }
 }
 

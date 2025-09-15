@@ -96,8 +96,9 @@ message JobFinishedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string job_id = 2 [ (silvana.options.v1.search) = true];
   uint64 duration = 3;
-  uint64 event_timestamp = 4;
-  JobResult result = 5;
+  uint64 cost = 4;
+  uint64 event_timestamp = 5;
+  JobResult result = 6;
 }
 
 message CoordinationTxEvent {

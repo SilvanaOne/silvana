@@ -1,5 +1,4 @@
 use crate::error::{CoordinatorError, Result};
-use sui::fetch::AgentMethod;
 
 /// Session information for Docker containers
 #[derive(Debug, Clone)]
@@ -20,21 +19,23 @@ pub fn generate_docker_session() -> Result<DockerSession> {
     })
 }
 
-/// Calculate session cost based on duration and agent method resources
+/// Calculate cost based on duration and resource requirements
 ///
 /// # Arguments
-/// * `duration_ms` - Session duration in milliseconds
-/// * `agent_method` - Agent method containing resource requirements
+/// * `duration_ms` - Duration in milliseconds
+/// * `min_memory_gb` - Minimum memory requirement in GB
+/// * `min_cpu_cores` - Minimum CPU cores requirement
+/// * `requires_tee` - Whether TEE is required
 ///
 /// # Returns
 /// Cost in units using formula: duration_in_sec * min_memory_gb * min_cpu_cores * (requires_tee? 10 : 1)
 /// Duration is rounded up to the nearest second
-pub fn calculate_session_cost(duration_ms: u64, agent_method: &AgentMethod) -> u64 {
+pub fn calculate_cost(duration_ms: u64, min_memory_gb: u16, min_cpu_cores: u16, requires_tee: bool) -> u64 {
     // Round up to nearest second: (duration_ms + 999) / 1000
     let duration_sec = (duration_ms + 999) / 1000;
-    let tee_multiplier = if agent_method.requires_tee { 10 } else { 1 };
+    let tee_multiplier = if requires_tee { 10 } else { 1 };
 
-    duration_sec * (agent_method.min_memory_gb as u64) * (agent_method.min_cpu_cores as u64) * tee_multiplier
+    duration_sec * (min_memory_gb as u64) * (min_cpu_cores as u64) * tee_multiplier
 }
 
 #[cfg(test)]
@@ -61,53 +62,28 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_session_cost() {
+    fn test_calculate_cost() {
         // Test basic cost calculation without TEE
-        let agent_method = AgentMethod {
-            docker_image: "test:latest".to_string(),
-            docker_sha256: None,
-            min_memory_gb: 2,
-            min_cpu_cores: 4,
-            requires_tee: false,
-        };
-
         // 10 seconds (10000ms) * 2GB * 4 cores * 1 (no TEE) = 80 units
-        assert_eq!(calculate_session_cost(10000, &agent_method), 80);
+        assert_eq!(calculate_cost(10000, 2, 4, false), 80);
 
         // Test with TEE enabled
-        let agent_method_tee = AgentMethod {
-            docker_image: "test:latest".to_string(),
-            docker_sha256: None,
-            min_memory_gb: 2,
-            min_cpu_cores: 4,
-            requires_tee: true,
-        };
-
         // 10 seconds * 2GB * 4 cores * 10 (TEE multiplier) = 800 units
-        assert_eq!(calculate_session_cost(10000, &agent_method_tee), 800);
+        assert_eq!(calculate_cost(10000, 2, 4, true), 800);
 
         // Test with different resources
-        let agent_method_small = AgentMethod {
-            docker_image: "test:latest".to_string(),
-            docker_sha256: None,
-            min_memory_gb: 1,
-            min_cpu_cores: 1,
-            requires_tee: false,
-        };
-
-        // 60 seconds (60000ms) * 1GB * 1 core * 1 = 60 units
-        assert_eq!(calculate_session_cost(60000, &agent_method_small), 60);
+        assert_eq!(calculate_cost(60000, 1, 1, false), 60);
 
         // Test with fractional seconds (should round up)
         // 5.5 seconds (5500ms) -> 6 seconds * 1GB * 1 core * 1 = 6 units
-        assert_eq!(calculate_session_cost(5500, &agent_method_small), 6);
+        assert_eq!(calculate_cost(5500, 1, 1, false), 6);
 
         // Test exact second boundary
         // 5 seconds (5000ms) -> 5 seconds * 1GB * 1 core * 1 = 5 units
-        assert_eq!(calculate_session_cost(5000, &agent_method_small), 5);
+        assert_eq!(calculate_cost(5000, 1, 1, false), 5);
 
         // Test minimal duration (1ms) rounds up to 1 second
         // 0.001 seconds (1ms) -> 1 second * 1GB * 1 core * 1 = 1 unit
-        assert_eq!(calculate_session_cost(1, &agent_method_small), 1);
+        assert_eq!(calculate_cost(1, 1, 1, false), 1);
     }
 }

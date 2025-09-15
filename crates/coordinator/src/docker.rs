@@ -3,7 +3,7 @@ use crate::constants::{JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_M
 use crate::error::Result;
 use crate::job_lock::JobLockGuard;
 use crate::metrics::CoordinatorMetrics;
-use crate::session::{calculate_session_cost, generate_docker_session};
+use crate::session::{calculate_cost, generate_docker_session};
 use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
 use proto;
@@ -72,14 +72,12 @@ impl SessionFinishedGuard {
             .as_millis() as u64;
 
         // Calculate cost using the session cost function
-        let agent_method = AgentMethod {
-            docker_image: String::new(), // Not needed for cost calculation
-            docker_sha256: None,
-            min_memory_gb: self.min_memory_gb,
-            min_cpu_cores: self.min_cpu_cores,
-            requires_tee: self.requires_tee,
-        };
-        let cost = calculate_session_cost(duration_ms, &agent_method);
+        let cost = calculate_cost(
+            duration_ms,
+            self.min_memory_gb,
+            self.min_cpu_cores,
+            self.requires_tee,
+        );
 
         // Get logs
         let container_logs = self.logs.lock().unwrap().clone();
@@ -404,12 +402,13 @@ pub async fn run_docker_container_task(
     let start_elapsed = start_time.elapsed();
 
     // Add job to agent database as a session-specific job for Docker retrieval
-    let memory_requirement = (agent_method.min_memory_gb as u64) * 1024 * 1024 * 1024;
     let agent_job = match AgentJob::new(
         job.clone(),
         docker_session.session_id.clone(),
         &state,
-        memory_requirement,
+        agent_method.min_memory_gb,
+        agent_method.min_cpu_cores,
+        agent_method.requires_tee,
     ) {
         Ok(job) => job,
         Err(e) => {
@@ -667,6 +666,13 @@ pub async fn ensure_job_failed_if_not_completed(
 
     // Add fail requests to multicall for any jobs that were in the database
     for failed_job in failed_jobs {
+        // Send JobFinishedEvent for the failed job
+        send_job_finished_event_for_failed(
+            state,
+            &failed_job,
+            reason.to_string(),  // Not used in current proto, but kept for potential future use
+        );
+
         state
             .add_fail_job_request(
                 failed_job.app_instance.clone(),
@@ -675,6 +681,82 @@ pub async fn ensure_job_failed_if_not_completed(
             )
             .await;
     }
+}
+
+/// Helper function to send JobFinishedEvent for failed jobs (fire and forget)
+fn send_job_finished_event_for_failed(
+    state: &SharedState,
+    agent_job: &crate::agent::AgentJob,
+    _error_message: String,  // Keep for API compatibility but not used in proto
+) {
+    // Get coordinator ID
+    let coordinator_id = match state.get_coordinator_id() {
+        Some(id) => id,
+        None => {
+            debug!("Cannot send JobFinishedEvent: coordinator_id not available");
+            return;
+        }
+    };
+
+    // Calculate job duration and cost
+    let job_end_time = std::time::SystemTime::now();
+    let duration_ms = job_end_time
+        .duration_since(agent_job.job_start_time)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    // Calculate cost using stored agent method info
+    let cost = crate::session::calculate_cost(
+        duration_ms,
+        agent_job.min_memory_gb,
+        agent_job.min_cpu_cores,
+        agent_job.requires_tee,
+    );
+
+    // Clone what we need for the async task
+    let state_clone = state.clone();
+    let job_id = agent_job.job_id.clone();
+    let job_end_timestamp = job_end_time
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Spawn async task to send the event
+    tokio::spawn(async move {
+        let rpc_client = state_clone.get_rpc_client().await;
+        if let Some(mut client) = rpc_client {
+            let event = proto::Event {
+                event: Some(proto::event::Event::JobFinished(
+                    proto::JobFinishedEvent {
+                        coordinator_id,
+                        job_id: job_id.clone(),
+                        duration: duration_ms,
+                        cost,
+                        event_timestamp: job_end_timestamp,
+                        result: proto::JobResult::Failed as i32,
+                    },
+                )),
+            };
+
+            let request = proto::SubmitEventRequest { event: Some(event) };
+
+            match client.submit_event(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        debug!("Sent JobFinishedEvent for failed job_id {}", job_id);
+                    } else {
+                        warn!("Failed to send JobFinishedEvent: {}", resp.message);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to send JobFinishedEvent: {}", e);
+                }
+            }
+        } else {
+            debug!("No RPC client available to send JobFinishedEvent");
+        }
+    });
 }
 
 // Standalone function to run a Docker container for a job (for parallel execution)

@@ -2,6 +2,7 @@ use crate::constants::{WALRUS_QUILT_BLOCK_INTERVAL, WALRUS_TEST};
 use crate::proofs_storage::{ProofMetadata, ProofStorage};
 use crate::state::SharedState;
 use monitoring::coordinator_metrics;
+use proto;
 use std::path::Path;
 use sui::fetch::block::fetch_block_info;
 use tokio::net::UnixListener;
@@ -46,6 +47,137 @@ impl CoordinatorServiceImpl {
             state,
             proof_storage: std::sync::Arc::new(ProofStorage::new()),
         }
+    }
+
+    /// Send JobStartedEvent to RPC service
+    async fn send_job_started_event(
+        &self,
+        session_id: String,
+        job_id: String,
+        app_instance: String,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match self.state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                warn!("Cannot send JobStartedEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Get RPC client
+        let rpc_client = self.state.get_rpc_client().await;
+        if let Some(mut client) = rpc_client {
+            let event = proto::Event {
+                event: Some(proto::event::Event::JobStarted(
+                    proto::JobStartedEvent {
+                        coordinator_id,
+                        session_id,
+                        app_instance_id: app_instance,
+                        job_id: job_id.clone(),
+                        event_timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    },
+                )),
+            };
+
+            let request = proto::SubmitEventRequest { event: Some(event) };
+
+            match client.submit_event(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        debug!("Sent JobStartedEvent for job_id {}", job_id);
+                    } else {
+                        warn!("Failed to send JobStartedEvent: {}", resp.message);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to send JobStartedEvent: {}", e);
+                }
+            }
+        } else {
+            debug!("No RPC client available to send JobStartedEvent");
+        }
+    }
+
+    /// Send JobFinishedEvent to RPC service (fire and forget)
+    fn send_job_finished_event(
+        &self,
+        agent_job: &crate::agent::AgentJob,
+        result: proto::JobResult,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match self.state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send JobFinishedEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Calculate job duration
+        let job_end_time = std::time::SystemTime::now();
+        let duration_ms = job_end_time
+            .duration_since(agent_job.job_start_time)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+        let job_id = agent_job.job_id.clone();
+        let job_end_timestamp = job_end_time
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Calculate cost using stored agent method info
+        let cost = crate::session::calculate_cost(
+            duration_ms,
+            agent_job.min_memory_gb,
+            agent_job.min_cpu_cores,
+            agent_job.requires_tee,
+        );
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::JobFinished(
+                        proto::JobFinishedEvent {
+                            coordinator_id,
+                            job_id: job_id.clone(),
+                            duration: duration_ms,
+                            cost,
+                            event_timestamp: job_end_timestamp,
+                            result: result as i32,
+                        },
+                    )),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent JobFinishedEvent for job_id {}", job_id);
+                        } else {
+                            warn!("Failed to send JobFinishedEvent: {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send JobFinishedEvent: {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send JobFinishedEvent");
+            }
+        });
     }
 }
 
@@ -180,6 +312,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     req.developer, req.agent, req.agent_method, agent_job.job_id, elapsed
                 );
 
+                // Send JobStartedEvent
+                self.send_job_started_event(
+                    req.session_id.clone(),
+                    agent_job.job_id.clone(),
+                    agent_job.app_instance.clone(),
+                ).await;
+
                 return Ok(Response::new(GetJobResponse {
                     success: true,
                     message: format!("Session job retrieved: {}", agent_job.job_id),
@@ -259,12 +398,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
             match sui::fetch::jobs::fetch_job_by_id(jobs_table_id, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
+                    // Fetch agent method to get resource requirements
+                    let agent_method = match sui::fetch_agent_method(
+                        &pending_job.developer,
+                        &pending_job.agent,
+                        &pending_job.agent_method,
+                    )
+                    .await
+                    {
+                        Ok(method) => method,
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch agent method for job {}: {}",
+                                pending_job.job_sequence, e
+                            );
+                            // Use default values if fetch fails
+                            sui::fetch::AgentMethod {
+                                docker_image: String::new(),
+                                docker_sha256: None,
+                                min_memory_gb: (started_job.memory_requirement / (1024 * 1024 * 1024)) as u16,
+                                min_cpu_cores: 1,
+                                requires_tee: false,
+                            }
+                        }
+                    };
+
                     // Create AgentJob and add it to agent database
                     let agent_job = match crate::agent::AgentJob::new(
                         pending_job.clone(),
                         req.session_id.clone(),
                         &self.state,
-                        started_job.memory_requirement,
+                        agent_method.min_memory_gb,
+                        agent_method.min_cpu_cores,
+                        agent_method.requires_tee,
                     ) {
                         Ok(job) => job,
                         Err(e) => {
@@ -368,7 +534,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         sequences1: pending_job.sequences1.clone().unwrap_or_default(),
                         sequences2: pending_job.sequences2.clone().unwrap_or_default(),
                         data: pending_job.data.clone(),
-                        job_id: agent_job.job_id,
+                        job_id: agent_job.job_id.clone(),
                         attempts: pending_job.attempts as u32,
                         created_at: pending_job.created_at,
                         updated_at: pending_job.updated_at,
@@ -386,6 +552,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         pending_job.app_instance_method,
                         elapsed
                     );
+
+                    // Send JobStartedEvent
+                    self.send_job_started_event(
+                        req.session_id.clone(),
+                        agent_job.job_id.clone(),
+                        started_job.app_instance.clone(),
+                    ).await;
 
                     return Ok(Response::new(GetJobResponse {
                         success: true,
@@ -508,6 +681,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             .add_complete_job_request(agent_job.app_instance.clone(), agent_job.job_sequence)
             .await;
 
+        // Send JobFinishedEvent before removing from database
+        self.send_job_finished_event(&agent_job, proto::JobResult::Completed);
+
         // Remove job from agent database
         let removed_job = self
             .state
@@ -600,6 +776,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Send JobFinishedEvent before failing
+        self.send_job_finished_event(&agent_job, proto::JobResult::Failed);
+
         // Add fail job request to batch instead of executing immediately
         self.state
             .add_fail_job_request(
@@ -656,6 +835,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
             "TerminateJob request for job_id: {} (sequence: {}, app_instance: {})",
             req.job_id, agent_job.job_sequence, agent_job.app_instance
         );
+
+        // Send JobFinishedEvent before terminating
+        self.send_job_finished_event(&agent_job, proto::JobResult::Terminated);
 
         self.state
             .add_terminate_job_request(agent_job.app_instance.clone(), agent_job.job_sequence)

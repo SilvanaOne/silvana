@@ -86,6 +86,7 @@ impl EventDatabase {
         let mut coordinator_active_events = Vec::new();
         let mut coordinator_shutdown_events = Vec::new();
         let mut agent_session_started_events = Vec::new();
+        let mut agent_session_finished_events = Vec::new();
         let mut jobs_events = Vec::new();
         let mut job_started_events = Vec::new();
         let mut job_finished_events = Vec::new();
@@ -116,6 +117,10 @@ impl EventDatabase {
                     }
                     EventType::AgentSessionStarted(e) => {
                         agent_session_started_events.push(convert_agent_session_started_event(e));
+                    }
+                    EventType::AgentSessionFinished(e) => {
+                        // Handle AgentSessionFinishedEvent
+                        agent_session_finished_events.push(convert_agent_session_finished_event(e));
                     }
                     EventType::JobCreated(e) => {
                         let (main_event, sequences, merged_sequences_1, merged_sequences_2) = convert_job_created_event(e);
@@ -174,6 +179,7 @@ impl EventDatabase {
             self.insert_coordinator_active_events(&txn, coordinator_active_events),
             self.insert_coordinator_shutdown_events(&txn, coordinator_shutdown_events),
             self.insert_agent_session_started_events(&txn, agent_session_started_events),
+            self.insert_agent_session_finished_events(&txn, agent_session_finished_events),
             self.insert_job_started_events(&txn, job_started_events),
             self.insert_job_finished_events(&txn, job_finished_events),
             self.insert_coordination_tx_events(&txn, coordination_tx_events),
@@ -338,6 +344,32 @@ impl EventDatabase {
             }
             Err(e) => {
                 error!("Failed to batch insert agent_session_started_events: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    async fn insert_agent_session_finished_events(
+        &self,
+        txn: &sea_orm::DatabaseTransaction,
+        events: Vec<entities::agent_session_finished_event::ActiveModel>,
+    ) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        debug!("Inserting {} agent_session_finished_events", events.len());
+        let events_len = events.len();
+        match entities::agent_session_finished_event::Entity::insert_many(events)
+            .exec(txn)
+            .await
+        {
+            Ok(_) => {
+                debug!("Successfully inserted agent_session_finished_events");
+                Ok(events_len)
+            }
+            Err(e) => {
+                error!("Failed to batch insert agent_session_finished_events: {}", e);
                 Err(e.into())
             }
         }
@@ -1218,6 +1250,25 @@ fn convert_agent_session_started_event(
         agent: ActiveValue::Set(event.agent.clone()),
         agent_method: ActiveValue::Set(event.agent_method.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
+        event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
+        created_at: ActiveValue::NotSet,
+        updated_at: ActiveValue::NotSet,
+    }
+}
+
+fn convert_agent_session_finished_event(
+    event: &proto::AgentSessionFinishedEvent,
+) -> entities::agent_session_finished_event::ActiveModel {
+    use entities::agent_session_finished_event::*;
+    use sea_orm::ActiveValue;
+
+    ActiveModel {
+        id: ActiveValue::NotSet,
+        coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
+        session_id: ActiveValue::Set(event.session_id.clone()),
+        session_log: ActiveValue::Set(event.session_log.clone()),
+        duration: ActiveValue::Set(event.duration as i64),
+        cost: ActiveValue::Set(event.cost as i64),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,
