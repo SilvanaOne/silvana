@@ -140,6 +140,8 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
     for message in messages {
         let table_name = if message.name == "JobCreatedEvent" {
             "jobs".to_string()
+        } else if message.name == "AgentSessionStartedEvent" {
+            "agent_session".to_string()
         } else {
             message.name.to_snake_case()
         };
@@ -161,8 +163,10 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
         ));
 
         // Special case: JobCreatedEvent, JobStartedEvent, JobFinishedEvent use job_id as primary key
-        if message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent" {
-            // Don't add auto-increment id, job_id will be the primary key
+        // AgentSessionStartedEvent, AgentSessionFinishedEvent use session_id as primary key
+        if message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent"
+            || message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent" {
+            // Don't add auto-increment id, job_id or session_id will be the primary key
         } else {
             // Add auto-increment primary key for other tables
             ddl.push_str("    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,\n");
@@ -207,8 +211,11 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
             };
 
             // Special handling for job_id as primary key in job-related tables
-            if (message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent")
-                && field.name == "job_id" {
+            // and session_id as primary key in agent session tables
+            if ((message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent")
+                && field.name == "job_id")
+                || ((message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent")
+                && field.name == "session_id") {
                 ddl.push_str(&format!(
                     "    `{}` {} {} PRIMARY KEY,\n",
                     column_name, mysql_type, nullable

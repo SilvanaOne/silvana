@@ -33,13 +33,12 @@ CREATE TABLE IF NOT EXISTS coordinator_shutdown_event (
     INDEX idx_event_timestamp (`event_timestamp`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-CREATE TABLE IF NOT EXISTS agent_session_started_event (
-    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS agent_session (
     `coordinator_id` VARCHAR(255) NOT NULL,
     `developer` VARCHAR(255) NOT NULL,
     `agent` VARCHAR(255) NOT NULL,
     `agent_method` VARCHAR(255) NOT NULL,
-    `session_id` VARCHAR(255) NOT NULL,
+    `session_id` VARCHAR(255) NOT NULL PRIMARY KEY,
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -51,6 +50,22 @@ CREATE TABLE IF NOT EXISTS agent_session_started_event (
     FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_agent_method (`agent_method`) WITH PARSER STANDARD,
+    FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE IF NOT EXISTS agent_session_finished_event (
+    `coordinator_id` VARCHAR(255) NOT NULL,
+    `session_id` VARCHAR(255) NOT NULL PRIMARY KEY,
+    `session_log` VARCHAR(255) NOT NULL,
+    `duration` BIGINT NOT NULL,
+    `cost` BIGINT NOT NULL,
+    `event_timestamp` BIGINT NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_created_at (`created_at`),
+    INDEX idx_coordinator_id (`coordinator_id`),
+    INDEX idx_session_id (`session_id`),
+    INDEX idx_event_timestamp (`event_timestamp`),
+    FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE IF NOT EXISTS jobs (

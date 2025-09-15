@@ -62,6 +62,15 @@ message AgentSessionStartedEvent {
   uint64 event_timestamp = 6;
 }
 
+message AgentSessionFinishedEvent {
+  string coordinator_id = 1 [ (silvana.options.v1.search) = true];
+  string session_id = 2 [ (silvana.options.v1.search) = true];
+  string session_log = 3;
+  uint64 duration = 4;
+  uint64 cost = 5;
+  uint64 event_timestamp = 6;
+}
+
 message JobCreatedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string session_id = 2 [ (silvana.options.v1.search) = true];

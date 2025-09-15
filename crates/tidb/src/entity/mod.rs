@@ -5,6 +5,7 @@ pub mod coordinator_started_event;
 pub mod coordinator_active_event;
 pub mod coordinator_shutdown_event;
 pub mod agent_session_started_event;
+pub mod agent_session_finished_event;
 pub mod jobs;
 pub mod job_started_event;
 pub mod job_finished_event;
