@@ -1,7 +1,6 @@
 syntax = "proto3";
 
 import "google/protobuf/descriptor.proto";
-import "silvana/options/v1/options.proto";
 
 package silvana.coordinator.v1;
 
@@ -32,9 +31,9 @@ message ProofEventRequest {
   uint64 block_number = 2;
   optional bool block_proof = 3;
   ProofEventType proof_event_type = 4;
-  repeated uint64 sequences = 5 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_1 = 6 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_2 = 7 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 sequences = 5;
+  repeated uint64 merged_sequences_1 = 6;
+  repeated uint64 merged_sequences_2 = 7;
 }
 
 // Response message for job completion
