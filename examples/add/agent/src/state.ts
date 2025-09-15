@@ -6,7 +6,13 @@ import {
   AddProgramProof,
 } from "./circuit.js";
 import { AddProgramCommitment } from "./commitment.js";
-import { readDataAvailability, rejectProof } from "@silvana-one/agent";
+import {
+  readDataAvailability,
+  rejectProof,
+  proofEvent,
+  ProofEventType,
+  error,
+} from "@silvana-one/agent";
 import {
   UInt32,
   Field,
@@ -46,6 +52,7 @@ export async function merge(params: {
   // Ensure the circuit is compiled
   const { vkProgram } = await compile();
   if (!vkProgram) {
+    error("Failed to compile circuit for merging");
     throw new Error("Failed to compile circuit for merging");
   }
 
@@ -66,8 +73,8 @@ export async function merge(params: {
       proof = await AddProgramProof.fromJSON(
         JSON.parse(serialized) as JsonProof
       );
-    } catch (error) {
-      console.error(`Error deserializing ${name}:`, error);
+    } catch (err) {
+      error(`Error deserializing ${name}:`, error);
       const rejectProofResponse = await rejectProof(blockNumber, sequences);
       if (!rejectProofResponse.success) {
         throw new Error(
@@ -82,10 +89,29 @@ export async function merge(params: {
     try {
       const ok = await verify(proof, vkProgram);
       if (!ok) {
+        await proofEvent({
+          proofEventType: ProofEventType.PROOF_REJECTED,
+          sequences: sequences,
+          blockNumber: blockNumber,
+          dataAvailability: "",
+        });
         throw new Error(`${name} verification failed`);
+      } else {
+        await proofEvent({
+          proofEventType: ProofEventType.PROOF_VERIFIED,
+          sequences: sequences,
+          blockNumber: blockNumber,
+          dataAvailability: "",
+        });
       }
-    } catch (error) {
-      console.error(`Error verifying ${name}:`, error);
+    } catch (err) {
+      await proofEvent({
+        proofEventType: ProofEventType.PROOF_REJECTED,
+        sequences: sequences,
+        blockNumber: blockNumber,
+        dataAvailability: "",
+      });
+      error(`Error verifying ${name}:`, err);
       const rejectProofResponse = await rejectProof(blockNumber, sequences);
       if (!rejectProofResponse.success) {
         throw new Error(

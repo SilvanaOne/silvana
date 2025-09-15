@@ -23,6 +23,9 @@ import {
   updateBlockSettlementTxHash,
   updateBlockSettlementTxIncludedInBlock,
   rejectProof,
+  proofEvent,
+  ProofEventType,
+  info,
 } from "@silvana-one/agent";
 
 interface SettleParams {
@@ -179,9 +182,7 @@ export async function settle(params: SettleParams): Promise<void> {
       !blockSettlement.blockSettlement ||
       blockSettlement.blockSettlement?.settlementTxIncludedInBlock === false
     ) {
-      console.log(
-        `Recording tx inclusion for block ${i} on chain ${settlementChain}`
-      );
+      info(`Recording tx inclusion for block ${i} on chain ${settlementChain}`);
       const updateResult = await updateBlockSettlementTxIncludedInBlock(
         i,
         BigInt(Date.now()),
@@ -415,10 +416,24 @@ export async function settle(params: SettleParams): Promise<void> {
     try {
       const isValid = await verify(blockProof, vkProgram);
       if (!isValid) {
+        await proofEvent({
+          proofEventType: ProofEventType.PROOF_REJECTED,
+          sequences: [],
+          blockProof: true,
+          blockNumber: currentBlockNumber,
+          dataAvailability: "",
+        });
         throw new Error(
           `Block proof verification failed for block ${currentBlockNumber}`
         );
       }
+      await proofEvent({
+        proofEventType: ProofEventType.PROOF_VERIFIED,
+        sequences: [],
+        blockProof: true,
+        blockNumber: currentBlockNumber,
+        dataAvailability: "",
+      });
     } catch (error) {
       console.error(
         `Error verifying block proof for block ${currentBlockNumber}:`,
