@@ -91,7 +91,7 @@ impl EventDatabase {
         let mut job_finished_events = Vec::new();
         let mut coordination_tx_events = Vec::new();
         let mut coordinator_message_events = Vec::new();
-        let mut proof_submitted_events = Vec::new();
+        let mut proof_events = Vec::new();
         let mut settlement_transaction_events = Vec::new();
         let mut settlement_transaction_included_events = Vec::new();
         let mut agent_message_events = Vec::new();
@@ -100,9 +100,9 @@ impl EventDatabase {
         let mut job_created_sequences = Vec::new();
         let mut job_created_ms1 = Vec::new();
         let mut job_created_ms2 = Vec::new();
-        let mut proof_submitted_sequences = Vec::new();
-        let mut proof_submitted_ms1 = Vec::new();
-        let mut proof_submitted_ms2 = Vec::new();
+        let mut proof_event_sequences = Vec::new();
+        let mut proof_event_ms1 = Vec::new();
+        let mut proof_event_ms2 = Vec::new();
 
         // Categorize events by type
         for event in events {
@@ -146,17 +146,17 @@ impl EventDatabase {
                     EventType::CoordinatorMessage(e) => {
                         coordinator_message_events.push(convert_coordinator_message_event(e));
                     }
-                    EventType::ProofSubmitted(e) => {
-                        let (main_event, sequences, ms1, ms2) = convert_proof_submitted_event(e);
-                        proof_submitted_events.push(main_event);
+                    EventType::ProofEvent(e) => {
+                        let (main_event, sequences, ms1, ms2) = convert_proof_event(e);
+                        proof_events.push(main_event);
                         if !sequences.is_empty() {
-                            proof_submitted_sequences.push(sequences);
+                            proof_event_sequences.push(sequences);
                         }
                         if !ms1.is_empty() {
-                            proof_submitted_ms1.push(ms1);
+                            proof_event_ms1.push(ms1);
                         }
                         if !ms2.is_empty() {
-                            proof_submitted_ms2.push(ms2);
+                            proof_event_ms2.push(ms2);
                         }
                     }
                     EventType::SettlementTransaction(e) => {
@@ -206,12 +206,12 @@ impl EventDatabase {
                 &job_created_ms1,
                 &job_created_ms2
             ),
-            self.insert_proof_submitted_events_with_sequences(
+            self.insert_proof_events_with_sequences(
                 &txn,
-                proof_submitted_events,
-                &proof_submitted_sequences,
-                &proof_submitted_ms1,
-                &proof_submitted_ms2
+                proof_events,
+                &proof_event_sequences,
+                &proof_event_ms1,
+                &proof_event_ms2
             ),
         )?;
 
@@ -616,10 +616,10 @@ impl EventDatabase {
         Ok(events_len)
     }
 
-    async fn insert_proof_submitted_events_with_sequences(
+    async fn insert_proof_events_with_sequences(
         &self,
         txn: &sea_orm::DatabaseTransaction,
-        events: Vec<entities::proof_submitted_event::ActiveModel>,
+        events: Vec<entities::proof_event::ActiveModel>,
         sequences_per_event: &[Vec<u64>],
         ms1_per_event: &[Vec<u64>],
         ms2_per_event: &[Vec<u64>],
@@ -628,11 +628,11 @@ impl EventDatabase {
             return Ok(0);
         }
 
-        debug!("Inserting {} proof_submitted_events with sequences", events.len());
+        debug!("Inserting {} proof_events with sequences", events.len());
         let events_len = events.len();
 
         // Insert parent records first
-        let parent_result = entities::proof_submitted_event::Entity::insert_many(events)
+        let parent_result = entities::proof_event::Entity::insert_many(events)
             .exec(txn)
             .await?;
 
@@ -640,10 +640,10 @@ impl EventDatabase {
 
         // Insert sequences child records
         if !sequences_per_event.is_empty() {
-            let sequence_records = self.create_proof_submitted_sequence_records(base_id, sequences_per_event);
+            let sequence_records = self.create_proof_event_sequence_records(base_id, sequences_per_event);
             if !sequence_records.is_empty() {
-                debug!("Inserting {} proof_submitted_event_sequences records", sequence_records.len());
-                entities::proof_submitted_event_sequences::Entity::insert_many(sequence_records)
+                debug!("Inserting {} proof_event_sequences records", sequence_records.len());
+                entities::proof_event_sequences::Entity::insert_many(sequence_records)
                     .exec(txn)
                     .await?;
             }
@@ -651,10 +651,10 @@ impl EventDatabase {
 
         // Insert ms1 child records
         if !ms1_per_event.is_empty() {
-            let ms1_records = self.create_proof_submitted_ms1_records(base_id, ms1_per_event);
+            let ms1_records = self.create_proof_event_ms1_records(base_id, ms1_per_event);
             if !ms1_records.is_empty() {
-                debug!("Inserting {} proof_submitted_event_ms1 records", ms1_records.len());
-                entities::proof_submitted_event_ms1::Entity::insert_many(ms1_records)
+                debug!("Inserting {} proof_event_ms1 records", ms1_records.len());
+                entities::proof_event_ms1::Entity::insert_many(ms1_records)
                     .exec(txn)
                     .await?;
             }
@@ -662,10 +662,10 @@ impl EventDatabase {
 
         // Insert ms2 child records
         if !ms2_per_event.is_empty() {
-            let ms2_records = self.create_proof_submitted_ms2_records(base_id, ms2_per_event);
+            let ms2_records = self.create_proof_event_ms2_records(base_id, ms2_per_event);
             if !ms2_records.is_empty() {
-                debug!("Inserting {} proof_submitted_event_ms2 records", ms2_records.len());
-                entities::proof_submitted_event_ms2::Entity::insert_many(ms2_records)
+                debug!("Inserting {} proof_event_ms2 records", ms2_records.len());
+                entities::proof_event_ms2::Entity::insert_many(ms2_records)
                     .exec(txn)
                     .await?;
             }
@@ -752,12 +752,12 @@ impl EventDatabase {
         records
     }
 
-    fn create_proof_submitted_sequence_records(
+    fn create_proof_event_sequence_records(
         &self,
         base_id: i64,
         sequences_per_event: &[Vec<u64>],
-    ) -> Vec<entities::proof_submitted_event_sequences::ActiveModel> {
-        use entities::proof_submitted_event_sequences::*;
+    ) -> Vec<entities::proof_event_sequences::ActiveModel> {
+        use entities::proof_event_sequences::*;
         use sea_orm::ActiveValue;
 
         let mut records = Vec::new();
@@ -767,7 +767,7 @@ impl EventDatabase {
             for &sequence in sequences {
                 records.push(ActiveModel {
                     id: ActiveValue::NotSet,
-                    proof_submitted_event_id: ActiveValue::Set(current_id),
+                    proof_event_id: ActiveValue::Set(current_id),
                     sequence: ActiveValue::Set(sequence as i64),
                     created_at: ActiveValue::NotSet,
                     updated_at: ActiveValue::NotSet,
@@ -778,12 +778,12 @@ impl EventDatabase {
         records
     }
 
-    fn create_proof_submitted_ms1_records(
+    fn create_proof_event_ms1_records(
         &self,
         base_id: i64,
         ms1_per_event: &[Vec<u64>],
-    ) -> Vec<entities::proof_submitted_event_ms1::ActiveModel> {
-        use entities::proof_submitted_event_ms1::*;
+    ) -> Vec<entities::proof_event_ms1::ActiveModel> {
+        use entities::proof_event_ms1::*;
         use sea_orm::ActiveValue;
 
         let mut records = Vec::new();
@@ -793,7 +793,7 @@ impl EventDatabase {
             for &value in ms1_values {
                 records.push(ActiveModel {
                     id: ActiveValue::NotSet,
-                    proof_submitted_event_id: ActiveValue::Set(current_id),
+                    proof_event_id: ActiveValue::Set(current_id),
                     merged_sequences_1: ActiveValue::Set(value as i64),
                     created_at: ActiveValue::NotSet,
                     updated_at: ActiveValue::NotSet,
@@ -804,12 +804,12 @@ impl EventDatabase {
         records
     }
 
-    fn create_proof_submitted_ms2_records(
+    fn create_proof_event_ms2_records(
         &self,
         base_id: i64,
         ms2_per_event: &[Vec<u64>],
-    ) -> Vec<entities::proof_submitted_event_ms2::ActiveModel> {
-        use entities::proof_submitted_event_ms2::*;
+    ) -> Vec<entities::proof_event_ms2::ActiveModel> {
+        use entities::proof_event_ms2::*;
         use sea_orm::ActiveValue;
 
         let mut records = Vec::new();
@@ -819,7 +819,7 @@ impl EventDatabase {
             for &value in ms2_values {
                 records.push(ActiveModel {
                     id: ActiveValue::NotSet,
-                    proof_submitted_event_id: ActiveValue::Set(current_id),
+                    proof_event_id: ActiveValue::Set(current_id),
                     merged_sequences_2: ActiveValue::Set(value as i64),
                     created_at: ActiveValue::NotSet,
                     updated_at: ActiveValue::NotSet,
@@ -1455,15 +1455,15 @@ fn convert_coordinator_message_event(
     }
 }
 
-fn convert_proof_submitted_event(
-    event: &proto::ProofSubmittedEvent,
+fn convert_proof_event(
+    event: &proto::ProofEvent,
 ) -> (
-    entities::proof_submitted_event::ActiveModel,
+    entities::proof_event::ActiveModel,
     Vec<u64>,  // sequences
     Vec<u64>,  // merged_sequences_1
     Vec<u64>,  // merged_sequences_2
 ) {
-    use entities::proof_submitted_event::*;
+    use entities::proof_event::*;
     use sea_orm::ActiveValue;
 
     let active_model = ActiveModel {
@@ -1474,6 +1474,10 @@ fn convert_proof_submitted_event(
         job_id: ActiveValue::Set(event.job_id.clone()),
         data_availability: ActiveValue::Set(event.data_availability.clone()),
         block_number: ActiveValue::Set(event.block_number as i64),
+        block_proof: ActiveValue::Set(event.block_proof),
+        proof_event_type: ActiveValue::Set(serde_json::json!({
+            "type": event.proof_event_type as i32
+        }).to_string()),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),
         created_at: ActiveValue::NotSet,
         updated_at: ActiveValue::NotSet,

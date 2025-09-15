@@ -1,19 +1,13 @@
-//! ProofSubmittedEvent entity
-//! Generated from proto definition: ProofSubmittedEvent
+//! Child entity for `merged_sequences_2`. `ProofEvent` -> `proof_event_ms2`
 
 use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "proof_submitted_event")]
+#[sea_orm(table_name = "proof_event_ms2")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub coordinator_id: String,
-    pub session_id: String,
-    pub app_instance_id: String,
-    pub job_id: String,
-    pub data_availability: String,
-    pub block_number: i64,
-    pub event_timestamp: i64,
+    pub proof_event_id: i64,
+    pub merged_sequences_2: i64,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,
 }

@@ -196,8 +196,8 @@ CREATE TABLE IF NOT EXISTS coordinator_message_event (
     FULLTEXT INDEX ft_idx_message (`message`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ProofSubmittedEvent Table
-CREATE TABLE IF NOT EXISTS proof_submitted_event (
+-- ProofEvent Table
+CREATE TABLE IF NOT EXISTS proof_event (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `coordinator_id` VARCHAR(255) NOT NULL,
     `session_id` VARCHAR(255) NOT NULL,
@@ -205,6 +205,8 @@ CREATE TABLE IF NOT EXISTS proof_submitted_event (
     `job_id` VARCHAR(255) NOT NULL,
     `data_availability` VARCHAR(255) NOT NULL,
     `block_number` BIGINT NOT NULL,
+    `block_proof` BOOLEAN NULL,
+    `proof_event_type` JSON NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -221,39 +223,39 @@ CREATE TABLE IF NOT EXISTS proof_submitted_event (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Child table for repeated field `sequences`
-CREATE TABLE IF NOT EXISTS proof_submitted_event_sequences (
+CREATE TABLE IF NOT EXISTS proof_event_sequences (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `proof_submitted_event_id` BIGINT NOT NULL,
+    `proof_event_id` BIGINT NOT NULL,
     `sequence` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_proof_submitted_event_sequences_parent (`proof_submitted_event_id`),
-    INDEX idx_proof_submitted_event_sequences_value (`sequence`),
-    CONSTRAINT fk_proof_submitted_event_sequences_proof_submitted_event_id FOREIGN KEY (`proof_submitted_event_id`) REFERENCES proof_submitted_event (`id`) ON DELETE CASCADE
+    INDEX idx_proof_event_sequences_parent (`proof_event_id`),
+    INDEX idx_proof_event_sequences_value (`sequence`),
+    CONSTRAINT fk_proof_event_sequences_proof_event_id FOREIGN KEY (`proof_event_id`) REFERENCES proof_event (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Child table for repeated field `merged_sequences_1`
-CREATE TABLE IF NOT EXISTS proof_submitted_event_ms1 (
+CREATE TABLE IF NOT EXISTS proof_event_ms1 (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `proof_submitted_event_id` BIGINT NOT NULL,
+    `proof_event_id` BIGINT NOT NULL,
     `merged_sequences_1` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_proof_submitted_event_ms1_parent (`proof_submitted_event_id`),
-    INDEX idx_proof_submitted_event_ms1_value (`merged_sequences_1`),
-    CONSTRAINT fk_proof_submitted_event_ms1_proof_submitted_event_id FOREIGN KEY (`proof_submitted_event_id`) REFERENCES proof_submitted_event (`id`) ON DELETE CASCADE
+    INDEX idx_proof_event_ms1_parent (`proof_event_id`),
+    INDEX idx_proof_event_ms1_value (`merged_sequences_1`),
+    CONSTRAINT fk_proof_event_ms1_proof_event_id FOREIGN KEY (`proof_event_id`) REFERENCES proof_event (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Child table for repeated field `merged_sequences_2`
-CREATE TABLE IF NOT EXISTS proof_submitted_event_ms2 (
+CREATE TABLE IF NOT EXISTS proof_event_ms2 (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `proof_submitted_event_id` BIGINT NOT NULL,
+    `proof_event_id` BIGINT NOT NULL,
     `merged_sequences_2` BIGINT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_proof_submitted_event_ms2_parent (`proof_submitted_event_id`),
-    INDEX idx_proof_submitted_event_ms2_value (`merged_sequences_2`),
-    CONSTRAINT fk_proof_submitted_event_ms2_proof_submitted_event_id FOREIGN KEY (`proof_submitted_event_id`) REFERENCES proof_submitted_event (`id`) ON DELETE CASCADE
+    INDEX idx_proof_event_ms2_parent (`proof_event_id`),
+    INDEX idx_proof_event_ms2_value (`merged_sequences_2`),
+    CONSTRAINT fk_proof_event_ms2_proof_event_id FOREIGN KEY (`proof_event_id`) REFERENCES proof_event (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- SettlementTransactionEvent Table

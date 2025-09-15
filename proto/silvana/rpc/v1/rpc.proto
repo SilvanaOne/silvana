@@ -164,7 +164,7 @@ message Event {
 
     // Transaction and proof events
     CoordinationTxEvent coordination_tx = 8;
-    ProofSubmittedEvent proof_submitted = 9;
+    ProofEvent proof_event = 9;
     SettlementTransactionEvent settlement_transaction = 10;
     SettlementTransactionIncludedInBlockEvent settlement_transaction_included = 11;
 
