@@ -9,7 +9,7 @@ pub struct Model {
     pub id: i64,
     pub coordinator_id: String,
     pub event_timestamp: i64,
-    pub level: i32,
+    pub level: String,
     pub message: String,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,

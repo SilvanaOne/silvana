@@ -11,7 +11,7 @@ pub struct Model {
     pub session_id: String,
     pub job_id: Option<String>,
     pub event_timestamp: i64,
-    pub level: i32,
+    pub level: String,
     pub message: String,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,

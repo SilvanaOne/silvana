@@ -5,9 +5,8 @@ use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "job_finished_event")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: i64,
     pub coordinator_id: String,
+    #[sea_orm(primary_key)]
     pub job_id: String,
     pub duration: i64,
     pub event_timestamp: i64,

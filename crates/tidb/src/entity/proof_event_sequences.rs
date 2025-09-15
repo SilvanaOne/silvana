@@ -1,4 +1,5 @@
-//! Child entity for `sequences`. `ProofEvent` -> `proof_event_sequences`
+//! Proof event sequences entity
+//! Maps (app_instance_id, sequence) => proof_event_id (many-to-many)
 
 use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
@@ -6,8 +7,10 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub proof_event_id: i64,
+    pub app_instance_id: String,
     pub sequence: i64,
+    pub proof_event_id: i64,
+    pub sequence_type: String,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,
 }

@@ -123,19 +123,21 @@ message SettlementTransactionEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string session_id = 2 [ (silvana.options.v1.search) = true];
   string app_instance_id = 3 [ (silvana.options.v1.search) = true];
-  string job_id = 4 [ (silvana.options.v1.search) = true];
-  uint64 block_number = 5;
-  string tx_hash = 6 [ (silvana.options.v1.search) = true];
-  uint64 event_timestamp = 7;
+  string chain = 4;
+  string job_id = 5 [ (silvana.options.v1.search) = true];
+  uint64 block_number = 6;
+  string tx_hash = 7 [ (silvana.options.v1.search) = true];
+  uint64 event_timestamp = 8;
 }
 
 message SettlementTransactionIncludedInBlockEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string session_id = 2 [ (silvana.options.v1.search) = true];
   string app_instance_id = 3 [ (silvana.options.v1.search) = true];
-  string job_id = 4 [ (silvana.options.v1.search) = true];
-  uint64 block_number = 5;
-  uint64 event_timestamp = 6;
+  string chain = 4;
+  string job_id = 5 [ (silvana.options.v1.search) = true];
+  uint64 block_number = 6;
+  uint64 event_timestamp = 7;
 }
 
 // Agent Events

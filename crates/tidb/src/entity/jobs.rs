@@ -3,15 +3,17 @@
 
 use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "job_created_event")]
+#[sea_orm(table_name = "jobs")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: i64,
     pub coordinator_id: String,
     pub session_id: String,
     pub app_instance_id: String,
     pub app_method: String,
     pub job_sequence: i64,
+    pub sequences: Option<String>, // JSON array of u64
+    pub merged_sequences_1: Option<String>, // JSON array of u64
+    pub merged_sequences_2: Option<String>, // JSON array of u64
+    #[sea_orm(primary_key)]
     pub job_id: String,
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,
