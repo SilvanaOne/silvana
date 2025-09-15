@@ -25,6 +25,17 @@ enum JobResult {
   JOB_RESULT_TERMINATED = 3;
 }
 
+// Job result enumeration
+enum ProofEventType {
+  PROOF_EVENT_TYPE_UNSPECIFIED = 0;
+  PROOF_SUBMITTED = 1;
+  PROOF_FETCHED = 2;
+  PROOF_VERIFIED = 3;
+  PROOF_UNAVAILABLE = 5;
+  PROOF_REJECTED = 6;
+}
+
+
 // Coordinator Events
 message CoordinatorStartedEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
@@ -93,17 +104,19 @@ message CoordinatorMessageEvent {
   string message = 4 [ (silvana.options.v1.search) = true];
 }
 
-message ProofSubmittedEvent {
+message ProofEvent {
   string coordinator_id = 1 [ (silvana.options.v1.search) = true];
   string session_id = 2 [ (silvana.options.v1.search) = true];
   string app_instance_id = 3 [ (silvana.options.v1.search) = true];
   string job_id = 4 [ (silvana.options.v1.search) = true];
   string data_availability = 5;
   uint64 block_number = 6;
-  repeated uint64 sequences = 7 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_1 = 8 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_2 = 9 [ (silvana.options.v1.sequences) = true];
-  uint64 event_timestamp = 10;
+  optional bool block_proof = 7;
+  ProofEventType proof_event_type = 8;
+  repeated uint64 sequences = 9 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_1 = 10 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_2 = 11 [ (silvana.options.v1.sequences) = true];
+  uint64 event_timestamp = 12;
 }
 
 message SettlementTransactionEvent {
