@@ -1186,10 +1186,18 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
             Err(e) => {
                 let elapsed = start_time.elapsed();
-                error!(
+                let error_msg = format!(
                     "Failed to reject proof for job {} on blockchain: {}",
                     req.job_id, e
                 );
+                error!("{}", error_msg);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    error_msg.clone()
+                );
+
                 warn!(
                     "❌ RejectProof: job_id={}, error={}, time={:?}",
                     req.job_id, e, elapsed
@@ -2671,7 +2679,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to try create block: {}", e);
+                let error_msg = format!("Failed to try create block: {}", e);
+                error!("{}", error_msg);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    error_msg.clone()
+                );
+
                 Ok(Response::new(TryCreateBlockResponse {
                     success: false,
                     message: format!("Failed to create block: {}", e),
@@ -2809,7 +2825,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to update block state DA: {}", e);
+                let error_msg = format!("Failed to update block state DA: {}", e);
+                error!("{}", error_msg);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    error_msg.clone()
+                );
+
                 Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
                     success: false,
                     message: format!("Failed to update block state DA: {}", e),
@@ -3204,7 +3228,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to update block proof DA: {}", e);
+                let error_msg = format!("Failed to update block proof DA: {}", e);
+                error!("{}", error_msg);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    error_msg.clone()
+                );
+
                 Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: false,
                     message: format!("Failed to update block proof DA: {}", e),
@@ -3270,7 +3302,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to update block settlement tx hash: {}", e);
+                let error_msg = format!("Failed to update block settlement tx hash: {}", e);
+                error!("{}", error_msg);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    error_msg.clone()
+                );
+
                 Ok(Response::new(UpdateBlockSettlementTxHashResponse {
                     success: false,
                     message: format!("Failed to update block settlement tx hash: {}", e),
@@ -3345,7 +3385,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 ))
             }
             Err(e) => {
-                error!("Failed to update block settlement included in block: {}", e);
+                let error_msg = format!("Failed to update block settlement included in block: {}", e);
+                error!("{}", error_msg);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    error_msg.clone()
+                );
+
                 Ok(Response::new(
                     UpdateBlockSettlementTxIncludedInBlockResponse {
                         success: false,
@@ -3420,7 +3468,15 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
             Err(e) => {
-                error!("Failed to create app job: {}", e);
+                let error_msg = format!("Failed to create app job: {}", e);
+                error!("{}", error_msg);
+
+                // Send error event to RPC
+                self.state.send_coordinator_message_event(
+                    proto::LogLevel::Error,
+                    error_msg.clone()
+                );
+
                 Ok(Response::new(CreateAppJobResponse {
                     success: false,
                     message: format!("Failed to create app job: {}", e),
