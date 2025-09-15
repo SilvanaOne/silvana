@@ -112,7 +112,10 @@ impl SchemaValidator {
             AND (TABLE_NAME LIKE '%_event'
                 OR TABLE_NAME LIKE '%_event_ms1'
                 OR TABLE_NAME LIKE '%_event_ms2'
-                OR TABLE_NAME LIKE '%_event_sequences')
+                OR TABLE_NAME LIKE '%_event_sequences'
+                OR TABLE_NAME LIKE '%_sequences'
+                OR TABLE_NAME = 'jobs'
+                OR TABLE_NAME = 'agent_session')
             ORDER BY TABLE_NAME
         "#;
 
@@ -298,32 +301,61 @@ impl SchemaValidator {
         let mut schema = HashMap::new();
 
         for message in messages {
-            let table_name = message.name.to_snake_case();
-            let mut columns = vec![
-                // Standard columns present in all tables
-                ExpectedColumn {
+            // Special table name mappings
+            let table_name = if message.name == "JobCreatedEvent" {
+                "jobs".to_string()
+            } else if message.name == "AgentSessionStartedEvent" {
+                "agent_session".to_string()
+            } else {
+                message.name.to_snake_case()
+            };
+
+            let mut columns = vec![];
+
+            // Check if this table uses a specific field as primary key
+            let uses_specific_primary_key =
+                (message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent") ||
+                (message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent");
+
+            // Only add id column if table doesn't use a specific field as primary key
+            if !uses_specific_primary_key {
+                columns.push(ExpectedColumn {
                     name: "id".to_string(),
                     data_type: "bigint".to_string(),
                     is_nullable: false,
-                },
-                ExpectedColumn {
-                    name: "created_at".to_string(),
-                    data_type: "timestamp".to_string(),
-                    is_nullable: true,
-                },
-                ExpectedColumn {
-                    name: "updated_at".to_string(),
-                    data_type: "timestamp".to_string(),
-                    is_nullable: true,
-                },
-            ];
+                });
+            }
+
+            // Standard timestamp columns
+            columns.push(ExpectedColumn {
+                name: "created_at".to_string(),
+                data_type: "timestamp".to_string(),
+                is_nullable: true,
+            });
+            columns.push(ExpectedColumn {
+                name: "updated_at".to_string(),
+                data_type: "timestamp".to_string(),
+                is_nullable: true,
+            });
 
             // Track fields with sequences option for child table creation
             let mut sequence_fields = Vec::new();
 
             // Add proto-defined fields
             for field in message.fields.clone() {
-                // Skip fields with sequences option - they become separate child tables
+                // Special handling for JobCreatedEvent and ProofEvent - keep sequences in both main table and child table
+                if (message.name == "JobCreatedEvent" || message.name == "ProofEvent") && field.has_sequences_option {
+                    sequence_fields.push(field.clone());
+                    // Also add as JSON column in main table
+                    columns.push(ExpectedColumn {
+                        name: field.name.to_snake_case(),
+                        data_type: "json".to_string(),
+                        is_nullable: true,
+                    });
+                    continue;
+                }
+
+                // For other tables, fields with sequences option are only in child tables
                 if field.has_sequences_option {
                     sequence_fields.push(field);
                     continue;
@@ -343,21 +375,9 @@ impl SchemaValidator {
 
             schema.insert(table_name.clone(), columns);
 
-            // Add child tables for fields with sequences option
-            for field in sequence_fields {
-                // Shorten long field names to avoid MySQL constraint name length limits
-                let field_suffix = if field.name == "merged_sequences_1" {
-                    "ms1".to_string()
-                } else if field.name == "merged_sequences_2" {
-                    "ms2".to_string()
-                } else {
-                    field.name.to_snake_case()
-                };
-
-                let child_table_name = format!("{}_{}", table_name, field_suffix);
-                let parent_fk = format!("{}_id", table_name);
-                let value_col = field.name.to_singular().to_snake_case();
-
+            // Special handling for JobCreatedEvent - single merged table for all sequences
+            if message.name == "JobCreatedEvent" && !sequence_fields.is_empty() {
+                let child_table_name = "job_sequences".to_string();
                 let child_columns = vec![
                     ExpectedColumn {
                         name: "id".to_string(),
@@ -365,18 +385,23 @@ impl SchemaValidator {
                         is_nullable: false,
                     },
                     ExpectedColumn {
-                        name: parent_fk,
+                        name: "app_instance_id".to_string(),
+                        data_type: "varchar(255)".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "sequence".to_string(),
                         data_type: "bigint".to_string(),
                         is_nullable: false,
                     },
                     ExpectedColumn {
-                        name: value_col,
-                        data_type: proto_type_to_mysql_with_options(
-                            &field.field_type,
-                            false,  // Not repeated in child table
-                            false,
-                            field.name.contains("metadata") || field.name.contains("message"),
-                        ),
+                        name: "job_id".to_string(),
+                        data_type: "varchar(255)".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "sequence_type".to_string(),
+                        data_type: "enum".to_string(),  // Simplified for comparison
                         is_nullable: false,
                     },
                     ExpectedColumn {
@@ -390,8 +415,99 @@ impl SchemaValidator {
                         is_nullable: true,
                     },
                 ];
-
                 schema.insert(child_table_name, child_columns);
+            // Special handling for ProofEvent - single merged table for all sequences
+            } else if message.name == "ProofEvent" && !sequence_fields.is_empty() {
+                let child_table_name = "proof_event_sequences".to_string();
+                let child_columns = vec![
+                    ExpectedColumn {
+                        name: "id".to_string(),
+                        data_type: "bigint".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "app_instance_id".to_string(),
+                        data_type: "varchar(255)".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "sequence".to_string(),
+                        data_type: "bigint".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "proof_event_id".to_string(),
+                        data_type: "bigint".to_string(),
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "sequence_type".to_string(),
+                        data_type: "enum".to_string(),  // Simplified for comparison
+                        is_nullable: false,
+                    },
+                    ExpectedColumn {
+                        name: "created_at".to_string(),
+                        data_type: "timestamp".to_string(),
+                        is_nullable: true,
+                    },
+                    ExpectedColumn {
+                        name: "updated_at".to_string(),
+                        data_type: "timestamp".to_string(),
+                        is_nullable: true,
+                    },
+                ];
+                schema.insert(child_table_name, child_columns);
+            } else {
+                // Normal handling for other tables - create separate child tables for each sequence field
+                for field in sequence_fields {
+                    // Shorten long field names to avoid MySQL constraint name length limits
+                    let field_suffix = if field.name == "merged_sequences_1" {
+                        "ms1".to_string()
+                    } else if field.name == "merged_sequences_2" {
+                        "ms2".to_string()
+                    } else {
+                        field.name.to_snake_case()
+                    };
+
+                    let child_table_name = format!("{}_{}", table_name, field_suffix);
+                    let parent_fk = format!("{}_id", table_name);
+                    let value_col = field.name.to_singular().to_snake_case();
+
+                    let child_columns = vec![
+                        ExpectedColumn {
+                            name: "id".to_string(),
+                            data_type: "bigint".to_string(),
+                            is_nullable: false,
+                        },
+                        ExpectedColumn {
+                            name: parent_fk,
+                            data_type: "bigint".to_string(),
+                            is_nullable: false,
+                        },
+                        ExpectedColumn {
+                            name: value_col,
+                            data_type: proto_type_to_mysql_with_options(
+                                &field.field_type,
+                                false,  // Not repeated in child table
+                                false,
+                                field.name.contains("metadata") || field.name.contains("message"),
+                            ),
+                            is_nullable: false,
+                        },
+                        ExpectedColumn {
+                            name: "created_at".to_string(),
+                            data_type: "timestamp".to_string(),
+                            is_nullable: true,
+                        },
+                        ExpectedColumn {
+                            name: "updated_at".to_string(),
+                            data_type: "timestamp".to_string(),
+                            is_nullable: true,
+                        },
+                    ];
+
+                    schema.insert(child_table_name, child_columns);
+                }
             }
         }
 
@@ -490,6 +606,17 @@ impl SchemaValidator {
         // Map common type variations
         let normalize_type = |t: &str| -> String {
             let t = t.to_lowercase();
+
+            // Handle ENUM types - just check if both are enum
+            if t.starts_with("enum") || t == "enum" {
+                return "enum".to_string();
+            }
+
+            // Handle boolean/tinyint compatibility (MySQL stores BOOLEAN as TINYINT(1))
+            if t == "boolean" || t == "tinyint" || t == "tinyint(1)" {
+                return "boolean".to_string();
+            }
+
             match t.as_str() {
                 "varchar" | "varchar(255)" => "varchar".to_string(),
                 "text" => "text".to_string(),
@@ -511,6 +638,22 @@ impl SchemaValidator {
         table_name: &str,
         expected_columns: &[ExpectedColumn],
     ) -> Result<Vec<String>> {
+        // Special handling for job_sequences and proof_event_sequences tables
+        if table_name == "job_sequences" {
+            return Ok(vec![
+                "idx_job_sequences_lookup".to_string(),
+                "idx_job_sequences_job_id".to_string(),
+                "uk_job_sequences".to_string(),
+            ]);
+        }
+        if table_name == "proof_event_sequences" {
+            return Ok(vec![
+                "idx_proof_event_sequences_lookup".to_string(),
+                "idx_proof_event_sequences_proof_event_id".to_string(),
+                "uk_proof_event_sequences".to_string(),
+            ]);
+        }
+
         // Check if this is a child table (ends with _ms1, _ms2, or _sequences)
         if table_name.ends_with("_ms1") || table_name.ends_with("_ms2") || table_name.ends_with("_sequences") {
             // Child tables have different index naming convention

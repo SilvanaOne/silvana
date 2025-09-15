@@ -119,6 +119,7 @@ install-tools: ## Install required tools (mysqldef only - proto-to-ddl builds au
 	@echo "🔧 Installing required tools..."
 	@echo "Installing mysqldef..."
 	go install github.com/sqldef/sqldef/cmd/mysqldef@latest
+	brew install mysql
 	@echo "✅ All tools installed"
 	@echo "ℹ️  proto-to-ddl will be built automatically via 'cargo run --release'"
 
@@ -403,13 +404,8 @@ read-config: ## Read configuration from RPC server (requires: CHAIN=[devnet|test
 show-tables: check-database-url ## Show all tables in the database
 	@echo "📋 Tables in database:"
 	@DB_URL="$(call load_database_url)"; \
-	export DB_USER=$$(echo "$$DB_URL" | sed 's|mysql://||' | sed 's|:.*||'); \
-	export DB_PASS=$$(echo "$$DB_URL" | sed 's|mysql://[^:]*:||' | sed 's|@.*||'); \
-	export DB_HOST=$$(echo "$$DB_URL" | sed 's|.*@||' | sed 's|:.*||'); \
-	export DB_PORT=$$(echo "$$DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
-	export DB_NAME=$$(echo "$$DB_URL" | sed 's|.*/||'); \
-	mysql --user=$$DB_USER --password=$$DB_PASS --host=$$DB_HOST --port=$$DB_PORT $$DB_NAME \
-		--execute="SHOW TABLES;" 2>/dev/null || echo "❌ Could not connect to database"
+	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- \
+		list-tables --database-url "$$DB_URL"
 
 show-schema: check-database-url ## Show schema for all tables  
 	@echo "📊 Database schema:"
@@ -431,6 +427,7 @@ show-schema: check-database-url ## Show schema for all tables
 validate-schema: check-database-url check-tools ## Validate that database schema matches proto definitions
 	@echo "🔍 Validating schema consistency..."
 	@DB_URL="$(call load_database_url)"; \
+	DB_URL=$$(echo "$$DB_URL" | xargs); \
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- validate \
 		--proto-file $(PROTO_FILE) \
 		--database-url "$$DB_URL"
