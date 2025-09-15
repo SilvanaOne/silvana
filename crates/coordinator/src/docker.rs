@@ -2,16 +2,179 @@ use crate::agent::AgentJob;
 use crate::constants::{JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS};
 use crate::error::Result;
 use crate::job_lock::JobLockGuard;
-use crate::session_id::generate_docker_session;
+use crate::metrics::CoordinatorMetrics;
+use crate::session::{calculate_session_cost, generate_docker_session};
 use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
+use proto;
 use secrets_client::SecretsClient;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use sui::fetch::{AgentMethod, Job};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
+
+/// Guard that ensures AgentSessionFinishedEvent is sent when dropped
+struct SessionFinishedGuard {
+    session_id: String,
+    coordinator_id: String,
+    session_start_time: std::time::SystemTime,
+    min_memory_gb: u16,
+    min_cpu_cores: u16,
+    requires_tee: bool,
+    state: SharedState,
+    logs: Arc<Mutex<String>>,
+    sent: Arc<Mutex<bool>>,
+}
+
+impl SessionFinishedGuard {
+    fn new(
+        session_id: String,
+        coordinator_id: String,
+        session_start_time: std::time::SystemTime,
+        agent_method: &AgentMethod,
+        state: SharedState,
+    ) -> Self {
+        Self {
+            session_id,
+            coordinator_id,
+            session_start_time,
+            min_memory_gb: agent_method.min_memory_gb,
+            min_cpu_cores: agent_method.min_cpu_cores,
+            requires_tee: agent_method.requires_tee,
+            state,
+            logs: Arc::new(Mutex::new(String::new())),
+            sent: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    fn set_logs(&self, logs: String) {
+        if let Ok(mut guard) = self.logs.lock() {
+            *guard = logs;
+        }
+    }
+
+    async fn send_finished_event(&self) {
+        // Check if already sent
+        {
+            let mut sent_guard = self.sent.lock().unwrap();
+            if *sent_guard {
+                return;
+            }
+            *sent_guard = true;
+        }
+
+        // Calculate session duration
+        let duration_ms = self.session_start_time
+            .elapsed()
+            .unwrap_or(std::time::Duration::from_secs(0))
+            .as_millis() as u64;
+
+        // Calculate cost using the session cost function
+        let agent_method = AgentMethod {
+            docker_image: String::new(), // Not needed for cost calculation
+            docker_sha256: None,
+            min_memory_gb: self.min_memory_gb,
+            min_cpu_cores: self.min_cpu_cores,
+            requires_tee: self.requires_tee,
+        };
+        let cost = calculate_session_cost(duration_ms, &agent_method);
+
+        // Get logs
+        let container_logs = self.logs.lock().unwrap().clone();
+
+        // Truncate logs if too long (max 10KB for session_log field)
+        let session_log = if container_logs.is_empty() {
+            "No logs available".to_string()
+        } else if container_logs.len() > 10240 {
+            format!("{}... (truncated)", &container_logs[..10240])
+        } else {
+            container_logs
+        };
+
+        // Send AgentSessionFinishedEvent to RPC service
+        let rpc_client = self.state.get_rpc_client().await;
+        if let Some(mut client) = rpc_client {
+            let event = proto::Event {
+                event: Some(proto::event::Event::AgentSessionFinished(
+                    proto::AgentSessionFinishedEvent {
+                        coordinator_id: self.coordinator_id.clone(),
+                        session_id: self.session_id.clone(),
+                        session_log,
+                        duration: duration_ms,
+                        cost,
+                        event_timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    },
+                )),
+            };
+
+            let request = proto::SubmitEventRequest { event: Some(event) };
+
+            match client.submit_event(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        info!(
+                            "Sent AgentSessionFinishedEvent for session {} (duration: {}ms, cost: {})",
+                            self.session_id, duration_ms, cost
+                        );
+                    } else {
+                        error!(
+                            "Failed to send AgentSessionFinishedEvent for session {}: {}",
+                            self.session_id, resp.message
+                        );
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to send AgentSessionFinishedEvent for session {}: {}",
+                        self.session_id, e
+                    );
+                }
+            }
+        } else {
+            warn!(
+                "No RPC client available to send AgentSessionFinishedEvent for session {}",
+                self.session_id
+            );
+        }
+    }
+}
+
+impl Drop for SessionFinishedGuard {
+    fn drop(&mut self) {
+        // Clone what we need for the async operation
+        let session_id = self.session_id.clone();
+        let coordinator_id = self.coordinator_id.clone();
+        let session_start_time = self.session_start_time;
+        let min_memory_gb = self.min_memory_gb;
+        let min_cpu_cores = self.min_cpu_cores;
+        let requires_tee = self.requires_tee;
+        let state = self.state.clone();
+        let logs = self.logs.clone();
+        let sent = self.sent.clone();
+
+        // Spawn a task to send the event since Drop can't be async
+        tokio::spawn(async move {
+            let guard = SessionFinishedGuard {
+                session_id,
+                coordinator_id,
+                session_start_time,
+                min_memory_gb,
+                min_cpu_cores,
+                requires_tee,
+                state,
+                logs,
+                sent,
+            };
+            guard.send_finished_event().await;
+        });
+    }
+}
 
 /// Standalone function to run a Docker container for a job (for parallel execution)
 /// The job_lock is held for the duration of this task to prevent duplicate processing
@@ -26,16 +189,20 @@ pub async fn run_docker_container_task(
     metrics: Option<Arc<CoordinatorMetrics>>,
 ) {
     let job_start = Instant::now();
+    let session_start_time = std::time::SystemTime::now();
 
     // Early check: coordinator_id must be available for running jobs
-    if state.get_coordinator_id().is_none() {
-        error!(
-            "Cannot run Docker container for job {}: coordinator_id not available. \
-             The coordinator must be properly initialized with SUI_ADDRESS.",
-            job.job_sequence
-        );
-        return;
-    }
+    let coordinator_id = match state.get_coordinator_id() {
+        Some(id) => id,
+        None => {
+            error!(
+                "Cannot run Docker container for job {}: coordinator_id not available. \
+                 The coordinator must be properly initialized with SUI_ADDRESS.",
+                job.job_sequence
+            );
+            return;
+        }
+    };
 
     debug!(
         "🐳 Running Docker task: dev={}, agent={}/{}, job_seq={}, app={}",
@@ -50,9 +217,19 @@ pub async fn run_docker_container_task(
                 "Failed to generate Docker session for job {}: {}",
                 job.job_sequence, e
             );
+            // Can't send finished event without session ID
             return;
         }
     };
+
+    // Create session finished guard to ensure event is always sent
+    let session_guard = SessionFinishedGuard::new(
+        docker_session.session_id.clone(),
+        coordinator_id.clone(),
+        session_start_time,
+        &agent_method,
+        state.clone(),
+    );
 
     // Start the job on Sui blockchain before processing
     debug!(
@@ -80,6 +257,44 @@ pub async fn run_docker_container_task(
             job.agent_method.clone(),
         )
         .await;
+
+    // Send AgentSessionStartedEvent to RPC service
+    {
+        let rpc_client = state.get_rpc_client().await;
+        if let Some(mut client) = rpc_client {
+            let event = proto::Event {
+                event: Some(proto::event::Event::AgentSessionStarted(
+                    proto::AgentSessionStartedEvent {
+                        coordinator_id: coordinator_id.clone(),
+                        developer: job.developer.clone(),
+                        agent: job.agent.clone(),
+                        agent_method: job.agent_method.clone(),
+                        session_id: docker_session.session_id.clone(),
+                        event_timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    },
+                )),
+            };
+
+            let request = proto::SubmitEventRequest { event: Some(event) };
+
+            match client.submit_event(request).await {
+                Ok(response) => {
+                    let resp = response.into_inner();
+                    if resp.success {
+                        debug!("Sent AgentSessionStartedEvent for session {}", docker_session.session_id);
+                    } else {
+                        warn!("Failed to send AgentSessionStartedEvent: {}", resp.message);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to send AgentSessionStartedEvent: {}", e);
+                }
+            }
+        }
+    }
 
     // Log how many containers are loading/running
     let (loading_count, running_count) = docker_manager.get_container_counts().await;
@@ -135,6 +350,9 @@ pub async fn run_docker_container_task(
                 &state,
             )
             .await;
+
+            // Set error log in guard before returning
+            session_guard.set_logs(format!("Error: Failed to fetch AppInstance: {}", e));
 
             docker_manager
                 .remove_container_tracking(&docker_session.session_id)
@@ -199,6 +417,8 @@ pub async fn run_docker_container_task(
                 "Failed to create agent job for job {}: {}",
                 job.job_sequence, e
             );
+            // Set error log in guard before returning
+            session_guard.set_logs(format!("Error: Failed to create agent job: {}", e));
             return;
         }
     };
@@ -245,6 +465,8 @@ pub async fn run_docker_container_task(
                         "🏁 Docker container aborted (SHA mismatch): {} loading, {} running",
                         loading_count, running_count
                     );
+                    // Set error log in guard before returning
+                    session_guard.set_logs(format!("Error: Docker image SHA256 mismatch. Expected: {}, Got: {}", expected_sha, digest));
                     return;
                 }
             }
@@ -349,10 +571,15 @@ pub async fn run_docker_container_task(
         job.job_sequence, loading_count, running_count
     );
     let docker_start = Instant::now();
+
+    // Collect container logs and exit result
     match docker_manager.run_container(&config).await {
         Ok(result) => {
             let docker_elapsed = docker_start.elapsed();
             let total_elapsed = job_start.elapsed();
+
+            // Set logs in the guard
+            session_guard.set_logs(result.logs.clone());
 
             if result.exit_code == 0 {
                 info!(
@@ -381,21 +608,27 @@ pub async fn run_docker_container_task(
         Err(e) => {
             let docker_elapsed = docker_start.elapsed();
             let total_elapsed = job_start.elapsed();
-            error!(
-                "Failed to run Docker container for job {}: {} (docker: {:?}, total: {:?})",
-                job.job_sequence, e, docker_elapsed, total_elapsed
-            );
+            let error_msg = format!("Failed to run Docker container for job {}: {} (docker: {:?}, total: {:?})",
+                job.job_sequence, e, docker_elapsed, total_elapsed);
+            error!("{}", error_msg);
+
+            // Set error message as logs in the guard
+            session_guard.set_logs(format!("Error: {}", e));
+
             // Increment container failed metric
             if let Some(ref metrics) = metrics {
                 metrics.increment_docker_containers_failed();
             }
         }
-    }
+    };
 
     // Ensure the job is failed on blockchain if it wasn't completed
     // This handles the case where the container exits without the agent calling complete/fail
     ensure_job_failed_if_not_completed(&docker_session.session_id, "container terminated", &state)
         .await;
+
+    // Send the finished event explicitly (also sent automatically on drop if not sent)
+    session_guard.send_finished_event().await;
 
     // Clear the agent state after Docker completes
     state.clear_current_agent(&docker_session.session_id).await;
@@ -504,7 +737,6 @@ async fn retrieve_secrets_for_job(
 }
 
 use crate::constants::MAX_CONCURRENT_AGENT_CONTAINERS;
-use crate::metrics::CoordinatorMetrics;
 use tokio::time::sleep;
 
 /// Docker buffer processor that monitors started_jobs_buffer and launches containers

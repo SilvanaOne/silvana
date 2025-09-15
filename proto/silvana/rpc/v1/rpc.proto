@@ -169,6 +169,7 @@ message Event {
 
     // Session and job events
     AgentSessionStartedEvent agent_session_started = 4;
+    AgentSessionFinishedEvent agent_session_finished = 14;
     JobCreatedEvent job_created = 5;
     JobStartedEvent job_started = 6;
     JobFinishedEvent job_finished = 7;
