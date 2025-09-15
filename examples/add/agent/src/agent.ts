@@ -6,7 +6,8 @@ import {
   submitProof,
   submitState,
   getProof,
-  getBlockProof,
+  info,
+  error,
 } from "@silvana-one/agent";
 import { deserializeTransitionData } from "./transition.js";
 import { getStateAndProof, SequenceState, merge } from "./state.js";
@@ -15,8 +16,7 @@ import { settle } from "./settle.js";
 
 async function agent() {
   console.time("Agent runtime");
-  console.log("Agent is running");
-  console.log("Agent arguments:", process.argv.length - 2);
+  info("Agent is running");
 
   const startTime = Date.now();
   const maxRunTimeMs = 500 * 1000; // 500 seconds (8.33 minutes) - absolute maximum runtime
@@ -26,13 +26,13 @@ async function agent() {
 
   try {
     while (Date.now() - startTime < maxRunTimeMs) {
-      console.log("Requesting job from coordinator...");
+      info("Requesting job from coordinator...");
 
       const response = await getJob();
 
       if (response.job) {
         jobCount++;
-        console.log(
+        info(
           `Received job ${jobCount}: ID=${response.job.jobSequence}, job_id=${response.job.jobId}`
         );
 
@@ -110,15 +110,15 @@ async function agent() {
                     `✅ Settle job completed successfully: ${completeResponse.message}`
                   );
                 } else {
-                  console.error(
+                  error(
                     `Failed to complete settle job: ${completeResponse.message}`
                   );
                 }
               } catch (settleError) {
                 throw settleError; // Re-throw to be caught by outer catch
               }
-            } catch (error) {
-              console.error(`\n❌ Failed to settle block: ${error}`);
+            } catch (err) {
+              error(`\n❌ Failed to settle block: ${err}`);
 
               // Fail the job
               console.log(
@@ -370,12 +370,9 @@ async function agent() {
                 console.log(
                   `Successfully deserialized sequence ${state.sequence} with transition sequence: ${transition.sequence}`
                 );
-              } catch (error) {
-                console.error(
-                  `Failed to deserialize sequence ${state.sequence}:`,
-                  error
-                );
-                console.error(
+              } catch (err) {
+                error(`Failed to deserialize sequence ${state.sequence}:`, err);
+                error(
                   `TransitionData bytes: [${Array.from(
                     state.transitionData
                   ).join(",")}]`
@@ -596,11 +593,11 @@ async function agent() {
         break;
       }
     }
-  } catch (error) {
-    console.error("gRPC call failed:", error);
+  } catch (err) {
+    error("gRPC call failed:", err);
   }
 
-  console.log(`Agent processed ${jobCount} jobs`);
+  info(`Agent processed ${jobCount} jobs`);
   console.timeEnd("Agent runtime");
 }
 
