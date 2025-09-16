@@ -79,7 +79,7 @@ impl EventDatabase {
         );
 
         let txn = self.connection.begin().await?;
-        //let mut total_inserted = 0;
+        let mut total_inserted = 0;
 
         // Group events by type for batch insertion
         let mut coordinator_started_events = Vec::new();
@@ -175,8 +175,8 @@ impl EventDatabase {
         }
 
         // Phase 1: Run all independent main table insertions in parallel
-        //debug!("Phase 1: Running main table insertions in parallel");
-        let _independent_results = tokio::try_join!(
+        debug!("Phase 1: Running main table insertions in parallel");
+        let independent_results = tokio::try_join!(
             self.insert_coordinator_started_events(&txn, coordinator_started_events),
             self.insert_coordinator_active_events(&txn, coordinator_active_events),
             self.insert_coordinator_shutdown_events(&txn, coordinator_shutdown_events),
@@ -195,16 +195,22 @@ impl EventDatabase {
         )?;
 
         // Sum up results from independent insertions
-        // total_inserted += independent_results.0
-        //     + independent_results.1
-        //     + independent_results.2
-        //     + independent_results.3
-        //     + independent_results.4
-        //     + independent_results.5;
+        total_inserted += independent_results.0
+            + independent_results.1
+            + independent_results.2
+            + independent_results.3
+            + independent_results.4
+            + independent_results.5
+            + independent_results.6
+            + independent_results.7
+            + independent_results.8
+            + independent_results.9
+            + independent_results.10
+            + independent_results.11;
 
         // Phase 2: Handle parent-child relationships for events with sequences
-        //debug!("Phase 2: Running parent-child table insertions");
-        let _parent_child_results = tokio::try_join!(
+        debug!("Phase 2: Running parent-child table insertions");
+        let parent_child_results = tokio::try_join!(
             self.insert_jobs_with_sequences(&txn, jobs_events, &job_sequences_data),
             self.insert_proof_events_with_sequences(
                 &txn,
@@ -213,23 +219,56 @@ impl EventDatabase {
             ),
         )?;
 
-        //total_inserted += parent_child_results.0 + parent_child_results.1;
+        total_inserted += parent_child_results.0 + parent_child_results.1;
 
-        txn.commit().await?;
+        // Commit the transaction
+        match txn.commit().await {
+            Ok(_) => {
+                let duration = start_time.elapsed();
+                let duration_ms = duration.as_millis();
 
-        let duration = start_time.elapsed();
-        let duration_ms = duration.as_millis();
-        let events_per_second = events.len() as f64 / duration.as_secs_f64();
+                if total_inserted == 0 {
+                    error!(
+                        "Database transaction committed but 0 records were inserted out of {} events. \
+                        This likely indicates a schema mismatch or data validation issue.",
+                        events.len()
+                    );
+                    // Return an error to trigger retries upstream
+                    return Err(anyhow::anyhow!(
+                        "None of the records are inserted. Transaction succeeded but 0 records inserted out of {} events",
+                        events.len()
+                    ));
+                }
 
-        debug!(
-            "Successfully parallel batch inserted  {} events in {}ms ({:.2}s) - {:.0} events/second",
-            events.len(),
-            duration_ms,
-            duration.as_secs_f64(),
-            events_per_second
-        );
+                if total_inserted < events.len() {
+                    warn!(
+                        "Partial insertion: {} out of {} events were successfully inserted in {}ms",
+                        total_inserted, events.len(), duration_ms
+                    );
+                } else {
+                    let events_per_second = total_inserted as f64 / duration.as_secs_f64();
+                    debug!(
+                        "Successfully parallel batch inserted {} events in {}ms ({:.2}s) - {:.0} events/second",
+                        total_inserted,
+                        duration_ms,
+                        duration.as_secs_f64(),
+                        events_per_second
+                    );
+                }
 
-        Ok(events.len())
+                Ok(total_inserted)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to commit transaction for {} events: {}",
+                    events.len(), e
+                );
+                Err(anyhow::anyhow!(
+                    "Transaction commit failed: {}. None of the {} events were inserted.",
+                    e, events.len()
+                ))
+            }
+        }
     }
 
     // Independent table insertion methods - can run in parallel
@@ -335,17 +374,58 @@ impl EventDatabase {
 
         debug!("Inserting {} agent_session_started_events", events.len());
         let events_len = events.len();
+
+        // Extract session_ids for debugging
+        let session_ids: Vec<String> = events
+            .iter()
+            .filter_map(|e| {
+                if let sea_orm::ActiveValue::Set(ref id) = e.session_id {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        debug!("Session IDs to insert: {:?}", session_ids);
+
         match entities::agent_session_started_event::Entity::insert_many(events)
             .exec(txn)
             .await
         {
             Ok(_) => {
-                debug!("Successfully inserted agent_session_started_events");
+                debug!("Successfully inserted {} agent_session_started_events", events_len);
                 Ok(events_len)
             }
             Err(e) => {
-                error!("Failed to batch insert agent_session_started_events: {}", e);
-                Err(e.into())
+                // Enhanced error logging with more details
+                let error_details = match &e {
+                    sea_orm::error::DbErr::Exec(exec_err) => {
+                        format!("Execution error: {}", exec_err)
+                    }
+                    sea_orm::error::DbErr::Query(query_err) => {
+                        format!("Query error: {}", query_err)
+                    }
+                    sea_orm::error::DbErr::Conn(conn_err) => {
+                        format!("Connection error: {}", conn_err)
+                    }
+                    sea_orm::error::DbErr::RecordNotInserted => {
+                        "Record not inserted - likely duplicate key constraint".to_string()
+                    }
+                    _ => format!("Database error: {:?}", e),
+                };
+
+                error!(
+                    "Failed to batch insert agent_session_started_events: {}\nSession IDs attempted: {:?}\nError type: {:?}",
+                    error_details, session_ids, e
+                );
+
+                // Return error with more context
+                Err(anyhow::anyhow!(
+                    "Failed to insert agent_session_started_events: {}. Session IDs: {:?}",
+                    error_details,
+                    session_ids
+                ))
             }
         }
     }
@@ -361,20 +441,58 @@ impl EventDatabase {
 
         debug!("Inserting {} agent_session_finished_events", events.len());
         let events_len = events.len();
+
+        // Extract session_ids for debugging
+        let session_ids: Vec<String> = events
+            .iter()
+            .filter_map(|e| {
+                if let sea_orm::ActiveValue::Set(ref id) = e.session_id {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        debug!("Session IDs to insert: {:?}", session_ids);
+
         match entities::agent_session_finished_event::Entity::insert_many(events)
             .exec(txn)
             .await
         {
             Ok(_) => {
-                debug!("Successfully inserted agent_session_finished_events");
+                debug!("Successfully inserted {} agent_session_finished_events", events_len);
                 Ok(events_len)
             }
             Err(e) => {
+                // Enhanced error logging with more details
+                let error_details = match &e {
+                    sea_orm::error::DbErr::Exec(exec_err) => {
+                        format!("Execution error: {}", exec_err)
+                    }
+                    sea_orm::error::DbErr::Query(query_err) => {
+                        format!("Query error: {}", query_err)
+                    }
+                    sea_orm::error::DbErr::Conn(conn_err) => {
+                        format!("Connection error: {}", conn_err)
+                    }
+                    sea_orm::error::DbErr::RecordNotInserted => {
+                        "Record not inserted - likely duplicate key constraint".to_string()
+                    }
+                    _ => format!("Database error: {:?}", e),
+                };
+
                 error!(
-                    "Failed to batch insert agent_session_finished_events: {}",
-                    e
+                    "Failed to batch insert agent_session_finished_events: {}\nSession IDs attempted: {:?}\nError type: {:?}",
+                    error_details, session_ids, e
                 );
-                Err(e.into())
+
+                // Return error with more context
+                Err(anyhow::anyhow!(
+                    "Failed to insert agent_session_finished_events: {}. Session IDs: {:?}",
+                    error_details,
+                    session_ids
+                ))
             }
         }
     }
@@ -1294,10 +1412,28 @@ fn convert_agent_session_finished_event(
     use entities::agent_session_finished_event::*;
     use sea_orm::ActiveValue;
 
+    // Debug log the event data
+    debug!(
+        "Converting AgentSessionFinishedEvent: session_id={}, coordinator_id={}, log_length={}, duration={}, cost={}",
+        event.session_id, event.coordinator_id, event.session_log.len(), event.duration, event.cost
+    );
+
+    // Validate and sanitize the session_log if needed
+    let session_log = if event.session_log.len() > 16_000_000 {
+        warn!(
+            "Session log for {} is very large ({} bytes), this might cause insert issues",
+            event.session_id,
+            event.session_log.len()
+        );
+        event.session_log.clone()
+    } else {
+        event.session_log.clone()
+    };
+
     ActiveModel {
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
-        session_log: ActiveValue::Set(event.session_log.clone()),
+        session_log: ActiveValue::Set(session_log),
         duration: ActiveValue::Set(event.duration as i64),
         cost: ActiveValue::Set(event.cost as i64),
         event_timestamp: ActiveValue::Set(event.event_timestamp as i64),

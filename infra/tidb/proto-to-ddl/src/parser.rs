@@ -592,8 +592,8 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
                 // Include sequences as JSON columns in JobCreatedEvent (arrays of u64)
                 content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
             } else if field.name == "job_id" {
-                // job_id is the primary key
-                content.push_str("    #[sea_orm(primary_key)]\n");
+                // job_id is the primary key (VARCHAR, not auto-increment)
+                content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
                 content.push_str("    pub job_id: String,\n");
             } else {
                 let rust_type = proto_type_to_rust(&field.field_type, field.is_repeated, field.is_optional);
@@ -603,12 +603,12 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
             // Include sequences as JSON columns in ProofEvent (arrays of u64)
             content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
         } else if (message.name == "JobStartedEvent" || message.name == "JobFinishedEvent") && field.name == "job_id" {
-            // job_id is the primary key for JobStartedEvent and JobFinishedEvent
-            content.push_str("    #[sea_orm(primary_key)]\n");
+            // job_id is the primary key for JobStartedEvent and JobFinishedEvent (VARCHAR, not auto-increment)
+            content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
             content.push_str("    pub job_id: String,\n");
         } else if (message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent") && field.name == "session_id" {
-            // session_id is the primary key for AgentSessionStartedEvent and AgentSessionFinishedEvent
-            content.push_str("    #[sea_orm(primary_key)]\n");
+            // session_id is the primary key for AgentSessionStartedEvent and AgentSessionFinishedEvent (VARCHAR, not auto-increment)
+            content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
             content.push_str("    pub session_id: String,\n");
         } else {
             // Normal handling for other entities

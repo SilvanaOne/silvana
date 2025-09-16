@@ -13,7 +13,7 @@ pub struct Model {
     pub sequences: Option<String>, // JSON array of u64
     pub merged_sequences_1: Option<String>, // JSON array of u64
     pub merged_sequences_2: Option<String>, // JSON array of u64
-    #[sea_orm(primary_key)]
+    #[sea_orm(primary_key, auto_increment = false)]
     pub job_id: String,
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,

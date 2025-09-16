@@ -8,7 +8,7 @@ pub struct Model {
     pub coordinator_id: String,
     pub session_id: String,
     pub app_instance_id: String,
-    #[sea_orm(primary_key)]
+    #[sea_orm(primary_key, auto_increment = false)]
     pub job_id: String,
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,

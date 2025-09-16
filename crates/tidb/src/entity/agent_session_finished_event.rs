@@ -6,7 +6,7 @@ use sea_orm::entity::prelude::*;
 #[sea_orm(table_name = "agent_session_finished_event")]
 pub struct Model {
     pub coordinator_id: String,
-    #[sea_orm(primary_key)]
+    #[sea_orm(primary_key, auto_increment = false)]
     pub session_id: String,
     pub session_log: String,
     pub duration: i64,

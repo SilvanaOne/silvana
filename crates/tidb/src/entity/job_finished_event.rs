@@ -6,7 +6,7 @@ use sea_orm::entity::prelude::*;
 #[sea_orm(table_name = "job_finished_event")]
 pub struct Model {
     pub coordinator_id: String,
-    #[sea_orm(primary_key)]
+    #[sea_orm(primary_key, auto_increment = false)]
     pub job_id: String,
     pub duration: i64,
     pub cost: i64,
