@@ -21,17 +21,17 @@
     "version": ">=22.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.4.0",
+    "@types/node": "^24.5.0",
     "dotenv": "^17.2.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   },
   "dependencies": {
     "@mysten/sui": "^1.38.0",
-    "@silvana-one/agent": "^1.0.38",
-    "@silvana-one/coordination": "^1.0.38",
-    "@silvana-one/mina-utils": "^1.0.38",
-    "@silvana-one/storage": "^1.0.38",
+    "@silvana-one/agent": "^1.0.39",
+    "@silvana-one/coordination": "^1.0.39",
+    "@silvana-one/mina-utils": "^1.0.39",
+    "@silvana-one/storage": "^1.0.39",
     "o1js": "2.4.0"
   }
 }

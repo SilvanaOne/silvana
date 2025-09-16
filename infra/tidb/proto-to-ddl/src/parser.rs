@@ -547,6 +547,8 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
     };
     let table_name = if message.name == "JobCreatedEvent" {
         "jobs".to_string()
+    } else if message.name == "AgentSessionStartedEvent" {
+        "agent_session".to_string()
     } else {
         message.name.to_snake_case()
     };
