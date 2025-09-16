@@ -873,7 +873,11 @@ public fun update_block_settlement_tx_included_in_block(
                 &mut app_instance.proof_calculations,
                 block_number,
             );
-            prover::delete_proof_calculation(proof_calculation, clock);
+            prover::delete_proof_calculation(
+                proof_calculation,
+                app_instance.id.to_address(),
+                clock,
+            );
         };
 
         // Use the block's end_sequence for purging

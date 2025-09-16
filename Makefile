@@ -53,7 +53,7 @@ check-database-url:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url validate-schema check-schema show-tables show-schema apply-ddl proto2entities dev-reset build store-secret retrieve-secret write-config read-config
+.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url validate-schema check-schema show-tables show-schema apply-ddl proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -77,6 +77,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "🔐 SECRET MANAGEMENT & CONFIG:"
 	@grep -E '^(store-secret|retrieve-secret|write-config|read-config):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "📊 ANALYSIS:"
+	@grep -E '^(analyze):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "📚 EXAMPLES:"
 	@grep -E '^(example-archive):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -439,7 +442,12 @@ validate-schema: check-database-url check-tools ## Validate that database schema
 		--database-url "$$DB_URL"
 
 
+# Analysis targets
+analyze: ## Analyze Sui proof events and compare merge algorithms
+	@echo "📊 Running Sui proof event analysis..."
+	@python3 scripts/sui_proof_analysis_complete.py
+
 # Example targets
 example-archive: ## Prepare archive with example project (examples/add)
 	@echo "📦 Packing examples/add folder to S3..."
-	@cargo x example-archive 
+	@cargo x example-archive
