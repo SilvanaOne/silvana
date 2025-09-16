@@ -102,7 +102,13 @@ export async function deployAddContract(): Promise<{
     },
     async () => {
       // Fund the new account
-      AccountUpdate.fundNewAccount(deployerPublicKey);
+      if (chain === "zeko:testnet") {
+        // workaround to make zeko testnet work with o1js 2.4
+        const au = AccountUpdate.createSigned(deployerPublicKey);
+        au.balance.subInPlace(100_000_000); // 0.1 MINA Account Creation Fee on Zeko Testnet
+      } else {
+        AccountUpdate.fundNewAccount(deployerPublicKey);
+      }
 
       // Deploy the contract
       await contract.deploy({

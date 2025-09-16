@@ -61,6 +61,7 @@ public fun test_create_registry_add_developer_and_agent() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"alice"),
             string::utf8(b"alice-github"),
             option::some(string::utf8(b"https://avatar.com/alice.png")),
@@ -159,6 +160,7 @@ public fun test_add_multiple_developers_and_agents() {
 
         add_developer(
             &mut registry_obj,
+            @0xc,
             string::utf8(b"bob"),
             string::utf8(b"bob-github"),
             option::none(),
@@ -180,6 +182,7 @@ public fun test_add_multiple_developers_and_agents() {
 
         add_developer(
             &mut registry_obj,
+            @0xd,
             string::utf8(b"charlie"),
             string::utf8(b"charlie-github"),
             option::some(string::utf8(b"https://charlie.com/avatar.jpg")),
@@ -306,6 +309,7 @@ public fun test_agent_method_management() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"dev1"),
             string::utf8(b"dev1-github"),
             option::none(),
@@ -411,7 +415,7 @@ public fun test_agent_method_management() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::registry::ENotAdmin)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_non_admin_cannot_remove_developer() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -434,6 +438,7 @@ public fun test_non_admin_cannot_remove_developer() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"testdev"),
             string::utf8(b"testdev-github"),
             option::none(),
@@ -446,9 +451,9 @@ public fun test_non_admin_cannot_remove_developer() {
         test::return_shared(registry_obj);
     };
 
-    // Try to remove developer as non-admin (should fail)
+    // Try to remove developer as non-admin non-owner (should fail)
     {
-        next_tx(&mut scenario, DEVELOPER); // Not admin
+        next_tx(&mut scenario, @0x9999); // Neither admin nor owner
         let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
@@ -491,6 +496,7 @@ public fun test_update_developer() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"updatable_dev"),
             string::utf8(b"old-github"),
             option::some(string::utf8(b"https://old-avatar.com/image.png")),
@@ -598,6 +604,7 @@ public fun test_update_agent() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"agent_dev"),
             string::utf8(b"agent-dev-github"),
             option::none(),
@@ -705,6 +712,7 @@ public fun test_remove_agent() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"remove_dev"),
             string::utf8(b"remove-dev-github"),
             option::none(),
@@ -843,6 +851,7 @@ public fun test_method_removal_and_default_handling() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"method_dev"),
             string::utf8(b"method-dev-github"),
             option::none(),
@@ -1016,6 +1025,7 @@ public fun test_admin_remove_developer_success() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"removable_dev"),
             string::utf8(b"removable-github"),
             option::none(),
@@ -1085,6 +1095,7 @@ public fun test_comprehensive_workflow() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"workflow_dev"),
             string::utf8(b"workflow-github"),
             option::some(string::utf8(b"https://avatar.com/workflow.png")),
@@ -1303,7 +1314,7 @@ public fun test_comprehensive_workflow() {
 // === SECURITY TESTS: Unauthorized Access ===
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_update_developer() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1325,6 +1336,7 @@ public fun test_unauthorized_update_developer() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"secure_dev"),
             string::utf8(b"secure-github"),
             option::none(),
@@ -1363,7 +1375,7 @@ public fun test_unauthorized_update_developer() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::agent::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_add_agent() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1385,6 +1397,7 @@ public fun test_unauthorized_add_agent() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"target_dev"),
             string::utf8(b"target-github"),
             option::none(),
@@ -1426,7 +1439,7 @@ public fun test_unauthorized_add_agent() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_update_agent() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1448,6 +1461,7 @@ public fun test_unauthorized_update_agent() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"target_dev"),
             string::utf8(b"target-github"),
             option::none(),
@@ -1499,7 +1513,7 @@ public fun test_unauthorized_update_agent() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_remove_agent() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1521,6 +1535,7 @@ public fun test_unauthorized_remove_agent() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"target_dev"),
             string::utf8(b"target-github"),
             option::none(),
@@ -1568,7 +1583,7 @@ public fun test_unauthorized_remove_agent() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_add_method() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1590,6 +1605,7 @@ public fun test_unauthorized_add_method() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"method_dev"),
             string::utf8(b"method-github"),
             option::none(),
@@ -1643,7 +1659,7 @@ public fun test_unauthorized_add_method() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_update_method() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1665,6 +1681,7 @@ public fun test_unauthorized_update_method() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"method_dev"),
             string::utf8(b"method-github"),
             option::none(),
@@ -1732,7 +1749,7 @@ public fun test_unauthorized_update_method() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_remove_method() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1754,6 +1771,7 @@ public fun test_unauthorized_remove_method() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"method_dev"),
             string::utf8(b"method-github"),
             option::none(),
@@ -1816,7 +1834,7 @@ public fun test_unauthorized_remove_method() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_set_default_method() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1838,6 +1856,7 @@ public fun test_unauthorized_set_default_method() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"default_dev"),
             string::utf8(b"default-github"),
             option::none(),
@@ -1900,7 +1919,7 @@ public fun test_unauthorized_set_default_method() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::developer::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_remove_default_method() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -1922,6 +1941,7 @@ public fun test_unauthorized_remove_default_method() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"default_dev"),
             string::utf8(b"default-github"),
             option::none(),
@@ -2017,6 +2037,7 @@ public fun test_create_and_manage_apps() {
         add_app(
             &mut registry_obj,
             string::utf8(b"trading_app"),
+            DEVELOPER,
             option::some(string::utf8(b"Automated trading application")),
             &clock,
             ctx(&mut scenario),
@@ -2106,6 +2127,7 @@ public fun test_multiple_apps_same_owner() {
         add_app(
             &mut registry_obj,
             string::utf8(b"defi_app"),
+            DEVELOPER,
             option::some(string::utf8(b"DeFi protocol management")),
             &clock,
             ctx(&mut scenario),
@@ -2124,6 +2146,7 @@ public fun test_multiple_apps_same_owner() {
         add_app(
             &mut registry_obj,
             string::utf8(b"nft_app"),
+            DEVELOPER,
             option::some(string::utf8(b"NFT marketplace application")),
             &clock,
             ctx(&mut scenario),
@@ -2180,6 +2203,7 @@ public fun test_app_instance_management() {
         add_app(
             &mut registry_obj,
             string::utf8(b"instance_app"),
+            DEVELOPER,
             option::some(string::utf8(b"App for instance testing")),
             &clock,
             ctx(&mut scenario),
@@ -2333,6 +2357,7 @@ public fun test_app_basic_workflow() {
         add_app(
             &mut registry_obj,
             string::utf8(b"basic_app"),
+            DEVELOPER,
             option::some(string::utf8(b"App for basic testing")),
             &clock,
             ctx(&mut scenario),
@@ -2362,7 +2387,7 @@ public fun test_app_basic_workflow() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::registry::ENotAdmin)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_non_admin_cannot_remove_app() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -2386,6 +2411,7 @@ public fun test_non_admin_cannot_remove_app() {
         add_app(
             &mut registry_obj,
             string::utf8(b"protected_app"),
+            DEVELOPER,
             option::some(string::utf8(b"App that should be protected")),
             &clock,
             ctx(&mut scenario),
@@ -2394,9 +2420,9 @@ public fun test_non_admin_cannot_remove_app() {
         test::return_shared(registry_obj);
     };
 
-    // Try to remove app as non-admin (should fail)
+    // Try to remove app as non-admin non-owner (should fail)
     {
-        next_tx(&mut scenario, DEVELOPER); // Not admin
+        next_tx(&mut scenario, @0x9999); // Neither admin nor owner
         let mut registry_obj = test::take_shared<SilvanaRegistry>(
             &scenario,
         );
@@ -2439,6 +2465,7 @@ public fun test_admin_remove_app_success() {
         add_app(
             &mut registry_obj,
             string::utf8(b"removable_app"),
+            DEVELOPER,
             option::some(string::utf8(b"App to be removed by admin")),
             &clock,
             ctx(&mut scenario),
@@ -2471,7 +2498,7 @@ public fun test_admin_remove_app_success() {
 // === APP SECURITY TESTS ===
 
 #[test]
-#[expected_failure(abort_code = coordination::silvana_app::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_update_app() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -2494,6 +2521,7 @@ public fun test_unauthorized_update_app() {
         add_app(
             &mut registry_obj,
             string::utf8(b"secure_app"),
+            DEVELOPER,
             option::some(string::utf8(b"Original secure app")),
             &clock,
             ctx(&mut scenario),
@@ -2546,6 +2574,7 @@ public fun test_app_access_verification() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"secure_dev"),
             string::utf8(b"secure-github"),
             option::none(),
@@ -2570,6 +2599,7 @@ public fun test_app_access_verification() {
         add_app(
             &mut registry_obj,
             string::utf8(b"secure_app"),
+            DEVELOPER,
             option::some(string::utf8(b"Secure app")),
             &clock,
             ctx(&mut scenario),
@@ -2598,7 +2628,7 @@ public fun test_app_access_verification() {
 }
 
 #[test]
-#[expected_failure(abort_code = coordination::silvana_app::EInvalidOwner)]
+#[expected_failure(abort_code = coordination::registry::ENotAuthorized)]
 public fun test_unauthorized_add_instance_to_app() {
     let mut scenario = test::begin(ADMIN);
     let clock = clock::create_for_testing(ctx(&mut scenario));
@@ -2621,6 +2651,7 @@ public fun test_unauthorized_add_instance_to_app() {
         add_app(
             &mut registry_obj,
             string::utf8(b"secure_app"),
+            DEVELOPER,
             option::some(string::utf8(b"Secure app")),
             &clock,
             ctx(&mut scenario),
@@ -2674,6 +2705,7 @@ public fun test_comprehensive_app_workflow() {
 
         add_developer(
             &mut registry_obj,
+            DEVELOPER,
             string::utf8(b"app_workflow_dev"),
             string::utf8(b"app-workflow-github"),
             option::some(string::utf8(b"https://avatar.com/workflow.png")),
@@ -2708,6 +2740,7 @@ public fun test_comprehensive_app_workflow() {
         add_app(
             &mut registry_obj,
             string::utf8(b"comprehensive_app"),
+            DEVELOPER,
             option::some(string::utf8(b"Comprehensive workflow testing app")),
             &clock,
             ctx(&mut scenario),

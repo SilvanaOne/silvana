@@ -1290,7 +1290,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "avs-operator"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2139,7 +2139,7 @@ dependencies = [
 
 [[package]]
 name = "buffer"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2401,7 +2401,7 @@ dependencies = [
 
 [[package]]
 name = "coordinator"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2732,7 +2732,7 @@ checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "db"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -2843,7 +2843,7 @@ dependencies = [
 
 [[package]]
 name = "docker"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "bollard",
@@ -3068,7 +3068,7 @@ dependencies = [
 
 [[package]]
 name = "ethereum"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "alloy",
  "anyhow",
@@ -3975,7 +3975,7 @@ dependencies = [
 
 [[package]]
 name = "indexed-merkle-map"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "borsh",
  "crypto-bigint 0.5.5",
@@ -4170,7 +4170,7 @@ dependencies = [
 
 [[package]]
 name = "kms"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -4352,7 +4352,7 @@ dependencies = [
 
 [[package]]
 name = "mina"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "bs58",
@@ -4458,7 +4458,7 @@ dependencies = [
 
 [[package]]
 name = "monitoring"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "axum",
@@ -4501,7 +4501,7 @@ dependencies = [
 
 [[package]]
 name = "nats"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -5392,7 +5392,7 @@ dependencies = [
 
 [[package]]
 name = "proto"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "buffer",
  "once_cell",
@@ -5809,7 +5809,7 @@ dependencies = [
 
 [[package]]
 name = "rpc"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -5841,7 +5841,7 @@ dependencies = [
 
 [[package]]
 name = "rpc-client"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "dotenvy",
@@ -6342,7 +6342,7 @@ dependencies = [
 
 [[package]]
 name = "secrets-client"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "rpc-client",
@@ -6962,7 +6962,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "storage"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -7040,7 +7040,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "sui"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7324,7 +7324,7 @@ dependencies = [
 
 [[package]]
 name = "tidb"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8576,7 +8576,7 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xtask"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "chrono",
