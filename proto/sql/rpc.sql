@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS agent_session (
 CREATE TABLE IF NOT EXISTS agent_session_finished_event (
     `coordinator_id` VARCHAR(255) NOT NULL,
     `session_id` VARCHAR(255) NOT NULL PRIMARY KEY,
-    `session_log` VARCHAR(255) NOT NULL,
+    `session_log` LONGTEXT NOT NULL,
     `duration` BIGINT NOT NULL,
     `cost` BIGINT NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS agent_session_finished_event (
     INDEX idx_session_id (`session_id`),
     INDEX idx_event_timestamp (`event_timestamp`),
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+    FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD,
+    FULLTEXT INDEX ft_idx_session_log (`session_log`) WITH PARSER STANDARD
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- JobCreatedEvent Table
@@ -183,7 +184,7 @@ CREATE TABLE IF NOT EXISTS coordinator_message_event (
     `coordinator_id` VARCHAR(255) NOT NULL,
     `event_timestamp` BIGINT NOT NULL,
     `level` ENUM('LOG_LEVEL_UNSPECIFIED', 'LOG_LEVEL_DEBUG', 'LOG_LEVEL_INFO', 'LOG_LEVEL_WARN', 'LOG_LEVEL_ERROR', 'LOG_LEVEL_FATAL') NOT NULL,
-    `message` TEXT NOT NULL,
+    `message` LONGTEXT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),
@@ -296,7 +297,7 @@ CREATE TABLE IF NOT EXISTS agent_message_event (
     `job_id` VARCHAR(255) NULL,
     `event_timestamp` BIGINT NOT NULL,
     `level` ENUM('LOG_LEVEL_UNSPECIFIED', 'LOG_LEVEL_DEBUG', 'LOG_LEVEL_INFO', 'LOG_LEVEL_WARN', 'LOG_LEVEL_ERROR', 'LOG_LEVEL_FATAL') NOT NULL,
-    `message` TEXT NOT NULL,
+    `message` LONGTEXT NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_created_at (`created_at`),

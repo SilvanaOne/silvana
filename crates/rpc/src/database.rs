@@ -720,6 +720,7 @@ impl EventDatabase {
     ) -> Vec<entities::proof_event_sequences::ActiveModel> {
         use entities::proof_event_sequences::*;
         use sea_orm::ActiveValue;
+        use tracing::{debug, warn};
 
         let mut records = Vec::new();
         let mut current_id = base_id;
@@ -728,8 +729,13 @@ impl EventDatabase {
             if let Some(event) = events.get(event_idx) {
                 // Extract app_instance_id from the event
                 let app_instance_id = if let ActiveValue::Set(ref id) = event.app_instance_id {
+                    if id.is_empty() {
+                        warn!("ProofEvent at index {} has empty app_instance_id, skipping sequences", event_idx);
+                        continue; // Skip if app_instance_id is empty
+                    }
                     id.clone()
                 } else {
+                    warn!("ProofEvent at index {} has no app_instance_id set, skipping sequences", event_idx);
                     continue; // Skip if app_instance_id is not set
                 };
 
@@ -1442,6 +1448,13 @@ fn convert_proof_event(
 ) {
     use entities::proof_event::*;
     use sea_orm::ActiveValue;
+    use tracing::warn;
+
+    // Debug logging to understand what's being received
+    if event.app_instance_id.is_empty() {
+        warn!("ProofEvent received with empty app_instance_id. Event: coordinator_id={}, block_number={}, sequences={:?}",
+            event.coordinator_id, event.block_number, event.sequences);
+    }
 
     // Convert sequences to JSON strings for storage
     let sequences_json = if !event.sequences.is_empty() {

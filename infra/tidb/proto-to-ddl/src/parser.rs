@@ -202,7 +202,7 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                 &field.field_type,
                 field.is_repeated,
                 field.has_search_option,
-                field.name.contains("metadata") || field.name.contains("message"),
+                field.name.contains("metadata") || field.name.contains("message") || field.name.contains("log"),
             );
             let nullable = if field.is_optional || field.is_repeated {
                 "NULL"
@@ -278,6 +278,20 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                     ",\n    FULLTEXT INDEX ft_idx_{} (`{}`) WITH PARSER STANDARD",
                     column_name, column_name
                 ));
+            }
+        }
+
+        // Add FULLTEXT indexes for log fields (e.g., session_log)
+        for field in &message.fields {
+            if field.field_type == "string" && field.name.contains("log") {
+                let column_name = field.name.to_snake_case();
+                // Check if we haven't already added a FULLTEXT index for this field
+                if !search_fields.iter().any(|f| f.name == field.name) {
+                    ddl.push_str(&format!(
+                        ",\n    FULLTEXT INDEX ft_idx_{} (`{}`) WITH PARSER STANDARD",
+                        column_name, column_name
+                    ));
+                }
             }
         }
 
@@ -759,12 +773,10 @@ pub fn proto_type_to_mysql_with_options(
 
     match proto_type {
         "string" => {
-            if has_search_option {
-                if long_text {
-                    "TEXT".to_string()
-                } else {
-                    "VARCHAR(255)".to_string()
-                } // Use VARCHAR for searchable fields - supports both regular and FULLTEXT indexes
+            if long_text {
+                "LONGTEXT".to_string()  // Use LONGTEXT for log fields
+            } else if has_search_option {
+                "VARCHAR(255)".to_string() // Use VARCHAR for searchable fields - supports both regular and FULLTEXT indexes
             } else {
                 "VARCHAR(255)".to_string()
             }

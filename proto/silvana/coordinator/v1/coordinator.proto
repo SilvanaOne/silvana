@@ -27,13 +27,15 @@ enum ProofEventType {
 }
 
 message ProofEventRequest {
-  string data_availability = 1;
-  uint64 block_number = 2;
-  optional bool block_proof = 3;
-  ProofEventType proof_event_type = 4;
-  repeated uint64 sequences = 5;
-  repeated uint64 merged_sequences_1 = 6;
-  repeated uint64 merged_sequences_2 = 7;
+  string job_id = 1;
+  string session_id = 2;
+  string data_availability = 3;
+  uint64 block_number = 4;
+  optional bool block_proof = 5;
+  ProofEventType proof_event_type = 6;
+  repeated uint64 sequences = 7;
+  repeated uint64 merged_sequences_1 = 8;
+  repeated uint64 merged_sequences_2 = 9;
 }
 
 // Response message for job completion
@@ -431,8 +433,10 @@ message UpdateBlockSettlementTxIncludedInBlockResponse {
 
 // Agent Events
 message AgentMessageRequest {
-  LogLevel level = 1;
-  string message = 2;
+  string job_id = 1;
+  string session_id = 2;
+  LogLevel level = 3;
+  string message = 4;
 }
 
 

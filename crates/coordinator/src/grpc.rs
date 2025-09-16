@@ -4148,9 +4148,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<AgentMessageRequest>,
     ) -> Result<Response<AgentMessageResponse>, Status> {
-        // Get metadata from the request before consuming it
-        let metadata = request.metadata().clone();
-
         let req = request.into_inner();
 
         // Get coordinator ID
@@ -4159,17 +4156,21 @@ impl CoordinatorService for CoordinatorServiceImpl {
             String::new()
         });
 
-        // Try to extract session_id and job_id from metadata or use defaults
-        let session_id = metadata
-            .get("session-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        // Use job_id and session_id from request (required fields)
+        if req.job_id.is_empty() {
+            warn!("AgentMessage received without job_id");
+        }
 
-        let job_id = metadata
-            .get("job-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+        if req.session_id.is_empty() {
+            warn!("AgentMessage received without session_id");
+        }
+
+        let session_id = req.session_id.clone();
+        let job_id = if !req.job_id.is_empty() {
+            Some(req.job_id.clone())
+        } else {
+            None
+        };
 
         // Convert coordinator LogLevel to RPC LogLevel
         let rpc_log_level = match LogLevel::try_from(req.level).unwrap_or(LogLevel::Unspecified) {
@@ -4210,9 +4211,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<ProofEventRequest>,
     ) -> Result<Response<ProofEventResponse>, Status> {
-        // Get metadata from the request before consuming it
-        let metadata = request.metadata().clone();
-
         let req = request.into_inner();
 
         // Get coordinator ID
@@ -4221,24 +4219,44 @@ impl CoordinatorService for CoordinatorServiceImpl {
             String::new()
         });
 
-        // Try to extract session_id, app_instance_id and job_id from metadata
-        let session_id = metadata
-            .get("session-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        // Validate required fields from request
+        if req.job_id.is_empty() {
+            error!("ProofEvent received without job_id");
+            return Err(Status::invalid_argument("job_id is required for ProofEvent"));
+        }
 
-        let app_instance_id = metadata
-            .get("app-instance-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        if req.session_id.is_empty() {
+            error!("ProofEvent received without session_id");
+            return Err(Status::invalid_argument("session_id is required for ProofEvent"));
+        }
 
-        let job_id = metadata
-            .get("job-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        // Look up the job information from the agent database using job_id
+        let agent_job = match self.state.get_agent_job_db().get_job_by_id(&req.job_id).await {
+            Some(job) => job,
+            None => {
+                error!("No job found for job_id: {} in ProofEvent", req.job_id);
+                return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
+            }
+        };
+
+        // Validate that session_id matches
+        if agent_job.session_id != req.session_id {
+            error!(
+                "Session ID mismatch for job {}: expected {}, got {}",
+                req.job_id, agent_job.session_id, req.session_id
+            );
+            return Err(Status::invalid_argument("Session ID mismatch"));
+        }
+
+        let app_instance_id = agent_job.app_instance.clone();
+        let job_id = agent_job.job_id.clone();
+        let session_id = agent_job.session_id.clone();
+
+        // Ensure app_instance_id is not empty
+        if app_instance_id.is_empty() {
+            error!("ProofEvent received with empty app_instance_id");
+            return Err(Status::invalid_argument("app_instance_id is required for ProofEvent"));
+        }
 
         // Convert coordinator ProofEventType to RPC ProofEventType
         let rpc_proof_event_type = match ProofEventType::try_from(req.proof_event_type).unwrap_or(ProofEventType::Unspecified) {
