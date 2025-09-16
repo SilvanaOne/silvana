@@ -130,6 +130,26 @@ pub enum Commands {
         failed: bool,
     },
 
+    /// Fetch and display all events for a specific sequence in an app instance
+    Sequence {
+        #[arg(long, env = "SUI_RPC_URL")]
+        rpc_url: Option<String>,
+
+        /// The app instance ID to fetch events from
+        instance: String,
+
+        /// The sequence number to fetch events for
+        sequence: u64,
+
+        /// Maximum number of events to fetch
+        #[arg(long, default_value = "100")]
+        limit: u32,
+
+        /// Offset for pagination
+        #[arg(long, default_value = "0")]
+        offset: u32,
+    },
+
     /// Execute blockchain transactions
     Transaction {
         #[arg(long, env = "SUI_RPC_URL")]

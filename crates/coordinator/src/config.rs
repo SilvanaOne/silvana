@@ -10,7 +10,7 @@ pub struct Config {
 }
 
 /// Get the default RPC server endpoint from environment or fallback
-fn get_default_endpoint() -> String {
+pub fn get_default_endpoint() -> String {
     std::env::var("SILVANA_RPC_SERVER")
         .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string())
 }
