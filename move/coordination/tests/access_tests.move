@@ -2,8 +2,6 @@
 module coordination::access_tests;
 
 use coordination::registry::{Self, SilvanaRegistry};
-use coordination::developer::{Self};
-use coordination::silvana_app::{Self};
 use sui::clock::{Self, Clock};
 use sui::test_scenario::{Self as ts, Scenario};
 
@@ -27,6 +25,7 @@ fun setup_developer_and_agent(scenario: &mut Scenario, clock: &Clock) {
         // Developer adds themselves
         registry::add_developer(
             &mut registry,
+            DEVELOPER1,
             b"developer1".to_string(),
             b"github1".to_string(),
             option::some(b"image1".to_string()),
@@ -119,7 +118,7 @@ fun test_admin_can_update_any_developer() {
 
 // Test: Non-owner non-admin cannot update developer profile
 #[test]
-#[expected_failure(abort_code = developer::EInvalidOwner)]
+#[expected_failure(abort_code = registry::ENotAuthorized)]
 fun test_attacker_cannot_update_developer() {
     let mut scenario = ts::begin(ADMIN);
     let test_clock = clock::create_for_testing(ts::ctx(&mut scenario));
@@ -218,7 +217,7 @@ fun test_admin_can_update_any_agent() {
 
 // Test: Non-owner non-admin cannot update agent
 #[test]
-#[expected_failure(abort_code = developer::EInvalidOwner)]
+#[expected_failure(abort_code = registry::ENotAuthorized)]
 fun test_attacker_cannot_update_agent() {
     let mut scenario = ts::begin(ADMIN);
     let test_clock = clock::create_for_testing(ts::ctx(&mut scenario));
@@ -322,7 +321,7 @@ fun test_admin_can_add_method_to_any_agent() {
 
 // Test: Non-owner non-admin cannot add method
 #[test]
-#[expected_failure(abort_code = developer::EInvalidOwner)]
+#[expected_failure(abort_code = registry::ENotAuthorized)]
 fun test_attacker_cannot_add_method() {
     let mut scenario = ts::begin(ADMIN);
     let test_clock = clock::create_for_testing(ts::ctx(&mut scenario));
@@ -416,7 +415,7 @@ fun test_admin_can_remove_any_agent() {
 
 // Test: Non-owner non-admin cannot remove agent
 #[test]
-#[expected_failure(abort_code = developer::EInvalidOwner)]
+#[expected_failure(abort_code = registry::ENotAuthorized)]
 fun test_attacker_cannot_remove_agent() {
     let mut scenario = ts::begin(ADMIN);
     let test_clock = clock::create_for_testing(ts::ctx(&mut scenario));
@@ -460,6 +459,7 @@ fun test_app_owner_can_update_own_app() {
         registry::add_app(
             &mut registry,
             b"app1".to_string(),
+            DEVELOPER1,
             option::some(b"app description".to_string()),
             &test_clock,
             ts::ctx(&mut scenario),
@@ -504,6 +504,7 @@ fun test_admin_can_update_any_app() {
         registry::add_app(
             &mut registry,
             b"app1".to_string(),
+            DEVELOPER1,
             option::some(b"app description".to_string()),
             &test_clock,
             ts::ctx(&mut scenario),
@@ -534,7 +535,7 @@ fun test_admin_can_update_any_app() {
 
 // Test: Non-owner non-admin cannot update app
 #[test]
-#[expected_failure(abort_code = silvana_app::EInvalidOwner)]
+#[expected_failure(abort_code = registry::ENotAuthorized)]
 fun test_attacker_cannot_update_app() {
     let mut scenario = ts::begin(ADMIN);
     let test_clock = clock::create_for_testing(ts::ctx(&mut scenario));
@@ -549,6 +550,7 @@ fun test_attacker_cannot_update_app() {
         registry::add_app(
             &mut registry,
             b"app1".to_string(),
+            DEVELOPER1,
             option::some(b"app description".to_string()),
             &test_clock,
             ts::ctx(&mut scenario),
@@ -581,7 +583,7 @@ fun test_attacker_cannot_update_app() {
 // This test verifies that even if someone tries to call internal functions directly
 // with a spoofed admin_address, they cannot bypass security
 #[test]
-#[expected_failure(abort_code = developer::EInvalidOwner)]
+#[expected_failure(abort_code = registry::ENotAuthorized)]
 fun test_cannot_spoof_admin_address() {
     let mut scenario = ts::begin(ADMIN);
     let test_clock = clock::create_for_testing(ts::ctx(&mut scenario));
@@ -620,7 +622,7 @@ fun test_cannot_spoof_admin_address() {
 
 // Test: Multiple developers cannot interfere with each other
 #[test]
-#[expected_failure(abort_code = developer::EInvalidOwner)]
+#[expected_failure(abort_code = registry::ENotAuthorized)]
 fun test_developer_cannot_update_other_developer() {
     let mut scenario = ts::begin(ADMIN);
     let test_clock = clock::create_for_testing(ts::ctx(&mut scenario));
@@ -635,6 +637,7 @@ fun test_developer_cannot_update_other_developer() {
         
         registry::add_developer(
             &mut registry,
+            DEVELOPER2,
             b"developer2".to_string(),
             b"github2".to_string(),
             option::some(b"image2".to_string()),

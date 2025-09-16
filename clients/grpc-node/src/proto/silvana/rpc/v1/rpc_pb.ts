@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file silvana/rpc/v1/rpc.proto.
  */
 export const file_silvana_rpc_v1_rpc: GenFile = /*@__PURE__*/
-  fileDesc("ChhzaWx2YW5hL3JwYy92MS9ycGMucHJvdG8SDnNpbHZhbmEucnBjLnYxImoKF0Nvb3JkaW5hdG9yU3RhcnRlZEV2ZW50EhwKDmNvb3JkaW5hdG9yX2lkGAEgASgJQgT4jxsBEhgKEGV0aGVyZXVtX2FkZHJlc3MYAiABKAkSFwoPZXZlbnRfdGltZXN0YW1wGAMgASgEIk8KFkNvb3JkaW5hdG9yQWN0aXZlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAIgASgEIlEKGENvb3JkaW5hdG9yU2h1dGRvd25FdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCg9ldmVudF90aW1lc3RhbXAYAiABKAQitQEKGEFnZW50U2Vzc2lvblN0YXJ0ZWRFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESGgoMYWdlbnRfbWV0aG9kGAQgASgJQgT4jxsBEhgKCnNlc3Npb25faWQYBSABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAYgASgEIqoCCg9Kb2JDcmVhdGVkRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESGAoKc2Vzc2lvbl9pZBgCIAEoCUIE+I8bARIdCg9hcHBfaW5zdGFuY2VfaWQYAyABKAlCBPiPGwESGAoKYXBwX21ldGhvZBgEIAEoCUIE+I8bARIaCgxqb2Jfc2VxdWVuY2UYBSABKARCBPiPGwESFwoJc2VxdWVuY2VzGAYgAygEQgTwjxsBEiAKEm1lcmdlZF9zZXF1ZW5jZXNfMRgHIAMoBEIE8I8bARIgChJtZXJnZWRfc2VxdWVuY2VzXzIYCCADKARCBPCPGwESFAoGam9iX2lkGAkgASgJQgT4jxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgKIAEoBCKXAQoPSm9iU3RhcnRlZEV2ZW50EhwKDmNvb3JkaW5hdG9yX2lkGAEgASgJQgT4jxsBEhgKCnNlc3Npb25faWQYAiABKAlCBPiPGwESHQoPYXBwX2luc3RhbmNlX2lkGAMgASgJQgT4jxsBEhQKBmpvYl9pZBgEIAEoCUIE+I8bARIXCg9ldmVudF90aW1lc3RhbXAYBSABKAQinAEKEEpvYkZpbmlzaGVkRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFAoGam9iX2lkGAIgASgJQgT4jxsBEhAKCGR1cmF0aW9uGAMgASgEEhcKD2V2ZW50X3RpbWVzdGFtcBgEIAEoBBIpCgZyZXN1bHQYBSABKA4yGS5zaWx2YW5hLnJwYy52MS5Kb2JSZXN1bHQiYwoTQ29vcmRpbmF0aW9uVHhFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIVCgd0eF9oYXNoGAIgASgJQgT4jxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgDIAEoBCKQAQoXQ29vcmRpbmF0b3JNZXNzYWdlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAIgASgEEicKBWxldmVsGAMgASgOMhguc2lsdmFuYS5ycGMudjEuTG9nTGV2ZWwSFQoHbWVzc2FnZRgEIAEoCUIE+I8bASKpAgoTUHJvb2ZTdWJtaXR0ZWRFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIYCgpzZXNzaW9uX2lkGAIgASgJQgT4jxsBEh0KD2FwcF9pbnN0YW5jZV9pZBgDIAEoCUIE+I8bARIUCgZqb2JfaWQYBCABKAlCBPiPGwESGQoRZGF0YV9hdmFpbGFiaWxpdHkYBSABKAkSFAoMYmxvY2tfbnVtYmVyGAYgASgEEhcKCXNlcXVlbmNlcxgHIAMoBEIE8I8bARIgChJtZXJnZWRfc2VxdWVuY2VzXzEYCCADKARCBPCPGwESIAoSbWVyZ2VkX3NlcXVlbmNlc18yGAkgAygEQgTwjxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgKIAEoBCLPAQoaU2V0dGxlbWVudFRyYW5zYWN0aW9uRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESGAoKc2Vzc2lvbl9pZBgCIAEoCUIE+I8bARIdCg9hcHBfaW5zdGFuY2VfaWQYAyABKAlCBPiPGwESFAoGam9iX2lkGAQgASgJQgT4jxsBEhQKDGJsb2NrX251bWJlchgFIAEoBBIVCgd0eF9oYXNoGAYgASgJQgT4jxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgHIAEoBCLHAQopU2V0dGxlbWVudFRyYW5zYWN0aW9uSW5jbHVkZWRJbkJsb2NrRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESGAoKc2Vzc2lvbl9pZBgCIAEoCUIE+I8bARIdCg9hcHBfaW5zdGFuY2VfaWQYAyABKAlCBPiPGwESFAoGam9iX2lkGAQgASgJQgT4jxsBEhQKDGJsb2NrX251bWJlchgFIAEoBBIXCg9ldmVudF90aW1lc3RhbXAYBiABKAQiygEKEUFnZW50TWVzc2FnZUV2ZW50EhwKDmNvb3JkaW5hdG9yX2lkGAEgASgJQgT4jxsBEhgKCnNlc3Npb25faWQYAiABKAlCBPiPGwESGQoGam9iX2lkGAMgASgJQgT4jxsBSACIAQESFwoPZXZlbnRfdGltZXN0YW1wGAQgASgEEicKBWxldmVsGAUgASgOMhguc2lsdmFuYS5ycGMudjEuTG9nTGV2ZWwSFQoHbWVzc2FnZRgGIAEoCUIE+I8bAUIJCgdfam9iX2lkIpUHCgVFdmVudBJGChNjb29yZGluYXRvcl9zdGFydGVkGAEgASgLMicuc2lsdmFuYS5ycGMudjEuQ29vcmRpbmF0b3JTdGFydGVkRXZlbnRIABJEChJjb29yZGluYXRvcl9hY3RpdmUYAiABKAsyJi5zaWx2YW5hLnJwYy52MS5Db29yZGluYXRvckFjdGl2ZUV2ZW50SAASSAoUY29vcmRpbmF0b3Jfc2h1dGRvd24YAyABKAsyKC5zaWx2YW5hLnJwYy52MS5Db29yZGluYXRvclNodXRkb3duRXZlbnRIABJJChVhZ2VudF9zZXNzaW9uX3N0YXJ0ZWQYBCABKAsyKC5zaWx2YW5hLnJwYy52MS5BZ2VudFNlc3Npb25TdGFydGVkRXZlbnRIABI2Cgtqb2JfY3JlYXRlZBgFIAEoCzIfLnNpbHZhbmEucnBjLnYxLkpvYkNyZWF0ZWRFdmVudEgAEjYKC2pvYl9zdGFydGVkGAYgASgLMh8uc2lsdmFuYS5ycGMudjEuSm9iU3RhcnRlZEV2ZW50SAASOAoMam9iX2ZpbmlzaGVkGAcgASgLMiAuc2lsdmFuYS5ycGMudjEuSm9iRmluaXNoZWRFdmVudEgAEj4KD2Nvb3JkaW5hdGlvbl90eBgIIAEoCzIjLnNpbHZhbmEucnBjLnYxLkNvb3JkaW5hdGlvblR4RXZlbnRIABI+Cg9wcm9vZl9zdWJtaXR0ZWQYCSABKAsyIy5zaWx2YW5hLnJwYy52MS5Qcm9vZlN1Ym1pdHRlZEV2ZW50SAASTAoWc2V0dGxlbWVudF90cmFuc2FjdGlvbhgKIAEoCzIqLnNpbHZhbmEucnBjLnYxLlNldHRsZW1lbnRUcmFuc2FjdGlvbkV2ZW50SAASZAofc2V0dGxlbWVudF90cmFuc2FjdGlvbl9pbmNsdWRlZBgLIAEoCzI5LnNpbHZhbmEucnBjLnYxLlNldHRsZW1lbnRUcmFuc2FjdGlvbkluY2x1ZGVkSW5CbG9ja0V2ZW50SAASRgoTY29vcmRpbmF0b3JfbWVzc2FnZRgMIAEoCzInLnNpbHZhbmEucnBjLnYxLkNvb3JkaW5hdG9yTWVzc2FnZUV2ZW50SAASOgoNYWdlbnRfbWVzc2FnZRgNIAEoCzIhLnNpbHZhbmEucnBjLnYxLkFnZW50TWVzc2FnZUV2ZW50SABCBwoFZXZlbnQiPAoTU3VibWl0RXZlbnRzUmVxdWVzdBIlCgZldmVudHMYASADKAsyFS5zaWx2YW5hLnJwYy52MS5FdmVudCJRChRTdWJtaXRFdmVudHNSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFwoPcHJvY2Vzc2VkX2NvdW50GAMgASgNIjoKElN1Ym1pdEV2ZW50UmVxdWVzdBIkCgVldmVudBgBIAEoCzIVLnNpbHZhbmEucnBjLnYxLkV2ZW50IlAKE1N1Ym1pdEV2ZW50UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhcKD3Byb2Nlc3NlZF9jb3VudBgDIAEoDSKQAQolR2V0RXZlbnRzQnlBcHBJbnN0YW5jZVNlcXVlbmNlUmVxdWVzdBIQCghzZXF1ZW5jZRgBIAEoBBISCgVsaW1pdBgCIAEoDUgAiAEBEhMKBm9mZnNldBgDIAEoDUgBiAEBEhcKD2FwcF9pbnN0YW5jZV9pZBgEIAEoCUIICgZfbGltaXRCCQoHX29mZnNldCKeAQomR2V0RXZlbnRzQnlBcHBJbnN0YW5jZVNlcXVlbmNlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEiUKBmV2ZW50cxgDIAMoCzIVLnNpbHZhbmEucnBjLnYxLkV2ZW50EhMKC3RvdGFsX2NvdW50GAQgASgNEhYKDnJldHVybmVkX2NvdW50GAUgASgNIpkBChNTZWFyY2hFdmVudHNSZXF1ZXN0EhQKDHNlYXJjaF9xdWVyeRgBIAEoCRISCgVsaW1pdBgCIAEoDUgAiAEBEhMKBm9mZnNldBgDIAEoDUgBiAEBEhsKDmNvb3JkaW5hdG9yX2lkGAQgASgJSAKIAQFCCAoGX2xpbWl0QgkKB19vZmZzZXRCEQoPX2Nvb3JkaW5hdG9yX2lkIl8KEkV2ZW50V2l0aFJlbGV2YW5jZRIKCgJpZBgBIAEoAxIkCgVldmVudBgCIAEoCzIVLnNpbHZhbmEucnBjLnYxLkV2ZW50EhcKD3JlbGV2YW5jZV9zY29yZRgDIAEoASKZAQoUU2VhcmNoRXZlbnRzUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEjIKBmV2ZW50cxgDIAMoCzIiLnNpbHZhbmEucnBjLnYxLkV2ZW50V2l0aFJlbGV2YW5jZRITCgt0b3RhbF9jb3VudBgEIAEoDRIWCg5yZXR1cm5lZF9jb3VudBgFIAEoDSIuCgpRdWlsdFBpZWNlEhIKCmlkZW50aWZpZXIYASABKAkSDAoEZGF0YRgCIAEoCSKAAgoSU3VibWl0UHJvb2ZSZXF1ZXN0EhQKCnByb29mX2RhdGEYASABKAlIABIvCgpxdWlsdF9kYXRhGAQgASgLMhkuc2lsdmFuYS5ycGMudjEuUXVpbHREYXRhSAASQgoIbWV0YWRhdGEYAiADKAsyMC5zaWx2YW5hLnJwYy52MS5TdWJtaXRQcm9vZlJlcXVlc3QuTWV0YWRhdGFFbnRyeRIXCgpleHBpcmVzX2F0GAMgASgESAGIAQEaLwoNTWV0YWRhdGFFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBQgYKBGRhdGFCDQoLX2V4cGlyZXNfYXQiNwoJUXVpbHREYXRhEioKBnBpZWNlcxgBIAMoCzIaLnNpbHZhbmEucnBjLnYxLlF1aWx0UGllY2UiZAoTU3VibWl0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSEgoKcHJvb2ZfaGFzaBgDIAEoCRIXCg9xdWlsdF9waWVjZV9pZHMYBCADKAkiUQoPR2V0UHJvb2ZSZXF1ZXN0EhIKCnByb29mX2hhc2gYASABKAkSGQoMYmxvY2tfbnVtYmVyGAIgASgJSACIAQFCDwoNX2Jsb2NrX251bWJlciL/AQoQR2V0UHJvb2ZSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSEgoKcHJvb2ZfZGF0YRgDIAEoCRJACghtZXRhZGF0YRgEIAMoCzIuLnNpbHZhbmEucnBjLnYxLkdldFByb29mUmVzcG9uc2UuTWV0YWRhdGFFbnRyeRIQCghpc19xdWlsdBgFIAEoCBIwCgxxdWlsdF9waWVjZXMYBiADKAsyGi5zaWx2YW5hLnJwYy52MS5RdWlsdFBpZWNlGi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASIhChBHZXRDb25maWdSZXF1ZXN0Eg0KBWNoYWluGAEgASgJIqMBChFHZXRDb25maWdSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSPQoGY29uZmlnGAMgAygLMi0uc2lsdmFuYS5ycGMudjEuR2V0Q29uZmlnUmVzcG9uc2UuQ29uZmlnRW50cnkaLQoLQ29uZmlnRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKSAQoSV3JpdGVDb25maWdSZXF1ZXN0Eg0KBWNoYWluGAEgASgJEj4KBmNvbmZpZxgCIAMoCzIuLnNpbHZhbmEucnBjLnYxLldyaXRlQ29uZmlnUmVxdWVzdC5Db25maWdFbnRyeRotCgtDb25maWdFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIk4KE1dyaXRlQ29uZmlnUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhUKDWl0ZW1zX3dyaXR0ZW4YAyABKA0i7wEKEldyaXRlQmluYXJ5UmVxdWVzdBIMCgRkYXRhGAEgASgMEhEKCWZpbGVfbmFtZRgCIAEoCRIRCgltaW1lX3R5cGUYAyABKAkSHAoPZXhwZWN0ZWRfc2hhMjU2GAQgASgJSACIAQESQgoIbWV0YWRhdGEYBSADKAsyMC5zaWx2YW5hLnJwYy52MS5Xcml0ZUJpbmFyeVJlcXVlc3QuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCEgoQX2V4cGVjdGVkX3NoYTI1NiJXChNXcml0ZUJpbmFyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIOCgZzaGEyNTYYAyABKAkSDgoGczNfdXJsGAQgASgJIiYKEVJlYWRCaW5hcnlSZXF1ZXN0EhEKCWZpbGVfbmFtZRgBIAEoCSLcAQoSUmVhZEJpbmFyeVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIMCgRkYXRhGAMgASgMEg4KBnNoYTI1NhgEIAEoCRIRCgltaW1lX3R5cGUYBSABKAkSQgoIbWV0YWRhdGEYBiADKAsyMC5zaWx2YW5hLnJwYy52MS5SZWFkQmluYXJ5UmVzcG9uc2UuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEilQEKD1NlY3JldFJlZmVyZW5jZRIRCglkZXZlbG9wZXIYASABKAkSDQoFYWdlbnQYAiABKAkSEAoDYXBwGAMgASgJSACIAQESGQoMYXBwX2luc3RhbmNlGAQgASgJSAGIAQESEQoEbmFtZRgFIAEoCUgCiAEBQgYKBF9hcHBCDwoNX2FwcF9pbnN0YW5jZUIHCgVfbmFtZSJxChJTdG9yZVNlY3JldFJlcXVlc3QSMgoJcmVmZXJlbmNlGAEgASgLMh8uc2lsdmFuYS5ycGMudjEuU2VjcmV0UmVmZXJlbmNlEhQKDHNlY3JldF92YWx1ZRgCIAEoCRIRCglzaWduYXR1cmUYAyABKAwiNwoTU3RvcmVTZWNyZXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiXgoVUmV0cmlldmVTZWNyZXRSZXF1ZXN0EjIKCXJlZmVyZW5jZRgBIAEoCzIfLnNpbHZhbmEucnBjLnYxLlNlY3JldFJlZmVyZW5jZRIRCglzaWduYXR1cmUYAiABKAwiUAoWUmV0cmlldmVTZWNyZXRSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFAoMc2VjcmV0X3ZhbHVlGAMgASgJKowBCghMb2dMZXZlbBIZChVMT0dfTEVWRUxfVU5TUEVDSUZJRUQQABITCg9MT0dfTEVWRUxfREVCVUcQARISCg5MT0dfTEVWRUxfSU5GTxACEhIKDkxPR19MRVZFTF9XQVJOEAMSEwoPTE9HX0xFVkVMX0VSUk9SEAQSEwoPTE9HX0xFVkVMX0ZBVEFMEAUqcwoJSm9iUmVzdWx0EhoKFkpPQl9SRVNVTFRfVU5TUEVDSUZJRUQQABIYChRKT0JfUkVTVUxUX0NPTVBMRVRFRBABEhUKEUpPQl9SRVNVTFRfRkFJTEVEEAISGQoVSk9CX1JFU1VMVF9URVJNSU5BVEVEEAMy6ggKEVNpbHZhbmFScGNTZXJ2aWNlElkKDFN1Ym1pdEV2ZW50cxIjLnNpbHZhbmEucnBjLnYxLlN1Ym1pdEV2ZW50c1JlcXVlc3QaJC5zaWx2YW5hLnJwYy52MS5TdWJtaXRFdmVudHNSZXNwb25zZRJWCgtTdWJtaXRFdmVudBIiLnNpbHZhbmEucnBjLnYxLlN1Ym1pdEV2ZW50UmVxdWVzdBojLnNpbHZhbmEucnBjLnYxLlN1Ym1pdEV2ZW50UmVzcG9uc2USjwEKHkdldEV2ZW50c0J5QXBwSW5zdGFuY2VTZXF1ZW5jZRI1LnNpbHZhbmEucnBjLnYxLkdldEV2ZW50c0J5QXBwSW5zdGFuY2VTZXF1ZW5jZVJlcXVlc3QaNi5zaWx2YW5hLnJwYy52MS5HZXRFdmVudHNCeUFwcEluc3RhbmNlU2VxdWVuY2VSZXNwb25zZRJZCgxTZWFyY2hFdmVudHMSIy5zaWx2YW5hLnJwYy52MS5TZWFyY2hFdmVudHNSZXF1ZXN0GiQuc2lsdmFuYS5ycGMudjEuU2VhcmNoRXZlbnRzUmVzcG9uc2USVgoLU3VibWl0UHJvb2YSIi5zaWx2YW5hLnJwYy52MS5TdWJtaXRQcm9vZlJlcXVlc3QaIy5zaWx2YW5hLnJwYy52MS5TdWJtaXRQcm9vZlJlc3BvbnNlEk0KCEdldFByb29mEh8uc2lsdmFuYS5ycGMudjEuR2V0UHJvb2ZSZXF1ZXN0GiAuc2lsdmFuYS5ycGMudjEuR2V0UHJvb2ZSZXNwb25zZRJWCgtTdG9yZVNlY3JldBIiLnNpbHZhbmEucnBjLnYxLlN0b3JlU2VjcmV0UmVxdWVzdBojLnNpbHZhbmEucnBjLnYxLlN0b3JlU2VjcmV0UmVzcG9uc2USXwoOUmV0cmlldmVTZWNyZXQSJS5zaWx2YW5hLnJwYy52MS5SZXRyaWV2ZVNlY3JldFJlcXVlc3QaJi5zaWx2YW5hLnJwYy52MS5SZXRyaWV2ZVNlY3JldFJlc3BvbnNlElYKC1dyaXRlQmluYXJ5EiIuc2lsdmFuYS5ycGMudjEuV3JpdGVCaW5hcnlSZXF1ZXN0GiMuc2lsdmFuYS5ycGMudjEuV3JpdGVCaW5hcnlSZXNwb25zZRJTCgpSZWFkQmluYXJ5EiEuc2lsdmFuYS5ycGMudjEuUmVhZEJpbmFyeVJlcXVlc3QaIi5zaWx2YW5hLnJwYy52MS5SZWFkQmluYXJ5UmVzcG9uc2USUAoJR2V0Q29uZmlnEiAuc2lsdmFuYS5ycGMudjEuR2V0Q29uZmlnUmVxdWVzdBohLnNpbHZhbmEucnBjLnYxLkdldENvbmZpZ1Jlc3BvbnNlElYKC1dyaXRlQ29uZmlnEiIuc2lsdmFuYS5ycGMudjEuV3JpdGVDb25maWdSZXF1ZXN0GiMuc2lsdmFuYS5ycGMudjEuV3JpdGVDb25maWdSZXNwb25zZUIsWipnaXRodWIuY29tL1NpbHZhbmFPbmUvc2lsdmFuYS9wcm90bztldmVudHNiBnByb3RvMw", [file_google_protobuf_descriptor, file_silvana_options_v1_options]);
+  fileDesc("ChhzaWx2YW5hL3JwYy92MS9ycGMucHJvdG8SDnNpbHZhbmEucnBjLnYxImoKF0Nvb3JkaW5hdG9yU3RhcnRlZEV2ZW50EhwKDmNvb3JkaW5hdG9yX2lkGAEgASgJQgT4jxsBEhgKEGV0aGVyZXVtX2FkZHJlc3MYAiABKAkSFwoPZXZlbnRfdGltZXN0YW1wGAMgASgEIk8KFkNvb3JkaW5hdG9yQWN0aXZlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAIgASgEIlEKGENvb3JkaW5hdG9yU2h1dGRvd25FdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCg9ldmVudF90aW1lc3RhbXAYAiABKAQitQEKGEFnZW50U2Vzc2lvblN0YXJ0ZWRFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIXCglkZXZlbG9wZXIYAiABKAlCBPiPGwESEwoFYWdlbnQYAyABKAlCBPiPGwESGgoMYWdlbnRfbWV0aG9kGAQgASgJQgT4jxsBEhgKCnNlc3Npb25faWQYBSABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAYgASgEIqEBChlBZ2VudFNlc3Npb25GaW5pc2hlZEV2ZW50EhwKDmNvb3JkaW5hdG9yX2lkGAEgASgJQgT4jxsBEhgKCnNlc3Npb25faWQYAiABKAlCBPiPGwESEwoLc2Vzc2lvbl9sb2cYAyABKAkSEAoIZHVyYXRpb24YBCABKAQSDAoEY29zdBgFIAEoBBIXCg9ldmVudF90aW1lc3RhbXAYBiABKAQiqgIKD0pvYkNyZWF0ZWRFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIYCgpzZXNzaW9uX2lkGAIgASgJQgT4jxsBEh0KD2FwcF9pbnN0YW5jZV9pZBgDIAEoCUIE+I8bARIYCgphcHBfbWV0aG9kGAQgASgJQgT4jxsBEhoKDGpvYl9zZXF1ZW5jZRgFIAEoBEIE+I8bARIXCglzZXF1ZW5jZXMYBiADKARCBPCPGwESIAoSbWVyZ2VkX3NlcXVlbmNlc18xGAcgAygEQgTwjxsBEiAKEm1lcmdlZF9zZXF1ZW5jZXNfMhgIIAMoBEIE8I8bARIUCgZqb2JfaWQYCSABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAogASgEIpcBCg9Kb2JTdGFydGVkRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESGAoKc2Vzc2lvbl9pZBgCIAEoCUIE+I8bARIdCg9hcHBfaW5zdGFuY2VfaWQYAyABKAlCBPiPGwESFAoGam9iX2lkGAQgASgJQgT4jxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgFIAEoBCKqAQoQSm9iRmluaXNoZWRFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIUCgZqb2JfaWQYAiABKAlCBPiPGwESEAoIZHVyYXRpb24YAyABKAQSDAoEY29zdBgEIAEoBBIXCg9ldmVudF90aW1lc3RhbXAYBSABKAQSKQoGcmVzdWx0GAYgASgOMhkuc2lsdmFuYS5ycGMudjEuSm9iUmVzdWx0ImMKE0Nvb3JkaW5hdGlvblR4RXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESFQoHdHhfaGFzaBgCIAEoCUIE+I8bARIXCg9ldmVudF90aW1lc3RhbXAYAyABKAQikAEKF0Nvb3JkaW5hdG9yTWVzc2FnZUV2ZW50EhwKDmNvb3JkaW5hdG9yX2lkGAEgASgJQgT4jxsBEhcKD2V2ZW50X3RpbWVzdGFtcBgCIAEoBBInCgVsZXZlbBgDIAEoDjIYLnNpbHZhbmEucnBjLnYxLkxvZ0xldmVsEhUKB21lc3NhZ2UYBCABKAlCBPiPGwEihAMKClByb29mRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESGAoKc2Vzc2lvbl9pZBgCIAEoCUIE+I8bARIdCg9hcHBfaW5zdGFuY2VfaWQYAyABKAlCBPiPGwESFAoGam9iX2lkGAQgASgJQgT4jxsBEhkKEWRhdGFfYXZhaWxhYmlsaXR5GAUgASgJEhQKDGJsb2NrX251bWJlchgGIAEoBBIYCgtibG9ja19wcm9vZhgHIAEoCEgAiAEBEjgKEHByb29mX2V2ZW50X3R5cGUYCCABKA4yHi5zaWx2YW5hLnJwYy52MS5Qcm9vZkV2ZW50VHlwZRIXCglzZXF1ZW5jZXMYCSADKARCBPCPGwESIAoSbWVyZ2VkX3NlcXVlbmNlc18xGAogAygEQgTwjxsBEiAKEm1lcmdlZF9zZXF1ZW5jZXNfMhgLIAMoBEIE8I8bARIXCg9ldmVudF90aW1lc3RhbXAYDCABKARCDgoMX2Jsb2NrX3Byb29mIt4BChpTZXR0bGVtZW50VHJhbnNhY3Rpb25FdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIYCgpzZXNzaW9uX2lkGAIgASgJQgT4jxsBEh0KD2FwcF9pbnN0YW5jZV9pZBgDIAEoCUIE+I8bARINCgVjaGFpbhgEIAEoCRIUCgZqb2JfaWQYBSABKAlCBPiPGwESFAoMYmxvY2tfbnVtYmVyGAYgASgEEhUKB3R4X2hhc2gYByABKAlCBPiPGwESFwoPZXZlbnRfdGltZXN0YW1wGAggASgEItYBCilTZXR0bGVtZW50VHJhbnNhY3Rpb25JbmNsdWRlZEluQmxvY2tFdmVudBIcCg5jb29yZGluYXRvcl9pZBgBIAEoCUIE+I8bARIYCgpzZXNzaW9uX2lkGAIgASgJQgT4jxsBEh0KD2FwcF9pbnN0YW5jZV9pZBgDIAEoCUIE+I8bARINCgVjaGFpbhgEIAEoCRIUCgZqb2JfaWQYBSABKAlCBPiPGwESFAoMYmxvY2tfbnVtYmVyGAYgASgEEhcKD2V2ZW50X3RpbWVzdGFtcBgHIAEoBCLKAQoRQWdlbnRNZXNzYWdlRXZlbnQSHAoOY29vcmRpbmF0b3JfaWQYASABKAlCBPiPGwESGAoKc2Vzc2lvbl9pZBgCIAEoCUIE+I8bARIZCgZqb2JfaWQYAyABKAlCBPiPGwFIAIgBARIXCg9ldmVudF90aW1lc3RhbXAYBCABKAQSJwoFbGV2ZWwYBSABKA4yGC5zaWx2YW5hLnJwYy52MS5Mb2dMZXZlbBIVCgdtZXNzYWdlGAYgASgJQgT4jxsBQgkKB19qb2JfaWQi1QcKBUV2ZW50EkYKE2Nvb3JkaW5hdG9yX3N0YXJ0ZWQYASABKAsyJy5zaWx2YW5hLnJwYy52MS5Db29yZGluYXRvclN0YXJ0ZWRFdmVudEgAEkQKEmNvb3JkaW5hdG9yX2FjdGl2ZRgCIAEoCzImLnNpbHZhbmEucnBjLnYxLkNvb3JkaW5hdG9yQWN0aXZlRXZlbnRIABJIChRjb29yZGluYXRvcl9zaHV0ZG93bhgDIAEoCzIoLnNpbHZhbmEucnBjLnYxLkNvb3JkaW5hdG9yU2h1dGRvd25FdmVudEgAEkkKFWFnZW50X3Nlc3Npb25fc3RhcnRlZBgEIAEoCzIoLnNpbHZhbmEucnBjLnYxLkFnZW50U2Vzc2lvblN0YXJ0ZWRFdmVudEgAEksKFmFnZW50X3Nlc3Npb25fZmluaXNoZWQYDiABKAsyKS5zaWx2YW5hLnJwYy52MS5BZ2VudFNlc3Npb25GaW5pc2hlZEV2ZW50SAASNgoLam9iX2NyZWF0ZWQYBSABKAsyHy5zaWx2YW5hLnJwYy52MS5Kb2JDcmVhdGVkRXZlbnRIABI2Cgtqb2Jfc3RhcnRlZBgGIAEoCzIfLnNpbHZhbmEucnBjLnYxLkpvYlN0YXJ0ZWRFdmVudEgAEjgKDGpvYl9maW5pc2hlZBgHIAEoCzIgLnNpbHZhbmEucnBjLnYxLkpvYkZpbmlzaGVkRXZlbnRIABI+Cg9jb29yZGluYXRpb25fdHgYCCABKAsyIy5zaWx2YW5hLnJwYy52MS5Db29yZGluYXRpb25UeEV2ZW50SAASMQoLcHJvb2ZfZXZlbnQYCSABKAsyGi5zaWx2YW5hLnJwYy52MS5Qcm9vZkV2ZW50SAASTAoWc2V0dGxlbWVudF90cmFuc2FjdGlvbhgKIAEoCzIqLnNpbHZhbmEucnBjLnYxLlNldHRsZW1lbnRUcmFuc2FjdGlvbkV2ZW50SAASZAofc2V0dGxlbWVudF90cmFuc2FjdGlvbl9pbmNsdWRlZBgLIAEoCzI5LnNpbHZhbmEucnBjLnYxLlNldHRsZW1lbnRUcmFuc2FjdGlvbkluY2x1ZGVkSW5CbG9ja0V2ZW50SAASRgoTY29vcmRpbmF0b3JfbWVzc2FnZRgMIAEoCzInLnNpbHZhbmEucnBjLnYxLkNvb3JkaW5hdG9yTWVzc2FnZUV2ZW50SAASOgoNYWdlbnRfbWVzc2FnZRgNIAEoCzIhLnNpbHZhbmEucnBjLnYxLkFnZW50TWVzc2FnZUV2ZW50SABCBwoFZXZlbnQiPAoTU3VibWl0RXZlbnRzUmVxdWVzdBIlCgZldmVudHMYASADKAsyFS5zaWx2YW5hLnJwYy52MS5FdmVudCJRChRTdWJtaXRFdmVudHNSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFwoPcHJvY2Vzc2VkX2NvdW50GAMgASgNIjoKElN1Ym1pdEV2ZW50UmVxdWVzdBIkCgVldmVudBgBIAEoCzIVLnNpbHZhbmEucnBjLnYxLkV2ZW50IlAKE1N1Ym1pdEV2ZW50UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEhcKD3Byb2Nlc3NlZF9jb3VudBgDIAEoDSKQAQolR2V0RXZlbnRzQnlBcHBJbnN0YW5jZVNlcXVlbmNlUmVxdWVzdBIXCg9hcHBfaW5zdGFuY2VfaWQYASABKAkSEAoIc2VxdWVuY2UYAiABKAQSEgoFbGltaXQYAyABKA1IAIgBARITCgZvZmZzZXQYBCABKA1IAYgBAUIICgZfbGltaXRCCQoHX29mZnNldCKeAQomR2V0RXZlbnRzQnlBcHBJbnN0YW5jZVNlcXVlbmNlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEiUKBmV2ZW50cxgDIAMoCzIVLnNpbHZhbmEucnBjLnYxLkV2ZW50EhMKC3RvdGFsX2NvdW50GAQgASgNEhYKDnJldHVybmVkX2NvdW50GAUgASgNIkkKE1NlYXJjaEV2ZW50c1JlcXVlc3QSFAoMc2VhcmNoX3F1ZXJ5GAEgASgJEhIKBWxpbWl0GAIgASgNSACIAQFCCAoGX2xpbWl0Il8KEkV2ZW50V2l0aFJlbGV2YW5jZRIKCgJpZBgBIAEoAxIkCgVldmVudBgCIAEoCzIVLnNpbHZhbmEucnBjLnYxLkV2ZW50EhcKD3JlbGV2YW5jZV9zY29yZRgDIAEoASJsChRTZWFyY2hFdmVudHNSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSMgoGZXZlbnRzGAMgAygLMiIuc2lsdmFuYS5ycGMudjEuRXZlbnRXaXRoUmVsZXZhbmNlIi4KClF1aWx0UGllY2USEgoKaWRlbnRpZmllchgBIAEoCRIMCgRkYXRhGAIgASgJIoACChJTdWJtaXRQcm9vZlJlcXVlc3QSFAoKcHJvb2ZfZGF0YRgBIAEoCUgAEi8KCnF1aWx0X2RhdGEYBCABKAsyGS5zaWx2YW5hLnJwYy52MS5RdWlsdERhdGFIABJCCghtZXRhZGF0YRgCIAMoCzIwLnNpbHZhbmEucnBjLnYxLlN1Ym1pdFByb29mUmVxdWVzdC5NZXRhZGF0YUVudHJ5EhcKCmV4cGlyZXNfYXQYAyABKARIAYgBARovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCBgoEZGF0YUINCgtfZXhwaXJlc19hdCI3CglRdWlsdERhdGESKgoGcGllY2VzGAEgAygLMhouc2lsdmFuYS5ycGMudjEuUXVpbHRQaWVjZSJkChNTdWJtaXRQcm9vZlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRISCgpwcm9vZl9oYXNoGAMgASgJEhcKD3F1aWx0X3BpZWNlX2lkcxgEIAMoCSJRCg9HZXRQcm9vZlJlcXVlc3QSEgoKcHJvb2ZfaGFzaBgBIAEoCRIZCgxibG9ja19udW1iZXIYAiABKAlIAIgBAUIPCg1fYmxvY2tfbnVtYmVyIv8BChBHZXRQcm9vZlJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRISCgpwcm9vZl9kYXRhGAMgASgJEkAKCG1ldGFkYXRhGAQgAygLMi4uc2lsdmFuYS5ycGMudjEuR2V0UHJvb2ZSZXNwb25zZS5NZXRhZGF0YUVudHJ5EhAKCGlzX3F1aWx0GAUgASgIEjAKDHF1aWx0X3BpZWNlcxgGIAMoCzIaLnNpbHZhbmEucnBjLnYxLlF1aWx0UGllY2UaLwoNTWV0YWRhdGFFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIiEKEEdldENvbmZpZ1JlcXVlc3QSDQoFY2hhaW4YASABKAkiowEKEUdldENvbmZpZ1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRI9CgZjb25maWcYAyADKAsyLS5zaWx2YW5hLnJwYy52MS5HZXRDb25maWdSZXNwb25zZS5Db25maWdFbnRyeRotCgtDb25maWdFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIpIBChJXcml0ZUNvbmZpZ1JlcXVlc3QSDQoFY2hhaW4YASABKAkSPgoGY29uZmlnGAIgAygLMi4uc2lsdmFuYS5ycGMudjEuV3JpdGVDb25maWdSZXF1ZXN0LkNvbmZpZ0VudHJ5Gi0KC0NvbmZpZ0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiTgoTV3JpdGVDb25maWdSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSFQoNaXRlbXNfd3JpdHRlbhgDIAEoDSLvAQoSV3JpdGVCaW5hcnlSZXF1ZXN0EgwKBGRhdGEYASABKAwSEQoJZmlsZV9uYW1lGAIgASgJEhEKCW1pbWVfdHlwZRgDIAEoCRIcCg9leHBlY3RlZF9zaGEyNTYYBCABKAlIAIgBARJCCghtZXRhZGF0YRgFIAMoCzIwLnNpbHZhbmEucnBjLnYxLldyaXRlQmluYXJ5UmVxdWVzdC5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4AUISChBfZXhwZWN0ZWRfc2hhMjU2IlcKE1dyaXRlQmluYXJ5UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEg4KBnNoYTI1NhgDIAEoCRIOCgZzM191cmwYBCABKAkiJgoRUmVhZEJpbmFyeVJlcXVlc3QSEQoJZmlsZV9uYW1lGAEgASgJItwBChJSZWFkQmluYXJ5UmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJEgwKBGRhdGEYAyABKAwSDgoGc2hhMjU2GAQgASgJEhEKCW1pbWVfdHlwZRgFIAEoCRJCCghtZXRhZGF0YRgGIAMoCzIwLnNpbHZhbmEucnBjLnYxLlJlYWRCaW5hcnlSZXNwb25zZS5NZXRhZGF0YUVudHJ5Gi8KDU1ldGFkYXRhRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASKVAQoPU2VjcmV0UmVmZXJlbmNlEhEKCWRldmVsb3BlchgBIAEoCRINCgVhZ2VudBgCIAEoCRIQCgNhcHAYAyABKAlIAIgBARIZCgxhcHBfaW5zdGFuY2UYBCABKAlIAYgBARIRCgRuYW1lGAUgASgJSAKIAQFCBgoEX2FwcEIPCg1fYXBwX2luc3RhbmNlQgcKBV9uYW1lInEKElN0b3JlU2VjcmV0UmVxdWVzdBIyCglyZWZlcmVuY2UYASABKAsyHy5zaWx2YW5hLnJwYy52MS5TZWNyZXRSZWZlcmVuY2USFAoMc2VjcmV0X3ZhbHVlGAIgASgJEhEKCXNpZ25hdHVyZRgDIAEoDCI3ChNTdG9yZVNlY3JldFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJeChVSZXRyaWV2ZVNlY3JldFJlcXVlc3QSMgoJcmVmZXJlbmNlGAEgASgLMh8uc2lsdmFuYS5ycGMudjEuU2VjcmV0UmVmZXJlbmNlEhEKCXNpZ25hdHVyZRgCIAEoDCJQChZSZXRyaWV2ZVNlY3JldFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIUCgxzZWNyZXRfdmFsdWUYAyABKAkqjAEKCExvZ0xldmVsEhkKFUxPR19MRVZFTF9VTlNQRUNJRklFRBAAEhMKD0xPR19MRVZFTF9ERUJVRxABEhIKDkxPR19MRVZFTF9JTkZPEAISEgoOTE9HX0xFVkVMX1dBUk4QAxITCg9MT0dfTEVWRUxfRVJST1IQBBITCg9MT0dfTEVWRUxfRkFUQUwQBSpzCglKb2JSZXN1bHQSGgoWSk9CX1JFU1VMVF9VTlNQRUNJRklFRBAAEhgKFEpPQl9SRVNVTFRfQ09NUExFVEVEEAESFQoRSk9CX1JFU1VMVF9GQUlMRUQQAhIZChVKT0JfUkVTVUxUX1RFUk1JTkFURUQQAyqZAQoOUHJvb2ZFdmVudFR5cGUSIAocUFJPT0ZfRVZFTlRfVFlQRV9VTlNQRUNJRklFRBAAEhMKD1BST09GX1NVQk1JVFRFRBABEhEKDVBST09GX0ZFVENIRUQQAhISCg5QUk9PRl9WRVJJRklFRBADEhUKEVBST09GX1VOQVZBSUxBQkxFEAUSEgoOUFJPT0ZfUkVKRUNURUQQBjLqCAoRU2lsdmFuYVJwY1NlcnZpY2USWQoMU3VibWl0RXZlbnRzEiMuc2lsdmFuYS5ycGMudjEuU3VibWl0RXZlbnRzUmVxdWVzdBokLnNpbHZhbmEucnBjLnYxLlN1Ym1pdEV2ZW50c1Jlc3BvbnNlElYKC1N1Ym1pdEV2ZW50EiIuc2lsdmFuYS5ycGMudjEuU3VibWl0RXZlbnRSZXF1ZXN0GiMuc2lsdmFuYS5ycGMudjEuU3VibWl0RXZlbnRSZXNwb25zZRKPAQoeR2V0RXZlbnRzQnlBcHBJbnN0YW5jZVNlcXVlbmNlEjUuc2lsdmFuYS5ycGMudjEuR2V0RXZlbnRzQnlBcHBJbnN0YW5jZVNlcXVlbmNlUmVxdWVzdBo2LnNpbHZhbmEucnBjLnYxLkdldEV2ZW50c0J5QXBwSW5zdGFuY2VTZXF1ZW5jZVJlc3BvbnNlElkKDFNlYXJjaEV2ZW50cxIjLnNpbHZhbmEucnBjLnYxLlNlYXJjaEV2ZW50c1JlcXVlc3QaJC5zaWx2YW5hLnJwYy52MS5TZWFyY2hFdmVudHNSZXNwb25zZRJWCgtTdWJtaXRQcm9vZhIiLnNpbHZhbmEucnBjLnYxLlN1Ym1pdFByb29mUmVxdWVzdBojLnNpbHZhbmEucnBjLnYxLlN1Ym1pdFByb29mUmVzcG9uc2USTQoIR2V0UHJvb2YSHy5zaWx2YW5hLnJwYy52MS5HZXRQcm9vZlJlcXVlc3QaIC5zaWx2YW5hLnJwYy52MS5HZXRQcm9vZlJlc3BvbnNlElYKC1N0b3JlU2VjcmV0EiIuc2lsdmFuYS5ycGMudjEuU3RvcmVTZWNyZXRSZXF1ZXN0GiMuc2lsdmFuYS5ycGMudjEuU3RvcmVTZWNyZXRSZXNwb25zZRJfCg5SZXRyaWV2ZVNlY3JldBIlLnNpbHZhbmEucnBjLnYxLlJldHJpZXZlU2VjcmV0UmVxdWVzdBomLnNpbHZhbmEucnBjLnYxLlJldHJpZXZlU2VjcmV0UmVzcG9uc2USVgoLV3JpdGVCaW5hcnkSIi5zaWx2YW5hLnJwYy52MS5Xcml0ZUJpbmFyeVJlcXVlc3QaIy5zaWx2YW5hLnJwYy52MS5Xcml0ZUJpbmFyeVJlc3BvbnNlElMKClJlYWRCaW5hcnkSIS5zaWx2YW5hLnJwYy52MS5SZWFkQmluYXJ5UmVxdWVzdBoiLnNpbHZhbmEucnBjLnYxLlJlYWRCaW5hcnlSZXNwb25zZRJQCglHZXRDb25maWcSIC5zaWx2YW5hLnJwYy52MS5HZXRDb25maWdSZXF1ZXN0GiEuc2lsdmFuYS5ycGMudjEuR2V0Q29uZmlnUmVzcG9uc2USVgoLV3JpdGVDb25maWcSIi5zaWx2YW5hLnJwYy52MS5Xcml0ZUNvbmZpZ1JlcXVlc3QaIy5zaWx2YW5hLnJwYy52MS5Xcml0ZUNvbmZpZ1Jlc3BvbnNlQixaKmdpdGh1Yi5jb20vU2lsdmFuYU9uZS9zaWx2YW5hL3Byb3RvO2V2ZW50c2IGcHJvdG8z", [file_google_protobuf_descriptor, file_silvana_options_v1_options]);
 
 /**
  * Coordinator Events
@@ -130,6 +130,48 @@ export const AgentSessionStartedEventSchema: GenMessage<AgentSessionStartedEvent
   messageDesc(file_silvana_rpc_v1_rpc, 3);
 
 /**
+ * @generated from message silvana.rpc.v1.AgentSessionFinishedEvent
+ */
+export type AgentSessionFinishedEvent = Message<"silvana.rpc.v1.AgentSessionFinishedEvent"> & {
+  /**
+   * @generated from field: string coordinator_id = 1;
+   */
+  coordinatorId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string session_log = 3;
+   */
+  sessionLog: string;
+
+  /**
+   * @generated from field: uint64 duration = 4;
+   */
+  duration: bigint;
+
+  /**
+   * @generated from field: uint64 cost = 5;
+   */
+  cost: bigint;
+
+  /**
+   * @generated from field: uint64 event_timestamp = 6;
+   */
+  eventTimestamp: bigint;
+};
+
+/**
+ * Describes the message silvana.rpc.v1.AgentSessionFinishedEvent.
+ * Use `create(AgentSessionFinishedEventSchema)` to create a new message.
+ */
+export const AgentSessionFinishedEventSchema: GenMessage<AgentSessionFinishedEvent> = /*@__PURE__*/
+  messageDesc(file_silvana_rpc_v1_rpc, 4);
+
+/**
  * @generated from message silvana.rpc.v1.JobCreatedEvent
  */
 export type JobCreatedEvent = Message<"silvana.rpc.v1.JobCreatedEvent"> & {
@@ -189,7 +231,7 @@ export type JobCreatedEvent = Message<"silvana.rpc.v1.JobCreatedEvent"> & {
  * Use `create(JobCreatedEventSchema)` to create a new message.
  */
 export const JobCreatedEventSchema: GenMessage<JobCreatedEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 4);
+  messageDesc(file_silvana_rpc_v1_rpc, 5);
 
 /**
  * @generated from message silvana.rpc.v1.JobStartedEvent
@@ -226,7 +268,7 @@ export type JobStartedEvent = Message<"silvana.rpc.v1.JobStartedEvent"> & {
  * Use `create(JobStartedEventSchema)` to create a new message.
  */
 export const JobStartedEventSchema: GenMessage<JobStartedEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 5);
+  messageDesc(file_silvana_rpc_v1_rpc, 6);
 
 /**
  * @generated from message silvana.rpc.v1.JobFinishedEvent
@@ -248,12 +290,17 @@ export type JobFinishedEvent = Message<"silvana.rpc.v1.JobFinishedEvent"> & {
   duration: bigint;
 
   /**
-   * @generated from field: uint64 event_timestamp = 4;
+   * @generated from field: uint64 cost = 4;
+   */
+  cost: bigint;
+
+  /**
+   * @generated from field: uint64 event_timestamp = 5;
    */
   eventTimestamp: bigint;
 
   /**
-   * @generated from field: silvana.rpc.v1.JobResult result = 5;
+   * @generated from field: silvana.rpc.v1.JobResult result = 6;
    */
   result: JobResult;
 };
@@ -263,7 +310,7 @@ export type JobFinishedEvent = Message<"silvana.rpc.v1.JobFinishedEvent"> & {
  * Use `create(JobFinishedEventSchema)` to create a new message.
  */
 export const JobFinishedEventSchema: GenMessage<JobFinishedEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 6);
+  messageDesc(file_silvana_rpc_v1_rpc, 7);
 
 /**
  * @generated from message silvana.rpc.v1.CoordinationTxEvent
@@ -290,7 +337,7 @@ export type CoordinationTxEvent = Message<"silvana.rpc.v1.CoordinationTxEvent"> 
  * Use `create(CoordinationTxEventSchema)` to create a new message.
  */
 export const CoordinationTxEventSchema: GenMessage<CoordinationTxEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 7);
+  messageDesc(file_silvana_rpc_v1_rpc, 8);
 
 /**
  * @generated from message silvana.rpc.v1.CoordinatorMessageEvent
@@ -322,12 +369,12 @@ export type CoordinatorMessageEvent = Message<"silvana.rpc.v1.CoordinatorMessage
  * Use `create(CoordinatorMessageEventSchema)` to create a new message.
  */
 export const CoordinatorMessageEventSchema: GenMessage<CoordinatorMessageEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 8);
+  messageDesc(file_silvana_rpc_v1_rpc, 9);
 
 /**
- * @generated from message silvana.rpc.v1.ProofSubmittedEvent
+ * @generated from message silvana.rpc.v1.ProofEvent
  */
-export type ProofSubmittedEvent = Message<"silvana.rpc.v1.ProofSubmittedEvent"> & {
+export type ProofEvent = Message<"silvana.rpc.v1.ProofEvent"> & {
   /**
    * @generated from field: string coordinator_id = 1;
    */
@@ -359,32 +406,42 @@ export type ProofSubmittedEvent = Message<"silvana.rpc.v1.ProofSubmittedEvent"> 
   blockNumber: bigint;
 
   /**
-   * @generated from field: repeated uint64 sequences = 7;
+   * @generated from field: optional bool block_proof = 7;
+   */
+  blockProof?: boolean;
+
+  /**
+   * @generated from field: silvana.rpc.v1.ProofEventType proof_event_type = 8;
+   */
+  proofEventType: ProofEventType;
+
+  /**
+   * @generated from field: repeated uint64 sequences = 9;
    */
   sequences: bigint[];
 
   /**
-   * @generated from field: repeated uint64 merged_sequences_1 = 8;
+   * @generated from field: repeated uint64 merged_sequences_1 = 10;
    */
   mergedSequences1: bigint[];
 
   /**
-   * @generated from field: repeated uint64 merged_sequences_2 = 9;
+   * @generated from field: repeated uint64 merged_sequences_2 = 11;
    */
   mergedSequences2: bigint[];
 
   /**
-   * @generated from field: uint64 event_timestamp = 10;
+   * @generated from field: uint64 event_timestamp = 12;
    */
   eventTimestamp: bigint;
 };
 
 /**
- * Describes the message silvana.rpc.v1.ProofSubmittedEvent.
- * Use `create(ProofSubmittedEventSchema)` to create a new message.
+ * Describes the message silvana.rpc.v1.ProofEvent.
+ * Use `create(ProofEventSchema)` to create a new message.
  */
-export const ProofSubmittedEventSchema: GenMessage<ProofSubmittedEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 9);
+export const ProofEventSchema: GenMessage<ProofEvent> = /*@__PURE__*/
+  messageDesc(file_silvana_rpc_v1_rpc, 10);
 
 /**
  * @generated from message silvana.rpc.v1.SettlementTransactionEvent
@@ -406,22 +463,27 @@ export type SettlementTransactionEvent = Message<"silvana.rpc.v1.SettlementTrans
   appInstanceId: string;
 
   /**
-   * @generated from field: string job_id = 4;
+   * @generated from field: string chain = 4;
+   */
+  chain: string;
+
+  /**
+   * @generated from field: string job_id = 5;
    */
   jobId: string;
 
   /**
-   * @generated from field: uint64 block_number = 5;
+   * @generated from field: uint64 block_number = 6;
    */
   blockNumber: bigint;
 
   /**
-   * @generated from field: string tx_hash = 6;
+   * @generated from field: string tx_hash = 7;
    */
   txHash: string;
 
   /**
-   * @generated from field: uint64 event_timestamp = 7;
+   * @generated from field: uint64 event_timestamp = 8;
    */
   eventTimestamp: bigint;
 };
@@ -431,7 +493,7 @@ export type SettlementTransactionEvent = Message<"silvana.rpc.v1.SettlementTrans
  * Use `create(SettlementTransactionEventSchema)` to create a new message.
  */
 export const SettlementTransactionEventSchema: GenMessage<SettlementTransactionEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 10);
+  messageDesc(file_silvana_rpc_v1_rpc, 11);
 
 /**
  * @generated from message silvana.rpc.v1.SettlementTransactionIncludedInBlockEvent
@@ -453,17 +515,22 @@ export type SettlementTransactionIncludedInBlockEvent = Message<"silvana.rpc.v1.
   appInstanceId: string;
 
   /**
-   * @generated from field: string job_id = 4;
+   * @generated from field: string chain = 4;
+   */
+  chain: string;
+
+  /**
+   * @generated from field: string job_id = 5;
    */
   jobId: string;
 
   /**
-   * @generated from field: uint64 block_number = 5;
+   * @generated from field: uint64 block_number = 6;
    */
   blockNumber: bigint;
 
   /**
-   * @generated from field: uint64 event_timestamp = 6;
+   * @generated from field: uint64 event_timestamp = 7;
    */
   eventTimestamp: bigint;
 };
@@ -473,7 +540,7 @@ export type SettlementTransactionIncludedInBlockEvent = Message<"silvana.rpc.v1.
  * Use `create(SettlementTransactionIncludedInBlockEventSchema)` to create a new message.
  */
 export const SettlementTransactionIncludedInBlockEventSchema: GenMessage<SettlementTransactionIncludedInBlockEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 11);
+  messageDesc(file_silvana_rpc_v1_rpc, 12);
 
 /**
  * Agent Events
@@ -517,7 +584,7 @@ export type AgentMessageEvent = Message<"silvana.rpc.v1.AgentMessageEvent"> & {
  * Use `create(AgentMessageEventSchema)` to create a new message.
  */
 export const AgentMessageEventSchema: GenMessage<AgentMessageEvent> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 12);
+  messageDesc(file_silvana_rpc_v1_rpc, 13);
 
 /**
  * Main event wrapper
@@ -558,6 +625,12 @@ export type Event = Message<"silvana.rpc.v1.Event"> & {
     case: "agentSessionStarted";
   } | {
     /**
+     * @generated from field: silvana.rpc.v1.AgentSessionFinishedEvent agent_session_finished = 14;
+     */
+    value: AgentSessionFinishedEvent;
+    case: "agentSessionFinished";
+  } | {
+    /**
      * @generated from field: silvana.rpc.v1.JobCreatedEvent job_created = 5;
      */
     value: JobCreatedEvent;
@@ -584,10 +657,10 @@ export type Event = Message<"silvana.rpc.v1.Event"> & {
     case: "coordinationTx";
   } | {
     /**
-     * @generated from field: silvana.rpc.v1.ProofSubmittedEvent proof_submitted = 9;
+     * @generated from field: silvana.rpc.v1.ProofEvent proof_event = 9;
      */
-    value: ProofSubmittedEvent;
-    case: "proofSubmitted";
+    value: ProofEvent;
+    case: "proofEvent";
   } | {
     /**
      * @generated from field: silvana.rpc.v1.SettlementTransactionEvent settlement_transaction = 10;
@@ -622,7 +695,7 @@ export type Event = Message<"silvana.rpc.v1.Event"> & {
  * Use `create(EventSchema)` to create a new message.
  */
 export const EventSchema: GenMessage<Event> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 13);
+  messageDesc(file_silvana_rpc_v1_rpc, 14);
 
 /**
  * Batch events request
@@ -641,7 +714,7 @@ export type SubmitEventsRequest = Message<"silvana.rpc.v1.SubmitEventsRequest"> 
  * Use `create(SubmitEventsRequestSchema)` to create a new message.
  */
 export const SubmitEventsRequestSchema: GenMessage<SubmitEventsRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 14);
+  messageDesc(file_silvana_rpc_v1_rpc, 15);
 
 /**
  * @generated from message silvana.rpc.v1.SubmitEventsResponse
@@ -668,7 +741,7 @@ export type SubmitEventsResponse = Message<"silvana.rpc.v1.SubmitEventsResponse"
  * Use `create(SubmitEventsResponseSchema)` to create a new message.
  */
 export const SubmitEventsResponseSchema: GenMessage<SubmitEventsResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 15);
+  messageDesc(file_silvana_rpc_v1_rpc, 16);
 
 /**
  * New messages for single-event submission
@@ -687,7 +760,7 @@ export type SubmitEventRequest = Message<"silvana.rpc.v1.SubmitEventRequest"> & 
  * Use `create(SubmitEventRequestSchema)` to create a new message.
  */
 export const SubmitEventRequestSchema: GenMessage<SubmitEventRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 16);
+  messageDesc(file_silvana_rpc_v1_rpc, 17);
 
 /**
  * @generated from message silvana.rpc.v1.SubmitEventResponse
@@ -714,7 +787,7 @@ export type SubmitEventResponse = Message<"silvana.rpc.v1.SubmitEventResponse"> 
  * Use `create(SubmitEventResponseSchema)` to create a new message.
  */
 export const SubmitEventResponseSchema: GenMessage<SubmitEventResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 17);
+  messageDesc(file_silvana_rpc_v1_rpc, 18);
 
 /**
  * Query request/response messages for getting events by sequence
@@ -723,28 +796,28 @@ export const SubmitEventResponseSchema: GenMessage<SubmitEventResponse> = /*@__P
  */
 export type GetEventsByAppInstanceSequenceRequest = Message<"silvana.rpc.v1.GetEventsByAppInstanceSequenceRequest"> & {
   /**
-   * @generated from field: uint64 sequence = 1;
+   * @generated from field: string app_instance_id = 1;
+   */
+  appInstanceId: string;
+
+  /**
+   * @generated from field: uint64 sequence = 2;
    */
   sequence: bigint;
 
   /**
    * Optional pagination limit
    *
-   * @generated from field: optional uint32 limit = 2;
+   * @generated from field: optional uint32 limit = 3;
    */
   limit?: number;
 
   /**
    * Optional pagination offset
    *
-   * @generated from field: optional uint32 offset = 3;
+   * @generated from field: optional uint32 offset = 4;
    */
   offset?: number;
-
-  /**
-   * @generated from field: string app_instance_id = 4;
-   */
-  appInstanceId: string;
 };
 
 /**
@@ -752,7 +825,7 @@ export type GetEventsByAppInstanceSequenceRequest = Message<"silvana.rpc.v1.GetE
  * Use `create(GetEventsByAppInstanceSequenceRequestSchema)` to create a new message.
  */
 export const GetEventsByAppInstanceSequenceRequestSchema: GenMessage<GetEventsByAppInstanceSequenceRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 18);
+  messageDesc(file_silvana_rpc_v1_rpc, 19);
 
 /**
  * @generated from message silvana.rpc.v1.GetEventsByAppInstanceSequenceResponse
@@ -793,7 +866,7 @@ export type GetEventsByAppInstanceSequenceResponse = Message<"silvana.rpc.v1.Get
  * Use `create(GetEventsByAppInstanceSequenceResponseSchema)` to create a new message.
  */
 export const GetEventsByAppInstanceSequenceResponseSchema: GenMessage<GetEventsByAppInstanceSequenceResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 19);
+  messageDesc(file_silvana_rpc_v1_rpc, 20);
 
 /**
  * Full-text search request/response messages for CoordinatorMessageEvent
@@ -809,25 +882,11 @@ export type SearchEventsRequest = Message<"silvana.rpc.v1.SearchEventsRequest"> 
   searchQuery: string;
 
   /**
-   * Optional pagination limit
+   * Optional limit per fulltext index
    *
    * @generated from field: optional uint32 limit = 2;
    */
   limit?: number;
-
-  /**
-   * Optional pagination offset
-   *
-   * @generated from field: optional uint32 offset = 3;
-   */
-  offset?: number;
-
-  /**
-   * Optional filter by coordinator
-   *
-   * @generated from field: optional string coordinator_id = 4;
-   */
-  coordinatorId?: string;
 };
 
 /**
@@ -835,7 +894,7 @@ export type SearchEventsRequest = Message<"silvana.rpc.v1.SearchEventsRequest"> 
  * Use `create(SearchEventsRequestSchema)` to create a new message.
  */
 export const SearchEventsRequestSchema: GenMessage<SearchEventsRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 20);
+  messageDesc(file_silvana_rpc_v1_rpc, 21);
 
 /**
  * @generated from message silvana.rpc.v1.EventWithRelevance
@@ -866,7 +925,7 @@ export type EventWithRelevance = Message<"silvana.rpc.v1.EventWithRelevance"> & 
  * Use `create(EventWithRelevanceSchema)` to create a new message.
  */
 export const EventWithRelevanceSchema: GenMessage<EventWithRelevance> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 21);
+  messageDesc(file_silvana_rpc_v1_rpc, 22);
 
 /**
  * @generated from message silvana.rpc.v1.SearchEventsResponse
@@ -886,20 +945,6 @@ export type SearchEventsResponse = Message<"silvana.rpc.v1.SearchEventsResponse"
    * @generated from field: repeated silvana.rpc.v1.EventWithRelevance events = 3;
    */
   events: EventWithRelevance[];
-
-  /**
-   * Total matching events (for pagination)
-   *
-   * @generated from field: uint32 total_count = 4;
-   */
-  totalCount: number;
-
-  /**
-   * Number of events in this response
-   *
-   * @generated from field: uint32 returned_count = 5;
-   */
-  returnedCount: number;
 };
 
 /**
@@ -907,7 +952,7 @@ export type SearchEventsResponse = Message<"silvana.rpc.v1.SearchEventsResponse"
  * Use `create(SearchEventsResponseSchema)` to create a new message.
  */
 export const SearchEventsResponseSchema: GenMessage<SearchEventsResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 22);
+  messageDesc(file_silvana_rpc_v1_rpc, 23);
 
 /**
  * Quilt piece for bundling multiple proofs
@@ -931,7 +976,7 @@ export type QuiltPiece = Message<"silvana.rpc.v1.QuiltPiece"> & {
  * Use `create(QuiltPieceSchema)` to create a new message.
  */
 export const QuiltPieceSchema: GenMessage<QuiltPiece> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 23);
+  messageDesc(file_silvana_rpc_v1_rpc, 24);
 
 /**
  * @generated from message silvana.rpc.v1.SubmitProofRequest
@@ -976,7 +1021,7 @@ export type SubmitProofRequest = Message<"silvana.rpc.v1.SubmitProofRequest"> & 
  * Use `create(SubmitProofRequestSchema)` to create a new message.
  */
 export const SubmitProofRequestSchema: GenMessage<SubmitProofRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 24);
+  messageDesc(file_silvana_rpc_v1_rpc, 25);
 
 /**
  * @generated from message silvana.rpc.v1.QuiltData
@@ -993,7 +1038,7 @@ export type QuiltData = Message<"silvana.rpc.v1.QuiltData"> & {
  * Use `create(QuiltDataSchema)` to create a new message.
  */
 export const QuiltDataSchema: GenMessage<QuiltData> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 25);
+  messageDesc(file_silvana_rpc_v1_rpc, 26);
 
 /**
  * @generated from message silvana.rpc.v1.SubmitProofResponse
@@ -1029,7 +1074,7 @@ export type SubmitProofResponse = Message<"silvana.rpc.v1.SubmitProofResponse"> 
  * Use `create(SubmitProofResponseSchema)` to create a new message.
  */
 export const SubmitProofResponseSchema: GenMessage<SubmitProofResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 26);
+  messageDesc(file_silvana_rpc_v1_rpc, 27);
 
 /**
  * @generated from message silvana.rpc.v1.GetProofRequest
@@ -1053,7 +1098,7 @@ export type GetProofRequest = Message<"silvana.rpc.v1.GetProofRequest"> & {
  * Use `create(GetProofRequestSchema)` to create a new message.
  */
 export const GetProofRequestSchema: GenMessage<GetProofRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 27);
+  messageDesc(file_silvana_rpc_v1_rpc, 28);
 
 /**
  * @generated from message silvana.rpc.v1.GetProofResponse
@@ -1099,7 +1144,7 @@ export type GetProofResponse = Message<"silvana.rpc.v1.GetProofResponse"> & {
  * Use `create(GetProofResponseSchema)` to create a new message.
  */
 export const GetProofResponseSchema: GenMessage<GetProofResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 28);
+  messageDesc(file_silvana_rpc_v1_rpc, 29);
 
 /**
  * @generated from message silvana.rpc.v1.GetConfigRequest
@@ -1118,7 +1163,7 @@ export type GetConfigRequest = Message<"silvana.rpc.v1.GetConfigRequest"> & {
  * Use `create(GetConfigRequestSchema)` to create a new message.
  */
 export const GetConfigRequestSchema: GenMessage<GetConfigRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 29);
+  messageDesc(file_silvana_rpc_v1_rpc, 30);
 
 /**
  * @generated from message silvana.rpc.v1.GetConfigResponse
@@ -1147,7 +1192,7 @@ export type GetConfigResponse = Message<"silvana.rpc.v1.GetConfigResponse"> & {
  * Use `create(GetConfigResponseSchema)` to create a new message.
  */
 export const GetConfigResponseSchema: GenMessage<GetConfigResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 30);
+  messageDesc(file_silvana_rpc_v1_rpc, 31);
 
 /**
  * @generated from message silvana.rpc.v1.WriteConfigRequest
@@ -1173,7 +1218,7 @@ export type WriteConfigRequest = Message<"silvana.rpc.v1.WriteConfigRequest"> & 
  * Use `create(WriteConfigRequestSchema)` to create a new message.
  */
 export const WriteConfigRequestSchema: GenMessage<WriteConfigRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 31);
+  messageDesc(file_silvana_rpc_v1_rpc, 32);
 
 /**
  * @generated from message silvana.rpc.v1.WriteConfigResponse
@@ -1202,7 +1247,7 @@ export type WriteConfigResponse = Message<"silvana.rpc.v1.WriteConfigResponse"> 
  * Use `create(WriteConfigResponseSchema)` to create a new message.
  */
 export const WriteConfigResponseSchema: GenMessage<WriteConfigResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 32);
+  messageDesc(file_silvana_rpc_v1_rpc, 33);
 
 /**
  * @generated from message silvana.rpc.v1.WriteBinaryRequest
@@ -1249,7 +1294,7 @@ export type WriteBinaryRequest = Message<"silvana.rpc.v1.WriteBinaryRequest"> & 
  * Use `create(WriteBinaryRequestSchema)` to create a new message.
  */
 export const WriteBinaryRequestSchema: GenMessage<WriteBinaryRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 33);
+  messageDesc(file_silvana_rpc_v1_rpc, 34);
 
 /**
  * @generated from message silvana.rpc.v1.WriteBinaryResponse
@@ -1285,7 +1330,7 @@ export type WriteBinaryResponse = Message<"silvana.rpc.v1.WriteBinaryResponse"> 
  * Use `create(WriteBinaryResponseSchema)` to create a new message.
  */
 export const WriteBinaryResponseSchema: GenMessage<WriteBinaryResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 34);
+  messageDesc(file_silvana_rpc_v1_rpc, 35);
 
 /**
  * @generated from message silvana.rpc.v1.ReadBinaryRequest
@@ -1304,7 +1349,7 @@ export type ReadBinaryRequest = Message<"silvana.rpc.v1.ReadBinaryRequest"> & {
  * Use `create(ReadBinaryRequestSchema)` to create a new message.
  */
 export const ReadBinaryRequestSchema: GenMessage<ReadBinaryRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 35);
+  messageDesc(file_silvana_rpc_v1_rpc, 36);
 
 /**
  * @generated from message silvana.rpc.v1.ReadBinaryResponse
@@ -1354,7 +1399,7 @@ export type ReadBinaryResponse = Message<"silvana.rpc.v1.ReadBinaryResponse"> & 
  * Use `create(ReadBinaryResponseSchema)` to create a new message.
  */
 export const ReadBinaryResponseSchema: GenMessage<ReadBinaryResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 36);
+  messageDesc(file_silvana_rpc_v1_rpc, 37);
 
 /**
  * Secrets storage messages
@@ -1393,7 +1438,7 @@ export type SecretReference = Message<"silvana.rpc.v1.SecretReference"> & {
  * Use `create(SecretReferenceSchema)` to create a new message.
  */
 export const SecretReferenceSchema: GenMessage<SecretReference> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 37);
+  messageDesc(file_silvana_rpc_v1_rpc, 38);
 
 /**
  * @generated from message silvana.rpc.v1.StoreSecretRequest
@@ -1422,7 +1467,7 @@ export type StoreSecretRequest = Message<"silvana.rpc.v1.StoreSecretRequest"> & 
  * Use `create(StoreSecretRequestSchema)` to create a new message.
  */
 export const StoreSecretRequestSchema: GenMessage<StoreSecretRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 38);
+  messageDesc(file_silvana_rpc_v1_rpc, 39);
 
 /**
  * @generated from message silvana.rpc.v1.StoreSecretResponse
@@ -1444,7 +1489,7 @@ export type StoreSecretResponse = Message<"silvana.rpc.v1.StoreSecretResponse"> 
  * Use `create(StoreSecretResponseSchema)` to create a new message.
  */
 export const StoreSecretResponseSchema: GenMessage<StoreSecretResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 39);
+  messageDesc(file_silvana_rpc_v1_rpc, 40);
 
 /**
  * @generated from message silvana.rpc.v1.RetrieveSecretRequest
@@ -1468,7 +1513,7 @@ export type RetrieveSecretRequest = Message<"silvana.rpc.v1.RetrieveSecretReques
  * Use `create(RetrieveSecretRequestSchema)` to create a new message.
  */
 export const RetrieveSecretRequestSchema: GenMessage<RetrieveSecretRequest> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 40);
+  messageDesc(file_silvana_rpc_v1_rpc, 41);
 
 /**
  * @generated from message silvana.rpc.v1.RetrieveSecretResponse
@@ -1497,7 +1542,7 @@ export type RetrieveSecretResponse = Message<"silvana.rpc.v1.RetrieveSecretRespo
  * Use `create(RetrieveSecretResponseSchema)` to create a new message.
  */
 export const RetrieveSecretResponseSchema: GenMessage<RetrieveSecretResponse> = /*@__PURE__*/
-  messageDesc(file_silvana_rpc_v1_rpc, 41);
+  messageDesc(file_silvana_rpc_v1_rpc, 42);
 
 /**
  * Log level enumeration for messages
@@ -1574,6 +1619,49 @@ export enum JobResult {
  */
 export const JobResultSchema: GenEnum<JobResult> = /*@__PURE__*/
   enumDesc(file_silvana_rpc_v1_rpc, 1);
+
+/**
+ * Job result enumeration
+ *
+ * @generated from enum silvana.rpc.v1.ProofEventType
+ */
+export enum ProofEventType {
+  /**
+   * @generated from enum value: PROOF_EVENT_TYPE_UNSPECIFIED = 0;
+   */
+  PROOF_EVENT_TYPE_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: PROOF_SUBMITTED = 1;
+   */
+  PROOF_SUBMITTED = 1,
+
+  /**
+   * @generated from enum value: PROOF_FETCHED = 2;
+   */
+  PROOF_FETCHED = 2,
+
+  /**
+   * @generated from enum value: PROOF_VERIFIED = 3;
+   */
+  PROOF_VERIFIED = 3,
+
+  /**
+   * @generated from enum value: PROOF_UNAVAILABLE = 5;
+   */
+  PROOF_UNAVAILABLE = 5,
+
+  /**
+   * @generated from enum value: PROOF_REJECTED = 6;
+   */
+  PROOF_REJECTED = 6,
+}
+
+/**
+ * Describes the enum silvana.rpc.v1.ProofEventType.
+ */
+export const ProofEventTypeSchema: GenEnum<ProofEventType> = /*@__PURE__*/
+  enumDesc(file_silvana_rpc_v1_rpc, 2);
 
 /**
  * gRPC service definition

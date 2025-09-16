@@ -1,26 +1,23 @@
+use serde_json;
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
-use serde_json;
 use tracing::{debug, error, warn};
 
 use crate::database::EventDatabase;
 use crate::storage::S3Storage;
 use buffer::EventBuffer;
-use db::secrets_storage::SecureSecretsStorage;
 use db::kv::ConfigStorage;
+use db::secrets_storage::SecureSecretsStorage;
 use monitoring::record_grpc_request;
 use proto::{
-    Event,
-    GetEventsByAppInstanceSequenceRequest, GetEventsByAppInstanceSequenceResponse,
-    SearchEventsRequest, SearchEventsResponse,
-    GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
-    GetProofRequest, GetProofResponse, ReadBinaryRequest, ReadBinaryResponse,
-    RetrieveSecretRequest, RetrieveSecretResponse,
-    StoreSecretRequest, StoreSecretResponse, SubmitEventRequest, SubmitEventResponse,
-    SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest, SubmitProofResponse,
-    WriteBinaryRequest, WriteBinaryResponse,
-    silvana_rpc_service_server::SilvanaRpcService,
+    Event, GetConfigRequest, GetConfigResponse, GetEventsByAppInstanceSequenceRequest,
+    GetEventsByAppInstanceSequenceResponse, GetProofRequest, GetProofResponse, ReadBinaryRequest,
+    ReadBinaryResponse, RetrieveSecretRequest, RetrieveSecretResponse, SearchEventsRequest,
+    SearchEventsResponse, StoreSecretRequest, StoreSecretResponse, SubmitEventRequest,
+    SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest,
+    SubmitProofResponse, WriteBinaryRequest, WriteBinaryResponse, WriteConfigRequest,
+    WriteConfigResponse, silvana_rpc_service_server::SilvanaRpcService,
 };
 use storage::ProofsCache;
 
@@ -36,15 +33,13 @@ pub struct SilvanaRpcServiceImpl {
 /// Helper function to parse JSON array strings into Vec<u64>
 fn parse_json_array(json_str: &Option<String>) -> Vec<u64> {
     match json_str {
-        Some(s) if !s.is_empty() => {
-            match serde_json::from_str::<Vec<u64>>(s) {
-                Ok(vec) => vec,
-                Err(e) => {
-                    warn!("Failed to parse JSON array: {}, error: {}", s, e);
-                    vec![]
-                }
+        Some(s) if !s.is_empty() => match serde_json::from_str::<Vec<u64>>(s) {
+            Ok(vec) => vec,
+            Err(e) => {
+                warn!("Failed to parse JSON array: {}, error: {}", s, e);
+                vec![]
             }
-        }
+        },
         _ => vec![],
     }
 }
@@ -75,7 +70,7 @@ impl SilvanaRpcServiceImpl {
         self.s3_storage = Some(s3_storage);
         self
     }
-    
+
     pub fn with_config_storage(mut self, config_storage: Arc<ConfigStorage>) -> Self {
         self.config_storage = Some(config_storage);
         self
@@ -197,7 +192,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         request: Request<GetEventsByAppInstanceSequenceRequest>,
     ) -> Result<Response<GetEventsByAppInstanceSequenceResponse>, Status> {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-        use tidb::entity::{job_sequences, proof_event_sequences, jobs, proof_event};
+        use tidb::entity::{job_sequences, jobs, proof_event, proof_event_sequences};
 
         let req = request.into_inner();
         let start = Instant::now();
@@ -239,20 +234,18 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             if let Some(job) = job_result {
                 // Convert job to Event
                 let event = proto::Event {
-                    event: Some(proto::event::Event::JobCreated(
-                        proto::JobCreatedEvent {
-                            coordinator_id: job.coordinator_id,
-                            session_id: job.session_id,
-                            app_instance_id: job.app_instance_id,
-                            app_method: job.app_method,
-                            job_sequence: job.job_sequence as u64,
-                            sequences: parse_json_array(&job.sequences),
-                            merged_sequences_1: parse_json_array(&job.merged_sequences_1),
-                            merged_sequences_2: parse_json_array(&job.merged_sequences_2),
-                            job_id: job.job_id,
-                            event_timestamp: job.event_timestamp as u64,
-                        }
-                    )),
+                    event: Some(proto::event::Event::JobCreated(proto::JobCreatedEvent {
+                        coordinator_id: job.coordinator_id,
+                        session_id: job.session_id,
+                        app_instance_id: job.app_instance_id,
+                        app_method: job.app_method,
+                        job_sequence: job.job_sequence as u64,
+                        sequences: parse_json_array(&job.sequences),
+                        merged_sequences_1: parse_json_array(&job.merged_sequences_1),
+                        merged_sequences_2: parse_json_array(&job.merged_sequences_2),
+                        job_id: job.job_id,
+                        event_timestamp: job.event_timestamp as u64,
+                    })),
                 };
                 all_events.push(event);
             }
@@ -269,7 +262,10 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                 Status::internal(format!("Database query failed: {}", e))
             })?;
 
-        debug!("Found {} proof_event_sequences entries", proof_sequence_results.len());
+        debug!(
+            "Found {} proof_event_sequences entries",
+            proof_sequence_results.len()
+        );
 
         // For each proof_event_id found, fetch the proof event
         for proof_seq in proof_sequence_results {
@@ -293,22 +289,20 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                 };
 
                 let event = proto::Event {
-                    event: Some(proto::event::Event::ProofEvent(
-                        proto::ProofEvent {
-                            coordinator_id: proof.coordinator_id,
-                            session_id: proof.session_id,
-                            app_instance_id: proof.app_instance_id,
-                            job_id: proof.job_id,
-                            data_availability: proof.data_availability,
-                            block_number: proof.block_number as u64,
-                            block_proof: proof.block_proof,
-                            proof_event_type,
-                            sequences: parse_json_array(&proof.sequences),
-                            merged_sequences_1: parse_json_array(&proof.merged_sequences_1),
-                            merged_sequences_2: parse_json_array(&proof.merged_sequences_2),
-                            event_timestamp: proof.event_timestamp as u64,
-                        }
-                    )),
+                    event: Some(proto::event::Event::ProofEvent(proto::ProofEvent {
+                        coordinator_id: proof.coordinator_id,
+                        session_id: proof.session_id,
+                        app_instance_id: proof.app_instance_id,
+                        job_id: proof.job_id,
+                        data_availability: proof.data_availability,
+                        block_number: proof.block_number as u64,
+                        block_proof: proof.block_proof,
+                        proof_event_type,
+                        sequences: parse_json_array(&proof.sequences),
+                        merged_sequences_1: parse_json_array(&proof.merged_sequences_1),
+                        merged_sequences_2: parse_json_array(&proof.merged_sequences_2),
+                        event_timestamp: proof.event_timestamp as u64,
+                    })),
                 };
                 all_events.push(event);
             }
@@ -319,11 +313,8 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         let offset = req.offset.unwrap_or(0) as usize;
         let limit = req.limit.unwrap_or(100) as usize;
 
-        let paginated_events: Vec<Event> = all_events
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect();
+        let paginated_events: Vec<Event> =
+            all_events.into_iter().skip(offset).take(limit).collect();
 
         let returned_count = paginated_events.len() as u32;
 
@@ -348,10 +339,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
     ) -> Result<Response<SearchEventsResponse>, Status> {
         let req = request.into_inner();
 
-        debug!(
-            "Searching events with query: '{}'",
-            req.search_query
-        );
+        debug!("Searching events with query: '{}'", req.search_query);
 
         // Validate search query
         if req.search_query.is_empty() || req.search_query.trim().is_empty() {
@@ -565,8 +553,11 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         // Handle both single proof and quilt submissions
         let result = match req.data {
             Some(proto::submit_proof_request::Data::ProofData(proof_data)) => {
-                debug!("Submitting single proof with {} bytes of data", proof_data.len());
-                
+                debug!(
+                    "Submitting single proof with {} bytes of data",
+                    proof_data.len()
+                );
+
                 proofs_cache
                     .submit_proof(proof_data, metadata, expires_at)
                     .await
@@ -578,9 +569,9 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                     .into_iter()
                     .map(|piece| (piece.identifier, piece.data))
                     .collect();
-                
+
                 debug!("Submitting quilt with {} pieces", pieces.len());
-                
+
                 proofs_cache
                     .submit_quilt(pieces, metadata, expires_at)
                     .await
@@ -602,7 +593,10 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                     message: if quilt_piece_ids.is_empty() {
                         "Proof submitted successfully".to_string()
                     } else {
-                        format!("Quilt submitted successfully with {} pieces", quilt_piece_ids.len())
+                        format!(
+                            "Quilt submitted successfully with {} pieces",
+                            quilt_piece_ids.len()
+                        )
                     },
                     proof_hash,
                     quilt_piece_ids,
@@ -642,13 +636,18 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         let result = match proofs_cache.read_proof(&req.proof_hash).await {
             Ok(proof_data) => {
                 // Check if this is a quilt
-                let is_quilt = proof_data.metadata.get("quilts")
+                let is_quilt = proof_data
+                    .metadata
+                    .get("quilts")
                     .map(|v| v == "true")
                     .unwrap_or(false);
-                
+
                 if is_quilt && req.block_number.is_some() {
                     // If it's a quilt and a specific block is requested, read the quilt
-                    match proofs_cache.read_quilt(&req.proof_hash, req.block_number.as_deref()).await {
+                    match proofs_cache
+                        .read_quilt(&req.proof_hash, req.block_number.as_deref())
+                        .await
+                    {
                         Ok(quilt_data) => Ok(quilt_data),
                         Err(e) => Err(e),
                     }
@@ -660,7 +659,9 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             Err(e) => {
                 // If regular proof read fails and block_number is provided, try reading as quilt
                 if req.block_number.is_some() {
-                    proofs_cache.read_quilt(&req.proof_hash, req.block_number.as_deref()).await
+                    proofs_cache
+                        .read_quilt(&req.proof_hash, req.block_number.as_deref())
+                        .await
                 } else {
                     Err(e)
                 }
@@ -670,17 +671,23 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         match result {
             Ok(proof_data) => {
                 record_grpc_request("get_proof", "success", start_time.elapsed().as_secs_f64());
-                
+
                 // Check if this is a quilt to build proper response
-                let is_quilt = proof_data.metadata.get("quilts")
+                let is_quilt = proof_data
+                    .metadata
+                    .get("quilts")
                     .map(|v| v == "true")
                     .unwrap_or(false);
-                
+
                 // Parse quilt pieces if this is a quilt
                 let quilt_pieces = if is_quilt && req.block_number.is_none() {
                     // Parse the full quilt data to extract pieces
-                    if let Ok(quilt_data) = serde_json::from_str::<storage::proofs_cache::QuiltData>(&proof_data.data) {
-                        quilt_data.pieces.into_iter()
+                    if let Ok(quilt_data) =
+                        serde_json::from_str::<storage::proofs_cache::QuiltData>(&proof_data.data)
+                    {
+                        quilt_data
+                            .pieces
+                            .into_iter()
                             .map(|p| proto::QuiltPiece {
                                 identifier: p.identifier,
                                 data: p.data,
@@ -692,7 +699,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                 } else {
                     vec![]
                 };
-                
+
                 Ok(Response::new(GetProofResponse {
                     success: true,
                     message: if is_quilt {
@@ -741,7 +748,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         request: Request<WriteBinaryRequest>,
     ) -> Result<Response<WriteBinaryResponse>, Status> {
         let start_time = Instant::now();
-        
+
         // Check if S3 storage is configured
         let s3_storage = self.s3_storage.as_ref().ok_or_else(|| {
             error!("S3 storage not configured");
@@ -750,18 +757,18 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         })?;
 
         let req = request.into_inner();
-        
+
         // Validate input
         if req.data.is_empty() {
             record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
             return Err(Status::invalid_argument("Data cannot be empty"));
         }
-        
+
         if req.file_name.is_empty() {
             record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
             return Err(Status::invalid_argument("File name cannot be empty"));
         }
-        
+
         if req.mime_type.is_empty() {
             record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
             return Err(Status::invalid_argument("MIME type cannot be empty"));
@@ -776,7 +783,12 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
 
         // Call S3 storage to write binary
         match s3_storage
-            .write_binary(req.data, &req.file_name, &req.mime_type, req.expected_sha256)
+            .write_binary(
+                req.data,
+                &req.file_name,
+                &req.mime_type,
+                req.expected_sha256,
+            )
             .await
         {
             Ok((sha256, s3_url)) => {
@@ -784,9 +796,13 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                     "Successfully wrote binary to S3: file_name={}, sha256={}",
                     req.file_name, sha256
                 );
-                
-                record_grpc_request("write_binary", "success", start_time.elapsed().as_secs_f64());
-                
+
+                record_grpc_request(
+                    "write_binary",
+                    "success",
+                    start_time.elapsed().as_secs_f64(),
+                );
+
                 Ok(Response::new(WriteBinaryResponse {
                     success: true,
                     message: "Binary data written successfully".to_string(),
@@ -797,11 +813,14 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             Err(e) => {
                 error!("Failed to write binary to S3: {}", e);
                 record_grpc_request("write_binary", "error", start_time.elapsed().as_secs_f64());
-                
+
                 // Check for specific error types
                 let error_string = e.to_string();
                 if error_string.contains("SHA256 hash mismatch") {
-                    Err(Status::invalid_argument(format!("Hash verification failed: {}", e)))
+                    Err(Status::invalid_argument(format!(
+                        "Hash verification failed: {}",
+                        e
+                    )))
                 } else {
                     Err(Status::internal(format!("Failed to write binary: {}", e)))
                 }
@@ -814,7 +833,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         request: Request<ReadBinaryRequest>,
     ) -> Result<Response<ReadBinaryResponse>, Status> {
         let start_time = Instant::now();
-        
+
         // Check if S3 storage is configured
         let s3_storage = self.s3_storage.as_ref().ok_or_else(|| {
             error!("S3 storage not configured");
@@ -823,7 +842,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         })?;
 
         let req = request.into_inner();
-        
+
         // Validate input
         if req.file_name.is_empty() {
             record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
@@ -841,9 +860,9 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                     data.len(),
                     sha256
                 );
-                
+
                 record_grpc_request("read_binary", "success", start_time.elapsed().as_secs_f64());
-                
+
                 // For now, we'll infer MIME type from file extension
                 // In a production system, you might want to store this as metadata
                 let mime_type = match req.file_name.split('.').last() {
@@ -856,7 +875,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                     _ => "application/octet-stream",
                 }
                 .to_string();
-                
+
                 Ok(Response::new(ReadBinaryResponse {
                     success: true,
                     message: "Binary data read successfully".to_string(),
@@ -869,93 +888,116 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             Err(e) => {
                 error!("Failed to read binary from S3: {}", e);
                 record_grpc_request("read_binary", "error", start_time.elapsed().as_secs_f64());
-                
+
                 // Check if file doesn't exist
                 let error_string = e.to_string();
                 if error_string.contains("not found") || error_string.contains("NoSuchKey") {
-                    Err(Status::not_found(format!("File not found: {}", req.file_name)))
+                    Err(Status::not_found(format!(
+                        "File not found: {}",
+                        req.file_name
+                    )))
                 } else {
                     Err(Status::internal(format!("Failed to read binary: {}", e)))
                 }
             }
         }
     }
-    
+
     async fn get_config(
         &self,
         request: Request<GetConfigRequest>,
     ) -> Result<Response<GetConfigResponse>, Status> {
         let start_time = Instant::now();
         let req = request.into_inner();
-        
+
         debug!("Getting config for chain: {}", req.chain);
-        
+
         match &self.config_storage {
             None => {
                 warn!("Config storage not configured");
-                record_grpc_request("get_config", "not_configured", start_time.elapsed().as_secs_f64());
+                record_grpc_request(
+                    "get_config",
+                    "not_configured",
+                    start_time.elapsed().as_secs_f64(),
+                );
                 Ok(Response::new(GetConfigResponse {
                     success: false,
                     message: "Config storage not configured".to_string(),
                     config: std::collections::HashMap::new(),
                 }))
             }
-            Some(storage) => {
-                match storage.get_config(&req.chain).await {
-                    Ok(config) => {
-                        record_grpc_request("get_config", "success", start_time.elapsed().as_secs_f64());
-                        Ok(Response::new(GetConfigResponse {
-                            success: true,
-                            message: format!("Retrieved {} config items", config.len()),
-                            config,
-                        }))
-                    }
-                    Err(e) => {
-                        error!("Failed to get config: {}", e);
-                        record_grpc_request("get_config", "error", start_time.elapsed().as_secs_f64());
-                        Err(Status::internal(format!("Failed to get config: {}", e)))
-                    }
+            Some(storage) => match storage.get_config(&req.chain).await {
+                Ok(config) => {
+                    record_grpc_request(
+                        "get_config",
+                        "success",
+                        start_time.elapsed().as_secs_f64(),
+                    );
+                    Ok(Response::new(GetConfigResponse {
+                        success: true,
+                        message: format!("Retrieved {} config items", config.len()),
+                        config,
+                    }))
                 }
-            }
+                Err(e) => {
+                    error!("Failed to get config: {}", e);
+                    record_grpc_request("get_config", "error", start_time.elapsed().as_secs_f64());
+                    Err(Status::internal(format!("Failed to get config: {}", e)))
+                }
+            },
         }
     }
-    
+
     async fn write_config(
         &self,
         request: Request<WriteConfigRequest>,
     ) -> Result<Response<WriteConfigResponse>, Status> {
         let start_time = Instant::now();
         let req = request.into_inner();
-        
-        debug!("Writing config for chain: {} ({} items)", req.chain, req.config.len());
-        
+
+        debug!(
+            "Writing config for chain: {} ({} items)",
+            req.chain,
+            req.config.len()
+        );
+
         match &self.config_storage {
             None => {
                 warn!("Config storage not configured");
-                record_grpc_request("write_config", "not_configured", start_time.elapsed().as_secs_f64());
+                record_grpc_request(
+                    "write_config",
+                    "not_configured",
+                    start_time.elapsed().as_secs_f64(),
+                );
                 Ok(Response::new(WriteConfigResponse {
                     success: false,
                     message: "Config storage not configured".to_string(),
                     items_written: 0,
                 }))
             }
-            Some(storage) => {
-                match storage.write_config(&req.chain, req.config).await {
-                    Ok(items_written) => {
-                        record_grpc_request("write_config", "success", start_time.elapsed().as_secs_f64());
-                        Ok(Response::new(WriteConfigResponse {
-                            success: true,
-                            message: format!("Successfully wrote {} config items", items_written),
-                            items_written,
-                        }))
-                    }
-                    Err(e) => {
-                        error!("Failed to write config: {}", e);
-                        record_grpc_request("write_config", "error", start_time.elapsed().as_secs_f64());
-                        Err(Status::internal(format!("Failed to write config: {}", e)))
-                    }
+            Some(storage) => match storage.write_config(&req.chain, req.config).await {
+                Ok(items_written) => {
+                    record_grpc_request(
+                        "write_config",
+                        "success",
+                        start_time.elapsed().as_secs_f64(),
+                    );
+                    Ok(Response::new(WriteConfigResponse {
+                        success: true,
+                        message: format!("Successfully wrote {} config items", items_written),
+                        items_written,
+                    }))
                 }
-            }
+                Err(e) => {
+                    error!("Failed to write config: {}", e);
+                    record_grpc_request(
+                        "write_config",
+                        "error",
+                        start_time.elapsed().as_secs_f64(),
+                    );
+                    Err(Status::internal(format!("Failed to write config: {}", e)))
+                }
+            },
         }
     }
 }

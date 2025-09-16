@@ -3,10 +3,7 @@
 import { useState, useEffect } from "react";
 import { createGrpcWebTransport } from "@connectrpc/connect-web";
 import { createClient } from "@connectrpc/connect";
-import {
-  EventSchema,
-  SilvanaRpcService,
-} from "@/proto/silvana/rpc/v1/rpc_pb";
+import { EventSchema, SilvanaRpcService } from "@/proto/silvana/rpc/v1/rpc_pb";
 import { createGrpcRequest } from "@/lib/grpc";
 import { wsconnect } from "@nats-io/nats-core";
 import {
@@ -19,6 +16,7 @@ import { fromBinary } from "@bufbuild/protobuf";
 import { serialize } from "@/lib/serialize";
 import { AnimatedBackground } from "@/components/AnimatedBackground";
 import { NavBar } from "@/components/NavBar";
+import { createSilvanaId } from "@/lib/coordinator";
 
 export default function Home() {
   const [eventResponseLog, setEventResponseLog] = useState<string[]>([]);
@@ -47,6 +45,8 @@ export default function Home() {
   > | null>(null);
   const [nats, setNats] = useState<ReturnType<typeof jetstream> | null>(null);
   const [natsConsumer, setNatsConsumer] = useState<Consumer | null>(null);
+  const [backgroundMonitoringPaused, setBackgroundMonitoringPaused] =
+    useState<boolean>(false);
 
   useEffect(() => {
     const initializeGrpc = async () => {
@@ -115,31 +115,70 @@ export default function Home() {
 
   // Monitor NATS messages in the background
   useEffect(() => {
+    let isActive = true;
+
     if (natsConsumer && !isLoading) {
       const monitorMessages = async () => {
         console.log("🎧 Starting background NATS monitoring...");
         try {
-          const iter = await natsConsumer.consume({ max_messages: 100 });
-          for await (const message of iter) {
-            console.log("📡 Background NATS event received, seq:", message.seq);
-            message.ack();
+          // Use fetch instead of consume for simpler message retrieval
+          // This avoids the concurrent consume issue with ordered consumers
+          while (isActive) {
+            // Skip fetching if background monitoring is paused
+            if (backgroundMonitoringPaused) {
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              continue;
+            }
 
             try {
-              const event = fromBinary(EventSchema, message.data);
-              const eventType = event.event.case || "unknown";
-              console.log(`📡 Background event type: ${eventType}`);
-              console.log(`📡 Full event details:`, event);
+              // Fetch up to 10 messages with a 1 second timeout
+              const messages = await natsConsumer.fetch({
+                max_messages: 10,
+                expires: 1000,
+              });
 
-              // Add to message log for visibility with full JSON (newest first)
-              setNatsMessageLog(prev => [
-                `[Background ${new Date().toISOString()}] ${eventType}`,
-                JSON.stringify(event, (_key, value) =>
-                  typeof value === 'bigint' ? value.toString() : value
-                , 2),
-                ...prev
-              ].slice(0, 100)); // Keep only last 100 messages
+              for await (const message of messages) {
+                if (!isActive) break;
+
+                console.log(
+                  "📡 Background NATS event received, seq:",
+                  message.seq
+                );
+                message.ack();
+
+                try {
+                  const event = fromBinary(EventSchema, message.data);
+                  const eventType = event.event.case || "unknown";
+                  console.log(`📡 Background event type: ${eventType}`);
+                  console.log(`📡 Full event details:`, event);
+
+                  // Add to message log for visibility with full JSON (newest first)
+                  setNatsMessageLog((prev) =>
+                    [
+                      `[Background ${new Date().toISOString()}] ${eventType}`,
+                      JSON.stringify(
+                        event,
+                        (_key, value) =>
+                          typeof value === "bigint" ? value.toString() : value,
+                        2
+                      ),
+                      ...prev,
+                    ].slice(0, 100)
+                  ); // Keep only last 100 messages
+                } catch (err) {
+                  console.error("Failed to decode background message:", err);
+                }
+              }
             } catch (err) {
-              console.error("Failed to decode background message:", err);
+              // Ignore timeout errors from fetch (expected when no messages)
+              if (err instanceof Error && !err.message?.includes("timeout")) {
+                console.error("Background fetch error:", err);
+              }
+            }
+
+            // Small delay between fetch attempts
+            if (isActive) {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
             }
           }
         } catch (err) {
@@ -149,7 +188,12 @@ export default function Home() {
 
       monitorMessages();
     }
-  }, [natsConsumer, isLoading]);
+
+    // Cleanup function
+    return () => {
+      isActive = false;
+    };
+  }, [natsConsumer, isLoading, backgroundMonitoringPaused]);
 
   // Update connection status dots
   useEffect(() => {
@@ -186,8 +230,18 @@ export default function Home() {
     }
     const { coordinatorId, start } = params;
 
-    console.log("🔍 Starting NATS message processing for coordinator:", coordinatorId);
+    // Pause background monitoring
+    setBackgroundMonitoringPaused(true);
+    console.log(
+      "⏸️ Pausing background monitoring for button-triggered processing"
+    );
+
+    console.log(
+      "🔍 Starting NATS message processing for coordinator:",
+      coordinatorId
+    );
     let messageCount = 0;
+    let foundOurMessage = false;
 
     try {
       let message = await natsConsumer.next({
@@ -251,18 +305,24 @@ export default function Home() {
           console.log("Full event details:", event);
 
           // Update the message log with all events (newest first)
-          setNatsMessageLog(prev => [
-            `[${new Date().toISOString()}] ${eventInfo}`,
-            JSON.stringify(event, (_key, value) =>
-              typeof value === 'bigint' ? value.toString() : value
-            , 2),
-            ...prev
-          ].slice(0, 100)); // Keep only last 100 messages
+          setNatsMessageLog((prev) =>
+            [
+              `[${new Date().toISOString()}] ${eventInfo}`,
+              JSON.stringify(
+                event,
+                (_key, value) =>
+                  typeof value === "bigint" ? value.toString() : value,
+                2
+              ),
+              ...prev,
+            ].slice(0, 100)
+          ); // Keep only last 100 messages
 
           // If this was our specific message, set the roundtrip delay
           if (isRelevant) {
             setNatsRoundtripDelay(endNats - start);
             console.log("Found our message!");
+            foundOurMessage = true;
           }
         } catch (error: unknown) {
           console.log(
@@ -283,43 +343,56 @@ export default function Home() {
       );
       setError(error instanceof Error ? error.message : "Unknown NATS error");
       setNatsConnection("error");
+      // Resume background monitoring even on error
+      setBackgroundMonitoringPaused(false);
+      console.log("▶️ Resuming background monitoring after error");
       return;
+    } finally {
+      // Always resume background monitoring
+      setBackgroundMonitoringPaused(false);
+      console.log("▶️ Resuming background monitoring");
     }
 
     // Only show timeout error if we didn't receive ANY events
-    if (natsMessageLog.length === 0) {
+    if (messageCount === 0) {
       setError("NATS message timeout - no events received");
       setNatsConnection("error");
+    } else if (!foundOurMessage) {
+      console.log(
+        `Received ${messageCount} NATS events (none matched our coordinator ID)`
+      );
     } else {
-      console.log(`Received ${natsMessageLog.length} NATS events (none matched our coordinator ID)`);
+      console.log(
+        `Successfully received our message among ${messageCount} NATS events`
+      );
     }
   }
 
   async function sendGrpcQuery(params: {
+    searchText: string;
     start: number;
-    appInstanceId: string;
   }): Promise<void> {
     if (!grpc) {
       setError("gRPC not initialized");
       return;
     }
-    const { start, appInstanceId } = params;
+    const { searchText, start } = params;
     try {
-      console.log(`🔍 Querying Events via gRPC-Web client for app instance: ${appInstanceId}...`);
-      let queryResponse = await grpc.getEventsByAppInstanceSequence({
-        sequence: 1n, // Start from sequence 1
-        appInstanceId: appInstanceId,
-        limit: 100, // Get up to 100 events
+      console.log(
+        `🔍 Querying Events via gRPC-Web client for search text: ${searchText}...`
+      );
+      let queryResponse = await grpc.searchEvents({
+        searchQuery: searchText,
+        limit: 10, // Get up to 10 events
       });
 
       // Wait for events to appear (since we just created this app instance)
       let attempts = 0;
-      while (queryResponse.returnedCount === 0 && Date.now() - start < 5000) {
-        await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms between attempts
-        queryResponse = await grpc.getEventsByAppInstanceSequence({
-          sequence: 1n,
-          appInstanceId: appInstanceId,
-          limit: 100,
+      while (queryResponse.events.length === 0 && Date.now() - start < 5000) {
+        await new Promise((resolve) => setTimeout(resolve, 500)); // Wait 500ms between attempts
+        queryResponse = await grpc.searchEvents({
+          searchQuery: searchText,
+          limit: 10, // Get up to 10 events
         });
         attempts++;
       }
@@ -339,14 +412,12 @@ export default function Home() {
       console.log("gRPC Query Response:", queryResponse);
 
       // Create a user-friendly message about the query result
-      const resultMessage = queryResponse.returnedCount > 0
-        ? `Found ${queryResponse.returnedCount} events`
-        : "Query successful (0 events - this is normal for a new app instance)";
+      const resultMessage =
+        queryResponse.events.length > 0
+          ? `Found ${queryResponse.events.length} events`
+          : "Query returned no events";
 
-      setQueryResponseLog([
-        resultMessage,
-        serialize(queryResponse)
-      ]);
+      setQueryResponseLog([resultMessage, serialize(queryResponse)]);
       setQueryRoundtripDelay(durationQuery);
 
       // Clear any previous errors since the query succeeded
@@ -369,8 +440,10 @@ export default function Home() {
       setQueryResponseLog([]);
       setEventResponseLog([]);
       setEventResponseLog([...eventResponseLog, "Sending gRPC-Web request..."]);
-      const coordinatorId = `coord-browser-${crypto.randomUUID()}`;
-      const appInstanceId = `app-instance-${Date.now()}`; // Dynamic app instance ID
+      const coordinatorId = await createSilvanaId();
+      const appInstanceId = await createSilvanaId();
+      console.log("coordinatorId: ", coordinatorId);
+      console.log("appInstanceId: ", appInstanceId);
       const request = await createGrpcRequest(coordinatorId);
       console.log("sending request: ", request);
       const startRequest = Date.now();
@@ -387,7 +460,7 @@ export default function Home() {
       });
       const endQueryPromise = sendGrpcQuery({
         start: startRequest,
-        appInstanceId: appInstanceId,
+        searchText: coordinatorId,
       });
 
       await Promise.all([endNatsPromise, endQueryPromise]);

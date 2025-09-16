@@ -1,11 +1,24 @@
+use crate::database::{EventDatabase, SearchResult, parse_json_array};
+use crate::fulltext_indexes::FULLTEXT_INDEXES;
 use crate::proto;
-use crate::database::{EventDatabase, parse_json_array, SearchResult};
 use anyhow::Result;
-use sea_orm::{ConnectionTrait, Statement, QueryResult};
+use futures::future::join_all;
+use sea_orm::{ConnectionTrait, QueryResult, Statement};
+use std::collections::HashSet;
 use std::time::Instant;
 use tracing::debug;
 
-/// Search all tables with fulltext indexes in parallel and return the most relevant events
+/// Determine if a field is an ID field (hex string) or a text field
+fn is_id_field(column_name: &str) -> bool {
+    matches!(
+        column_name,
+        "coordinator_id" | "app_instance_id" | "job_id" | "session_id" | "tx_hash"
+    )
+}
+
+/// Search all fulltext indexes in parallel, using appropriate search method for each field type
+/// - ID fields (hex strings) use LIKE queries
+/// - Text fields use fts_match_word for fulltext search
 pub async fn search_all_events_parallel(
     database: &EventDatabase,
     search_query: &str,
@@ -23,132 +36,181 @@ pub async fn search_all_events_parallel(
 
     // Escape single quotes in search query to prevent SQL injection
     let escaped_query = search_query.replace("'", "''");
-
-    // Default limit if not specified
     let query_limit = limit.unwrap_or(10) as usize;
 
-    // We'll query each table with a higher limit to ensure we get enough results
-    let per_table_limit = query_limit * 2;
+    // Create a query for each fulltext index
+    let mut queries = Vec::new();
 
-    // Prepare all SQL queries
-    let queries = prepare_queries(&escaped_query, per_table_limit);
+    for index in FULLTEXT_INDEXES.iter() {
+        let primary_key = get_primary_key_column(index.table_name);
+
+        // Use different query strategy based on field type
+        let query = if is_id_field(index.column_name) {
+            // For ID fields (hex strings), use LIKE query
+            format!(
+                "SELECT {} as pk, '{}' as table_name, '{}' as matched_column, \
+                 1.0 as relevance_score \
+                 FROM {} \
+                 WHERE {} LIKE '%{}%' \
+                 ORDER BY relevance_score DESC \
+                 LIMIT {}",
+                primary_key,
+                index.table_name,
+                index.column_name,
+                index.table_name,
+                index.column_name,
+                escaped_query,
+                query_limit * 2 // Get more results to ensure we have enough after deduplication
+            )
+        } else {
+            // For text fields, use fts_match_word for proper fulltext search
+            // Note: fts_match_word can only be used once per query in TiDB
+            format!(
+                "SELECT {} as pk, '{}' as table_name, '{}' as matched_column, \
+                 fts_match_word('{}', {}) as relevance_score \
+                 FROM {} \
+                 WHERE fts_match_word('{}', {}) \
+                 ORDER BY relevance_score DESC \
+                 LIMIT {}",
+                primary_key,
+                index.table_name,
+                index.column_name,
+                escaped_query,
+                index.column_name,
+                index.table_name,
+                escaped_query,
+                index.column_name,
+                query_limit * 2
+            )
+        };
+
+        queries.push((index.table_name, index.column_name, query));
+    }
 
     // Execute all queries in parallel
     let conn = crate::database::get_connection(database);
-    let results = tokio::join!(
-        execute_query(conn, &queries.coordinator_message),
-        execute_query(conn, &queries.agent_message),
-        execute_query(conn, &queries.jobs),
-        execute_query(conn, &queries.proof_event),
-        execute_query(conn, &queries.coordination_tx),
-        execute_query(conn, &queries.agent_session),
-        execute_query(conn, &queries.settlement_tx),
-        execute_query(conn, &queries.job_started),
-        execute_query(conn, &queries.job_finished),
-        execute_query(conn, &queries.settlement_included),
-    );
+    let mut futures = Vec::new();
 
-    // Process results and collect all events
-    let mut all_events: Vec<proto::EventWithRelevance> = Vec::new();
+    for (_table, _column, query) in queries {
+        let conn_clone = conn.clone();
+        let query_clone = query.clone();
+        futures.push(async move { execute_search_query(&conn_clone, &query_clone).await });
+    }
 
-    // Process coordinator_message_event results
-    if let Ok(rows) = results.0 {
-        for row in rows {
-            if let Some(event) = parse_coordinator_message_event(&row) {
-                all_events.push(event);
+    let results = join_all(futures).await;
+
+    // Collect all matching records with their scores
+    #[derive(Debug)]
+    struct SearchMatch {
+        table_name: String,
+        primary_key: String,
+        relevance_score: f64,
+    }
+
+    let mut matches: Vec<SearchMatch> = Vec::new();
+
+    for result in results {
+        if let Ok(rows) = result {
+            for row in rows {
+                // Try to get values by column index instead of name
+                match row.try_get_by_index::<String>(0) {
+                    Ok(pk) => {
+                        let table_name = row.try_get_by_index::<String>(1).unwrap_or_default();
+                        let _matched_column = row.try_get_by_index::<String>(2).unwrap_or_default();
+                        // Relevance score might be returned as integer (1) for LIKE queries
+                        let relevance_score = row
+                            .try_get_by_index::<f64>(3)
+                            .or_else(|_| row.try_get_by_index::<i64>(3).map(|v| v as f64))
+                            .or_else(|_| row.try_get_by_index::<f32>(3).map(|v| v as f64))
+                            .unwrap_or(1.0); // Default to 1.0 for ID field matches
+
+                        matches.push(SearchMatch {
+                            table_name,
+                            primary_key: pk,
+                            relevance_score,
+                        });
+                    }
+                    Err(e) => {
+                        // Try to get as i64 for numeric primary keys
+                        if let Ok(pk_num) = row.try_get_by_index::<i64>(0) {
+                            let table_name = row.try_get_by_index::<String>(1).unwrap_or_default();
+                            let _matched_column =
+                                row.try_get_by_index::<String>(2).unwrap_or_default();
+                            // Relevance score might be returned as integer (1) for LIKE queries
+                            let relevance_score = row
+                                .try_get_by_index::<f64>(3)
+                                .or_else(|_| row.try_get_by_index::<i64>(3).map(|v| v as f64))
+                                .or_else(|_| row.try_get_by_index::<f32>(3).map(|v| v as f64))
+                                .unwrap_or(1.0); // Default to 1.0 for ID field matches
+
+                            matches.push(SearchMatch {
+                                table_name,
+                                primary_key: pk_num.to_string(),
+                                relevance_score,
+                            });
+                        } else {
+                            debug!("Failed to get pk from row: {:?}", e);
+                        }
+                    }
+                }
             }
+        } else if let Err(e) = result {
+            debug!("Query failed: {:?}", e);
         }
     }
 
-    // Process agent_message_event results
-    if let Ok(rows) = results.1 {
-        for row in rows {
-            if let Some(event) = parse_agent_message_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process jobs results
-    if let Ok(rows) = results.2 {
-        for row in rows {
-            if let Some(event) = parse_job_created_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process proof_event results
-    if let Ok(rows) = results.3 {
-        for row in rows {
-            if let Some(event) = parse_proof_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process coordination_tx_event results
-    if let Ok(rows) = results.4 {
-        for row in rows {
-            if let Some(event) = parse_coordination_tx_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process agent_session results
-    if let Ok(rows) = results.5 {
-        for row in rows {
-            if let Some(event) = parse_agent_session_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process settlement_transaction_event results
-    if let Ok(rows) = results.6 {
-        for row in rows {
-            if let Some(event) = parse_settlement_tx_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process job_started_event results
-    if let Ok(rows) = results.7 {
-        for row in rows {
-            if let Some(event) = parse_job_started_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process job_finished_event results
-    if let Ok(rows) = results.8 {
-        for row in rows {
-            if let Some(event) = parse_job_finished_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Process settlement_transaction_included_in_block_event results
-    if let Ok(rows) = results.9 {
-        for row in rows {
-            if let Some(event) = parse_settlement_included_event(&row) {
-                all_events.push(event);
-            }
-        }
-    }
-
-    // Sort all events by relevance score (descending)
-    all_events.sort_by(|a, b| {
-        b.relevance_score.partial_cmp(&a.relevance_score)
+    // Sort by relevance score (for text fields, this is BM25 score; for ID fields, it's 1.0)
+    matches.sort_by(|a, b| {
+        b.relevance_score
+            .partial_cmp(&a.relevance_score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // Take only the requested limit
-    all_events.truncate(query_limit);
+    // Deduplicate by (table, primary_key) keeping highest score
+    let mut seen = HashSet::new();
+    let mut unique_matches = Vec::new();
+
+    for match_ in matches {
+        let key = format!("{}:{}", match_.table_name, match_.primary_key);
+        if !seen.contains(&key) {
+            seen.insert(key);
+            unique_matches.push(match_);
+        }
+    }
+
+    // Take only requested limit
+    unique_matches.truncate(query_limit);
+
+    // Now fetch the full records for each match
+    let mut all_events: Vec<proto::EventWithRelevance> = Vec::new();
+
+    for match_ in unique_matches {
+        match fetch_full_event(
+            conn,
+            &match_.table_name,
+            &match_.primary_key,
+            match_.relevance_score,
+        )
+        .await
+        {
+            Ok(Some(event)) => {
+                all_events.push(event);
+            }
+            Ok(None) => {
+                debug!(
+                    "No event found for table={}, pk={}",
+                    match_.table_name, match_.primary_key
+                );
+            }
+            Err(e) => {
+                debug!(
+                    "Failed to fetch event from table={}, pk={}: {:?}",
+                    match_.table_name, match_.primary_key, e
+                );
+                return Err(e);
+            }
+        }
+    }
 
     let total_count = all_events.len();
     let returned_count = all_events.len();
@@ -167,272 +229,101 @@ pub async fn search_all_events_parallel(
     })
 }
 
-struct SearchQueries {
-    coordinator_message: String,
-    agent_message: String,
-    jobs: String,
-    proof_event: String,
-    coordination_tx: String,
-    agent_session: String,
-    settlement_tx: String,
-    job_started: String,
-    job_finished: String,
-    settlement_included: String,
-}
-
-fn prepare_queries(escaped_query: &str, limit: usize) -> SearchQueries {
-    SearchQueries {
-        coordinator_message: format!(
-            "SELECT id, coordinator_id, event_timestamp, level, message,
-             fts_match_bm25('{}', message) as relevance_score
-             FROM coordinator_message_event
-             WHERE fts_match_word('{}', message)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query, limit
-        ),
-
-        agent_message: format!(
-            "SELECT id, coordinator_id, session_id, job_id, event_timestamp, level, message,
-             fts_match_bm25('{}', message) as relevance_score
-             FROM agent_message_event
-             WHERE fts_match_word('{}', message)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query, limit
-        ),
-
-        jobs: format!(
-            "SELECT job_id, coordinator_id, session_id, app_instance_id, app_method,
-             job_sequence, sequences, merged_sequences_1, merged_sequences_2, event_timestamp,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', session_id), fts_match_bm25('{}', session_id), 0),
-                 IF(fts_match_word('{}', app_instance_id), fts_match_bm25('{}', app_instance_id), 0),
-                 IF(fts_match_word('{}', app_method), fts_match_bm25('{}', app_method), 0),
-                 IF(fts_match_word('{}', job_id), fts_match_bm25('{}', job_id), 0)
-             ) as relevance_score
-             FROM jobs
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', session_id)
-                OR fts_match_word('{}', app_instance_id)
-                OR fts_match_word('{}', app_method)
-                OR fts_match_word('{}', job_id)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
-
-        proof_event: format!(
-            "SELECT id, coordinator_id, session_id, app_instance_id, job_id,
-             data_availability, block_number, block_proof, proof_event_type,
-             sequences, merged_sequences_1, merged_sequences_2, event_timestamp,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', session_id), fts_match_bm25('{}', session_id), 0),
-                 IF(fts_match_word('{}', app_instance_id), fts_match_bm25('{}', app_instance_id), 0),
-                 IF(fts_match_word('{}', job_id), fts_match_bm25('{}', job_id), 0)
-             ) as relevance_score
-             FROM proof_event
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', session_id)
-                OR fts_match_word('{}', app_instance_id)
-                OR fts_match_word('{}', job_id)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
-
-        coordination_tx: format!(
-            "SELECT id, coordinator_id, tx_hash, event_timestamp,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', tx_hash), fts_match_bm25('{}', tx_hash), 0)
-             ) as relevance_score
-             FROM coordination_tx_event
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', tx_hash)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
-
-        agent_session: format!(
-            "SELECT id, coordinator_id, developer, agent, agent_method, session_id, event_timestamp,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', developer), fts_match_bm25('{}', developer), 0),
-                 IF(fts_match_word('{}', agent), fts_match_bm25('{}', agent), 0),
-                 IF(fts_match_word('{}', agent_method), fts_match_bm25('{}', agent_method), 0),
-                 IF(fts_match_word('{}', session_id), fts_match_bm25('{}', session_id), 0)
-             ) as relevance_score
-             FROM agent_session
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', developer)
-                OR fts_match_word('{}', agent)
-                OR fts_match_word('{}', agent_method)
-                OR fts_match_word('{}', session_id)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
-
-        settlement_tx: format!(
-            "SELECT id, coordinator_id, session_id, app_instance_id, chain, job_id,
-             block_number, tx_hash, event_timestamp,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', session_id), fts_match_bm25('{}', session_id), 0),
-                 IF(fts_match_word('{}', app_instance_id), fts_match_bm25('{}', app_instance_id), 0),
-                 IF(fts_match_word('{}', job_id), fts_match_bm25('{}', job_id), 0),
-                 IF(fts_match_word('{}', tx_hash), fts_match_bm25('{}', tx_hash), 0)
-             ) as relevance_score
-             FROM settlement_transaction_event
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', session_id)
-                OR fts_match_word('{}', app_instance_id)
-                OR fts_match_word('{}', job_id)
-                OR fts_match_word('{}', tx_hash)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
-
-        job_started: format!(
-            "SELECT id, coordinator_id, session_id, app_instance_id, job_id, event_timestamp,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', session_id), fts_match_bm25('{}', session_id), 0),
-                 IF(fts_match_word('{}', app_instance_id), fts_match_bm25('{}', app_instance_id), 0),
-                 IF(fts_match_word('{}', job_id), fts_match_bm25('{}', job_id), 0)
-             ) as relevance_score
-             FROM job_started_event
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', session_id)
-                OR fts_match_word('{}', app_instance_id)
-                OR fts_match_word('{}', job_id)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
-
-        job_finished: format!(
-            "SELECT job_id, coordinator_id, duration, cost, event_timestamp, result,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', job_id), fts_match_bm25('{}', job_id), 0)
-             ) as relevance_score
-             FROM job_finished_event
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', job_id)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
-
-        settlement_included: format!(
-            "SELECT id, coordinator_id, session_id, app_instance_id, chain, job_id,
-             block_number, event_timestamp,
-             GREATEST(
-                 IF(fts_match_word('{}', coordinator_id), fts_match_bm25('{}', coordinator_id), 0),
-                 IF(fts_match_word('{}', session_id), fts_match_bm25('{}', session_id), 0),
-                 IF(fts_match_word('{}', app_instance_id), fts_match_bm25('{}', app_instance_id), 0),
-                 IF(fts_match_word('{}', job_id), fts_match_bm25('{}', job_id), 0)
-             ) as relevance_score
-             FROM settlement_transaction_included_in_block_event
-             WHERE fts_match_word('{}', coordinator_id)
-                OR fts_match_word('{}', session_id)
-                OR fts_match_word('{}', app_instance_id)
-                OR fts_match_word('{}', job_id)
-             ORDER BY relevance_score DESC
-             LIMIT {}",
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query, escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            escaped_query,
-            limit
-        ),
+/// Get the primary key column name for a table
+fn get_primary_key_column(table_name: &str) -> &'static str {
+    match table_name {
+        "jobs" => "job_id",
+        "job_started_event" => "job_id",
+        "job_finished_event" => "job_id",
+        "agent_session" => "session_id",
+        "agent_session_finished_event" => "session_id",
+        _ => "id",
     }
 }
 
-async fn execute_query(
+/// Execute a search query and return results
+async fn execute_search_query(
     conn: &sea_orm::DatabaseConnection,
     query: &str,
 ) -> Result<Vec<QueryResult>> {
-    let stmt = Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::MySql,
-        query,
-        vec![],
-    );
-    conn.query_all(stmt).await.map_err(|e| anyhow::anyhow!("Query failed: {}", e))
+    let stmt = Statement::from_sql_and_values(sea_orm::DatabaseBackend::MySql, query, vec![]);
+    conn.query_all(stmt)
+        .await
+        .map_err(|e| anyhow::anyhow!("Query failed: {}", e))
+}
+
+/// Fetch a full event record by table name and primary key
+async fn fetch_full_event(
+    conn: &sea_orm::DatabaseConnection,
+    table_name: &str,
+    primary_key: &str,
+    relevance_score: f64,
+) -> Result<Option<proto::EventWithRelevance>> {
+    let pk_column = get_primary_key_column(table_name);
+
+    // Check if primary key is numeric (for id columns) or string (for job_id, session_id)
+    let query = if pk_column == "id" {
+        // Numeric primary key - don't quote
+        format!(
+            "SELECT * FROM {} WHERE {} = {}",
+            table_name, pk_column, primary_key
+        )
+    } else {
+        // String primary key - quote it
+        format!(
+            "SELECT * FROM {} WHERE {} = '{}'",
+            table_name, pk_column, primary_key
+        )
+    };
+
+    let stmt = Statement::from_sql_and_values(sea_orm::DatabaseBackend::MySql, &query, vec![]);
+
+    let result = conn.query_one(stmt).await?;
+
+    if let Some(row) = result {
+        // Parse based on table name
+        match table_name {
+            "coordinator_message_event" => {
+                Ok(parse_coordinator_message_event(&row, relevance_score))
+            }
+            "agent_message_event" => Ok(parse_agent_message_event(&row, relevance_score)),
+            "jobs" => Ok(parse_job_created_event(&row, relevance_score)),
+            "proof_event" => Ok(parse_proof_event(&row, relevance_score)),
+            "coordination_tx_event" => Ok(parse_coordination_tx_event(&row, relevance_score)),
+            "agent_session" => Ok(parse_agent_session_event(&row, relevance_score)),
+            "agent_session_finished_event" => {
+                Ok(parse_agent_session_finished_event(&row, relevance_score))
+            }
+            "settlement_transaction_event" => Ok(parse_settlement_tx_event(&row, relevance_score)),
+            "job_started_event" => Ok(parse_job_started_event(&row, relevance_score)),
+            "job_finished_event" => Ok(parse_job_finished_event(&row, relevance_score)),
+            "settlement_transaction_included_in_block_event" => {
+                Ok(parse_settlement_included_event(&row, relevance_score))
+            }
+            "coordinator_started_event" => {
+                Ok(parse_coordinator_started_event(&row, relevance_score))
+            }
+            "coordinator_active_event" => Ok(parse_coordinator_active_event(&row, relevance_score)),
+            "coordinator_shutdown_event" => {
+                Ok(parse_coordinator_shutdown_event(&row, relevance_score))
+            }
+            _ => Ok(None),
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 // Parsing functions for each event type
-fn parse_coordinator_message_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_coordinator_message_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let id = row.try_get::<i64>("", "id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
     let level = row.try_get::<i8>("", "level").ok()? as i32;
     let message = row.try_get::<String>("", "message").ok()?;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     let event = proto::Event {
         event: Some(proto::event::Event::CoordinatorMessage(
@@ -441,7 +332,7 @@ fn parse_coordinator_message_event(row: &QueryResult) -> Option<proto::EventWith
                 event_timestamp,
                 level,
                 message,
-            }
+            },
         )),
     };
 
@@ -452,15 +343,30 @@ fn parse_coordinator_message_event(row: &QueryResult) -> Option<proto::EventWith
     })
 }
 
-fn parse_agent_message_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
-    let id = row.try_get::<i64>("", "id").ok()?;
-    let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
-    let session_id = row.try_get::<String>("", "session_id").ok()?;
-    let job_id = row.try_get::<Option<String>>("", "job_id").ok()?;
-    let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let level = row.try_get::<i8>("", "level").ok()? as i32;
-    let message = row.try_get::<String>("", "message").ok()?;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
+fn parse_agent_message_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
+    // The columns from the SELECT * are in table order:
+    // id, coordinator_id, session_id, job_id, event_timestamp, level, message, created_at, updated_at
+    let id = row.try_get_by_index::<i64>(0).ok()?;
+    let coordinator_id = row.try_get_by_index::<String>(1).ok()?;
+    let session_id = row.try_get_by_index::<String>(2).ok()?;
+    let job_id = row.try_get_by_index::<Option<String>>(3).ok()?;
+    let event_timestamp = row.try_get_by_index::<i64>(4).ok()? as u64;
+    let level_str = row.try_get_by_index::<String>(5).ok()?;
+    let message = row.try_get_by_index::<String>(6).ok()?;
+
+    // Convert level string enum to i32
+    let level = match level_str.as_str() {
+        "LOG_LEVEL_UNSPECIFIED" => 0,
+        "LOG_LEVEL_DEBUG" => 1,
+        "LOG_LEVEL_INFO" => 2,
+        "LOG_LEVEL_WARN" => 3,
+        "LOG_LEVEL_ERROR" => 4,
+        "LOG_LEVEL_FATAL" => 5,
+        _ => 2, // Default to INFO
+    } as i32;
 
     let event = proto::Event {
         event: Some(proto::event::Event::AgentMessage(
@@ -471,7 +377,7 @@ fn parse_agent_message_event(row: &QueryResult) -> Option<proto::EventWithReleva
                 event_timestamp,
                 level,
                 message,
-            }
+            },
         )),
     };
 
@@ -482,7 +388,10 @@ fn parse_agent_message_event(row: &QueryResult) -> Option<proto::EventWithReleva
     })
 }
 
-fn parse_job_created_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_job_created_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let job_id = row.try_get::<String>("", "job_id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let session_id = row.try_get::<String>("", "session_id").ok()?;
@@ -490,40 +399,40 @@ fn parse_job_created_event(row: &QueryResult) -> Option<proto::EventWithRelevanc
     let app_method = row.try_get::<String>("", "app_method").ok()?;
     let job_sequence = row.try_get::<i64>("", "job_sequence").ok()? as u64;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     // Parse JSON arrays
-    let sequences = row.try_get::<Option<String>>("", "sequences")
+    let sequences = row
+        .try_get::<Option<String>>("", "sequences")
         .ok()
         .flatten()
         .and_then(|s| parse_json_array(&s).ok())
         .unwrap_or_default();
-    let merged_sequences_1 = row.try_get::<Option<String>>("", "merged_sequences_1")
+    let merged_sequences_1 = row
+        .try_get::<Option<String>>("", "merged_sequences_1")
         .ok()
         .flatten()
         .and_then(|s| parse_json_array(&s).ok())
         .unwrap_or_default();
-    let merged_sequences_2 = row.try_get::<Option<String>>("", "merged_sequences_2")
+    let merged_sequences_2 = row
+        .try_get::<Option<String>>("", "merged_sequences_2")
         .ok()
         .flatten()
         .and_then(|s| parse_json_array(&s).ok())
         .unwrap_or_default();
 
     let event = proto::Event {
-        event: Some(proto::event::Event::JobCreated(
-            proto::JobCreatedEvent {
-                coordinator_id,
-                session_id,
-                app_instance_id,
-                app_method,
-                job_sequence,
-                sequences,
-                merged_sequences_1,
-                merged_sequences_2,
-                job_id,
-                event_timestamp,
-            }
-        )),
+        event: Some(proto::event::Event::JobCreated(proto::JobCreatedEvent {
+            coordinator_id,
+            session_id,
+            app_instance_id,
+            app_method,
+            job_sequence,
+            sequences,
+            merged_sequences_1,
+            merged_sequences_2,
+            job_id,
+            event_timestamp,
+        })),
     };
 
     Some(proto::EventWithRelevance {
@@ -533,7 +442,7 @@ fn parse_job_created_event(row: &QueryResult) -> Option<proto::EventWithRelevanc
     })
 }
 
-fn parse_proof_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_proof_event(row: &QueryResult, relevance_score: f64) -> Option<proto::EventWithRelevance> {
     let id = row.try_get::<i64>("", "id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let session_id = row.try_get::<String>("", "session_id").ok()?;
@@ -544,20 +453,22 @@ fn parse_proof_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
     let block_proof = row.try_get::<Option<bool>>("", "block_proof").ok()?;
     let proof_event_type_str = row.try_get::<String>("", "proof_event_type").ok()?;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     // Parse JSON arrays
-    let sequences = row.try_get::<Option<String>>("", "sequences")
+    let sequences = row
+        .try_get::<Option<String>>("", "sequences")
         .ok()
         .flatten()
         .and_then(|s| parse_json_array(&s).ok())
         .unwrap_or_default();
-    let merged_sequences_1 = row.try_get::<Option<String>>("", "merged_sequences_1")
+    let merged_sequences_1 = row
+        .try_get::<Option<String>>("", "merged_sequences_1")
         .ok()
         .flatten()
         .and_then(|s| parse_json_array(&s).ok())
         .unwrap_or_default();
-    let merged_sequences_2 = row.try_get::<Option<String>>("", "merged_sequences_2")
+    let merged_sequences_2 = row
+        .try_get::<Option<String>>("", "merged_sequences_2")
         .ok()
         .flatten()
         .and_then(|s| parse_json_array(&s).ok())
@@ -574,22 +485,20 @@ fn parse_proof_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
     };
 
     let event = proto::Event {
-        event: Some(proto::event::Event::ProofEvent(
-            proto::ProofEvent {
-                coordinator_id,
-                session_id,
-                app_instance_id,
-                job_id,
-                data_availability,
-                block_number,
-                block_proof,
-                proof_event_type,
-                sequences,
-                merged_sequences_1,
-                merged_sequences_2,
-                event_timestamp,
-            }
-        )),
+        event: Some(proto::event::Event::ProofEvent(proto::ProofEvent {
+            coordinator_id,
+            session_id,
+            app_instance_id,
+            job_id,
+            data_availability,
+            block_number,
+            block_proof,
+            proof_event_type,
+            sequences,
+            merged_sequences_1,
+            merged_sequences_2,
+            event_timestamp,
+        })),
     };
 
     Some(proto::EventWithRelevance {
@@ -599,12 +508,14 @@ fn parse_proof_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
     })
 }
 
-fn parse_coordination_tx_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_coordination_tx_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let id = row.try_get::<i64>("", "id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let tx_hash = row.try_get::<String>("", "tx_hash").ok()?;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     let event = proto::Event {
         event: Some(proto::event::Event::CoordinationTx(
@@ -612,7 +523,7 @@ fn parse_coordination_tx_event(row: &QueryResult) -> Option<proto::EventWithRele
                 coordinator_id,
                 tx_hash,
                 event_timestamp,
-            }
+            },
         )),
     };
 
@@ -623,7 +534,10 @@ fn parse_coordination_tx_event(row: &QueryResult) -> Option<proto::EventWithRele
     })
 }
 
-fn parse_agent_session_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_agent_session_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let id = row.try_get::<i64>("", "id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let developer = row.try_get::<String>("", "developer").ok()?;
@@ -631,7 +545,6 @@ fn parse_agent_session_event(row: &QueryResult) -> Option<proto::EventWithReleva
     let agent_method = row.try_get::<String>("", "agent_method").ok()?;
     let session_id = row.try_get::<String>("", "session_id").ok()?;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     let event = proto::Event {
         event: Some(proto::event::Event::AgentSessionStarted(
@@ -642,7 +555,7 @@ fn parse_agent_session_event(row: &QueryResult) -> Option<proto::EventWithReleva
                 agent_method,
                 session_id,
                 event_timestamp,
-            }
+            },
         )),
     };
 
@@ -653,7 +566,10 @@ fn parse_agent_session_event(row: &QueryResult) -> Option<proto::EventWithReleva
     })
 }
 
-fn parse_settlement_tx_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_settlement_tx_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let id = row.try_get::<i64>("", "id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let session_id = row.try_get::<String>("", "session_id").ok()?;
@@ -663,7 +579,6 @@ fn parse_settlement_tx_event(row: &QueryResult) -> Option<proto::EventWithReleva
     let block_number = row.try_get::<i64>("", "block_number").ok()? as u64;
     let tx_hash = row.try_get::<String>("", "tx_hash").ok()?;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     let event = proto::Event {
         event: Some(proto::event::Event::SettlementTransaction(
@@ -676,7 +591,7 @@ fn parse_settlement_tx_event(row: &QueryResult) -> Option<proto::EventWithReleva
                 block_number,
                 tx_hash,
                 event_timestamp,
-            }
+            },
         )),
     };
 
@@ -687,25 +602,25 @@ fn parse_settlement_tx_event(row: &QueryResult) -> Option<proto::EventWithReleva
     })
 }
 
-fn parse_job_started_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_job_started_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let id = row.try_get::<i64>("", "id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let session_id = row.try_get::<String>("", "session_id").ok()?;
     let app_instance_id = row.try_get::<String>("", "app_instance_id").ok()?;
     let job_id = row.try_get::<String>("", "job_id").ok()?;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     let event = proto::Event {
-        event: Some(proto::event::Event::JobStarted(
-            proto::JobStartedEvent {
-                coordinator_id,
-                session_id,
-                app_instance_id,
-                job_id,
-                event_timestamp,
-            }
-        )),
+        event: Some(proto::event::Event::JobStarted(proto::JobStartedEvent {
+            coordinator_id,
+            session_id,
+            app_instance_id,
+            job_id,
+            event_timestamp,
+        })),
     };
 
     Some(proto::EventWithRelevance {
@@ -715,14 +630,16 @@ fn parse_job_started_event(row: &QueryResult) -> Option<proto::EventWithRelevanc
     })
 }
 
-fn parse_job_finished_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_job_finished_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let job_id = row.try_get::<String>("", "job_id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let duration = row.try_get::<i64>("", "duration").ok()? as u64;
     let cost = row.try_get::<i64>("", "cost").ok()? as u64;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
     let result_str = row.try_get::<String>("", "result").ok()?;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     // Convert result string to enum
     let result = match result_str.as_str() {
@@ -733,16 +650,14 @@ fn parse_job_finished_event(row: &QueryResult) -> Option<proto::EventWithRelevan
     };
 
     let event = proto::Event {
-        event: Some(proto::event::Event::JobFinished(
-            proto::JobFinishedEvent {
-                coordinator_id,
-                job_id,
-                duration,
-                cost,
-                event_timestamp,
-                result,
-            }
-        )),
+        event: Some(proto::event::Event::JobFinished(proto::JobFinishedEvent {
+            coordinator_id,
+            job_id,
+            duration,
+            cost,
+            event_timestamp,
+            result,
+        })),
     };
 
     Some(proto::EventWithRelevance {
@@ -752,7 +667,10 @@ fn parse_job_finished_event(row: &QueryResult) -> Option<proto::EventWithRelevan
     })
 }
 
-fn parse_settlement_included_event(row: &QueryResult) -> Option<proto::EventWithRelevance> {
+fn parse_settlement_included_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
     let id = row.try_get::<i64>("", "id").ok()?;
     let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
     let session_id = row.try_get::<String>("", "session_id").ok()?;
@@ -761,7 +679,6 @@ fn parse_settlement_included_event(row: &QueryResult) -> Option<proto::EventWith
     let job_id = row.try_get::<String>("", "job_id").ok()?;
     let block_number = row.try_get::<i64>("", "block_number").ok()? as u64;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
-    let relevance_score = row.try_get::<f64>("", "relevance_score").unwrap_or(0.0);
 
     let event = proto::Event {
         event: Some(proto::event::Event::SettlementTransactionIncluded(
@@ -773,12 +690,117 @@ fn parse_settlement_included_event(row: &QueryResult) -> Option<proto::EventWith
                 job_id,
                 block_number,
                 event_timestamp,
-            }
+            },
         )),
     };
 
     Some(proto::EventWithRelevance {
         id,
+        event: Some(event),
+        relevance_score,
+    })
+}
+
+fn parse_coordinator_started_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
+    let id = row.try_get::<i64>("", "id").ok()?;
+    let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
+    let ethereum_address = row.try_get::<String>("", "ethereum_address").ok()?;
+    let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
+
+    let event = proto::Event {
+        event: Some(proto::event::Event::CoordinatorStarted(
+            proto::CoordinatorStartedEvent {
+                coordinator_id,
+                ethereum_address,
+                event_timestamp,
+            },
+        )),
+    };
+
+    Some(proto::EventWithRelevance {
+        id,
+        event: Some(event),
+        relevance_score,
+    })
+}
+
+fn parse_coordinator_active_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
+    let id = row.try_get::<i64>("", "id").ok()?;
+    let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
+    let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
+
+    let event = proto::Event {
+        event: Some(proto::event::Event::CoordinatorActive(
+            proto::CoordinatorActiveEvent {
+                coordinator_id,
+                event_timestamp,
+            },
+        )),
+    };
+
+    Some(proto::EventWithRelevance {
+        id,
+        event: Some(event),
+        relevance_score,
+    })
+}
+
+fn parse_coordinator_shutdown_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
+    let id = row.try_get::<i64>("", "id").ok()?;
+    let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
+    let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
+
+    let event = proto::Event {
+        event: Some(proto::event::Event::CoordinatorShutdown(
+            proto::CoordinatorShutdownEvent {
+                coordinator_id,
+                event_timestamp,
+            },
+        )),
+    };
+
+    Some(proto::EventWithRelevance {
+        id,
+        event: Some(event),
+        relevance_score,
+    })
+}
+
+fn parse_agent_session_finished_event(
+    row: &QueryResult,
+    relevance_score: f64,
+) -> Option<proto::EventWithRelevance> {
+    let coordinator_id = row.try_get::<String>("", "coordinator_id").ok()?;
+    let session_id = row.try_get::<String>("", "session_id").ok()?;
+    let session_log = row.try_get::<String>("", "session_log").ok()?;
+    let duration = row.try_get::<i64>("", "duration").ok()? as u64;
+    let cost = row.try_get::<i64>("", "cost").ok()? as u64;
+    let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
+
+    let event = proto::Event {
+        event: Some(proto::event::Event::AgentSessionFinished(
+            proto::AgentSessionFinishedEvent {
+                coordinator_id,
+                session_id,
+                session_log,
+                duration,
+                cost,
+                event_timestamp,
+            },
+        )),
+    };
+
+    Some(proto::EventWithRelevance {
+        id: -1, // agent_session_finished_event uses session_id as primary key
         event: Some(event),
         relevance_score,
     })

@@ -52,6 +52,7 @@ async-nats.workspace = true
 
 # Async utilities
 futures.workspace = true
+lazy_static = "1.5"
 async-trait.workspace = true
 
 # Random number generation for retry jitter

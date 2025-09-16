@@ -1,0 +1,72 @@
+# Fulltext Indexes Generated from Protobuf
+
+
+## Table: coordinator_started_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+
+## Table: coordinator_active_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+
+## Table: coordinator_shutdown_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+
+## Table: agent_session
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_developer (`developer`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_agent (`agent`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_agent_method (`agent_method`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+
+## Table: agent_session_finished_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+
+## Table: jobs
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_app_instance_id (`app_instance_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_app_method (`app_method`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+
+## Table: job_started_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_app_instance_id (`app_instance_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+
+## Table: job_finished_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+
+## Table: coordination_tx_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_tx_hash (`tx_hash`) WITH PARSER STANDARD
+
+## Table: coordinator_message_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_message (`message`) WITH PARSER STANDARD
+
+## Table: proof_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_app_instance_id (`app_instance_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+
+## Table: settlement_transaction_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_app_instance_id (`app_instance_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_tx_hash (`tx_hash`) WITH PARSER STANDARD
+
+## Table: settlement_transaction_included_in_block_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_app_instance_id (`app_instance_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+
+## Table: agent_message_event
+- FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_message (`message`) WITH PARSER STANDARD

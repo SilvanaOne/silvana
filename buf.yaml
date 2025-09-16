@@ -4,6 +4,8 @@ modules:
 lint:
   use:
     - STANDARD
+  except:
+    - ENUM_VALUE_PREFIX
 breaking:
   use:
     - FILE
