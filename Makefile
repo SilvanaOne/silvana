@@ -151,8 +151,14 @@ build-rpc: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
 	@docker rmi rpc-builder:al2023-arm64 2>/dev/null || true
 	@echo "✅ RPC deployment archive built successfully for ARM64"
 	@echo "📦 Archive: rpc.tar.gz (contains rpc folder + ARM64 RPC executable)"
-	@echo "🔄 Touching user-data.sh to trigger Pulumi redeploy..."
-	@touch infra/pulumi-rpc/user-data.sh
+	@echo "🔄 Updating user-data.sh timestamp to trigger Pulumi redeploy..."
+	@# Update the timestamp comment in user-data.sh to force Pulumi to see a change
+	@if grep -q "^# Deploy timestamp:" infra/pulumi-rpc/user-data.sh; then \
+		sed -i.bak "s/^# Deploy timestamp:.*/$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)/" infra/pulumi-rpc/user-data.sh; \
+	else \
+		sed -i.bak "4a\\$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)" infra/pulumi-rpc/user-data.sh; \
+	fi
+	@rm -f infra/pulumi-rpc/user-data.sh.bak
 
 build-arm: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
 	@echo "🐳 Building Silvana for Ubuntu Linux ARM64..."

@@ -63,6 +63,11 @@ lazy_static! {
             index_name: "ft_idx_session_id",
         },
         FulltextIndex {
+            table_name: "agent_session_finished_event",
+            column_name: "session_log",
+            index_name: "ft_idx_session_log",
+        },
+        FulltextIndex {
             table_name: "jobs",
             column_name: "coordinator_id",
             index_name: "ft_idx_coordinator_id",
@@ -233,7 +238,10 @@ pub fn get_indexes_for_table(table_name: &str) -> Vec<&'static FulltextIndex> {
 }
 
 pub fn get_tables_with_fulltext() -> Vec<&'static str> {
-    let mut tables: Vec<&str> = FULLTEXT_INDEXES.iter().map(|idx| idx.table_name).collect();
+    let mut tables: Vec<&str> = FULLTEXT_INDEXES
+        .iter()
+        .map(|idx| idx.table_name)
+        .collect();
     tables.sort();
     tables.dedup();
     tables

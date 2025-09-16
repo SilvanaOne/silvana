@@ -69,6 +69,17 @@ impl MulticallProcessor {
                             "Multicall continuing during shutdown: {} operations, {} jobs buffered, {} containers running",
                             pending_operations, buffer_size, current_agents
                         );
+
+                        // Try to process any stuck operations during shutdown
+                        if pending_operations > 0 && buffer_size == 0 && current_agents == 0 {
+                            // Operations exist but no active work - might be stuck
+                            debug!("Attempting to process {} potentially stuck operations during shutdown", pending_operations);
+                            if let Err(e) = self.execute_multicall_batch().await {
+                                error!("Failed to execute stuck operations during shutdown: {}", e);
+                            }
+                            // Update timestamp to prevent repeated attempts
+                            self.state.update_last_multicall_timestamp().await;
+                        }
                     }
                     // Don't return - continue the loop to process operations
                 }
@@ -112,6 +123,8 @@ impl MulticallProcessor {
                 if let Err(e) = self.execute_multicall_batch().await {
                     error!("Failed to execute time-triggered multicall: {}", e);
                 }
+                // Always update timestamp after time-triggered execution attempt
+                self.state.update_last_multicall_timestamp().await;
             } else if should_execute_by_time {
                 // Time passed but no operations - just update timestamp to reset the timer
                 debug!("Time interval passed but no operations to execute");

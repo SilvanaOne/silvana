@@ -202,7 +202,7 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                 &field.field_type,
                 field.is_repeated,
                 field.has_search_option,
-                field.name.contains("metadata") || field.name.contains("message"),
+                field.name.contains("metadata") || field.name.contains("message") || field.name.contains("log"),
             );
             let nullable = if field.is_optional || field.is_repeated {
                 "NULL"
@@ -278,6 +278,20 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                     ",\n    FULLTEXT INDEX ft_idx_{} (`{}`) WITH PARSER STANDARD",
                     column_name, column_name
                 ));
+            }
+        }
+
+        // Add FULLTEXT indexes for log fields (e.g., session_log)
+        for field in &message.fields {
+            if field.field_type == "string" && field.name.contains("log") {
+                let column_name = field.name.to_snake_case();
+                // Check if we haven't already added a FULLTEXT index for this field
+                if !search_fields.iter().any(|f| f.name == field.name) {
+                    ddl.push_str(&format!(
+                        ",\n    FULLTEXT INDEX ft_idx_{} (`{}`) WITH PARSER STANDARD",
+                        column_name, column_name
+                    ));
+                }
             }
         }
 
@@ -533,6 +547,8 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
     };
     let table_name = if message.name == "JobCreatedEvent" {
         "jobs".to_string()
+    } else if message.name == "AgentSessionStartedEvent" {
+        "agent_session".to_string()
     } else {
         message.name.to_snake_case()
     };
@@ -556,9 +572,11 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
     content.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", table_name));
     content.push_str("pub struct Model {\n");
 
-    // Primary key - special handling for job-related events
+    // Primary key - special handling for job-related and session-related events
     if message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent" {
         // job_id is the primary key, added with other fields
+    } else if message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent" {
+        // session_id is the primary key, added with other fields
     } else {
         content.push_str("    #[sea_orm(primary_key)]\n");
         content.push_str("    pub id: i64,\n");
@@ -572,10 +590,12 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
         if message.name == "JobCreatedEvent" {
             if field.has_sequences_option {
                 // Include sequences as JSON columns in JobCreatedEvent (arrays of u64)
-                content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
+                // MySQL/TiDB uses JsonBinary, not Json
+                content.push_str(&format!("    #[sea_orm(column_type = \"JsonBinary\")]\n"));
+                content.push_str(&format!("    pub {}: Option<Json>, // JSON array of u64\n", field_name));
             } else if field.name == "job_id" {
-                // job_id is the primary key
-                content.push_str("    #[sea_orm(primary_key)]\n");
+                // job_id is the primary key (VARCHAR, not auto-increment)
+                content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
                 content.push_str("    pub job_id: String,\n");
             } else {
                 let rust_type = proto_type_to_rust(&field.field_type, field.is_repeated, field.is_optional);
@@ -583,11 +603,17 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
             }
         } else if message.name == "ProofEvent" && field.has_sequences_option {
             // Include sequences as JSON columns in ProofEvent (arrays of u64)
-            content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
+            // MySQL/TiDB uses JsonBinary, not Json
+            content.push_str(&format!("    #[sea_orm(column_type = \"JsonBinary\")]\n"));
+            content.push_str(&format!("    pub {}: Option<Json>, // JSON array of u64\n", field_name));
         } else if (message.name == "JobStartedEvent" || message.name == "JobFinishedEvent") && field.name == "job_id" {
-            // job_id is the primary key for JobStartedEvent and JobFinishedEvent
-            content.push_str("    #[sea_orm(primary_key)]\n");
+            // job_id is the primary key for JobStartedEvent and JobFinishedEvent (VARCHAR, not auto-increment)
+            content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
             content.push_str("    pub job_id: String,\n");
+        } else if (message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent") && field.name == "session_id" {
+            // session_id is the primary key for AgentSessionStartedEvent and AgentSessionFinishedEvent (VARCHAR, not auto-increment)
+            content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
+            content.push_str("    pub session_id: String,\n");
         } else {
             // Normal handling for other entities
             if field.has_sequences_option {
@@ -759,12 +785,10 @@ pub fn proto_type_to_mysql_with_options(
 
     match proto_type {
         "string" => {
-            if has_search_option {
-                if long_text {
-                    "TEXT".to_string()
-                } else {
-                    "VARCHAR(255)".to_string()
-                } // Use VARCHAR for searchable fields - supports both regular and FULLTEXT indexes
+            if long_text {
+                "LONGTEXT".to_string()  // Use LONGTEXT for log fields
+            } else if has_search_option {
+                "VARCHAR(255)".to_string() // Use VARCHAR for searchable fields - supports both regular and FULLTEXT indexes
             } else {
                 "VARCHAR(255)".to_string()
             }

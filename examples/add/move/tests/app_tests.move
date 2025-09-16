@@ -25,6 +25,7 @@ fun setup_test_registry_and_app(
     add_app(
         &mut registry,
         b"add_app".to_string(),
+        @0x1, // owner address
         option::some(b"Test application for adding values".to_string()),
         clock,
         test::ctx(scenario),

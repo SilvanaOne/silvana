@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "3E595373E922073B888EF6029BB90E0D9E9CA1F8060C364B62C260E3124C9BDA"
+manifest_digest = "C2C9FAB7E72D636ED7C4B1DC82115EE848FEB810F676B1EE7264A21B198296C6"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "bd77ba8710959aec501d216ec0a5ad073f915ead", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "93bb64423210de64b8c476a26e89ebffc1c80411", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "bd77ba8710959aec501d216ec0a5ad073f915ead", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "93bb64423210de64b8c476a26e89ebffc1c80411", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "bd77ba8710959aec501d216ec0a5ad073f915ead", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "93bb64423210de64b8c476a26e89ebffc1c80411", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -88,7 +88,7 @@ flavor = "sui"
 [env]
 
 [env.devnet]
-chain-id = "ae43edc0"
-original-published-id = "0x82d27fb36e396dbe130c7239ac7c5942e7855454c702a9b660f7960579b638a2"
-latest-published-id = "0x82d27fb36e396dbe130c7239ac7c5942e7855454c702a9b660f7960579b638a2"
+chain-id = "e052dec1"
+original-published-id = "0xdbd3862117acc5f59ffd6ec1c880c259a6200122756179bbac7413b8f874aaa6"
+latest-published-id = "0xdbd3862117acc5f59ffd6ec1c880c259a6200122756179bbac7413b8f874aaa6"
 published-version = "1"

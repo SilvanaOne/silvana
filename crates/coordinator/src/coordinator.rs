@@ -26,7 +26,9 @@ pub async fn start_coordinator(
     app_instance_filter: Option<String>,
     settle_only: bool,
 ) -> Result<()> {
+    info!("--------------------------------");
     info!("🚀 Starting Silvana Coordinator");
+    info!("--------------------------------");
     info!("🔗 Sui RPC URL: {}", rpc_url);
     info!("📦 Monitoring package: {}", package_id);
 
@@ -56,7 +58,7 @@ pub async fn start_coordinator(
             info!("🌐 Network: {}", network);
 
             if let Some(id) = service_info.chain_id {
-                debug!("Chain ID: {}", id);
+                info!("Chain ID: {}", id);
             }
 
             if let Some(version) = service_info.server_version {
@@ -64,7 +66,7 @@ pub async fn start_coordinator(
             }
 
             if let Some(height) = service_info.checkpoint_height {
-                debug!("Checkpoint height: {}", height);
+                info!("Checkpoint height: {}", height);
             }
         }
         Err(e) => {

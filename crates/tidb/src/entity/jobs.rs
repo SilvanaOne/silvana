@@ -10,10 +10,13 @@ pub struct Model {
     pub app_instance_id: String,
     pub app_method: String,
     pub job_sequence: i64,
-    pub sequences: Option<String>, // JSON array of u64
-    pub merged_sequences_1: Option<String>, // JSON array of u64
-    pub merged_sequences_2: Option<String>, // JSON array of u64
-    #[sea_orm(primary_key)]
+    #[sea_orm(column_type = "JsonBinary")]
+    pub sequences: Option<Json>, // JSON array of u64
+    #[sea_orm(column_type = "JsonBinary")]
+    pub merged_sequences_1: Option<Json>, // JSON array of u64
+    #[sea_orm(column_type = "JsonBinary")]
+    pub merged_sequences_2: Option<Json>, // JSON array of u64
+    #[sea_orm(primary_key, auto_increment = false)]
     pub job_id: String,
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,

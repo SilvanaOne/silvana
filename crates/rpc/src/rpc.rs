@@ -30,17 +30,21 @@ pub struct SilvanaRpcServiceImpl {
     config_storage: Option<Arc<ConfigStorage>>,
 }
 
-/// Helper function to parse JSON array strings into Vec<u64>
-fn parse_json_array(json_str: &Option<String>) -> Vec<u64> {
-    match json_str {
-        Some(s) if !s.is_empty() => match serde_json::from_str::<Vec<u64>>(s) {
-            Ok(vec) => vec,
-            Err(e) => {
-                warn!("Failed to parse JSON array: {}, error: {}", s, e);
+/// Helper function to parse JSON array from Json type into Vec<u64>
+fn parse_json_array(json_val: &Option<serde_json::Value>) -> Vec<u64> {
+    match json_val {
+        Some(val) => {
+            // Try to parse as array of u64
+            if let Some(arr) = val.as_array() {
+                arr.iter()
+                    .filter_map(|v| v.as_u64())
+                    .collect()
+            } else {
+                warn!("JSON value is not an array: {:?}", val);
                 vec![]
             }
-        },
-        _ => vec![],
+        }
+        None => vec![],
     }
 }
 
@@ -202,6 +206,16 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
             req.app_instance_id, req.sequence
         );
 
+        // Normalize app_instance_id by removing 0x prefix if present
+        // Database stores them without 0x prefix
+        let normalized_app_id = if req.app_instance_id.starts_with("0x") || req.app_instance_id.starts_with("0X") {
+            req.app_instance_id[2..].to_string()
+        } else {
+            req.app_instance_id.clone()
+        };
+
+        debug!("Normalized app_instance_id for query: {}", normalized_app_id);
+
         // Get database connection
         let db = self._database.get_connection().await;
 
@@ -209,7 +223,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
 
         // Query job_sequences table to find job_ids for this (app_instance_id, sequence)
         let job_sequence_results = job_sequences::Entity::find()
-            .filter(job_sequences::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(job_sequences::Column::AppInstanceId.eq(&normalized_app_id))
             .filter(job_sequences::Column::Sequence.eq(req.sequence as i64))
             .all(db)
             .await
@@ -253,7 +267,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
 
         // Query proof_event_sequences table to find proof_event_ids
         let proof_sequence_results = proof_event_sequences::Entity::find()
-            .filter(proof_event_sequences::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_event_sequences::Column::AppInstanceId.eq(&normalized_app_id))
             .filter(proof_event_sequences::Column::Sequence.eq(req.sequence as i64))
             .all(db)
             .await

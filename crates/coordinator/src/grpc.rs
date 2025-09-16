@@ -16,14 +16,14 @@ pub mod coordinator {
 }
 
 use coordinator::{
-    AddMetadataRequest, AddMetadataResponse, AgentMessageRequest, AgentMessageResponse, Block, BlockSettlement, CompleteJobRequest,
-    CompleteJobResponse, CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest,
-    DeleteKvResponse, FailJobRequest, FailJobResponse, GetBlockProofRequest, GetBlockProofResponse,
-    GetBlockRequest, GetBlockResponse, GetBlockSettlementRequest, GetBlockSettlementResponse,
-    GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse, GetMetadataRequest,
-    GetMetadataResponse, GetProofRequest, GetProofResponse, GetSequenceStatesRequest,
-    GetSequenceStatesResponse, Job, LogLevel, Metadata, ProofEventRequest, ProofEventResponse,
-    ProofEventType, ReadDataAvailabilityRequest,
+    AddMetadataRequest, AddMetadataResponse, AgentMessageRequest, AgentMessageResponse, Block,
+    BlockSettlement, CompleteJobRequest, CompleteJobResponse, CreateAppJobRequest,
+    CreateAppJobResponse, DeleteKvRequest, DeleteKvResponse, FailJobRequest, FailJobResponse,
+    GetBlockProofRequest, GetBlockProofResponse, GetBlockRequest, GetBlockResponse,
+    GetBlockSettlementRequest, GetBlockSettlementResponse, GetJobRequest, GetJobResponse,
+    GetKvRequest, GetKvResponse, GetMetadataRequest, GetMetadataResponse, GetProofRequest,
+    GetProofResponse, GetSequenceStatesRequest, GetSequenceStatesResponse, Job, LogLevel, Metadata,
+    ProofEventRequest, ProofEventResponse, ProofEventType, ReadDataAvailabilityRequest,
     ReadDataAvailabilityResponse, RejectProofRequest, RejectProofResponse, RetrieveSecretRequest,
     RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
     SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
@@ -70,18 +70,16 @@ impl CoordinatorServiceImpl {
         let rpc_client = self.state.get_rpc_client().await;
         if let Some(mut client) = rpc_client {
             let event = proto::Event {
-                event: Some(proto::event::Event::JobStarted(
-                    proto::JobStartedEvent {
-                        coordinator_id,
-                        session_id,
-                        app_instance_id: app_instance,
-                        job_id: job_id.clone(),
-                        event_timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    },
-                )),
+                event: Some(proto::event::Event::JobStarted(proto::JobStartedEvent {
+                    coordinator_id,
+                    session_id,
+                    app_instance_id: app_instance,
+                    job_id: job_id.clone(),
+                    event_timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
+                })),
             };
 
             let request = proto::SubmitEventRequest { event: Some(event) };
@@ -144,20 +142,17 @@ impl CoordinatorServiceImpl {
 
         // Spawn async task to send the event
         tokio::spawn(async move {
-
             let rpc_client = state_clone.get_rpc_client().await;
             if let Some(mut client) = rpc_client {
                 let event = proto::Event {
-                    event: Some(proto::event::Event::JobFinished(
-                        proto::JobFinishedEvent {
-                            coordinator_id,
-                            job_id: job_id.clone(),
-                            duration: duration_ms,
-                            cost,
-                            event_timestamp: job_end_timestamp,
-                            result: result as i32,
-                        },
-                    )),
+                    event: Some(proto::event::Event::JobFinished(proto::JobFinishedEvent {
+                        coordinator_id,
+                        job_id: job_id.clone(),
+                        duration: duration_ms,
+                        cost,
+                        event_timestamp: job_end_timestamp,
+                        result: result as i32,
+                    })),
                 };
 
                 let request = proto::SubmitEventRequest { event: Some(event) };
@@ -213,22 +208,20 @@ impl CoordinatorServiceImpl {
             let rpc_client = state_clone.get_rpc_client().await;
             if let Some(mut client) = rpc_client {
                 let event = proto::Event {
-                    event: Some(proto::event::Event::ProofEvent(
-                        proto::ProofEvent {
-                            coordinator_id,
-                            session_id,
-                            app_instance_id,
-                            job_id: job_id.clone(),
-                            data_availability: String::new(), // No DA for rejected proofs
-                            block_number,
-                            block_proof: Some(false), // Regular proof rejection
-                            proof_event_type: proto::ProofEventType::ProofRejected as i32,
-                            sequences,
-                            merged_sequences_1: vec![],
-                            merged_sequences_2: vec![],
-                            event_timestamp,
-                        },
-                    )),
+                    event: Some(proto::event::Event::ProofEvent(proto::ProofEvent {
+                        coordinator_id,
+                        session_id,
+                        app_instance_id,
+                        job_id: job_id.clone(),
+                        data_availability: String::new(), // No DA for rejected proofs
+                        block_number,
+                        block_proof: Some(false), // Regular proof rejection
+                        proof_event_type: proto::ProofEventType::ProofRejected as i32,
+                        sequences,
+                        merged_sequences_1: vec![],
+                        merged_sequences_2: vec![],
+                        event_timestamp,
+                    })),
                 };
 
                 let request = proto::SubmitEventRequest { event: Some(event) };
@@ -281,7 +274,7 @@ impl CoordinatorServiceImpl {
 
         // Determine if this is a block proof based on sequences
         let block_proof = if !merged_sequences_1.is_empty() || !merged_sequences_2.is_empty() {
-            Some(true)  // It's a merge/block proof
+            Some(true) // It's a merge/block proof
         } else {
             Some(false) // It's a regular proof
         };
@@ -296,22 +289,20 @@ impl CoordinatorServiceImpl {
             let rpc_client = state_clone.get_rpc_client().await;
             if let Some(mut client) = rpc_client {
                 let event = proto::Event {
-                    event: Some(proto::event::Event::ProofEvent(
-                        proto::ProofEvent {
-                            coordinator_id,
-                            session_id,
-                            app_instance_id,
-                            job_id: job_id.clone(),
-                            data_availability,
-                            block_number,
-                            block_proof,
-                            proof_event_type: proof_event_type as i32,
-                            sequences,
-                            merged_sequences_1,
-                            merged_sequences_2,
-                            event_timestamp,
-                        },
-                    )),
+                    event: Some(proto::event::Event::ProofEvent(proto::ProofEvent {
+                        coordinator_id,
+                        session_id,
+                        app_instance_id,
+                        job_id: job_id.clone(),
+                        data_availability,
+                        block_number,
+                        block_proof,
+                        proof_event_type: proof_event_type as i32,
+                        sequences,
+                        merged_sequences_1,
+                        merged_sequences_2,
+                        event_timestamp,
+                    })),
                 };
 
                 let request = proto::SubmitEventRequest { event: Some(event) };
@@ -391,7 +382,10 @@ impl CoordinatorServiceImpl {
                         if resp.success {
                             debug!("Sent SettlementTransactionEvent for job_id {}", job_id);
                         } else {
-                            warn!("Failed to send SettlementTransactionEvent: {}", resp.message);
+                            warn!(
+                                "Failed to send SettlementTransactionEvent: {}",
+                                resp.message
+                            );
                         }
                     }
                     Err(e) => {
@@ -414,7 +408,9 @@ impl CoordinatorServiceImpl {
         let coordinator_id = match self.state.get_coordinator_id() {
             Some(id) => id,
             None => {
-                debug!("Cannot send SettlementTransactionIncludedInBlockEvent: coordinator_id not available");
+                debug!(
+                    "Cannot send SettlementTransactionIncludedInBlockEvent: coordinator_id not available"
+                );
                 return;
             }
         };
@@ -455,13 +451,22 @@ impl CoordinatorServiceImpl {
                 match client.submit_event(request).await {
                     Ok(response) => {
                         if response.into_inner().success {
-                            debug!("SettlementTransactionIncludedInBlockEvent sent successfully for job {}", job_id);
+                            debug!(
+                                "SettlementTransactionIncludedInBlockEvent sent successfully for job {}",
+                                job_id
+                            );
                         } else {
-                            warn!("Failed to send SettlementTransactionIncludedInBlockEvent for job {}", job_id);
+                            warn!(
+                                "Failed to send SettlementTransactionIncludedInBlockEvent for job {}",
+                                job_id
+                            );
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to send SettlementTransactionIncludedInBlockEvent: {}", e);
+                        warn!(
+                            "Failed to send SettlementTransactionIncludedInBlockEvent: {}",
+                            e
+                        );
                     }
                 }
             } else {
@@ -552,22 +557,20 @@ impl CoordinatorServiceImpl {
             let rpc_client = state_clone.get_rpc_client().await;
             if let Some(mut client) = rpc_client {
                 let event = proto::Event {
-                    event: Some(proto::event::Event::ProofEvent(
-                        proto::ProofEvent {
-                            coordinator_id,
-                            session_id,
-                            app_instance_id,
-                            job_id,
-                            data_availability,
-                            block_number,
-                            block_proof,
-                            proof_event_type: proof_event_type as i32,
-                            sequences,
-                            merged_sequences_1,
-                            merged_sequences_2,
-                            event_timestamp,
-                        },
-                    )),
+                    event: Some(proto::event::Event::ProofEvent(proto::ProofEvent {
+                        coordinator_id,
+                        session_id,
+                        app_instance_id,
+                        job_id,
+                        data_availability,
+                        block_number,
+                        block_proof,
+                        proof_event_type: proof_event_type as i32,
+                        sequences,
+                        merged_sequences_1,
+                        merged_sequences_2,
+                        event_timestamp,
+                    })),
                 };
 
                 let request = proto::SubmitEventRequest { event: Some(event) };
@@ -680,7 +683,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         // Continue to look for next job
                         continue 'job_search;
                     }
-                    
+
                     // Check if session already has a different settlement chain
                     let current_agent = self.state.get_current_agent(&req.session_id).await;
                     if let Some(current) = current_agent {
@@ -688,28 +691,29 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             if settlement_chain.as_ref() != Some(session_chain) {
                                 warn!(
                                     "Session {} is locked to chain '{}', but job {} is for chain '{:?}' - skipping",
-                                    req.session_id, session_chain, agent_job.job_sequence, settlement_chain
+                                    req.session_id,
+                                    session_chain,
+                                    agent_job.job_sequence,
+                                    settlement_chain
                                 );
-                                
+
                                 // Don't terminate the job, just skip it for this session
                                 // Put it back as available for other sessions
                                 self.state
                                     .get_agent_job_db()
                                     .release_job(&agent_job.job_id)
                                     .await;
-                                
+
                                 // Continue to look for next job
                                 continue 'job_search;
                             }
                         }
                     }
-                    
+
                     // Update session with settlement chain if not already set
-                    if let Err(e) = self.state
-                        .set_settlement_chain_for_session(
-                            &req.session_id,
-                            settlement_chain.clone(),
-                        )
+                    if let Err(e) = self
+                        .state
+                        .set_settlement_chain_for_session(&req.session_id, settlement_chain.clone())
                         .await
                     {
                         warn!("Failed to set settlement chain for session: {}", e);
@@ -727,7 +731,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     req.session_id.clone(),
                     agent_job.job_id.clone(),
                     agent_job.app_instance.clone(),
-                ).await;
+                )
+                .await;
 
                 return Ok(Response::new(GetJobResponse {
                     success: true,
@@ -763,7 +768,12 @@ impl CoordinatorService for CoordinatorServiceImpl {
         // The buffer contains jobs that have been started on blockchain via multicall
         if let Some(started_job) = self
             .state
-            .get_started_job_for_agent(&req.developer, &req.agent, &req.agent_method, &req.session_id)
+            .get_started_job_for_agent(
+                &req.developer,
+                &req.agent,
+                &req.agent_method,
+                &req.session_id,
+            )
             .await
         {
             debug!(
@@ -826,7 +836,9 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             sui::fetch::AgentMethod {
                                 docker_image: String::new(),
                                 docker_sha256: None,
-                                min_memory_gb: (started_job.memory_requirement / (1024 * 1024 * 1024)) as u16,
+                                min_memory_gb: (started_job.memory_requirement
+                                    / (1024 * 1024 * 1024))
+                                    as u16,
                                 min_cpu_cores: 1,
                                 requires_tee: false,
                             }
@@ -905,7 +917,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             job: None,
                         }));
                     }
-                    
+
                     // Set current agent for this session
                     self.state
                         .set_current_agent(
@@ -915,10 +927,11 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             pending_job.agent_method.clone(),
                         )
                         .await;
-                    
+
                     // Set settlement chain if this is a settlement job
                     if pending_job.app_instance_method == "settle" {
-                        if let Err(e) = self.state
+                        if let Err(e) = self
+                            .state
                             .set_settlement_chain_for_session(
                                 &req.session_id,
                                 settlement_chain.clone(),
@@ -968,7 +981,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         req.session_id.clone(),
                         agent_job.job_id.clone(),
                         started_job.app_instance.clone(),
-                    ).await;
+                    )
+                    .await;
 
                     return Ok(Response::new(GetJobResponse {
                         success: true,
@@ -1618,10 +1632,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 error!("{}", error_msg);
 
                 // Send error event to RPC
-                self.state.send_coordinator_message_event(
-                    proto::LogLevel::Error,
-                    error_msg.clone()
-                );
+                self.state
+                    .send_coordinator_message_event(proto::LogLevel::Error, error_msg.clone());
 
                 warn!(
                     "❌ RejectProof: job_id={}, error={}, time={:?}",
@@ -3108,10 +3120,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 error!("{}", error_msg);
 
                 // Send error event to RPC
-                self.state.send_coordinator_message_event(
-                    proto::LogLevel::Error,
-                    error_msg.clone()
-                );
+                self.state
+                    .send_coordinator_message_event(proto::LogLevel::Error, error_msg.clone());
 
                 Ok(Response::new(TryCreateBlockResponse {
                     success: false,
@@ -3254,10 +3264,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 error!("{}", error_msg);
 
                 // Send error event to RPC
-                self.state.send_coordinator_message_event(
-                    proto::LogLevel::Error,
-                    error_msg.clone()
-                );
+                self.state
+                    .send_coordinator_message_event(proto::LogLevel::Error, error_msg.clone());
 
                 Ok(Response::new(UpdateBlockStateDataAvailabilityResponse {
                     success: false,
@@ -3657,10 +3665,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 error!("{}", error_msg);
 
                 // Send error event to RPC
-                self.state.send_coordinator_message_event(
-                    proto::LogLevel::Error,
-                    error_msg.clone()
-                );
+                self.state
+                    .send_coordinator_message_event(proto::LogLevel::Error, error_msg.clone());
 
                 Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
                     success: false,
@@ -3720,10 +3726,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 self.state.send_coordination_tx_event(tx_hash.clone());
 
                 // Send SettlementTransactionEvent
-                self.send_settlement_transaction_event(
-                    &agent_job,
-                    &req,
-                );
+                self.send_settlement_transaction_event(&agent_job, &req);
 
                 info!("✅ UpdateBlockSettlementTxHash successful, tx: {}", tx_hash);
                 Ok(Response::new(UpdateBlockSettlementTxHashResponse {
@@ -3737,10 +3740,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 error!("{}", error_msg);
 
                 // Send error event to RPC
-                self.state.send_coordinator_message_event(
-                    proto::LogLevel::Error,
-                    error_msg.clone()
-                );
+                self.state
+                    .send_coordinator_message_event(proto::LogLevel::Error, error_msg.clone());
 
                 Ok(Response::new(UpdateBlockSettlementTxHashResponse {
                     success: false,
@@ -3803,10 +3804,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 self.state.send_coordination_tx_event(tx_hash.clone());
 
                 // Send SettlementTransactionIncludedInBlockEvent
-                self.send_settlement_transaction_included_in_block_event(
-                    &agent_job,
-                    &req,
-                );
+                self.send_settlement_transaction_included_in_block_event(&agent_job, &req);
 
                 info!(
                     "✅ UpdateBlockSettlementTxIncludedInBlock successful, tx: {}",
@@ -3822,14 +3820,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 ))
             }
             Err(e) => {
-                let error_msg = format!("Failed to update block settlement included in block: {}", e);
+                let error_msg =
+                    format!("Failed to update block settlement included in block: {}", e);
                 error!("{}", error_msg);
 
                 // Send error event to RPC
-                self.state.send_coordinator_message_event(
-                    proto::LogLevel::Error,
-                    error_msg.clone()
-                );
+                self.state
+                    .send_coordinator_message_event(proto::LogLevel::Error, error_msg.clone());
 
                 Ok(Response::new(
                     UpdateBlockSettlementTxIncludedInBlockResponse {
@@ -3909,10 +3906,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 error!("{}", error_msg);
 
                 // Send error event to RPC
-                self.state.send_coordinator_message_event(
-                    proto::LogLevel::Error,
-                    error_msg.clone()
-                );
+                self.state
+                    .send_coordinator_message_event(proto::LogLevel::Error, error_msg.clone());
 
                 Ok(Response::new(CreateAppJobResponse {
                     success: false,
@@ -4148,9 +4143,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<AgentMessageRequest>,
     ) -> Result<Response<AgentMessageResponse>, Status> {
-        // Get metadata from the request before consuming it
-        let metadata = request.metadata().clone();
-
         let req = request.into_inner();
 
         // Get coordinator ID
@@ -4159,17 +4151,17 @@ impl CoordinatorService for CoordinatorServiceImpl {
             String::new()
         });
 
-        // Try to extract session_id and job_id from metadata or use defaults
-        let session_id = metadata
-            .get("session-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        // Use job_id and session_id from request
+        if req.job_id.is_none() {
+            info!("AgentMessage received without job_id");
+        }
 
-        let job_id = metadata
-            .get("job-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+        if req.session_id.is_empty() {
+            warn!("AgentMessage received without session_id");
+        }
+
+        let session_id = req.session_id.clone();
+        let job_id = req.job_id.clone();
 
         // Convert coordinator LogLevel to RPC LogLevel
         let rpc_log_level = match LogLevel::try_from(req.level).unwrap_or(LogLevel::Unspecified) {
@@ -4210,9 +4202,6 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<ProofEventRequest>,
     ) -> Result<Response<ProofEventResponse>, Status> {
-        // Get metadata from the request before consuming it
-        let metadata = request.metadata().clone();
-
         let req = request.into_inner();
 
         // Get coordinator ID
@@ -4221,27 +4210,60 @@ impl CoordinatorService for CoordinatorServiceImpl {
             String::new()
         });
 
-        // Try to extract session_id, app_instance_id and job_id from metadata
-        let session_id = metadata
-            .get("session-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        // Validate required fields from request
+        if req.job_id.is_empty() {
+            error!("ProofEvent received without job_id");
+            return Err(Status::invalid_argument(
+                "job_id is required for ProofEvent",
+            ));
+        }
 
-        let app_instance_id = metadata
-            .get("app-instance-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        if req.session_id.is_empty() {
+            error!("ProofEvent received without session_id");
+            return Err(Status::invalid_argument(
+                "session_id is required for ProofEvent",
+            ));
+        }
 
-        let job_id = metadata
-            .get("job-id")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| String::new());
+        // Look up the job information from the agent database using job_id
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                error!("No job found for job_id: {} in ProofEvent", req.job_id);
+                return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
+            }
+        };
+
+        // Validate that session_id matches
+        if agent_job.session_id != req.session_id {
+            error!(
+                "Session ID mismatch for job {}: expected {}, got {}",
+                req.job_id, agent_job.session_id, req.session_id
+            );
+            return Err(Status::invalid_argument("Session ID mismatch"));
+        }
+
+        let app_instance_id = agent_job.app_instance.clone();
+        let job_id = agent_job.job_id.clone();
+        let session_id = agent_job.session_id.clone();
+
+        // Ensure app_instance_id is not empty
+        if app_instance_id.is_empty() {
+            error!("ProofEvent received with empty app_instance_id");
+            return Err(Status::invalid_argument(
+                "app_instance_id is required for ProofEvent",
+            ));
+        }
 
         // Convert coordinator ProofEventType to RPC ProofEventType
-        let rpc_proof_event_type = match ProofEventType::try_from(req.proof_event_type).unwrap_or(ProofEventType::Unspecified) {
+        let rpc_proof_event_type = match ProofEventType::try_from(req.proof_event_type)
+            .unwrap_or(ProofEventType::Unspecified)
+        {
             ProofEventType::ProofSubmitted => proto::ProofEventType::ProofSubmitted,
             ProofEventType::ProofFetched => proto::ProofEventType::ProofFetched,
             ProofEventType::ProofVerified => proto::ProofEventType::ProofVerified,

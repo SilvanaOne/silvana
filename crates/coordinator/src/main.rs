@@ -266,5 +266,16 @@ async fn main() -> Result<()> {
         } => cli::registry::handle_registry_command(rpc_url, subcommand, chain_override).await,
 
         Commands::Secrets { subcommand } => cli::secrets::handle_secrets_command(subcommand).await,
+
+        Commands::Sequence {
+            rpc_url,
+            instance,
+            sequence,
+            limit,
+            offset,
+        } => {
+            cli::sequence::handle_sequence_command(rpc_url, instance, sequence, limit, offset, chain_override.clone())
+                .await
+        }
     }
 }

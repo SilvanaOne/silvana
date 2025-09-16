@@ -15,9 +15,12 @@ pub struct Model {
     pub block_number: i64,
     pub block_proof: Option<bool>,
     pub proof_event_type: String,
-    pub sequences: Option<String>, // JSON array of u64
-    pub merged_sequences_1: Option<String>, // JSON array of u64
-    pub merged_sequences_2: Option<String>, // JSON array of u64
+    #[sea_orm(column_type = "JsonBinary")]
+    pub sequences: Option<Json>, // JSON array of u64
+    #[sea_orm(column_type = "JsonBinary")]
+    pub merged_sequences_1: Option<Json>, // JSON array of u64
+    #[sea_orm(column_type = "JsonBinary")]
+    pub merged_sequences_2: Option<Json>, // JSON array of u64
     pub event_timestamp: i64,
     pub created_at: Option<DateTimeUtc>,
     pub updated_at: Option<DateTimeUtc>,

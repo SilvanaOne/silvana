@@ -20,6 +20,7 @@
 ## Table: agent_session_finished_event
 - FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD
 - FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD
+- FULLTEXT INDEX ft_idx_session_log (`session_log`) WITH PARSER STANDARD
 
 ## Table: jobs
 - FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD

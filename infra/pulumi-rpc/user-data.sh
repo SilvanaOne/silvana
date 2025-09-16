@@ -2,6 +2,8 @@
 
 # AWS EC2 User Data Script for Silvana RPC Server
 # This script performs initial system setup and then calls start.sh from the S3 bucket
+# Deploy timestamp: 2025-09-16 18:55:31
+
 
 # Set up logging
 exec > >(tee /var/log/user-data.log)

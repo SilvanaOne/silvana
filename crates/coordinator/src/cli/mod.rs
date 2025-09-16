@@ -16,6 +16,7 @@ pub mod new;
 pub mod split;
 pub mod network;
 pub mod avs;
+pub mod sequence;
 
 // Re-export all items from commands module
 pub use commands::*;
