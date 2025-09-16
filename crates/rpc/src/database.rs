@@ -1454,19 +1454,19 @@ fn convert_job_created_event(
     use sea_orm::ActiveValue;
 
     let sequences_json = if !event.sequences.is_empty() {
-        Some(serde_json::to_string(&event.sequences).unwrap_or_else(|_| "[]".to_string()))
+        Some(serde_json::json!(event.sequences))
     } else {
         None
     };
 
     let merged_sequences_1_json = if !event.merged_sequences_1.is_empty() {
-        Some(serde_json::to_string(&event.merged_sequences_1).unwrap_or_else(|_| "[]".to_string()))
+        Some(serde_json::json!(event.merged_sequences_1))
     } else {
         None
     };
 
     let merged_sequences_2_json = if !event.merged_sequences_2.is_empty() {
-        Some(serde_json::to_string(&event.merged_sequences_2).unwrap_or_else(|_| "[]".to_string()))
+        Some(serde_json::json!(event.merged_sequences_2))
     } else {
         None
     };
@@ -1600,19 +1600,19 @@ fn convert_proof_event(
 
     // Convert sequences to JSON strings for storage
     let sequences_json = if !event.sequences.is_empty() {
-        Some(serde_json::to_string(&event.sequences).unwrap_or_else(|_| "[]".to_string()))
+        Some(serde_json::json!(event.sequences))
     } else {
         None
     };
 
     let merged_sequences_1_json = if !event.merged_sequences_1.is_empty() {
-        Some(serde_json::to_string(&event.merged_sequences_1).unwrap_or_else(|_| "[]".to_string()))
+        Some(serde_json::json!(event.merged_sequences_1))
     } else {
         None
     };
 
     let merged_sequences_2_json = if !event.merged_sequences_2.is_empty() {
-        Some(serde_json::to_string(&event.merged_sequences_2).unwrap_or_else(|_| "[]".to_string()))
+        Some(serde_json::json!(event.merged_sequences_2))
     } else {
         None
     };

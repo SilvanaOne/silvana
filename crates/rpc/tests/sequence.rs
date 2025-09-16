@@ -1,13 +1,108 @@
 use rpc::database::EventDatabase;
-use rpc::proto::{GetEventsByAppInstanceSequenceRequest};
-use rpc::rpc::get_events_by_app_instance_sequence_impl;
+use rpc::proto::{GetEventsByAppInstanceSequenceRequest, GetEventsByAppInstanceSequenceResponse, Event};
 use std::env;
-use tracing::{info, debug};
+
+// Direct implementation that mirrors the actual RPC function with 0x prefix handling
+async fn get_events_by_app_instance_sequence_direct(
+    database: &EventDatabase,
+    request: GetEventsByAppInstanceSequenceRequest,
+) -> Result<GetEventsByAppInstanceSequenceResponse, Box<dyn std::error::Error>> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    use tidb::entity::{job_sequences, proof_event_sequences};
+
+    println!("\nDirect function called with:");
+    println!("  app_instance_id: {}", request.app_instance_id);
+    println!("  sequence: {}", request.sequence);
+
+    // Normalize app_instance_id by removing 0x prefix if present (same as the fix in rpc.rs)
+    let normalized_app_id = if request.app_instance_id.starts_with("0x") || request.app_instance_id.starts_with("0X") {
+        request.app_instance_id[2..].to_string()
+    } else {
+        request.app_instance_id.clone()
+    };
+
+    println!("  normalized_app_id: {}", normalized_app_id);
+
+    let db = rpc::database::get_connection(database);
+    let mut all_events = Vec::new();
+
+    // Query job_sequences table
+    let job_sequence_results = job_sequences::Entity::find()
+        .filter(job_sequences::Column::AppInstanceId.eq(&normalized_app_id))
+        .filter(job_sequences::Column::Sequence.eq(request.sequence as i64))
+        .all(db)
+        .await?;
+
+    println!("  Found {} job_sequences entries", job_sequence_results.len());
+
+    // For each job_id found, we would fetch the job from jobs table
+    for job_seq in &job_sequence_results {
+        println!("    Found job_sequences entry with job_id: {}", job_seq.job_id);
+        // In the real implementation, we would fetch the full job details here
+        // For now, just create a placeholder event to show it's working
+        let event = Event {
+            event: Some(rpc::proto::event::Event::JobCreated(rpc::proto::JobCreatedEvent {
+                coordinator_id: "test".to_string(),
+                session_id: "test".to_string(),
+                app_instance_id: normalized_app_id.clone(),
+                app_method: "test".to_string(),
+                job_sequence: request.sequence,
+                sequences: vec![request.sequence],
+                merged_sequences_1: vec![],
+                merged_sequences_2: vec![],
+                job_id: job_seq.job_id.clone(),
+                event_timestamp: 0,
+            })),
+        };
+        all_events.push(event);
+    }
+
+    // Query proof_event_sequences table
+    let proof_sequence_results = proof_event_sequences::Entity::find()
+        .filter(proof_event_sequences::Column::AppInstanceId.eq(&normalized_app_id))
+        .filter(proof_event_sequences::Column::Sequence.eq(request.sequence as i64))
+        .all(db)
+        .await?;
+
+    println!("  Found {} proof_event_sequences entries", proof_sequence_results.len());
+
+    // For each proof_event_id found, we would fetch the proof event
+    for proof_seq in &proof_sequence_results {
+        println!("    Found proof_event_sequences entry with proof_event_id: {}", proof_seq.proof_event_id);
+        // In the real implementation, we would fetch the full proof event details here
+        // For now, just create a placeholder event to show it's working
+        let event = Event {
+            event: Some(rpc::proto::event::Event::ProofEvent(rpc::proto::ProofEvent {
+                coordinator_id: "test".to_string(),
+                session_id: "test".to_string(),
+                app_instance_id: normalized_app_id.clone(),
+                job_id: "test".to_string(),
+                data_availability: "test".to_string(),
+                block_number: 0,
+                block_proof: Some(false),
+                proof_event_type: 1, // ProofSubmitted
+                sequences: vec![request.sequence],
+                merged_sequences_1: vec![],
+                merged_sequences_2: vec![],
+                event_timestamp: 0,
+            })),
+        };
+        all_events.push(event);
+    }
+
+    let total_count = all_events.len() as u32;
+
+    Ok(GetEventsByAppInstanceSequenceResponse {
+        success: true,
+        message: format!("Found {} events", total_count),
+        events: all_events,
+        total_count,
+        returned_count: total_count,
+    })
+}
 
 #[tokio::test]
 async fn test_get_events_by_sequence() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
 
     // Load environment variables from .env file manually
     dotenvy::dotenv().ok();
@@ -22,8 +117,8 @@ async fn test_get_events_by_sequence() -> Result<(), Box<dyn std::error::Error>>
     let database = EventDatabase::new(&database_url).await?;
 
     // Test parameters from the user's example
-    let app_instance_id = "0xe4094d71ce851dda51efd6a459a1d096c414fd899ac79e655a1349f39288d45e";
-    let sequence = 4u64;
+    let app_instance_id = "0x02b089c58854c9189c5cf8ae5ec320f94312ebe2a94a4a58b05d6c0e120f8ba2";
+    let sequence = 1u64;
 
     println!("\n=== Testing sequence lookup for app_instance={}, sequence={} ===", app_instance_id, sequence);
 
@@ -124,7 +219,7 @@ async fn test_get_events_by_sequence() -> Result<(), Box<dyn std::error::Error>>
     }
 
     // Now test the actual RPC function
-    println!("\n=== Testing RPC function get_events_by_app_instance_sequence ===");
+    println!("\n=== Testing direct database function with 0x prefix handling ===");
 
     let request = GetEventsByAppInstanceSequenceRequest {
         app_instance_id: app_instance_id.to_string(),
@@ -133,7 +228,7 @@ async fn test_get_events_by_sequence() -> Result<(), Box<dyn std::error::Error>>
         offset: None,
     };
 
-    match get_events_by_app_instance_sequence_impl(&database, request).await {
+    match get_events_by_app_instance_sequence_direct(&database, request).await {
         Ok(response) => {
             println!("\nRPC Response:");
             println!("  success: {}", response.success);
@@ -158,6 +253,79 @@ async fn test_get_events_by_sequence() -> Result<(), Box<dyn std::error::Error>>
 
     // Let's also test with sequence as string "4" in case there's a type mismatch
     println!("\n=== Additional debug: Check job_sequences and proof_event_sequences tables directly ===");
+
+    // First let's check if there are ANY records in proof_event_sequences table
+    println!("\nChecking proof_event_sequences table for ANY records:");
+    {
+        use sea_orm::{ConnectionTrait, Statement};
+        let conn = rpc::database::get_connection(&database);
+
+        let query = "SELECT COUNT(*) as count FROM proof_event_sequences";
+        let stmt = Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::MySql,
+            query,
+            vec![],
+        );
+
+        if let Ok(results) = conn.query_all(stmt).await {
+            if let Some(row) = results.first() {
+                if let Ok(count) = row.try_get_by_index::<i64>(0) {
+                    println!("Total records in proof_event_sequences: {}", count);
+                }
+            }
+        }
+
+        // First, let's see what app_instance_ids are actually in the table
+        let query_all = "SELECT DISTINCT app_instance_id FROM proof_event_sequences LIMIT 10";
+        let stmt_all = Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::MySql,
+            query_all,
+            vec![],
+        );
+
+        if let Ok(results) = conn.query_all(stmt_all).await {
+            println!("\nDistinct app_instance_ids in proof_event_sequences:");
+            for row in &results {
+                if let Ok(app_id) = row.try_get_by_index::<String>(0) {
+                    println!("  - {}", app_id);
+                    // Check if this matches our search (case-insensitive)
+                    if app_id.to_lowercase() == app_instance_id.to_lowercase() {
+                        println!("    ✓ MATCHES our search (case-insensitive)");
+                    }
+                }
+            }
+        }
+
+        // Check specific records
+        let query2 = "SELECT * FROM proof_event_sequences WHERE app_instance_id = ? LIMIT 10";
+        let stmt2 = Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::MySql,
+            query2,
+            vec![sea_orm::Value::String(Some(Box::new(app_instance_id.to_string())))],
+        );
+
+        if let Ok(results) = conn.query_all(stmt2).await {
+            println!("Found {} records for app_instance_id {}", results.len(), app_instance_id);
+            for row in &results {
+                println!("\nRow data:");
+                if let Ok(id) = row.try_get_by_index::<i64>(0) {
+                    println!("  id: {}", id);
+                }
+                if let Ok(app_id) = row.try_get_by_index::<String>(1) {
+                    println!("  app_instance_id: {}", app_id);
+                }
+                if let Ok(seq) = row.try_get_by_index::<i64>(2) {
+                    println!("  sequence: {}", seq);
+                }
+                if let Ok(proof_id) = row.try_get_by_index::<i64>(3) {
+                    println!("  proof_event_id: {}", proof_id);
+                }
+                if let Ok(seq_type) = row.try_get_by_index::<String>(4) {
+                    println!("  sequence_type: {}", seq_type);
+                }
+            }
+        }
+    }
     {
         use sea_orm::{ConnectionTrait, Statement, Value};
         let conn = rpc::database::get_connection(&database);

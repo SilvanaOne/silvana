@@ -590,7 +590,9 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
         if message.name == "JobCreatedEvent" {
             if field.has_sequences_option {
                 // Include sequences as JSON columns in JobCreatedEvent (arrays of u64)
-                content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
+                // MySQL/TiDB uses JsonBinary, not Json
+                content.push_str(&format!("    #[sea_orm(column_type = \"JsonBinary\")]\n"));
+                content.push_str(&format!("    pub {}: Option<Json>, // JSON array of u64\n", field_name));
             } else if field.name == "job_id" {
                 // job_id is the primary key (VARCHAR, not auto-increment)
                 content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
@@ -601,7 +603,9 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
             }
         } else if message.name == "ProofEvent" && field.has_sequences_option {
             // Include sequences as JSON columns in ProofEvent (arrays of u64)
-            content.push_str(&format!("    pub {}: Option<String>, // JSON array of u64\n", field_name));
+            // MySQL/TiDB uses JsonBinary, not Json
+            content.push_str(&format!("    #[sea_orm(column_type = \"JsonBinary\")]\n"));
+            content.push_str(&format!("    pub {}: Option<Json>, // JSON array of u64\n", field_name));
         } else if (message.name == "JobStartedEvent" || message.name == "JobFinishedEvent") && field.name == "job_id" {
             // job_id is the primary key for JobStartedEvent and JobFinishedEvent (VARCHAR, not auto-increment)
             content.push_str("    #[sea_orm(primary_key, auto_increment = false)]\n");
