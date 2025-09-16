@@ -178,7 +178,7 @@ export default function Home() {
 
             // Small delay between fetch attempts
             if (isActive) {
-              await new Promise((resolve) => setTimeout(resolve, 2000));
+              await new Promise((resolve) => setTimeout(resolve, 1000));
             }
           }
         } catch (err) {
