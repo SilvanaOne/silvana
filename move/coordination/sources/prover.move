@@ -106,6 +106,7 @@ public struct ProofCalculationFinishedEvent has copy, drop {
 }
 
 public struct ProofCalculationDeletedEvent has copy, drop {
+    app_instance_id: address,
     block_number: u64,
     start_sequence: u64,
     end_sequence: Option<u64>,
@@ -274,6 +275,7 @@ public fun is_finished(proof_calculation: &ProofCalculation): bool {
 // Delete proof calculation after block is settled and emit comprehensive event
 public(package) fun delete_proof_calculation(
     proof_calculation: ProofCalculation,
+    app_instance_id: address,
     clock: &Clock,
 ) {
     let ProofCalculation {
@@ -305,6 +307,7 @@ public(package) fun delete_proof_calculation(
         timestamp,
     });
     event::emit(ProofCalculationDeletedEvent {
+        app_instance_id,
         block_number,
         start_sequence,
         end_sequence,

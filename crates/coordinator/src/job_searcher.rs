@@ -8,6 +8,7 @@ use crate::proof::analyze_proof_completion;
 use crate::settlement::{can_remove_app_instance, fetch_all_pending_jobs};
 use crate::state::SharedState;
 use futures::future;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use sui::fetch::Job;
 use sui::fetch_agent_method;
@@ -447,73 +448,99 @@ impl JobSearcher {
                 }
 
                 // Normal mode: Collect all viable jobs (up to pool size)
-                // Priority order: settlement > merge > others
-                // But we'll return all and let multicall handle execution order
+                // Priority order:
+                // 1. Settlement jobs (regardless of block)
+                // 2. Jobs from lowest block (merge before other)
+                // 3. Jobs from next block, etc.
 
-                // Separate jobs by type
+                // Separate settlement jobs and group others by block
                 let mut settlement_jobs: Vec<Job> = Vec::new();
-                let mut merge_jobs: Vec<Job> = Vec::new();
-                let mut other_jobs: Vec<Job> = Vec::new();
+                let mut jobs_by_block: BTreeMap<u64, (Vec<Job>, Vec<Job>)> = BTreeMap::new();
 
                 for job in viable_jobs {
                     match job.app_instance_method.as_str() {
                         "settle" => settlement_jobs.push(job),
-                        "merge" => merge_jobs.push(job),
-                        _ => other_jobs.push(job),
+                        _ => {
+                            // Group by block number (use u64::MAX for None to process last)
+                            let block = job.block_number.unwrap_or(u64::MAX);
+                            let entry = jobs_by_block.entry(block).or_insert((Vec::new(), Vec::new()));
+
+                            if job.app_instance_method == "merge" {
+                                entry.0.push(job); // merge jobs
+                            } else {
+                                entry.1.push(job); // other jobs
+                            }
+                        }
                     }
                 }
 
-                settlement_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
-                merge_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
-                other_jobs.sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
+                // Sort settlement jobs by sequence
+                settlement_jobs.sort_by_key(|j| j.job_sequence);
 
                 debug!(
-                    "Collected settlement jobs: {:?}",
-                    settlement_jobs
-                        .iter()
-                        .map(|j| j.job_sequence)
-                        .collect::<Vec<_>>()
+                    "Collected {} settlement jobs",
+                    settlement_jobs.len()
                 );
                 debug!(
-                    "Collected merge jobs: {:?}",
-                    merge_jobs
-                        .iter()
-                        .map(|j| j.job_sequence)
-                        .collect::<Vec<_>>()
-                );
-                debug!(
-                    "Collected other jobs: {:?}",
-                    other_jobs
-                        .iter()
-                        .map(|j| j.job_sequence)
-                        .collect::<Vec<_>>()
+                    "Collected jobs for {} blocks",
+                    jobs_by_block.len()
                 );
 
                 // Build the job pool respecting pool size limit
                 let mut job_pool = Vec::new();
 
-                // Add all settlement jobs (highest priority)
+                // Add all settlement jobs first (highest priority)
                 job_pool.extend(settlement_jobs.clone());
 
-                // Add merge jobs up to remaining pool size
-                let remaining = JOB_SELECTION_POOL_SIZE.saturating_sub(job_pool.len());
-                job_pool.extend(merge_jobs.iter().take(remaining).cloned());
+                // Process blocks in order (BTreeMap iterates in key order)
+                for (block, (mut merge_jobs, mut other_jobs)) in jobs_by_block {
+                    // Sort jobs within each category by sequence
+                    merge_jobs.sort_by_key(|j| j.job_sequence);
+                    other_jobs.sort_by_key(|j| j.job_sequence);
 
-                // Add other jobs up to remaining pool size
-                let remaining = JOB_SELECTION_POOL_SIZE.saturating_sub(job_pool.len());
-                job_pool.extend(other_jobs.iter().take(remaining).cloned());
+                    debug!(
+                        "Block {}: {} merge jobs, {} other jobs",
+                        if block == u64::MAX { "None".to_string() } else { block.to_string() },
+                        merge_jobs.len(),
+                        other_jobs.len()
+                    );
+
+                    // Add merge jobs first, then other jobs, respecting pool size limit
+                    let remaining = JOB_SELECTION_POOL_SIZE.saturating_sub(job_pool.len());
+                    if remaining == 0 { break; }
+
+                    let merge_to_add = merge_jobs.len().min(remaining);
+                    job_pool.extend(merge_jobs.into_iter().take(merge_to_add));
+
+                    let remaining = JOB_SELECTION_POOL_SIZE.saturating_sub(job_pool.len());
+                    if remaining == 0 { break; }
+
+                    let other_to_add = other_jobs.len().min(remaining);
+                    job_pool.extend(other_jobs.into_iter().take(other_to_add));
+
+                    // Break if we've filled the pool
+                    if job_pool.len() >= JOB_SELECTION_POOL_SIZE { break; }
+                }
+
+                // Count jobs by type for logging
+                let mut merge_jobs_count = 0;
+                let mut other_jobs_count = 0;
+                for job in &job_pool {
+                    if job.app_instance_method != "settle" {
+                        if job.app_instance_method == "merge" {
+                            merge_jobs_count += 1;
+                        } else {
+                            other_jobs_count += 1;
+                        }
+                    }
+                }
 
                 info!(
                     "Collected {} jobs for batching: {} settlement, {} merge, {} other",
                     job_pool.len(),
                     settlement_jobs.len(),
-                    merge_jobs
-                        .len()
-                        .min(JOB_SELECTION_POOL_SIZE.saturating_sub(settlement_jobs.len())),
-                    other_jobs.len().min(
-                        JOB_SELECTION_POOL_SIZE
-                            .saturating_sub(settlement_jobs.len() + merge_jobs.len())
-                    )
+                    merge_jobs_count,
+                    other_jobs_count
                 );
 
                 // Report metrics for job pool
@@ -521,8 +548,8 @@ impl JobSearcher {
                     if !job_pool.is_empty() {
                         metrics.set_job_selection_metrics(
                             job_pool.len(),
-                            merge_jobs.len(),
-                            other_jobs.len(),
+                            merge_jobs_count,
+                            other_jobs_count,
                             settlement_jobs.len(),
                             locked_count,
                             failed_cached_count,

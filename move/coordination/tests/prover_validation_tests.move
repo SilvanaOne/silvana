@@ -11,9 +11,9 @@ fun create_proof_calculation_for_test(
     start_sequence: u64,
     end_sequence: Option<u64>,
     ctx: &mut TxContext,
-): ProofCalculation {
+): (ProofCalculation, address) {
     let clock = clock::create_for_testing(ctx);
-    let (proof_calc, _addr) = prover::create_block_proof_calculation(
+    let (proof_calc, app_instance_id) = prover::create_block_proof_calculation(
         block_number,
         start_sequence,
         end_sequence,
@@ -21,7 +21,7 @@ fun create_proof_calculation_for_test(
         ctx
     );
     clock::destroy_for_testing(clock);
-    proof_calc
+    (proof_calc, app_instance_id)
 }
 
 // Test 1: Valid sequences within range (with end_sequence set)
@@ -31,7 +31,7 @@ fun test_valid_sequences_with_end_sequence() {
     let ctx = test_scenario::ctx(&mut scenario);
     
     // Create proof calculation for sequences 10-20
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     let clock = clock::create_for_testing(ctx);
     
     // First submit the prerequisite proofs that will be referenced
@@ -88,7 +88,7 @@ fun test_valid_sequences_with_end_sequence() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -101,7 +101,7 @@ fun test_sequences_below_start_range() {
     let ctx = test_scenario::ctx(&mut scenario);
     
     // Create proof calculation starting from sequence 10
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     
     // Test sequences that include values below start (9 < 10)
     let sequences = vector[9, 10, 11]; // 9 is below start_sequence
@@ -125,7 +125,7 @@ fun test_sequences_below_start_range() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -138,7 +138,7 @@ fun test_sequences_above_end_range() {
     let ctx = test_scenario::ctx(&mut scenario);
     
     // Create proof calculation with end_sequence = 20
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     
     // Test sequences that include values above end (21 > 20)
     let sequences = vector[18, 19, 20, 21]; // 21 is above end_sequence
@@ -162,7 +162,7 @@ fun test_sequences_above_end_range() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -174,7 +174,7 @@ fun test_sequence1_out_of_range() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     
     let sequences = vector[15, 16]; // Valid main sequences
     let sequence1 = option::some(vector[8, 9, 10]); // 8 and 9 are below start_sequence
@@ -198,7 +198,7 @@ fun test_sequence1_out_of_range() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -210,7 +210,7 @@ fun test_sequence2_out_of_range() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     
     let sequences = vector[15, 16]; // Valid main sequences
     let sequence2 = option::some(vector[20, 21, 22]); // 21 and 22 are above end_sequence
@@ -234,7 +234,7 @@ fun test_sequence2_out_of_range() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -245,7 +245,7 @@ fun test_sequences_are_sorted() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     
     // Provide unsorted sequences
     let sequences = vector[20, 15, 10, 18, 12]; // Completely unsorted
@@ -272,7 +272,7 @@ fun test_sequences_are_sorted() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -284,7 +284,7 @@ fun test_start_proving_validation_fails() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     
     let sequences = vector[5, 10, 15]; // 5 is below start_sequence
     let clock = clock::create_for_testing(ctx);
@@ -301,7 +301,7 @@ fun test_start_proving_validation_fails() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -312,7 +312,7 @@ fun test_start_proving_validation_succeeds() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     let clock = clock::create_for_testing(ctx);
     
     // First submit prerequisite proofs
@@ -363,7 +363,7 @@ fun test_start_proving_validation_succeeds() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -375,7 +375,7 @@ fun test_reject_proof_validation_fails() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     let clock = clock::create_for_testing(ctx);
     
     // First start a proof with valid sequences
@@ -399,7 +399,7 @@ fun test_reject_proof_validation_fails() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -411,7 +411,7 @@ fun test_no_end_sequence_validation() {
     let ctx = test_scenario::ctx(&mut scenario);
     
     // Create proof calculation without end_sequence (open-ended)
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::none(), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::none(), ctx);
     
     // Test with very high sequence numbers (should succeed since no upper limit)
     let sequences = vector[100, 1000, 10000];
@@ -435,7 +435,7 @@ fun test_no_end_sequence_validation() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -448,7 +448,7 @@ fun test_no_end_sequence_but_below_start_fails() {
     let ctx = test_scenario::ctx(&mut scenario);
     
     // Create proof calculation without end_sequence
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::none(), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::none(), ctx);
     
     // Test with sequence below start
     let sequences = vector[5, 15, 100]; // 5 is below start_sequence
@@ -472,7 +472,7 @@ fun test_no_end_sequence_but_below_start_fails() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -484,7 +484,7 @@ fun test_empty_sequences_fail() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     
     // Test with empty sequences
     let sequences = vector::empty<u64>();
@@ -508,7 +508,7 @@ fun test_empty_sequences_fail() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
@@ -519,7 +519,7 @@ fun test_boundary_sequences() {
     let mut scenario = test_scenario::begin(@0x1);
     let ctx = test_scenario::ctx(&mut scenario);
     
-    let mut proof_calc = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
+    let (mut proof_calc, app_instance_id) = create_proof_calculation_for_test(1, 10, option::some(20), ctx);
     let clock = clock::create_for_testing(ctx);
     
     // First submit the proofs that will be referenced
@@ -571,7 +571,7 @@ fun test_boundary_sequences() {
     
     clock::destroy_for_testing(clock);
     let cleanup_clock = clock::create_for_testing(ctx);
-    prover::delete_proof_calculation(proof_calc, &cleanup_clock);
+    prover::delete_proof_calculation(proof_calc, app_instance_id, &cleanup_clock);
     clock::destroy_for_testing(cleanup_clock);
     test_scenario::end(scenario);
 }
