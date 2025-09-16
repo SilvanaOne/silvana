@@ -28,10 +28,10 @@
   },
   "dependencies": {
     "@mysten/sui": "^1.38.0",
-    "@silvana-one/agent": "^1.0.39",
-    "@silvana-one/coordination": "^1.0.39",
-    "@silvana-one/mina-utils": "^1.0.39",
-    "@silvana-one/storage": "^1.0.39",
+    "@silvana-one/agent": "^1.0.40",
+    "@silvana-one/coordination": "^1.0.40",
+    "@silvana-one/mina-utils": "^1.0.40",
+    "@silvana-one/storage": "^1.0.40",
     "o1js": "2.4.0"
   }
 }
