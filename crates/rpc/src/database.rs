@@ -1277,7 +1277,6 @@ fn convert_agent_session_started_event(
     use sea_orm::ActiveValue;
 
     ActiveModel {
-        id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         developer: ActiveValue::Set(event.developer.clone()),
         agent: ActiveValue::Set(event.agent.clone()),
@@ -1296,7 +1295,6 @@ fn convert_agent_session_finished_event(
     use sea_orm::ActiveValue;
 
     ActiveModel {
-        id: ActiveValue::NotSet,
         coordinator_id: ActiveValue::Set(event.coordinator_id.clone()),
         session_id: ActiveValue::Set(event.session_id.clone()),
         session_log: ActiveValue::Set(event.session_log.clone()),

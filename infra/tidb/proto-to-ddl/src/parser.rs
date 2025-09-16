@@ -572,9 +572,11 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
     content.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", table_name));
     content.push_str("pub struct Model {\n");
 
-    // Primary key - special handling for job-related events
+    // Primary key - special handling for job-related and session-related events
     if message.name == "JobCreatedEvent" || message.name == "JobStartedEvent" || message.name == "JobFinishedEvent" {
         // job_id is the primary key, added with other fields
+    } else if message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent" {
+        // session_id is the primary key, added with other fields
     } else {
         content.push_str("    #[sea_orm(primary_key)]\n");
         content.push_str("    pub id: i64,\n");
@@ -604,6 +606,10 @@ fn generate_entity_file(message: &ProtoMessage, output_dir: &str) -> Result<()> 
             // job_id is the primary key for JobStartedEvent and JobFinishedEvent
             content.push_str("    #[sea_orm(primary_key)]\n");
             content.push_str("    pub job_id: String,\n");
+        } else if (message.name == "AgentSessionStartedEvent" || message.name == "AgentSessionFinishedEvent") && field.name == "session_id" {
+            // session_id is the primary key for AgentSessionStartedEvent and AgentSessionFinishedEvent
+            content.push_str("    #[sea_orm(primary_key)]\n");
+            content.push_str("    pub session_id: String,\n");
         } else {
             // Normal handling for other entities
             if field.has_sequences_option {

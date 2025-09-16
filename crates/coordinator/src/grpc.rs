@@ -4156,8 +4156,8 @@ impl CoordinatorService for CoordinatorServiceImpl {
             String::new()
         });
 
-        // Use job_id and session_id from request (required fields)
-        if req.job_id.is_empty() {
+        // Use job_id and session_id from request
+        if req.job_id.is_none() {
             warn!("AgentMessage received without job_id");
         }
 
@@ -4166,11 +4166,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
         }
 
         let session_id = req.session_id.clone();
-        let job_id = if !req.job_id.is_empty() {
-            Some(req.job_id.clone())
-        } else {
-            None
-        };
+        let job_id = req.job_id.clone();
 
         // Convert coordinator LogLevel to RPC LogLevel
         let rpc_log_level = match LogLevel::try_from(req.level).unwrap_or(LogLevel::Unspecified) {

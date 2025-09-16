@@ -433,7 +433,7 @@ message UpdateBlockSettlementTxIncludedInBlockResponse {
 
 // Agent Events
 message AgentMessageRequest {
-  string job_id = 1;
+  optional string job_id = 1;
   string session_id = 2;
   LogLevel level = 3;
   string message = 4;
