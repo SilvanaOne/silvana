@@ -8,7 +8,7 @@
 
 /// Maximum number of agent Docker containers that can run simultaneously.
 /// This limits the total parallel processing capacity of the coordinator.
-pub const MAX_CONCURRENT_AGENT_CONTAINERS: usize = 5;
+pub const MAX_CONCURRENT_AGENT_CONTAINERS: usize = 7;
 
 /// Size of the job selection pool buffer.
 /// The coordinator maintains a pool of jobs to choose from when scheduling work.

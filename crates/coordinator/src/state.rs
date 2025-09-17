@@ -304,6 +304,19 @@ impl SharedState {
         }
     }
 
+    /// Clear all current agents (used during force shutdown to clear phantom agents)
+    pub async fn clear_all_current_agents(&self) {
+        let mut current_agents = self.current_agents.write().await;
+        let count = current_agents.len();
+        if count > 0 {
+            warn!(
+                "Force clearing all {} current agents (phantom cleanup)",
+                count
+            );
+            current_agents.clear();
+        }
+    }
+
     pub async fn get_current_agent(&self, session_id: &str) -> Option<CurrentAgent> {
         let current_agents = self.current_agents.read().await;
         current_agents.get(session_id).cloned()
