@@ -1002,8 +1002,8 @@ impl DockerBufferProcessor {
                 continue;
             }
 
-            // Get next job from buffer
-            let started_job = self.state.get_next_started_job().await;
+            // Get next job from buffer using prioritized selection
+            let started_job = self.state.get_next_prioritized_started_job().await;
             if started_job.is_none() {
                 // No jobs in buffer, sleep briefly
                 sleep(Duration::from_secs(1)).await;

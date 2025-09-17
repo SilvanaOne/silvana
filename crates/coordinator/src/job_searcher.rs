@@ -243,6 +243,9 @@ impl JobSearcher {
                                     job.app_instance.clone(),
                                     job.job_sequence,
                                     memory_requirement,
+                                    job.app_instance_method.clone(),
+                                    job.block_number,
+                                    job.sequences.clone(),
                                 )
                                 .await;
 

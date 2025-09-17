@@ -33,6 +33,12 @@ pub struct StartedJob {
     pub app_instance: String,
     pub job_sequence: u64,
     pub memory_requirement: u64,
+    /// Job type (e.g., "settle", "merge", or other app_instance_method)
+    pub job_type: String,
+    /// Block number associated with the job
+    pub block_number: Option<u64>,
+    /// Sequences array (helpful for debugging and prioritization)
+    pub sequences: Option<Vec<u64>>,
 }
 
 /// Request to create a new job
@@ -61,6 +67,9 @@ pub struct CreateJobRequest {
 pub struct StartJobRequest {
     pub job_sequence: u64,
     pub memory_requirement: u64,
+    pub job_type: String,
+    pub block_number: Option<u64>,
+    pub sequences: Option<Vec<u64>>,
     pub _timestamp: Instant,
 }
 
@@ -566,6 +575,9 @@ impl SharedState {
         app_instance: String,
         job_sequence: u64,
         memory_requirement: u64,
+        job_type: String,
+        block_number: Option<u64>,
+        sequences: Option<Vec<u64>>,
     ) {
         let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
@@ -597,12 +609,18 @@ impl SharedState {
             entry.start_jobs[existing_index] = StartJobRequest {
                 job_sequence,
                 memory_requirement,
+                job_type,
+                block_number,
+                sequences,
                 _timestamp: Instant::now(),
             };
         } else {
             entry.start_jobs.push(StartJobRequest {
                 job_sequence,
                 memory_requirement,
+                job_type,
+                block_number,
+                sequences,
                 _timestamp: Instant::now(),
             });
         }
@@ -948,6 +966,7 @@ impl SharedState {
     }
 
     /// Get the next started job from the buffer (thread-safe)
+    #[allow(dead_code)]
     pub async fn get_next_started_job(&self) -> Option<StartedJob> {
         let mut buffer = self.started_jobs_buffer.lock().await;
         let job = buffer.pop_front();
@@ -959,6 +978,84 @@ impl SharedState {
             debug!("Started jobs buffer now contains {} jobs", buffer.len());
         }
         job
+    }
+
+    /// Get the next started job from the buffer using prioritized selection
+    /// Priority order:
+    /// 1. Settlement jobs (regardless of block)
+    /// 2. Jobs from lowest block (sorted by sequence array size, smallest first)
+    /// 3. Jobs from next block (sorted by sequence array size), etc.
+    pub async fn get_next_prioritized_started_job(&self) -> Option<StartedJob> {
+        let mut buffer = self.started_jobs_buffer.lock().await;
+
+        if buffer.is_empty() {
+            return None;
+        }
+
+        // Convert to Vec for sorting
+        let mut jobs: Vec<StartedJob> = buffer.drain(..).collect();
+
+        // Sort jobs by priority
+        jobs.sort_by(|a, b| {
+            // First priority: settlement jobs
+            let a_is_settlement = a.job_type == "settle";
+            let b_is_settlement = b.job_type == "settle";
+
+            match (a_is_settlement, b_is_settlement) {
+                (true, false) => return std::cmp::Ordering::Less,
+                (false, true) => return std::cmp::Ordering::Greater,
+                _ => {} // Both settlement or both non-settlement, continue to next criteria
+            }
+
+            // Second priority: block number (lower is better)
+            match (a.block_number, b.block_number) {
+                (Some(a_block), Some(b_block)) => {
+                    match a_block.cmp(&b_block) {
+                        std::cmp::Ordering::Equal => {
+                            // Same block, sort by sequences size (smaller first)
+                            let a_size = a.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                            let b_size = b.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                            match a_size.cmp(&b_size) {
+                                std::cmp::Ordering::Equal => {
+                                    // Same size, sort by job sequence
+                                    a.job_sequence.cmp(&b.job_sequence)
+                                }
+                                other => other
+                            }
+                        }
+                        other => other
+                    }
+                }
+                (None, Some(_)) => std::cmp::Ordering::Greater, // Jobs with no block go last
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, None) => {
+                    // Both have no block, sort by sequences size then job sequence
+                    let a_size = a.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                    let b_size = b.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                    match a_size.cmp(&b_size) {
+                        std::cmp::Ordering::Equal => a.job_sequence.cmp(&b.job_sequence),
+                        other => other
+                    }
+                }
+            }
+        });
+
+        // Take the first (highest priority) job
+        let selected_job = jobs.remove(0);
+
+        // Put remaining jobs back in buffer
+        for job in jobs {
+            buffer.push_back(job);
+        }
+
+        debug!(
+            "Selected prioritized job from buffer: app_instance={}, sequence={}, type={}, block={:?}, sequences_len={}",
+            selected_job.app_instance, selected_job.job_sequence, selected_job.job_type,
+            selected_job.block_number, selected_job.sequences.as_ref().map(|s| s.len()).unwrap_or(0)
+        );
+        debug!("Started jobs buffer now contains {} jobs", buffer.len());
+
+        Some(selected_job)
     }
 
     /// Get a started job from buffer that matches specific agent details
