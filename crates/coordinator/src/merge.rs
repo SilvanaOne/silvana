@@ -1,6 +1,6 @@
 use crate::constants::{
-    BLOCK_CREATION_CHECK_INTERVAL_SECS, MERGE_RETRY_DELAY_MS, PROOF_ANALYSIS_INTERVAL_SECS,
-    PROOF_MERGE_MAX_ATTEMPTS, PROOF_RESERVED_TIMEOUT_MS, PROOF_STARTED_TIMEOUT_MS,
+    BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS,
+    PROOF_RESERVED_TIMEOUT_MS, PROOF_STARTED_TIMEOUT_MS,
     PROOF_USED_MERGE_TIMEOUT_MS,
 };
 use anyhow::Result;
@@ -191,129 +191,35 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         );
     }
 
-    // Try to find and create merge jobs, with up to 10 attempts
-    let mut attempted_merges = Vec::new();
-    let mut merge_created = false;
+    // Find ALL merge opportunities at once
+    let merge_opportunities = find_all_proofs_to_merge(&block_proofs);
 
-    for attempt in 1..=PROOF_MERGE_MAX_ATTEMPTS {
-        // Refetch ProofCalculations on each attempt to get the latest state
-        // This is important because other coordinators might have updated them
-        let current_block_proofs = if attempt > 1 {
-            debug!(
-                "🔄 Refetching ProofCalculations to get latest state (attempt {})",
-                attempt
-            );
+    if merge_opportunities.is_empty() {
+        debug!(
+            "🚫 No merge opportunities found for block {} in app_instance {}",
+            proof_calc.block_number, app_instance
+        );
+    } else {
+        debug!(
+            "✨ Found {} merge opportunities for block {}",
+            merge_opportunities.len(),
+            proof_calc.block_number
+        );
 
-            // Fetch existing ProofCalculation for this block again
-            let updated_proof_calculation =
-                match fetch_proof_calculation(&app_instance_obj, proof_calc.block_number).await {
-                    Ok(Some(pc)) => {
-                        debug!(
-                            "📊 Refetched ProofCalculation for block {}",
-                            proof_calc.block_number
-                        );
-                        Some(pc)
-                    }
-                    Ok(None) => {
-                        debug!(
-                            "📋 Still no ProofCalculation found for block {}",
-                            proof_calc.block_number
-                        );
-                        None
-                    }
-                    Err(e) => {
-                        error!(
-                            "❌ Failed to refetch ProofCalculation for block {}: {}",
-                            proof_calc.block_number, e
-                        );
-                        None
-                    }
-                };
+        let mut successful_merges = 0;
+        let mut failed_merges = 0;
 
-            // Rebuild proof_infos with updated data (only from blockchain)
-            let mut updated_proof_infos = Vec::new();
-
-            // Only add existing proofs from refetched data with their actual status
-            if let Some(existing_proof_calc) = &updated_proof_calculation {
-                for existing_proof in &existing_proof_calc.proofs {
-                    updated_proof_infos.push(existing_proof.clone());
-                }
-            }
-
-            // Use the most recent ProofCalculation's start_sequence and end_sequence
-            // If no updated calculations exist, use the current one's values
-            let (latest_start_seq, latest_end_seq, latest_is_finished, latest_block_proof) =
-                if let Some(ref latest) = updated_proof_calculation {
-                    (
-                        latest.start_sequence,
-                        latest.end_sequence,
-                        latest.is_finished,
-                        latest.block_proof.clone(),
-                    )
-                } else {
-                    (
-                        start_sequence,
-                        end_sequence,
-                        is_finished,
-                        proof_calc.block_proof.clone(),
-                    )
-                };
-
-            let updated_block_proofs = ProofCalculation {
-                id: updated_proof_calculation
-                    .as_ref()
-                    .map(|p| p.id.clone())
-                    .unwrap_or_else(|| String::new()),
-                block_number: proof_calc.block_number,
-                start_sequence: latest_start_seq,
-                end_sequence: latest_end_seq,
-                proofs: updated_proof_infos,
-                block_proof: latest_block_proof,
-                is_finished: latest_is_finished,
-            };
-
-            // Debug: Print updated proof list after refetch
-            if !updated_block_proofs.proofs.is_empty() {
-                debug!("📝 Updated proof list after refetch (attempt {}):", attempt);
-                for (idx, proof) in updated_block_proofs.proofs.iter().enumerate() {
-                    let sequences_str = if proof.sequences.len() <= 10 {
-                        format!("{:?}", proof.sequences)
-                    } else {
-                        format!(
-                            "[{} sequences: {}..{}]",
-                            proof.sequences.len(),
-                            proof.sequences.first().unwrap_or(&0),
-                            proof.sequences.last().unwrap_or(&0)
-                        )
-                    };
-
-                    debug!(
-                        "   Proof #{}: sequences={}, status={:?}",
-                        idx + 1,
-                        sequences_str,
-                        proof.status
-                    );
-                }
-            }
-
-            updated_block_proofs
-        } else {
-            block_proofs.clone()
-        };
-
-        // Find proofs that can be merged, excluding already attempted ones
-        if let Some(merge_request) =
-            find_proofs_to_merge_excluding(&current_block_proofs, &attempted_merges)
-        {
+        // Try to create merge jobs for ALL opportunities
+        for (idx, merge_request) in merge_opportunities.iter().enumerate() {
             // Find the actual proof objects for more details
-            let proof1_details = current_block_proofs
+            let proof1_details = block_proofs
                 .proofs
                 .iter()
                 .find(|p| p.sequences == merge_request.sequences1)
                 .map(|p| format!("status={:?}", p.status))
                 .unwrap_or_else(|| "not found".to_string());
 
-            let proof2_details = current_block_proofs
+            let proof2_details = block_proofs
                 .proofs
                 .iter()
                 .find(|p| p.sequences == merge_request.sequences2)
@@ -321,9 +227,8 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 .unwrap_or_else(|| "not found".to_string());
 
             debug!(
-                "✨ Attempt {}/{}: Found merge opportunity - Sequences1: {:?} ({}), Sequences2: {:?} ({}), Is block proof: {}",
-                attempt,
-                PROOF_MERGE_MAX_ATTEMPTS,
+                "  Merge opportunity #{}: Sequences1: {:?} ({}), Sequences2: {:?} ({}), Is block proof: {}",
+                idx + 1,
                 merge_request.sequences1,
                 proof1_details,
                 merge_request.sequences2,
@@ -331,33 +236,28 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 merge_request.block_proof
             );
 
-            // Remember this attempt
-            attempted_merges.push((
-                merge_request.sequences1.clone(),
-                merge_request.sequences2.clone(),
-            ));
-
             // Find the proof statuses for the sequences to merge
-            let proof1_status = current_block_proofs
+            let proof1_status = block_proofs
                 .proofs
                 .iter()
                 .find(|p| p.sequences == merge_request.sequences1)
                 .map(|p| &p.status)
                 .unwrap_or(&ProofStatus::Calculated);
 
-            let proof2_status = current_block_proofs
+            let proof2_status = block_proofs
                 .proofs
                 .iter()
                 .find(|p| p.sequences == merge_request.sequences2)
                 .map(|p| &p.status)
                 .unwrap_or(&ProofStatus::Calculated);
 
-            // Try to create merge job with proof reservation
+            // Special logging for block 180
             if proof_calc.block_number == 180 {
-                info!("🔨 Block 180: Attempting to create merge job for {:?} + {:?}", 
+                info!("🔨 Block 180: Attempting to create merge job for {:?} + {:?}",
                       merge_request.sequences1, merge_request.sequences2);
             }
-            
+
+            // Try to create merge job with proof reservation
             match create_merge_job(
                 merge_request.sequences1.clone(),
                 merge_request.sequences2.clone(),
@@ -365,85 +265,63 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 app_instance,
                 proof1_status,
                 proof2_status,
-                &current_block_proofs,
+                &block_proofs,
                 state,
             )
             .await
             {
                 Ok(_) => {
                     if proof_calc.block_number == 180 {
-                        info!("✅ Block 180: Successfully created merge job on attempt {}", attempt);
+                        info!("✅ Block 180: Successfully created merge job");
                     }
                     debug!(
-                        "✅ Successfully created and reserved merge job for block {} on attempt {}",
-                        proof_calc.block_number, attempt
+                        "✅ Successfully created merge job #{} for block {}",
+                        idx + 1, proof_calc.block_number
                     );
-                    merge_created = true;
-                    break; // Successfully created a merge job, stop trying
+                    successful_merges += 1;
                 }
                 Err(e) => {
+                    let error_str = e.to_string();
                     if proof_calc.block_number == 180 {
                         info!("❌ Block 180: Failed to create merge job: {}", e);
                     }
-                    debug!(
-                        "ℹ️ Attempt {}/{}: Could not create merge job for block {} (sequences {:?} + {:?}): {}",
-                        attempt,
-                        PROOF_MERGE_MAX_ATTEMPTS,
-                        proof_calc.block_number,
-                        merge_request.sequences1,
-                        merge_request.sequences2,
-                        e
-                    );
 
-                    // Check if we should continue trying
-                    let error_str = e.to_string();
-                    if error_str.contains("already reserved") {
-                        debug!("   → Looking for other merge opportunities...");
-                        // Add a small delay before retrying to allow other coordinators to complete
-                        if attempt < PROOF_MERGE_MAX_ATTEMPTS {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(
-                                MERGE_RETRY_DELAY_MS,
-                            ))
-                            .await;
-                        }
-                        // Continue to next iteration to try another merge opportunity
-                    } else if error_str.contains("already Started and not timed out")
+                    // Log based on error type
+                    if error_str.contains("already reserved")
+                        || error_str.contains("already Started and not timed out")
                         || error_str.contains("Cannot merge")
                         || error_str.contains("Combined proof already exists")
-                        || error_str
-                            .contains("Cannot reserve proofs - likely taken by another coordinator")
+                        || error_str.contains("Cannot reserve proofs - likely taken by another coordinator")
                         || error_str.contains("Proofs not in reservable state")
                     {
-                        // These are expected conditions in a concurrent environment, not errors
+                        // These are expected conditions in a concurrent environment
                         debug!(
-                            "   → Expected condition, will try other opportunities: {}",
-                            e
+                            "ℹ️ Merge job #{} for block {} skipped (expected condition): {}",
+                            idx + 1, proof_calc.block_number, e
                         );
                     } else {
-                        warn!("   → Unexpected error, will try other opportunities: {}", e);
+                        warn!(
+                            "⚠️ Failed to create merge job #{} for block {}: {}",
+                            idx + 1, proof_calc.block_number, e
+                        );
                     }
+                    failed_merges += 1;
                 }
             }
-        } else {
-            debug!(
-                "🚫 No more merge opportunities found for block {} after {} attempt(s)",
-                proof_calc.block_number, attempt
-            );
-            break; // No more merge opportunities available
         }
-    }
 
-    if !merge_created && !attempted_merges.is_empty() {
-        debug!(
-            "ℹ️ No merge job created for block {} after {} attempts (proofs may be in progress)",
-            proof_calc.block_number,
-            attempted_merges.len()
-        );
-    } else if !merge_created {
-        debug!(
-            "🚫 No merge opportunities found for block {} in app_instance {}",
-            proof_calc.block_number, app_instance
-        );
+        // Log summary
+        if successful_merges > 0 {
+            info!(
+                "📊 Block {} merge jobs: {} created successfully, {} skipped/failed",
+                proof_calc.block_number, successful_merges, failed_merges
+            );
+        } else if failed_merges > 0 {
+            debug!(
+                "ℹ️ Block {} merge jobs: all {} opportunities were skipped (proofs may be in progress)",
+                proof_calc.block_number, failed_merges
+            );
+        }
     }
 
     Ok(())
@@ -720,6 +598,195 @@ fn find_proofs_to_merge_excluding(
 #[allow(dead_code)]
 pub fn find_proofs_to_merge(block_proofs: &ProofCalculation) -> Option<MergeRequest> {
     find_proofs_to_merge_excluding(block_proofs, &[])
+}
+
+/// Find ALL merge opportunities in a ProofCalculation
+/// This function returns all possible merges following the binary tree algorithm
+pub fn find_all_proofs_to_merge(block_proofs: &ProofCalculation) -> Vec<MergeRequest> {
+    let mut merge_opportunities = Vec::new();
+
+    if block_proofs.is_finished {
+        return merge_opportunities;
+    }
+
+    let current_time = chrono::Utc::now().timestamp() as u64 * 1000;
+    let start_seq = block_proofs.start_sequence;
+
+    // CASE 1: end_sequence is known - use deterministic binary split
+    if let Some(end_seq) = block_proofs.end_sequence {
+        debug!("Block {} has known end_sequence={}, finding all deterministic binary tree merges",
+               block_proofs.block_number, end_seq);
+
+        // First, check if we can create the block proof directly
+        let full_range: Vec<u64> = (start_seq..=end_seq).collect();
+        let block_proof_exists = block_proofs.proofs.iter()
+            .any(|p| arrays_equal(&p.sequences, &full_range));
+
+        if !block_proof_exists {
+            // Try to create the block proof using binary splits
+            if let Some(split) = find_binary_split_point(start_seq, end_seq) {
+                let left_range: Vec<u64> = (start_seq..split).collect();
+                let right_range: Vec<u64> = (split..=end_seq).collect();
+
+                // Check if both halves exist and are available
+                let left_proof = block_proofs.proofs.iter()
+                    .find(|p| arrays_equal(&p.sequences, &left_range));
+                let right_proof = block_proofs.proofs.iter()
+                    .find(|p| arrays_equal(&p.sequences, &right_range));
+
+                if let (Some(left), Some(right)) = (left_proof, right_proof) {
+                    if is_proof_available(left, current_time) && is_proof_available(right, current_time) {
+                        debug!("Found block proof merge: {:?} + {:?}", left_range, right_range);
+                        merge_opportunities.push(MergeRequest {
+                            sequences1: left_range,
+                            sequences2: right_range,
+                            block_proof: true,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Find ALL intermediate merges needed for target range
+        find_all_merges_for_target_range(start_seq, end_seq, block_proofs, current_time, &mut merge_opportunities);
+    }
+
+    // CASE 2: end_sequence is unknown - build binary tree from bottom up
+    if block_proofs.end_sequence.is_none() {
+        debug!("Block {} has unknown end_sequence, finding all binary tree merges from bottom up",
+               block_proofs.block_number);
+
+        // Try merging at each level, starting from singles (level 1)
+        let mut level = 1u64;
+        while level <= 256 { // Reasonable upper bound
+            // Find all proofs at this level
+            let proofs_at_level: Vec<&Proof> = block_proofs.proofs.iter()
+                .filter(|p| p.sequences.len() as u64 == level)
+                .collect();
+
+            if proofs_at_level.is_empty() {
+                level *= 2;
+                continue;
+            }
+
+            // Try to find ALL mergeable pairs at this level
+            for proof1 in &proofs_at_level {
+                if !is_proof_available(proof1, current_time) {
+                    continue;
+                }
+
+                let proof1_start = *proof1.sequences.first().unwrap();
+                let proof1_end = *proof1.sequences.last().unwrap();
+
+                // For binary tree pattern, we want to merge aligned chunks
+                let relative_start = proof1_start - start_seq;
+                let chunk_size = level * 2;
+
+                // Check if this proof is aligned for merging at the next level
+                if relative_start % chunk_size != 0 {
+                    continue;
+                }
+
+                // Look for the adjacent proof to merge with
+                let expected_next_start = proof1_end + 1;
+                let expected_next_end = expected_next_start + level - 1;
+                let expected_next_sequences: Vec<u64> = (expected_next_start..=expected_next_end).collect();
+
+                // Find the adjacent proof
+                let proof2 = block_proofs.proofs.iter()
+                    .find(|p| arrays_equal(&p.sequences, &expected_next_sequences));
+
+                if let Some(proof2) = proof2 {
+                    if !is_proof_available(proof2, current_time) {
+                        continue;
+                    }
+
+                    // Check if the combined proof already exists
+                    let combined: Vec<u64> = [&proof1.sequences[..], &proof2.sequences[..]].concat();
+                    let already_exists = block_proofs.proofs.iter()
+                        .any(|p| arrays_equal(&p.sequences, &combined) && is_proof_active_or_completed(p, current_time));
+
+                    if !already_exists {
+                        debug!("Found level {} merge: {:?} + {:?}", level, proof1.sequences, proof2.sequences);
+                        merge_opportunities.push(MergeRequest {
+                            sequences1: proof1.sequences.clone(),
+                            sequences2: proof2.sequences.clone(),
+                            block_proof: false,
+                        });
+                    }
+                }
+            }
+
+            // Move to the next level
+            level *= 2;
+        }
+    }
+
+    debug!("Found {} merge opportunities for block {}", merge_opportunities.len(), block_proofs.block_number);
+    merge_opportunities
+}
+
+/// Helper function to find all merges needed for a target range
+fn find_all_merges_for_target_range(
+    start_seq: u64,
+    end_seq: u64,
+    block_proofs: &ProofCalculation,
+    current_time: u64,
+    merge_opportunities: &mut Vec<MergeRequest>,
+) {
+    // Recursively find all binary splits and check for merge opportunities
+    fn recursive_find_merges(
+        start: u64,
+        end: u64,
+        block_proofs: &ProofCalculation,
+        current_time: u64,
+        merge_opportunities: &mut Vec<MergeRequest>,
+    ) {
+        let range_sequences: Vec<u64> = (start..=end).collect();
+
+        // Check if this range already exists
+        let range_exists = block_proofs.proofs.iter()
+            .any(|p| arrays_equal(&p.sequences, &range_sequences));
+
+        if range_exists {
+            return; // This range already exists, no need to merge
+        }
+
+        // Try binary split
+        if let Some(split) = find_binary_split_point(start, end) {
+            let left_range: Vec<u64> = (start..split).collect();
+            let right_range: Vec<u64> = (split..=end).collect();
+
+            // Check if both parts exist
+            let left_proof = block_proofs.proofs.iter()
+                .find(|p| arrays_equal(&p.sequences, &left_range));
+            let right_proof = block_proofs.proofs.iter()
+                .find(|p| arrays_equal(&p.sequences, &right_range));
+
+            if let (Some(left), Some(right)) = (left_proof, right_proof) {
+                if is_proof_available(left, current_time) && is_proof_available(right, current_time) {
+                    // Check if we haven't already added this merge
+                    let already_added = merge_opportunities.iter()
+                        .any(|m| arrays_equal(&m.sequences1, &left_range) && arrays_equal(&m.sequences2, &right_range));
+
+                    if !already_added {
+                        debug!("Found intermediate merge: {:?} + {:?}", left_range, right_range);
+                        merge_opportunities.push(MergeRequest {
+                            sequences1: left_range.clone(),
+                            sequences2: right_range.clone(),
+                            block_proof: false,
+                        });
+                    }
+                }
+            }
+
+            // Recursively check both halves
+            recursive_find_merges(start, split - 1, block_proofs, current_time, merge_opportunities);
+            recursive_find_merges(split, end, block_proofs, current_time, merge_opportunities);
+        }
+    }
+
+    recursive_find_merges(start_seq, end_seq, block_proofs, current_time, merge_opportunities);
 }
 
 fn arrays_equal(a: &[u64], b: &[u64]) -> bool {
