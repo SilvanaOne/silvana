@@ -1,5 +1,5 @@
 use crate::constants::MULTICALL_INTERVAL_SECS;
-use crate::error::{CoordinatorError, Result};
+use crate::error::Result;
 use crate::metrics::CoordinatorMetrics;
 use crate::state::{SharedState, StartedJob, TerminateJobRequest};
 use std::sync::Arc;
@@ -224,7 +224,7 @@ impl MulticallProcessor {
 
         let mut sui_interface = sui::SilvanaSuiInterface::new();
         match sui_interface
-            .multicall_job_operations(current_batch_operations, None)
+            .multicall_job_operations(current_batch_operations.clone(), None)
             .await
         {
             Ok(result) => {
@@ -302,10 +302,23 @@ impl MulticallProcessor {
                 );
                 error!("{}", full_error);
 
-                // Send error event to RPC
+                // CRITICAL: Return operations to queue for retry instead of losing them
+                let mut total_returned = 0;
+                for operations in current_batch_operations {
+                    let op_count = operations.total_operations();
+                    self.state.return_operations_to_queue(operations).await;
+                    total_returned += op_count;
+                }
+
+                warn!(
+                    "Returned {} operations to queue for retry after multicall failure: {}",
+                    total_returned, error_msg
+                );
+
+                // Send error event to RPC with retry info
                 self.state.send_coordinator_message_event(
                     proto::LogLevel::Error,
-                    full_error
+                    format!("{} - Returned {} operations to queue for retry", full_error, total_returned)
                 );
 
                 // Report failed multicall metrics
@@ -313,10 +326,9 @@ impl MulticallProcessor {
                     metrics.increment_multicall_batch_failed();
                 }
 
-                return Err(CoordinatorError::Other(anyhow::anyhow!(
-                    "Batch multicall failed: {}",
-                    error_msg
-                )));
+                // Don't return error - operations are safely back in queue
+                // Next multicall cycle will retry them
+                info!("Operations returned to queue, will retry in next multicall cycle");
             }
         }
 

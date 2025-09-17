@@ -90,6 +90,7 @@ public fun create_app(
     registry: &mut SilvanaRegistry,
     settlement_chains: vector<String>,
     settlement_addresses: vector<Option<String>>,
+    block_creation_interval_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): App {
@@ -101,7 +102,7 @@ public fun create_app(
         option::none(), // description
         settlement_chains,
         settlement_addresses,
-        3 * 60 * 1000, // 3 minute between blocks
+        block_creation_interval_ms,
         clock,
         ctx,
     );
