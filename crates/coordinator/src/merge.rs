@@ -353,6 +353,11 @@ fn largest_power_of_two_below(n: u64) -> u64 {
 
 // Find the deterministic split point for a range when end_sequence is known
 fn find_binary_split_point(start: u64, end: u64) -> Option<u64> {
+    // Cannot split a single element or invalid range
+    if start >= end {
+        return None;
+    }
+
     let total_sequences = end - start + 1;
 
     if is_power_of_two(total_sequences) {
@@ -742,6 +747,11 @@ fn find_all_merges_for_target_range(
         current_time: u64,
         merge_opportunities: &mut Vec<MergeRequest>,
     ) {
+        // BASE CASE: Invalid range
+        if start > end {
+            return;
+        }
+
         let range_sequences: Vec<u64> = (start..=end).collect();
 
         // Check if this range already exists
@@ -752,7 +762,7 @@ fn find_all_merges_for_target_range(
             return; // This range already exists, no need to merge
         }
 
-        // Try binary split
+        // Try binary split (only if range has at least 2 elements)
         if let Some(split) = find_binary_split_point(start, end) {
             let left_range: Vec<u64> = (start..split).collect();
             let right_range: Vec<u64> = (split..=end).collect();
@@ -780,9 +790,15 @@ fn find_all_merges_for_target_range(
                 }
             }
 
-            // Recursively check both halves
-            recursive_find_merges(start, split - 1, block_proofs, current_time, merge_opportunities);
-            recursive_find_merges(split, end, block_proofs, current_time, merge_opportunities);
+            // Recursively check both halves with proper bounds checking
+            // Left half: from start to split-1
+            if start < split && split > 0 {
+                recursive_find_merges(start, split - 1, block_proofs, current_time, merge_opportunities);
+            }
+            // Right half: from split to end
+            if split <= end {
+                recursive_find_merges(split, end, block_proofs, current_time, merge_opportunities);
+            }
         }
     }
 
