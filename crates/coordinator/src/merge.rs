@@ -32,6 +32,17 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
         }
     };
 
+    // Check if this block is too far ahead of the last proved block
+    // Only create merge jobs for blocks within MAX_BLOCK_LOOKAHEAD blocks of last_proved_block
+    if proof_calc.block_number > app_instance_obj.last_proved_block_number + crate::constants::MAX_BLOCK_LOOKAHEAD {
+        debug!(
+            "⏭️ Skipping merge job creation for block {} (too far ahead, last_proved={})",
+            proof_calc.block_number,
+            app_instance_obj.last_proved_block_number
+        );
+        return Ok(());
+    }
+
     // Fetch existing ProofCalculation for this block to get full info including start_sequence, end_sequence, is_finished
     let existing_proof_calculation =
         match fetch_proof_calculation(&app_instance_obj, proof_calc.block_number).await {

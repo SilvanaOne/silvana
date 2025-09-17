@@ -17,7 +17,11 @@ pub const JOB_SELECTION_POOL_SIZE: usize = 30;
 
 /// Maximum number of jobs to process per app instance in a single batch.
 /// This prevents any single app instance from monopolizing processing resources.
-pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 100;
+pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 1000;
+
+/// Maximum number of blocks to look ahead when creating merge jobs.
+/// This prevents creating too many jobs for future blocks that can't be processed yet.
+pub const MAX_BLOCK_LOOKAHEAD: u64 = 10;
 
 // =============================================================================
 // Delays and Intervals (in milliseconds)
@@ -121,7 +125,7 @@ pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
 /// Memory calculation coefficient for job buffer sizing.
 /// Multiplies available memory to allow more jobs to be buffered between multicalls.
 /// Higher coefficient = more jobs in buffer to avoid running out before next multicall.
-pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 5.0;
+pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 3.0;
 
 /// Interval for reconciliation task (in seconds).
 /// The coordinator reconciles its state with the blockchain at this interval.
