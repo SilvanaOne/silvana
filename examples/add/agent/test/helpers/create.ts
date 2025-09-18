@@ -261,7 +261,7 @@ export async function createApp(params: {
       tx.object(registryAddress), // SilvanaRegistry reference
       tx.pure.vector("string", chains), // vector of settlement chains
       tx.pure("vector<option<string>>", addresses), // vector of Option<String>
-      tx.pure("u64", 5 * 60 * 1000), // block creation interval in milliseconds
+      tx.pure("u64", 10 * 60 * 1000), // block creation interval in milliseconds
       tx.object(SUI_CLOCK_OBJECT_ID), // Clock reference
     ],
   });
