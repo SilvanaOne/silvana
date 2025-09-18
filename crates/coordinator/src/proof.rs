@@ -287,16 +287,23 @@ pub async fn analyze_proof_completion(
     }
 
     // Step 2: Process blocks in order from last_proved_block_number + 1 to current_block_number for merge opportunities
-    let blocks_to_analyze = (current_block_number - last_proved_block_number).saturating_sub(0);
+    // But limit to MAX_BLOCK_LOOKAHEAD blocks ahead to prevent creating too many future jobs
+    let max_block_to_analyze = std::cmp::min(
+        current_block_number,
+        last_proved_block_number + crate::constants::MAX_BLOCK_LOOKAHEAD
+    );
+
+    let blocks_to_analyze = max_block_to_analyze.saturating_sub(last_proved_block_number);
     debug!(
-        "🔄 Processing {} blocks from {} to {} for merge opportunities",
+        "🔄 Processing {} blocks from {} to {} for merge opportunities (limited by lookahead of {})",
         blocks_to_analyze,
         last_proved_block_number + 1,
-        current_block_number
+        max_block_to_analyze,
+        crate::constants::MAX_BLOCK_LOOKAHEAD
     );
 
     let mut analyzed_blocks = 0;
-    for block_number in (last_proved_block_number + 1)..=current_block_number {
+    for block_number in (last_proved_block_number + 1)..=max_block_to_analyze {
         analyzed_blocks += 1;
         let block_start = std::time::Instant::now();
         debug!(

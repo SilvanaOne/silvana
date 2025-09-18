@@ -8,7 +8,7 @@
 
 /// Maximum number of agent Docker containers that can run simultaneously.
 /// This limits the total parallel processing capacity of the coordinator.
-pub const MAX_CONCURRENT_AGENT_CONTAINERS: usize = 5;
+pub const MAX_CONCURRENT_AGENT_CONTAINERS: usize = 7;
 
 /// Size of the job selection pool buffer.
 /// The coordinator maintains a pool of jobs to choose from when scheduling work.
@@ -17,7 +17,11 @@ pub const JOB_SELECTION_POOL_SIZE: usize = 30;
 
 /// Maximum number of jobs to process per app instance in a single batch.
 /// This prevents any single app instance from monopolizing processing resources.
-pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 100;
+pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 1000;
+
+/// Maximum number of blocks to look ahead when creating merge jobs.
+/// This prevents creating too many jobs for future blocks that can't be processed yet.
+pub const MAX_BLOCK_LOOKAHEAD: u64 = 10;
 
 // =============================================================================
 // Delays and Intervals (in milliseconds)
@@ -83,10 +87,6 @@ pub const RETRY_MAX_ATTEMPTS: usize = 100;
 /// If no data is received from a stream within this time, it's considered failed.
 pub const GRPC_STREAM_TIMEOUT_SECS: u64 = 30;
 
-/// Maximum number of attempts to merge proofs into a single block.
-/// If merging fails this many times, the block creation is abandoned.
-pub const PROOF_MERGE_MAX_ATTEMPTS: usize = 10;
-
 // =============================================================================
 // System Requirements and Resource Limits
 // =============================================================================
@@ -121,7 +121,7 @@ pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
 /// Memory calculation coefficient for job buffer sizing.
 /// Multiplies available memory to allow more jobs to be buffered between multicalls.
 /// Higher coefficient = more jobs in buffer to avoid running out before next multicall.
-pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 5.0;
+pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 2.0;
 
 /// Interval for reconciliation task (in seconds).
 /// The coordinator reconciles its state with the blockchain at this interval.
@@ -172,8 +172,14 @@ pub const JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS: u64 = 5;
 #[cfg(test)]
 pub const JOB_PROCESSING_CHECK_DELAY_MS: u64 = 10;
 
-/// Delay after merge attempt failure (in milliseconds).
+/// DEPRECATED: No longer used as we now find and create ALL merge opportunities at once
+/// Previously: Delay after merge attempt failure (in milliseconds).
 /// Wait time before retrying a failed merge operation.
+#[deprecated(
+    since = "1.0.0",
+    note = "Replaced with find_all_proofs_to_merge that finds all opportunities at once"
+)]
+#[allow(dead_code)]
 pub const MERGE_RETRY_DELAY_MS: u64 = 500;
 
 /// Delay for blockchain state propagation (in milliseconds).

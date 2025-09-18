@@ -33,6 +33,12 @@ pub struct StartedJob {
     pub app_instance: String,
     pub job_sequence: u64,
     pub memory_requirement: u64,
+    /// Job type (e.g., "settle", "merge", or other app_instance_method)
+    pub job_type: String,
+    /// Block number associated with the job
+    pub block_number: Option<u64>,
+    /// Sequences array (helpful for debugging and prioritization)
+    pub sequences: Option<Vec<u64>>,
 }
 
 /// Request to create a new job
@@ -61,6 +67,9 @@ pub struct CreateJobRequest {
 pub struct StartJobRequest {
     pub job_sequence: u64,
     pub memory_requirement: u64,
+    pub job_type: String,
+    pub block_number: Option<u64>,
+    pub sequences: Option<Vec<u64>>,
     pub _timestamp: Instant,
 }
 
@@ -109,6 +118,7 @@ pub struct SubmitProofRequest {
     pub prover_memory: u64,
     pub cpu_time: u64,
     pub _timestamp: Instant,
+    pub retry_count: u32,
 }
 
 /// Request to create an app job (e.g., settlement job) through multicall
@@ -249,12 +259,12 @@ impl SharedState {
         settlement_chain: Option<String>,
     ) -> Result<(), String> {
         let mut current_agents = self.current_agents.write().await;
-        
+
         // Get existing agent or return error
         let existing_agent = current_agents
             .get(session_id)
             .ok_or_else(|| format!("Session {} not found", session_id))?;
-        
+
         // Check if session already has a different settlement chain
         if let Some(existing_chain) = &existing_agent.settlement_chain {
             if let Some(new_chain) = &settlement_chain {
@@ -268,7 +278,7 @@ impl SharedState {
             // If already has a chain and new is None or same, keep existing
             return Ok(());
         }
-        
+
         // Create updated agent with same identity but new settlement chain
         let updated_agent = CurrentAgent {
             session_id: session_id.to_string(),
@@ -277,9 +287,9 @@ impl SharedState {
             agent_method: existing_agent.agent_method.clone(),
             settlement_chain: settlement_chain.clone(),
         };
-        
+
         current_agents.insert(session_id.to_string(), updated_agent.clone());
-        
+
         if let Some(chain) = settlement_chain {
             debug!(
                 "Set settlement chain '{}' for session {}: {}/{}/{}",
@@ -290,7 +300,7 @@ impl SharedState {
                 updated_agent.agent_method
             );
         }
-        
+
         Ok(())
     }
 
@@ -301,6 +311,19 @@ impl SharedState {
                 "Clearing current agent: {}/{}/{} (session: {})",
                 agent.developer, agent.agent, agent.agent_method, session_id
             );
+        }
+    }
+
+    /// Clear all current agents (used during force shutdown to clear phantom agents)
+    pub async fn clear_all_current_agents(&self) {
+        let mut current_agents = self.current_agents.write().await;
+        let count = current_agents.len();
+        if count > 0 {
+            warn!(
+                "Force clearing all {} current agents (phantom cleanup)",
+                count
+            );
+            current_agents.clear();
         }
     }
 
@@ -489,7 +512,7 @@ impl SharedState {
     pub fn is_settle_only(&self) -> bool {
         self.settle_only.load(Ordering::Acquire)
     }
-    
+
     /// Check if there are any settle jobs pending in the multicall requests
     pub async fn has_settle_jobs_pending(&self) -> bool {
         let requests = self.multicall_requests.lock().await;
@@ -553,6 +576,9 @@ impl SharedState {
         app_instance: String,
         job_sequence: u64,
         memory_requirement: u64,
+        job_type: String,
+        block_number: Option<u64>,
+        sequences: Option<Vec<u64>>,
     ) {
         let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
@@ -584,12 +610,18 @@ impl SharedState {
             entry.start_jobs[existing_index] = StartJobRequest {
                 job_sequence,
                 memory_requirement,
+                job_type,
+                block_number,
+                sequences,
                 _timestamp: Instant::now(),
             };
         } else {
             entry.start_jobs.push(StartJobRequest {
                 job_sequence,
                 memory_requirement,
+                job_type,
+                block_number,
+                sequences,
                 _timestamp: Instant::now(),
             });
         }
@@ -935,6 +967,7 @@ impl SharedState {
     }
 
     /// Get the next started job from the buffer (thread-safe)
+    #[allow(dead_code)]
     pub async fn get_next_started_job(&self) -> Option<StartedJob> {
         let mut buffer = self.started_jobs_buffer.lock().await;
         let job = buffer.pop_front();
@@ -946,6 +979,91 @@ impl SharedState {
             debug!("Started jobs buffer now contains {} jobs", buffer.len());
         }
         job
+    }
+
+    /// Get the next started job from the buffer using prioritized selection
+    /// Priority order:
+    /// 1. Settlement jobs (regardless of block)
+    /// 2. Jobs from lowest block (sorted by sequence array size, smallest first)
+    /// 3. Jobs from next block (sorted by sequence array size), etc.
+    pub async fn get_next_prioritized_started_job(&self) -> Option<StartedJob> {
+        let mut buffer = self.started_jobs_buffer.lock().await;
+
+        if buffer.is_empty() {
+            return None;
+        }
+
+        // Convert to Vec for sorting
+        let mut jobs: Vec<StartedJob> = buffer.drain(..).collect();
+
+        // Sort jobs by priority
+        jobs.sort_by(|a, b| {
+            // First priority: settlement jobs
+            let a_is_settlement = a.job_type == "settle";
+            let b_is_settlement = b.job_type == "settle";
+
+            match (a_is_settlement, b_is_settlement) {
+                (true, false) => return std::cmp::Ordering::Less,
+                (false, true) => return std::cmp::Ordering::Greater,
+                _ => {} // Both settlement or both non-settlement, continue to next criteria
+            }
+
+            // Second priority: block number (lower is better)
+            match (a.block_number, b.block_number) {
+                (Some(a_block), Some(b_block)) => {
+                    match a_block.cmp(&b_block) {
+                        std::cmp::Ordering::Equal => {
+                            // Same block, sort by sequences size (smaller first)
+                            let a_size = a.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                            let b_size = b.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                            match a_size.cmp(&b_size) {
+                                std::cmp::Ordering::Equal => {
+                                    // Same size, sort by job sequence
+                                    a.job_sequence.cmp(&b.job_sequence)
+                                }
+                                other => other,
+                            }
+                        }
+                        other => other,
+                    }
+                }
+                (None, Some(_)) => std::cmp::Ordering::Greater, // Jobs with no block go last
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, None) => {
+                    // Both have no block, sort by sequences size then job sequence
+                    let a_size = a.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                    let b_size = b.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                    match a_size.cmp(&b_size) {
+                        std::cmp::Ordering::Equal => a.job_sequence.cmp(&b.job_sequence),
+                        other => other,
+                    }
+                }
+            }
+        });
+
+        // Take the first (highest priority) job
+        let selected_job = jobs.remove(0);
+
+        // Put remaining jobs back in buffer
+        for job in jobs {
+            buffer.push_back(job);
+        }
+
+        debug!(
+            "Selected prioritized job from buffer: app_instance={}, sequence={}, type={}, block={:?}, sequences_len={}",
+            selected_job.app_instance,
+            selected_job.job_sequence,
+            selected_job.job_type,
+            selected_job.block_number,
+            selected_job
+                .sequences
+                .as_ref()
+                .map(|s| s.len())
+                .unwrap_or(0)
+        );
+        debug!("Started jobs buffer now contains {} jobs", buffer.len());
+
+        Some(selected_job)
     }
 
     /// Get a started job from buffer that matches specific agent details
@@ -1000,13 +1118,18 @@ impl SharedState {
 
                                         // Check if session already has a settlement chain
                                         let current_agents = self.current_agents.read().await;
-                                        if let Some(current_agent) = current_agents.get(session_id) {
-                                            if let Some(session_chain) = &current_agent.settlement_chain {
+                                        if let Some(current_agent) = current_agents.get(session_id)
+                                        {
+                                            if let Some(session_chain) =
+                                                &current_agent.settlement_chain
+                                            {
                                                 // Session is locked to a chain, only accept jobs for that chain
                                                 if job_chain.as_ref() != Some(session_chain) {
                                                     debug!(
                                                         "Settlement job {} for chain {:?} doesn't match session chain {}, skipping",
-                                                        started_job.job_sequence, job_chain, session_chain
+                                                        started_job.job_sequence,
+                                                        job_chain,
+                                                        session_chain
                                                     );
                                                     checked_jobs.push(started_job);
                                                     continue;
@@ -1014,7 +1137,7 @@ impl SharedState {
                                             }
                                         }
                                     }
-                                    
+
                                     debug!(
                                         "Found matching buffer job: app_instance={}, sequence={}, dev={}, agent={}, method={}",
                                         started_job.app_instance,
@@ -1095,10 +1218,177 @@ impl SharedState {
     pub async fn get_started_jobs_count(&self) -> usize {
         self.started_jobs_buffer.lock().await.len()
     }
-    
+
     /// Get the current size of the started jobs buffer (for metrics)
     pub async fn get_started_jobs_buffer_size(&self) -> usize {
         self.started_jobs_buffer.lock().await.len()
+    }
+
+    /// Return operations back to the multicall queue (used when multicall fails)
+    pub async fn return_operations_to_queue(&self, operations: sui::MulticallOperations) {
+        let app_instance = normalize_app_instance_id(&operations.app_instance);
+        let mut requests = self.multicall_requests.lock().await;
+
+        let entry = requests
+            .entry(app_instance.clone())
+            .or_insert_with(|| MulticallRequests {
+                _app_instance: app_instance.clone(),
+                create_jobs: Vec::new(),
+                start_jobs: Vec::new(),
+                complete_jobs: Vec::new(),
+                fail_jobs: Vec::new(),
+                terminate_jobs: Vec::new(),
+                update_state_for_sequences: Vec::new(),
+                submit_proofs: Vec::new(),
+                create_app_jobs: Vec::new(),
+                create_merge_jobs: Vec::new(),
+            });
+
+        // Count items before consuming them
+        let create_merge_count = operations.create_merge_jobs.len();
+        let submit_proofs_count = operations.submit_proofs.len();
+        let update_state_count = operations.update_state_for_sequences.len();
+        let start_count = operations.start_job_sequences.len();
+        let complete_count = operations.complete_job_sequences.len();
+        let fail_count = operations.fail_job_sequences.len();
+        let terminate_count = operations.terminate_job_sequences.len();
+
+        // Return create merge jobs
+        for (block_number, sequences, sequences1, sequences2, job_description) in
+            operations.create_merge_jobs
+        {
+            entry.create_merge_jobs.push(CreateMergeJobRequest {
+                block_number,
+                sequences,
+                sequences1,
+                sequences2,
+                job_description,
+                _timestamp: Instant::now(),
+            });
+        }
+
+        // Return submit proofs with incremented retry count
+        for (
+            block_number,
+            sequences,
+            merged_sequences_1,
+            merged_sequences_2,
+            job_id,
+            da_hash,
+            cpu_cores,
+            prover_architecture,
+            prover_memory,
+            cpu_time,
+        ) in operations.submit_proofs
+        {
+            // Find existing retry count for this proof
+            let retry_count = entry
+                .submit_proofs
+                .iter()
+                .find(|p| p.block_number == block_number && p.sequences == sequences)
+                .map(|p| p.retry_count)
+                .unwrap_or(0)
+                + 1;
+
+            // Skip if we've exceeded max retries
+            const MAX_RETRY_COUNT: u32 = 5;
+            if retry_count > MAX_RETRY_COUNT {
+                error!(
+                    "Proof submission for block {} sequences {:?} after {} retries",
+                    block_number,
+                    sequences,
+                    retry_count - 1
+                );
+            }
+
+            entry.submit_proofs.push(SubmitProofRequest {
+                block_number,
+                sequences,
+                merged_sequences_1,
+                merged_sequences_2,
+                job_id,
+                da_hash,
+                cpu_cores,
+                prover_architecture,
+                prover_memory,
+                cpu_time,
+                _timestamp: Instant::now(),
+                retry_count,
+            });
+        }
+
+        // Return update state operations
+        for (sequence, new_state_data, new_data_availability_hash) in
+            operations.update_state_for_sequences
+        {
+            entry
+                .update_state_for_sequences
+                .push(UpdateStateForSequenceRequest {
+                    sequence,
+                    new_state_data,
+                    new_data_availability_hash,
+                    _timestamp: Instant::now(),
+                });
+        }
+
+        // Return start jobs - we only have sequences and memory requirements, not full metadata
+        for (i, job_sequence) in operations.start_job_sequences.iter().enumerate() {
+            let memory_requirement = operations
+                .start_job_memory_requirements
+                .get(i)
+                .copied()
+                .unwrap_or(0);
+            entry.start_jobs.push(StartJobRequest {
+                job_sequence: *job_sequence,
+                memory_requirement,
+                job_type: String::new(), // Lost metadata
+                block_number: None,      // Lost metadata
+                sequences: None,         // Lost metadata
+                _timestamp: Instant::now(),
+            });
+        }
+
+        // Return complete jobs
+        for job_sequence in operations.complete_job_sequences {
+            entry.complete_jobs.push(CompleteJobRequest {
+                job_sequence,
+                _timestamp: Instant::now(),
+            });
+        }
+
+        // Return fail jobs
+        for (i, job_sequence) in operations.fail_job_sequences.iter().enumerate() {
+            let error_message = operations
+                .fail_errors
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| "Requeued after multicall failure".to_string());
+            entry.fail_jobs.push(FailJobRequest {
+                job_sequence: *job_sequence,
+                error: error_message,
+                _timestamp: Instant::now(),
+            });
+        }
+
+        // Return terminate jobs
+        for job_sequence in operations.terminate_job_sequences {
+            entry.terminate_jobs.push(TerminateJobRequest {
+                job_sequence,
+                _timestamp: Instant::now(),
+            });
+        }
+
+        debug!(
+            "Returned operations to queue for app_instance {}: {} create_merge, {} submit_proofs, {} update_state, {} start, {} complete, {} fail, {} terminate",
+            app_instance,
+            create_merge_count,
+            submit_proofs_count,
+            update_state_count,
+            start_count,
+            complete_count,
+            fail_count,
+            terminate_count,
+        );
     }
 
     /// Get the total number of operations across all app instances

@@ -102,8 +102,12 @@ pub async fn fetch_and_display_config(chain: &str) -> Result<HashMap<String, Str
                     || key.to_lowercase().contains("password")
                     || key.to_lowercase().contains("token")
                 {
-                    if value.len() > 8 {
-                        format!("{}...{}", &value[..4], &value[value.len() - 4..])
+                    // Use char iterator to safely handle UTF-8 characters
+                    let chars: Vec<char> = value.chars().collect();
+                    if chars.len() >= 8 {
+                        let start: String = chars.iter().take(4).collect();
+                        let end: String = chars.iter().rev().take(4).rev().collect();
+                        format!("{}...{}", start, end)
                     } else {
                         "***".to_string()
                     }

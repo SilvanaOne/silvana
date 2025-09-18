@@ -86,7 +86,12 @@ impl SessionFinishedGuard {
         let session_log = if container_logs.is_empty() {
             "No logs available".to_string()
         } else if container_logs.len() > 10240 {
-            format!("{}... (truncated)", &container_logs[..10240])
+            // Find the last valid character boundary at or before 10240
+            let mut truncate_at = 10240;
+            while truncate_at > 0 && !container_logs.is_char_boundary(truncate_at) {
+                truncate_at -= 1;
+            }
+            format!("{}... (truncated)", &container_logs[..truncate_at])
         } else {
             container_logs
         };
@@ -174,6 +179,68 @@ impl Drop for SessionFinishedGuard {
     }
 }
 
+/// Guard to ensure agent state is cleared from coordinator when function exits
+struct AgentStateGuard {
+    session_id: String,
+    state: SharedState,
+    docker_manager: Arc<DockerManager>,
+    cleared: Arc<Mutex<bool>>,
+}
+
+impl AgentStateGuard {
+    fn new(session_id: String, state: SharedState, docker_manager: Arc<DockerManager>) -> Self {
+        Self {
+            session_id,
+            state,
+            docker_manager,
+            cleared: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    async fn clear(&self) {
+        // Check if already cleared without holding the lock across await
+        {
+            let cleared = self.cleared.lock().unwrap();
+            if *cleared {
+                return;
+            }
+        }
+
+        // Do the actual cleanup
+        self.state.clear_current_agent(&self.session_id).await;
+        self.docker_manager.remove_container_tracking(&self.session_id).await;
+
+        // Mark as cleared
+        {
+            let mut cleared = self.cleared.lock().unwrap();
+            *cleared = true;
+        }
+
+        debug!("AgentStateGuard: Cleared agent state for session {}", self.session_id);
+    }
+}
+
+impl Drop for AgentStateGuard {
+    fn drop(&mut self) {
+        // Check if already cleared
+        if *self.cleared.lock().unwrap() {
+            return;
+        }
+
+        // Clone for async operation
+        let session_id = self.session_id.clone();
+        let state = self.state.clone();
+        let docker_manager = self.docker_manager.clone();
+
+        // Spawn cleanup task
+        tokio::spawn(async move {
+            state.clear_current_agent(&session_id).await;
+            docker_manager.remove_container_tracking(&session_id).await;
+            debug!("AgentStateGuard: Cleared agent state for session {} in Drop", session_id);
+        });
+    }
+}
+
 /// Standalone function to run a Docker container for a job (for parallel execution)
 /// The job_lock is held for the duration of this task to prevent duplicate processing
 pub async fn run_docker_container_task(
@@ -255,6 +322,13 @@ pub async fn run_docker_container_task(
             job.agent_method.clone(),
         )
         .await;
+
+    // Create guard to ensure agent state is cleaned up on exit
+    let agent_state_guard = AgentStateGuard::new(
+        docker_session.session_id.clone(),
+        state.clone(),
+        docker_manager.clone(),
+    );
 
     // Send AgentSessionStartedEvent to RPC service
     {
@@ -341,7 +415,6 @@ pub async fn run_docker_container_task(
             );
             // Don't add to failed cache - this is a network/fetch error, not a job failure
             // We'll retry this job on the next iteration
-            state.clear_current_agent(&docker_session.session_id).await;
             ensure_job_failed_if_not_completed(
                 &docker_session.session_id,
                 "Failed to fetch fresh AppInstance",
@@ -352,9 +425,7 @@ pub async fn run_docker_container_task(
             // Set error log in guard before returning
             session_guard.set_logs(format!("Error: Failed to fetch AppInstance: {}", e));
 
-            docker_manager
-                .remove_container_tracking(&docker_session.session_id)
-                .await;
+            // Agent state cleanup handled by AgentStateGuard Drop
             return;
         }
     };
@@ -452,11 +523,6 @@ pub async fn run_docker_container_task(
                         "Docker image SHA256 mismatch for job {}: expected {}, got {}",
                         job.job_sequence, expected_sha, digest
                     );
-                    state.clear_current_agent(&docker_session.session_id).await;
-                    docker_manager
-                        .remove_container_tracking(&docker_session.session_id)
-                        .await;
-
                     // Log container count after clearing
                     let (loading_count, running_count) =
                         docker_manager.get_container_counts().await;
@@ -473,7 +539,7 @@ pub async fn run_docker_container_task(
         }
         Err(e) => {
             error!("Failed to pull image for job {}: {}", job.job_sequence, e);
-            state.clear_current_agent(&docker_session.session_id).await;
+            // Agent state cleanup handled by AgentStateGuard Drop
 
             ensure_job_failed_if_not_completed(
                 &docker_session.session_id,
@@ -482,16 +548,13 @@ pub async fn run_docker_container_task(
             )
             .await;
 
-            docker_manager
-                .remove_container_tracking(&docker_session.session_id)
-                .await;
-
-            // Log container count after clearing
+            // Log container count
             let (loading_count, running_count) = docker_manager.get_container_counts().await;
             info!(
                 "🏁 Docker container aborted (image pull failed): {} loading, {} running",
                 loading_count, running_count
             );
+            // Agent state cleanup handled by AgentStateGuard Drop
             return;
         }
     };
@@ -630,10 +693,8 @@ pub async fn run_docker_container_task(
     session_guard.send_finished_event().await;
 
     // Clear the agent state after Docker completes
-    state.clear_current_agent(&docker_session.session_id).await;
-    docker_manager
-        .remove_container_tracking(&docker_session.session_id)
-        .await;
+    // This ensures cleanup happens before function returns normally
+    agent_state_guard.clear().await;
 
     // Log how many containers are still loading/running
     let (loading_count, running_count) = docker_manager.get_container_counts().await;
@@ -941,8 +1002,8 @@ impl DockerBufferProcessor {
                 continue;
             }
 
-            // Get next job from buffer
-            let started_job = self.state.get_next_started_job().await;
+            // Get next job from buffer using prioritized selection
+            let started_job = self.state.get_next_prioritized_started_job().await;
             if started_job.is_none() {
                 // No jobs in buffer, sleep briefly
                 sleep(Duration::from_secs(1)).await;

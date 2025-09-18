@@ -243,6 +243,9 @@ impl JobSearcher {
                                     job.app_instance.clone(),
                                     job.job_sequence,
                                     memory_requirement,
+                                    job.app_instance_method.clone(),
+                                    job.block_number,
+                                    job.sequences.clone(),
                                 )
                                 .await;
 
@@ -450,12 +453,12 @@ impl JobSearcher {
                 // Normal mode: Collect all viable jobs (up to pool size)
                 // Priority order:
                 // 1. Settlement jobs (regardless of block)
-                // 2. Jobs from lowest block (merge before other)
-                // 3. Jobs from next block, etc.
+                // 2. Jobs from lowest block (sorted by sequence array size, smallest first)
+                // 3. Jobs from next block (sorted by sequence array size), etc.
 
                 // Separate settlement jobs and group others by block
                 let mut settlement_jobs: Vec<Job> = Vec::new();
-                let mut jobs_by_block: BTreeMap<u64, (Vec<Job>, Vec<Job>)> = BTreeMap::new();
+                let mut jobs_by_block: BTreeMap<u64, Vec<Job>> = BTreeMap::new();
 
                 for job in viable_jobs {
                     match job.app_instance_method.as_str() {
@@ -463,13 +466,7 @@ impl JobSearcher {
                         _ => {
                             // Group by block number (use u64::MAX for None to process last)
                             let block = job.block_number.unwrap_or(u64::MAX);
-                            let entry = jobs_by_block.entry(block).or_insert((Vec::new(), Vec::new()));
-
-                            if job.app_instance_method == "merge" {
-                                entry.0.push(job); // merge jobs
-                            } else {
-                                entry.1.push(job); // other jobs
-                            }
+                            jobs_by_block.entry(block).or_insert(Vec::new()).push(job);
                         }
                     }
                 }
@@ -493,30 +490,33 @@ impl JobSearcher {
                 job_pool.extend(settlement_jobs.clone());
 
                 // Process blocks in order (BTreeMap iterates in key order)
-                for (block, (mut merge_jobs, mut other_jobs)) in jobs_by_block {
-                    // Sort jobs within each category by sequence
-                    merge_jobs.sort_by_key(|j| j.job_sequence);
-                    other_jobs.sort_by_key(|j| j.job_sequence);
+                for (block, mut block_jobs) in jobs_by_block {
+                    // Sort jobs by sequence array size (smallest first), then by job sequence
+                    block_jobs.sort_by(|a, b| {
+                        let a_size = a.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                        let b_size = b.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+                        a_size.cmp(&b_size)
+                            .then_with(|| a.job_sequence.cmp(&b.job_sequence))
+                    });
+
+                    // Count job types for logging
+                    let merge_count = block_jobs.iter().filter(|j| j.app_instance_method == "merge").count();
+                    let other_count = block_jobs.len() - merge_count;
 
                     debug!(
-                        "Block {}: {} merge jobs, {} other jobs",
+                        "Block {}: {} total jobs ({} merge, {} other), sorted by sequence size",
                         if block == u64::MAX { "None".to_string() } else { block.to_string() },
-                        merge_jobs.len(),
-                        other_jobs.len()
+                        block_jobs.len(),
+                        merge_count,
+                        other_count
                     );
 
-                    // Add merge jobs first, then other jobs, respecting pool size limit
+                    // Add jobs respecting pool size limit
                     let remaining = JOB_SELECTION_POOL_SIZE.saturating_sub(job_pool.len());
                     if remaining == 0 { break; }
 
-                    let merge_to_add = merge_jobs.len().min(remaining);
-                    job_pool.extend(merge_jobs.into_iter().take(merge_to_add));
-
-                    let remaining = JOB_SELECTION_POOL_SIZE.saturating_sub(job_pool.len());
-                    if remaining == 0 { break; }
-
-                    let other_to_add = other_jobs.len().min(remaining);
-                    job_pool.extend(other_jobs.into_iter().take(other_to_add));
+                    let jobs_to_add = block_jobs.len().min(remaining);
+                    job_pool.extend(block_jobs.into_iter().take(jobs_to_add));
 
                     // Break if we've filled the pool
                     if job_pool.len() >= JOB_SELECTION_POOL_SIZE { break; }

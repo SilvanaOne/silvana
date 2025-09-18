@@ -1454,6 +1454,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     prover_architecture: hardware_info.prover_architecture.clone(),
                     prover_memory: hardware_info.prover_memory,
                     cpu_time: req.cpu_time,
+                    retry_count: 0,
                     _timestamp: Instant::now(),
                 },
             )

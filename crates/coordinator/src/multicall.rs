@@ -1,5 +1,5 @@
 use crate::constants::MULTICALL_INTERVAL_SECS;
-use crate::error::{CoordinatorError, Result};
+use crate::error::Result;
 use crate::metrics::CoordinatorMetrics;
 use crate::state::{SharedState, StartedJob, TerminateJobRequest};
 use std::sync::Arc;
@@ -173,7 +173,7 @@ impl MulticallProcessor {
             }
 
             // Get partial operations from this app instance
-            if let Some(operations) = self
+            if let Some((operations, start_job_requests)) = self
                 .take_partial_multicall_operations(
                     &app_instance,
                     max_operations - current_operation_count,
@@ -185,17 +185,15 @@ impl MulticallProcessor {
                     has_operations = true;
                     current_operation_count += operation_count;
 
-                    // Collect started jobs for buffer management
-                    for (i, sequence) in operations.start_job_sequences.iter().enumerate() {
-                        let memory_req = operations
-                            .start_job_memory_requirements
-                            .get(i)
-                            .copied()
-                            .unwrap_or(0);
+                    // Collect started jobs for buffer management with full metadata
+                    for start_req in start_job_requests {
                         current_batch_started_jobs.push((
                             app_instance.clone(),
-                            *sequence,
-                            memory_req,
+                            start_req.job_sequence,
+                            start_req.memory_requirement,
+                            start_req.job_type,
+                            start_req.block_number,
+                            start_req.sequences,
                         ));
                     }
 
@@ -226,7 +224,7 @@ impl MulticallProcessor {
 
         let mut sui_interface = sui::SilvanaSuiInterface::new();
         match sui_interface
-            .multicall_job_operations(current_batch_operations, None)
+            .multicall_job_operations(current_batch_operations.clone(), None)
             .await
         {
             Ok(result) => {
@@ -258,11 +256,14 @@ impl MulticallProcessor {
                 // Filter started jobs to only include successful ones
                 let successful_started_jobs: Vec<StartedJob> = current_batch_started_jobs
                     .into_iter()
-                    .filter(|(_, sequence, _)| successful_start_sequences.contains(sequence))
-                    .map(|(app_instance, sequence, memory_req)| StartedJob {
+                    .filter(|(_, sequence, _, _, _, _)| successful_start_sequences.contains(sequence))
+                    .map(|(app_instance, sequence, memory_req, job_type, block_number, sequences)| StartedJob {
                         app_instance,
                         job_sequence: sequence,
                         memory_requirement: memory_req,
+                        job_type,
+                        block_number,
+                        sequences,
                     })
                     .collect();
 
@@ -301,10 +302,23 @@ impl MulticallProcessor {
                 );
                 error!("{}", full_error);
 
-                // Send error event to RPC
+                // CRITICAL: Return operations to queue for retry instead of losing them
+                let mut total_returned = 0;
+                for operations in current_batch_operations {
+                    let op_count = operations.total_operations();
+                    self.state.return_operations_to_queue(operations).await;
+                    total_returned += op_count;
+                }
+
+                warn!(
+                    "Returned {} operations to queue for retry after multicall failure: {}",
+                    total_returned, error_msg
+                );
+
+                // Send error event to RPC with retry info
                 self.state.send_coordinator_message_event(
                     proto::LogLevel::Error,
-                    full_error
+                    format!("{} - Returned {} operations to queue for retry", full_error, total_returned)
                 );
 
                 // Report failed multicall metrics
@@ -312,10 +326,9 @@ impl MulticallProcessor {
                     metrics.increment_multicall_batch_failed();
                 }
 
-                return Err(CoordinatorError::Other(anyhow::anyhow!(
-                    "Batch multicall failed: {}",
-                    error_msg
-                )));
+                // Don't return error - operations are safely back in queue
+                // Next multicall cycle will retry them
+                info!("Operations returned to queue, will retry in next multicall cycle");
             }
         }
 
@@ -323,17 +336,19 @@ impl MulticallProcessor {
     }
 
     /// Take partial operations from an app instance up to the specified limit
+    /// Returns the operations and the associated StartJobRequest data for metadata preservation
     async fn take_partial_multicall_operations(
         &self,
         app_instance: &str,
         max_operations: usize,
-    ) -> Option<sui::MulticallOperations> {
+    ) -> Option<(sui::MulticallOperations, Vec<crate::state::StartJobRequest>)> {
         let app_instance = crate::state::normalize_app_instance_id(app_instance);
         let mut requests_lock = self.state.get_multicall_requests_mut().await;
 
         if let Some(requests) = requests_lock.get_mut(&app_instance) {
             let mut operations_count = 0;
             let mut taken_operations = sui::MulticallOperations::new(app_instance.clone(), 0);
+            let mut validated_start_jobs = Vec::new();
 
             // Take operations one by one until we hit the limit
 
@@ -430,7 +445,6 @@ impl MulticallProcessor {
                     .sort_by(|a, b| a.job_sequence.cmp(&b.job_sequence));
 
                 // Take start jobs with validation
-                let mut validated_start_jobs = Vec::new();
                 let mut remaining_start_jobs = Vec::new();
 
                 for start_job in requests.start_jobs.drain(..) {
@@ -549,7 +563,7 @@ impl MulticallProcessor {
                             .start_job_memory_requirements
                             .push(start_job.memory_requirement);
                         operations_count += 1;
-                        validated_start_jobs.push(start_job);
+                        validated_start_jobs.push(start_job.clone());
                     } else {
                         info!("Job {} is not valid - skipping", start_job.job_sequence);
                         if is_error {
@@ -685,7 +699,7 @@ impl MulticallProcessor {
             }
 
             if operations_count > 0 {
-                Some(taken_operations)
+                Some((taken_operations, validated_start_jobs))
             } else {
                 None
             }

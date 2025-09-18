@@ -632,6 +632,8 @@ pub async fn start_coordinator(
                 "  🛑 Force shutdown - terminating {} running agents...",
                 remaining_agents
             );
+            // Clear phantom agents on force shutdown
+            state.clear_all_current_agents().await;
         } else {
             warn!(
                 "  ⚠️ {} agents still running after timeout, collecting logs...",
@@ -716,7 +718,16 @@ pub async fn start_coordinator(
 
     while (!docker_done || !multicall_done)
         && shutdown_start.elapsed().as_secs() < GRACEFUL_SHUTDOWN_TIMEOUT_SECS
+        && !state.is_force_shutdown()
     {
+        // Check for force shutdown inside the loop
+        if state.is_force_shutdown() {
+            error!("  🛑 Force shutdown detected - exiting shutdown progress loop");
+            // Clear any phantom agents that might be stuck
+            state.clear_all_current_agents().await;
+            break;
+        }
+
         // Check docker status
         if !docker_done && docker_handle.is_finished() {
             docker_done = true;
