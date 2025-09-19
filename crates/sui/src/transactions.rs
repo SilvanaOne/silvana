@@ -625,13 +625,13 @@ where
                                         let non_refundable_storage_fee =
                                             gas_summary.non_refundable_storage_fee.unwrap_or(0);
 
-                                        // Calculate total gas needed with 20% buffer
+                                        // Calculate total gas needed with 100% buffer
                                         // Use saturating_sub to prevent underflow when rebate is larger than costs
                                         let total_gas_used = (computation_cost
                                             + storage_cost
                                             + non_refundable_storage_fee)
                                             .saturating_sub(storage_rebate);
-                                        let estimated_budget = (total_gas_used as f64 * 1.2) as u64;
+                                        let estimated_budget = (total_gas_used as f64 * 2.0) as u64;
 
                                         // Ensure minimum budget
                                         let final_budget = estimated_budget.max(MIN_GAS_BUDGET);
@@ -668,7 +668,7 @@ where
                                         );
                                         debug!("  Total gas used: {} MIST", total_gas_used);
                                         debug!(
-                                            "  Estimated budget (with 20% buffer): {} MIST",
+                                            "  Estimated budget (with 100% buffer): {} MIST",
                                             estimated_budget
                                         );
                                         debug!(

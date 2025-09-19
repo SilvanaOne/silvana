@@ -145,6 +145,9 @@ const ESettlementJobAlreadyExists: vector<u8> =
 #[error]
 const EMethodNotFound: vector<u8> = b"Method not found in app instance";
 
+#[error]
+const EPreviousBlockNotSettled: vector<u8> = b"Previous block not settled yet";
+
 fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
 
@@ -660,7 +663,10 @@ public fun update_block_settlement_tx_hash(
 
 // Helper function to update AppInstance's last_settled_block_number
 // and clean up old blocks that have been settled across all chains
-fun update_app_last_settled_block_number(app_instance: &mut AppInstance) {
+fun update_app_last_settled_block_number(
+    app_instance: &mut AppInstance,
+    clock: &Clock,
+) {
     // Find the minimum last_settled_block_number across all settlements
     let settlements_size = vec_map::size(&app_instance.settlements);
     if (settlements_size == 0) {
@@ -726,8 +732,20 @@ fun update_app_last_settled_block_number(app_instance: &mut AppInstance) {
                     &mut app_instance.blocks,
                     block_to_remove,
                 );
+                // Use the block's end_sequence for purging
+                let proved_sequence = block.get_end_sequence();
+
+                let rollback = app_instance.state.get_rollback_mut();
+                commitment::rollback::purge_records(rollback, proved_sequence);
+
+                sequence_state::purge(
+                    &mut app_instance.sequence_state_manager,
+                    proved_sequence,
+                    clock,
+                );
+
                 // Delete the Block object using the delete function from block module
-                block::delete_block(block);
+                block.delete_block();
 
                 // Emit event for block purging
                 event::emit(BlockPurgedEvent {
@@ -735,6 +753,22 @@ fun update_app_last_settled_block_number(app_instance: &mut AppInstance) {
                     block_number: block_to_remove,
                     reason: b"Block settled on all chains".to_string(),
                 });
+            };
+            if (
+                object_table::contains(
+                    &app_instance.proof_calculations,
+                    block_to_remove,
+                )
+            ) {
+                let proof_calculation = object_table::remove(
+                    &mut app_instance.proof_calculations,
+                    block_to_remove,
+                );
+                prover::delete_proof_calculation(
+                    proof_calculation,
+                    app_instance.id.to_address(),
+                    clock,
+                );
             };
             block_to_remove = block_to_remove + 1;
         };
@@ -768,7 +802,11 @@ public fun update_block_settlement_tx_included_in_block(
         ESettlementChainNotFound,
     );
     let settlement = vec_map::get_mut(&mut app_instance.settlements, &chain);
-
+    let current_last_settled = settlement::get_last_settled_block_number(
+        settlement,
+    );
+    assert!(block_number == current_last_settled + 1, EPreviousBlockNotSettled);
+    settlement.set_last_settled_block_number(block_number);
     let sent_to_settlement_at = settlement::get_sent_to_settlement_at(
         settlement,
         block_number,
@@ -788,111 +826,8 @@ public fun update_block_settlement_tx_included_in_block(
         ctx,
     );
 
-    // Update last_settled_block_number by checking all blocks from
-    // last_settled_block_number + 1 up to and including the current block_number
-    // to find the highest consecutive settled block
-    let current_last_settled = settlement::get_last_settled_block_number(
-        settlement,
-    );
-    let mut i = current_last_settled + 1;
-    while (
-        i <= block_number && object_table::contains(&app_instance.blocks, i)
-    ) {
-        if (
-            settlement::get_block_settlement_tx_included_in_block(settlement, i)
-        ) {
-            // This block is settled, update last_settled_block_number
-            settlement::set_last_settled_block_number(settlement, i);
-            i = i + 1;
-        } else {
-            // Found a gap - this block is not settled yet
-            break
-        };
-    };
-
-    // Also check if there are any blocks after block_number that were settled out of order
-    let updated_last_settled = settlement::get_last_settled_block_number(
-        settlement,
-    );
-    if (updated_last_settled == block_number) {
-        let mut j = block_number + 1;
-        while (
-            j < app_instance.block_number && object_table::contains(&app_instance.blocks, j)
-        ) {
-            if (
-                settlement::get_block_settlement_tx_included_in_block(
-                    settlement,
-                    j,
-                )
-            ) {
-                settlement::set_last_settled_block_number(settlement, j);
-                j = j + 1;
-            } else {
-                break
-            };
-        };
-    };
-
     // Update the AppInstance's last_settled_block_number to be the minimum across all chains
-    update_app_last_settled_block_number(app_instance);
-
-    // Check if ALL chains have settled this block before deleting ProofCalculation and purging
-    // We need to ensure all chains have last_settled_block_number >= block_number
-    let mut all_chains_settled = true;
-    let mut min_settled_block = block_number;
-
-    let settlements_size = vec_map::size(&app_instance.settlements);
-    let mut idx = 0;
-    while (idx < settlements_size) {
-        let (_, other_settlement) = vec_map::get_entry_by_idx(
-            &app_instance.settlements,
-            idx,
-        );
-        let other_last_settled = settlement::get_last_settled_block_number(
-            other_settlement,
-        );
-        if (other_last_settled < block_number) {
-            all_chains_settled = false;
-            // Track the minimum settled block across all chains
-            if (other_last_settled < min_settled_block) {
-                min_settled_block = other_last_settled;
-            };
-        };
-        idx = idx + 1;
-    };
-
-    // Only delete ProofCalculation and purge sequence states if ALL chains have settled this block
-    if (all_chains_settled) {
-        // Delete the proof_calculation for this block as it's no longer needed
-        // All information has been preserved in events
-        // Note: Block 0 (genesis) doesn't have proof_calculation, only blocks >= 1
-        if (
-            block_number > 0 && object_table::contains(&app_instance.proof_calculations, block_number)
-        ) {
-            let proof_calculation = object_table::remove(
-                &mut app_instance.proof_calculations,
-                block_number,
-            );
-            prover::delete_proof_calculation(
-                proof_calculation,
-                app_instance.id.to_address(),
-                clock,
-            );
-        };
-
-        // Use the block's end_sequence for purging
-        let block_to_purge = app_instance.blocks.borrow(block_number);
-        let proved_sequence = block::get_end_sequence(block_to_purge);
-
-        let rollback = app_instance.state.get_rollback_mut();
-        commitment::rollback::purge_records(rollback, proved_sequence);
-
-        sequence_state::purge(
-            &mut app_instance.sequence_state_manager,
-            proved_sequence,
-            clock,
-        );
-    };
+    update_app_last_settled_block_number(app_instance, clock);
 }
 
 // Methods for managing metadata and kv
