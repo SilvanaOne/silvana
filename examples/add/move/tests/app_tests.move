@@ -87,10 +87,11 @@ fun test_create_app() {
     
     let mut registry = test::take_shared<SilvanaRegistry>(&scenario);
     let app = create_app(
-        &mut registry, 
+        &mut registry,
         vector::empty<String>(), // settlement_chains
         vector::empty<Option<String>>(), // settlement_addresses
-        &clock, 
+        300000, // block_creation_interval_ms (5 minutes)
+        &clock,
         test::ctx(&mut scenario)
     );
     test::return_shared(registry);
@@ -127,6 +128,7 @@ fun test_add_function_single_index() {
         &mut registry,
         vector::empty<String>(), // settlement_chains
         vector::empty<Option<String>>(), // settlement_addresses
+        300000, // block_creation_interval_ms (5 minutes)
         &clock,
         test::ctx(&mut scenario)
     );
@@ -169,6 +171,7 @@ fun test_multiply_function_single_index() {
         &mut registry,
         vector::empty<String>(), // settlement_chains
         vector::empty<Option<String>>(), // settlement_addresses
+        300000, // block_creation_interval_ms (5 minutes)
         &clock,
         test::ctx(&mut scenario)
     );
@@ -211,6 +214,7 @@ fun test_multiple_indexes_sequential() {
         &mut registry,
         vector::empty<String>(), // settlement_chains
         vector::empty<Option<String>>(), // settlement_addresses
+        300000, // block_creation_interval_ms (5 minutes)
         &clock,
         test::ctx(&mut scenario)
     );
@@ -274,6 +278,7 @@ fun test_add_reserved_index_0() {
         &mut registry,
         vector::empty<String>(), // settlement_chains
         vector::empty<Option<String>>(), // settlement_addresses
+        300000, // block_creation_interval_ms (5 minutes)
         &clock,
         test::ctx(&mut scenario)
     );
@@ -306,6 +311,7 @@ fun test_add_invalid_value_100() {
         &mut registry,
         vector::empty<String>(), // settlement_chains
         vector::empty<Option<String>>(), // settlement_addresses
+        300000, // block_creation_interval_ms (5 minutes)
         &clock,
         test::ctx(&mut scenario)
     );
@@ -337,6 +343,7 @@ fun test_zero_operations() {
         &mut registry,
         vector::empty<String>(), // settlement_chains
         vector::empty<Option<String>>(), // settlement_addresses
+        300000, // block_creation_interval_ms (5 minutes)
         &clock,
         test::ctx(&mut scenario)
     );

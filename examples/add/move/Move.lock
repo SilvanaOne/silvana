@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "AE07274EA8FF75BF15ED1E90677FD1C67319FAC5D5D8FCB5C548AD87EF024E5E"
+manifest_digest = "8BB5BF1B653CD339BD753CE5536C06892FB8AF01A53ACBE2E49ABBB268437449"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "01a54358e7d12996d1ff66189df313dcacff1eab", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "b4d2e518644c3079fed5b0c26dc23b3251332d65", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "01a54358e7d12996d1ff66189df313dcacff1eab", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "b4d2e518644c3079fed5b0c26dc23b3251332d65", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "01a54358e7d12996d1ff66189df313dcacff1eab", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "b4d2e518644c3079fed5b0c26dc23b3251332d65", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -88,7 +88,7 @@ flavor = "sui"
 [env]
 
 [env.devnet]
-chain-id = "e052dec1"
-original-published-id = "0x835b9009d74d9b401e2bd69391ff67e4fa7edfb8a43aa6322a9549e2f6f84929"
-latest-published-id = "0x835b9009d74d9b401e2bd69391ff67e4fa7edfb8a43aa6322a9549e2f6f84929"
+chain-id = "d4b07478"
+original-published-id = "0x11fb6f25adc6a64dda1e4f5430110313e9110ada4a4b0cb592ebec9c3a510d30"
+latest-published-id = "0x11fb6f25adc6a64dda1e4f5430110313e9110ada4a4b0cb592ebec9c3a510d30"
 published-version = "1"
