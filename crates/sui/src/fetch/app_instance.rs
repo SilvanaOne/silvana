@@ -72,6 +72,10 @@ pub struct AppInstance {
     pub last_proved_block_number: u64,
     /// Last settled block number (minimum across all chains)
     pub last_settled_block_number: u64,
+    /// Last settled sequence number
+    pub last_settled_sequence: u64,
+    /// Last purged sequence number
+    pub last_purged_sequence: u64,
     /// Settlements map (chain -> Settlement)
     pub settlements: HashMap<String, Settlement>,
     /// Whether the app is paused
@@ -255,6 +259,8 @@ pub fn parse_app_instance_from_struct(
             .unwrap_or(serde_json::Value::Null),
         last_proved_block_number: get_u64(struct_value, "last_proved_block_number"),
         last_settled_block_number: get_u64(struct_value, "last_settled_block_number"),
+        last_settled_sequence: get_u64(struct_value, "last_settled_sequence"),
+        last_purged_sequence: get_u64(struct_value, "last_purged_sequence"),
         settlements: parse_settlements(struct_value),
         is_paused: get_bool(struct_value, "isPaused"),
         min_time_between_blocks: get_u64(struct_value, "min_time_between_blocks"),
@@ -298,6 +304,8 @@ mod tests {
             previous_block_actions_state: serde_json::Value::Null,
             last_proved_block_number: 9,
             last_settled_block_number: 7,
+            last_settled_sequence: 95,
+            last_purged_sequence: 90,
             settlements: {
                 let mut settlements = HashMap::new();
                 settlements.insert(
