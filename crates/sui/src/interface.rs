@@ -1,6 +1,6 @@
 use crate::app_instance::{
     complete_job_tx, create_app_job_tx, create_merge_job_tx, create_merge_job_with_proving_tx,
-    create_settle_job_tx, fail_job_tx, multicall_job_operations_tx, reject_proof_tx,
+    create_settle_job_tx, fail_job_tx, multicall_job_operations_tx, purge_tx, reject_proof_tx,
     restart_failed_jobs_with_sequences_tx, start_job_tx, start_proving_tx, submit_proof_tx,
     terminate_app_job_tx, terminate_job_tx, try_create_block_tx,
     update_block_proof_data_availability_tx, update_block_settlement_tx_hash_tx,
@@ -1731,6 +1731,59 @@ impl SilvanaSuiInterface {
                     agent_name, developer, registry_id, e
                 );
                 Err(e.to_string())
+            }
+        }
+    }
+
+    /// Purge old sequence states that have been settled
+    /// This cleans up storage by removing sequence states up to the specified number of sequences
+    /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
+    pub async fn purge(
+        &mut self,
+        app_instance: &str,
+        sequences_to_purge: u64,
+        gas_budget_sui: Option<f64>,
+    ) -> Result<String, (String, Option<String>)> {
+        debug!(
+            "Attempting to purge {} sequences from app instance {} on Sui blockchain",
+            sequences_to_purge, app_instance
+        );
+
+        let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
+
+        match purge_tx(app_instance, sequences_to_purge, gas_budget_mist).await {
+            Ok(tx_digest) => {
+                debug!(
+                    "Successfully purged {} sequences from app instance {} on blockchain, tx: {}",
+                    sequences_to_purge, app_instance, tx_digest
+                );
+                Ok(tx_digest)
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                error!(
+                    "Failed to purge {} sequences from app instance {} on blockchain: {}",
+                    sequences_to_purge, app_instance, error_msg
+                );
+
+                // Extract tx digest from error if it's a TransactionError
+                let tx_digest = if let Some(sui_error) =
+                    e.downcast_ref::<crate::error::SilvanaSuiInterfaceError>()
+                {
+                    if let crate::error::SilvanaSuiInterfaceError::TransactionError {
+                        tx_digest,
+                        ..
+                    } = sui_error
+                    {
+                        tx_digest.clone()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                Err((error_msg, tx_digest))
             }
         }
     }
