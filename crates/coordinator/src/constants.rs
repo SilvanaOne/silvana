@@ -230,6 +230,15 @@ pub const PENDING_JOBS_CHECK_DELAY_MS: u64 = 1000;
 pub const JOB_STATUS_CHECK_DELAY_SECS: u64 = 5;
 
 // =============================================================================
+// Sequence State Management
+// =============================================================================
+
+/// Default number of sequences to purge in a single transaction.
+/// This is used when automatically purging old sequence states that have been settled.
+/// A smaller value reduces gas costs per transaction but may require more transactions.
+pub const DEFAULT_PURGE_SEQUENCES: u64 = 10;
+
+// =============================================================================
 // Data Availability Configuration
 // =============================================================================
 
