@@ -733,7 +733,7 @@ fun update_app_last_settled_block_number(
     // Only proceed if there's a change in settled block number
     if (min_settled_block > previous_last_settled && min_settled_block > 0) {
         let mut block_to_remove = start_block;
-        while (block_to_remove < end_block) {
+        while (block_to_remove <= end_block) {
             if (object_table::contains(&app_instance.blocks, block_to_remove)) {
                 let block = object_table::remove(
                     &mut app_instance.blocks,

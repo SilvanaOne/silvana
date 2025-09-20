@@ -1040,10 +1040,9 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
         block_number, chain
     );
 
-    execute_app_instance_function_with_gas(
+    execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_included_in_block",
-        Some(5_000_000_000),
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
 
@@ -1165,6 +1164,32 @@ pub async fn try_create_block_tx(app_instance_str: &str) -> Result<String> {
         |_tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             vec![app_instance_arg, clock_arg]
+        },
+    )
+    .await
+}
+
+/// Purge old sequence states that have been settled
+/// This function calls the purge Move function on the blockchain
+/// to clean up sequence states up to the specified number of sequences
+pub async fn purge_tx(
+    app_instance_str: &str,
+    sequences_to_purge: u64,
+    gas_budget: Option<u64>,
+) -> Result<String> {
+    debug!(
+        "Creating purge transaction for app_instance: {} with sequences_to_purge: {}",
+        app_instance_str, sequences_to_purge
+    );
+
+    execute_app_instance_function_with_gas(
+        app_instance_str,
+        "purge",
+        gas_budget,
+        move |tb, object_args, clock_arg| {
+            let app_instance_arg = *object_args.get(0).expect("App instance argument required");
+            let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences_to_purge));
+            vec![app_instance_arg, sequences_arg, clock_arg]
         },
     )
     .await

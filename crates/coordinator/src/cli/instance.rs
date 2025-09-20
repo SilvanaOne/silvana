@@ -170,6 +170,14 @@ pub async fn handle_instance_command(
                 "    last_settled_block_number: {},",
                 app_instance.last_settled_block_number
             );
+            println!(
+                "    last_settled_sequence: {},",
+                app_instance.last_settled_sequence
+            );
+            println!(
+                "    last_purged_sequence: {},",
+                app_instance.last_purged_sequence
+            );
             // Print settlement data for every chain
             println!("    settlements: {{");
             for (chain, settlement) in &app_instance.settlements {

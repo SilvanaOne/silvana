@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "15F9509A290B242903426991B00FE7BC8B62E0BF054B28849D919FCFFE5C2756"
+manifest_digest = "AE118157BF49F9765944BAAF76E272683D1A1D31FB64CCB9C799E2D1D4FB80C6"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "7722bff104b649360b47531d8ca7619037b5b1a2", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "86963a782a6c2654f941e3d3bdad3d2ecbe2cfc4", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "7722bff104b649360b47531d8ca7619037b5b1a2", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "86963a782a6c2654f941e3d3bdad3d2ecbe2cfc4", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "7722bff104b649360b47531d8ca7619037b5b1a2", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "86963a782a6c2654f941e3d3bdad3d2ecbe2cfc4", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -89,6 +89,6 @@ flavor = "sui"
 
 [env.devnet]
 chain-id = "d4b07478"
-original-published-id = "0xfd9646f2fbd530934f4777831f387d77115f3e2823b667a2c76ae82c57cf7ba3"
-latest-published-id = "0xfd9646f2fbd530934f4777831f387d77115f3e2823b667a2c76ae82c57cf7ba3"
+original-published-id = "0x430fed90a4b1ecccb8df477f0f9e29a9c1e0d62b19a3c97b3e5b0830d07ef649"
+latest-published-id = "0x430fed90a4b1ecccb8df477f0f9e29a9c1e0d62b19a3c97b3e5b0830d07ef649"
 published-version = "1"

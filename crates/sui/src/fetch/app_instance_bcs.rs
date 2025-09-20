@@ -267,6 +267,8 @@ pub struct AppInstanceBcs {
     pub previous_block_actions_state: Element<Scalar>,
     pub last_proved_block_number: u64,
     pub last_settled_block_number: u64,
+    pub last_settled_sequence: u64,
+    pub last_purged_sequence: u64,
     pub settlements: VecMap<MoveString, SettlementBcs>,
     #[serde(rename = "isPaused")]
     pub is_paused: bool,
@@ -493,6 +495,8 @@ pub async fn fetch_app_instance_bcs(
         previous_block_actions_state: elem_bytes_json(&raw.previous_block_actions_state),
         last_proved_block_number: raw.last_proved_block_number,
         last_settled_block_number: raw.last_settled_block_number,
+        last_settled_sequence: raw.last_settled_sequence,
+        last_purged_sequence: raw.last_purged_sequence,
         settlements: parse_settlements_bcs(raw.settlements),
         is_paused: raw.is_paused,
         min_time_between_blocks: raw.min_time_between_blocks,

@@ -290,7 +290,7 @@ pub async fn analyze_proof_completion(
     // But limit to MAX_BLOCK_LOOKAHEAD blocks ahead to prevent creating too many future jobs
     let max_block_to_analyze = std::cmp::min(
         current_block_number,
-        last_proved_block_number + crate::constants::MAX_BLOCK_LOOKAHEAD
+        last_proved_block_number + crate::constants::MAX_BLOCK_LOOKAHEAD,
     );
 
     let blocks_to_analyze = max_block_to_analyze.saturating_sub(last_proved_block_number);
@@ -360,6 +360,48 @@ pub async fn analyze_proof_completion(
                 block_duration.as_secs_f64()
             );
         }
+    }
+
+    // Check for purge opportunity
+    // The Move contract purges when last_purged_sequence < last_settled_sequence
+    if app_instance.last_purged_sequence < app_instance.last_settled_sequence {
+        let sequences_to_purge = crate::constants::DEFAULT_PURGE_SEQUENCES;
+        let purgeable_sequences =
+            app_instance.last_settled_sequence - app_instance.last_purged_sequence;
+
+        debug!(
+            "🗑️ Purge opportunity detected: {} sequences can be purged (last_purged: {}, last_settled: {})",
+            purgeable_sequences,
+            app_instance.last_purged_sequence,
+            app_instance.last_settled_sequence
+        );
+
+        // Create a Sui interface and call purge
+        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+        match sui_interface
+            .purge(&app_instance.id, sequences_to_purge, None)
+            .await
+        {
+            Ok(tx_digest) => {
+                info!(
+                    "✅ Successfully purged of up to {} sequences (tx: {})",
+                    sequences_to_purge, tx_digest
+                );
+            }
+            Err((error_msg, tx_digest)) => {
+                // Log as debug instead of warn since purging is an optimization, not critical
+                warn!(
+                    "⚠️ Failed to purge sequences: {}{}",
+                    error_msg,
+                    tx_digest.map_or(String::new(), |d| format!(" (tx: {})", d))
+                );
+            }
+        }
+    } else {
+        debug!(
+            "🔍 No purge needed (last_purged: {}, last_settled: {})",
+            app_instance.last_purged_sequence, app_instance.last_settled_sequence
+        );
     }
 
     let analysis_duration = analysis_start.elapsed();
