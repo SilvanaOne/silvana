@@ -1040,10 +1040,9 @@ pub async fn update_block_settlement_tx_included_in_block_tx(
         block_number, chain
     );
 
-    execute_app_instance_function_with_gas(
+    execute_app_instance_function(
         app_instance_str,
         "update_block_settlement_tx_included_in_block",
-        Some(5_000_000_000),
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
 
