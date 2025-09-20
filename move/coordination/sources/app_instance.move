@@ -40,6 +40,8 @@ public struct AppInstance has key, store {
     previous_block_actions_state: Element<Scalar>,
     last_proved_block_number: u64,
     last_settled_block_number: u64,
+    last_settled_sequence: u64,
+    last_purged_sequence: u64,
     isPaused: bool,
     min_time_between_blocks: u64, // Configurable minimum time between blocks
     created_at: u64,
@@ -148,6 +150,9 @@ const EMethodNotFound: vector<u8> = b"Method not found in app instance";
 #[error]
 const EPreviousBlockNotSettled: vector<u8> = b"Previous block not settled yet";
 
+#[error]
+const EInvalidPurgeSequences: vector<u8> = b"Invalid purge sequences";
+
 fun init(otw: APP_INSTANCE, ctx: &mut TxContext) {
     let publisher = package::claim(otw, ctx);
 
@@ -252,6 +257,8 @@ public fun create_app_instance(
         previous_block_actions_state: scalar_zero(),
         last_proved_block_number: 0u64,
         last_settled_block_number: 0u64,
+        last_settled_sequence: 0u64,
+        last_purged_sequence: 0u64,
         isPaused: false,
         min_time_between_blocks,
         created_at: timestamp,
@@ -733,16 +740,7 @@ fun update_app_last_settled_block_number(
                     block_to_remove,
                 );
                 // Use the block's end_sequence for purging
-                let proved_sequence = block.get_end_sequence();
-
-                let rollback = app_instance.state.get_rollback_mut();
-                commitment::rollback::purge_records(rollback, proved_sequence);
-
-                sequence_state::purge(
-                    &mut app_instance.sequence_state_manager,
-                    proved_sequence,
-                    clock,
-                );
+                app_instance.last_settled_sequence = block.get_end_sequence();
 
                 // Delete the Block object using the delete function from block module
                 block.delete_block();
@@ -775,8 +773,30 @@ fun update_app_last_settled_block_number(
     };
 }
 
-// #[error]
-// const EBlockNotSentToMina: vector<u8> = b"Block not sent to Mina";
+public fun purge(
+    app_instance: &mut AppInstance,
+    sequences_to_purge: u64,
+    clock: &Clock,
+) {
+    assert!(sequences_to_purge > 0, EInvalidPurgeSequences);
+    let mut last_sequence_to_purge =
+        app_instance.last_purged_sequence + sequences_to_purge;
+    if (last_sequence_to_purge > app_instance.last_settled_sequence) {
+        last_sequence_to_purge = app_instance.last_settled_sequence;
+    };
+    if (last_sequence_to_purge <= app_instance.last_purged_sequence) {
+        return
+    };
+    let rollback = app_instance.state.get_rollback_mut();
+    commitment::rollback::purge_records(rollback, last_sequence_to_purge);
+
+    sequence_state::purge(
+        &mut app_instance.sequence_state_manager,
+        last_sequence_to_purge,
+        clock,
+    );
+    app_instance.last_purged_sequence = last_sequence_to_purge;
+}
 
 public fun update_block_settlement_tx_included_in_block(
     app_instance: &mut AppInstance,
