@@ -779,12 +779,14 @@ public fun purge(
     clock: &Clock,
 ) {
     assert!(sequences_to_purge > 0, EInvalidPurgeSequences);
-    assert!(
-        app_instance.last_purged_sequence + sequences_to_purge <= app_instance.last_settled_sequence,
-        EInvalidPurgeSequences,
-    );
-    let last_sequence_to_purge =
+    let mut last_sequence_to_purge =
         app_instance.last_purged_sequence + sequences_to_purge;
+    if (last_sequence_to_purge > app_instance.last_settled_sequence) {
+        last_sequence_to_purge = app_instance.last_settled_sequence;
+    };
+    if (last_sequence_to_purge <= app_instance.last_purged_sequence) {
+        return
+    };
     let rollback = app_instance.state.get_rollback_mut();
     commitment::rollback::purge_records(rollback, last_sequence_to_purge);
 
