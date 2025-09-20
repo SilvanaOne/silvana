@@ -279,6 +279,20 @@ pub enum TransactionType {
         #[arg(long, default_value = "0.1")]
         gas: f64,
     },
+
+    /// Purge old sequence states that have been settled
+    Purge {
+        /// The app instance ID
+        instance: String,
+
+        /// Number of sequences to purge
+        #[arg(long, default_value = "10")]
+        sequences: u64,
+
+        /// Gas budget in SUI (e.g., 0.5 for 0.5 SUI)
+        #[arg(long)]
+        gas: Option<f64>,
+    },
 }
 
 #[derive(Subcommand)]

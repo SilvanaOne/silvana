@@ -187,6 +187,45 @@ pub async fn handle_transaction_command(
                 }
             }
         }
+
+        TransactionType::Purge {
+            instance,
+            sequences,
+            gas,
+        } => {
+            if let Some(gas_budget) = gas {
+                println!(
+                    "Purging up to {} sequences from instance {} (gas: {} SUI)",
+                    sequences, instance, gas_budget
+                );
+            } else {
+                println!(
+                    "Purging up to {} sequences from instance {} (default gas)",
+                    sequences, instance
+                );
+            }
+
+            match interface.purge(&instance, sequences, gas).await {
+                Ok(tx_digest) => {
+                    println!("✅ Transaction executed successfully");
+                    println!("Transaction digest: {}", tx_digest);
+                    println!("Successfully purged up to {} sequences", sequences);
+                }
+                Err((error_msg, tx_digest)) => {
+                    println!("❌ Transaction execution failed");
+                    if let Some(digest) = tx_digest {
+                        println!("Transaction digest: {}", digest);
+                        println!(
+                            "Note: Transaction was submitted but failed during execution"
+                        );
+                    } else {
+                        println!("Transaction was not submitted to the blockchain");
+                    }
+                    println!("Error: {}", error_msg);
+                    return Err(anyhow!("Transaction failed").into());
+                }
+            }
+        }
     }
 
     Ok(())
