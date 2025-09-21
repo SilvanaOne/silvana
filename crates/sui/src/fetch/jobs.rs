@@ -88,7 +88,7 @@ pub struct Job {
     pub app_instance_method: String,
     /// Optional block number
     pub block_number: Option<u64>,
-    /// Optional sequence numbers
+    /// Optional sequences numbers
     pub sequences: Option<Vec<u64>>,
     /// Optional sequences1 for merge operations
     pub sequences1: Option<Vec<u64>>,
@@ -603,24 +603,55 @@ pub async fn fetch_job_by_id(
         list_request.parent = Some(jobs_table_id.to_string());
         list_request.page_size = Some(100);
         list_request.page_token = page_token.clone();
-        // Specify minimal fields that trigger name loading
-        // The name field is a Bcs message type with subfields like value
+        // Request only minimal fields including name Bcs
         list_request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
+                "name".to_string(),
             ],
         });
 
-        let list_response = client
+        let list_response = match client
             .state_client()
             .list_dynamic_fields(list_request)
             .await
-            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                format!("Failed to list jobs in table: {}", e)
-            ))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("invalid read_mask path") && msg.contains("name") {
+                    let mut req2 = ListDynamicFieldsRequest::default();
+                    req2.parent = Some(jobs_table_id.to_string());
+                    req2.page_size = Some(100);
+                    req2.page_token = page_token.clone();
+                    req2.read_mask = Some(prost_types::FieldMask {
+                        paths: vec![
+                            "parent".to_string(),
+                            "field_id".to_string(),
+                            "kind".to_string(),
+                            "field_object.json".to_string(),
+                        ],
+                    });
+                    client
+                        .state_client()
+                        .list_dynamic_fields(req2)
+                        .await
+                        .map_err(|e2| {
+                            SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                                "Failed to list jobs in table: {}",
+                                e2
+                            ))
+                        })?
+                } else {
+                    return Err(SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                        "Failed to list jobs in table: {}",
+                        e
+                    )));
+                }
+            }
+        };
 
         let response = list_response.into_inner();
 
@@ -630,22 +661,11 @@ pub async fn fetch_job_by_id(
 
         // Find the specific job entry in this page
         for field in &response.dynamic_fields {
-            if let Some(name) = &field.name {
-                if let Some(name_value) = &name.value {
-                // The name_value is BCS-encoded u64 (job_sequence)
-                match bcs::from_bytes::<u64>(name_value) {
-                    Ok(field_job_sequence) => {
-                        if field_job_sequence == job_sequence {
-                            if let Some(field_id) = &field.field_id {
-                                //debug!("Found job {} in jobs table with field_id {}", job_sequence, field_id);
-                                // Found the job, fetch its content
-                                return fetch_job_object_by_field_id(field_id, job_sequence).await;
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        warn!("Failed to decode BCS for field name_value: {:?}, error: {}", name_value, e);
-                    }
+            if let Some(field_job_sequence) = crate::fetch::prover::extract_block_number_from_field(field) {
+                if field_job_sequence == job_sequence {
+                    if let Some(field_id) = &field.field_id {
+                        // Found the job, fetch its content
+                        return fetch_job_object_by_field_id(field_id, job_sequence).await;
                     }
                 }
             }
@@ -749,43 +769,68 @@ pub async fn fetch_jobs_batch(
         list_request.parent = Some(jobs_table_id.to_string());
         list_request.page_size = Some(PAGE_SIZE);
         list_request.page_token = page_token.clone();
-        // Specify minimal fields that trigger name loading
-        // The name field is a Bcs message type with subfields like value
+        // Request only minimal fields including name Bcs
         list_request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
+                "name".to_string(),
             ],
         });
-        
-        let list_response = client
+        let list_response = match client
             .state_client()
             .list_dynamic_fields(list_request)
             .await
-            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                format!("Failed to list jobs in table: {}", e)
-            ))?;
-        
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("invalid read_mask path") && msg.contains("name") {
+                    let mut req2 = ListDynamicFieldsRequest::default();
+                    req2.parent = Some(jobs_table_id.to_string());
+                    req2.page_size = Some(PAGE_SIZE);
+                    req2.page_token = page_token.clone();
+                    req2.read_mask = Some(prost_types::FieldMask {
+                        paths: vec![
+                            "parent".to_string(),
+                            "field_id".to_string(),
+                            "kind".to_string(),
+                        ],
+                    });
+                    client
+                        .state_client()
+                        .list_dynamic_fields(req2)
+                        .await
+                        .map_err(|e2| {
+                            SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                                "Failed to list jobs in table: {}",
+                                e2
+                            ))
+                        })?
+                } else {
+                    return Err(SilvanaSuiInterfaceError::RpcConnectionError(format!(
+                        "Failed to list jobs in table: {}",
+                        e
+                    )));
+                }
+            }
+        };
+
         let response = list_response.into_inner();
         
         // Check each field to see if it's one of our requested jobs
         for field in &response.dynamic_fields {
-            if let Some(name) = &field.name {
-                if let Some(name_value) = &name.value {
-                if let Ok(field_job_seq) = bcs::from_bytes::<u64>(name_value) {
-                    if job_sequences.contains(&field_job_seq) {
-                        if let Some(field_id) = &field.field_id {
-                            field_ids_map.insert(field_job_seq, field_id.clone());
-                            
-                            // Stop if we found all requested jobs
-                            if field_ids_map.len() == job_sequences.len() {
-                                break;
-                            }
+            if let Some(field_job_seq) = crate::fetch::prover::extract_block_number_from_field(field) {
+                if job_sequences.contains(&field_job_seq) {
+                    if let Some(field_id) = &field.field_id {
+                        field_ids_map.insert(field_job_seq, field_id.clone());
+
+                        // Stop if we found all requested jobs
+                        if field_ids_map.len() == job_sequences.len() {
+                            break;
                         }
                     }
-                }
                 }
             }
         }
@@ -1046,11 +1091,8 @@ pub async fn fetch_all_jobs_from_app_instance(
             for field in &response.dynamic_fields {
                 if let Some(field_id) = &field.field_id {
                     // Extract job_sequence from name_value for debugging
-                    let job_sequence = field.name.as_ref()
-                        .and_then(|n| n.value.as_ref())
-                        .and_then(|nv| bcs::from_bytes::<u64>(nv).ok())
-                        .unwrap_or(0);
-                    
+                    let job_sequence = crate::fetch::prover::extract_block_number_from_field(field).unwrap_or(0);
+
                     // Fetch the job using the helper function
                     if let Ok(Some(job)) = fetch_job_object_by_field_id(field_id, job_sequence).await {
                         all_jobs.push(job);

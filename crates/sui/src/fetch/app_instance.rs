@@ -442,22 +442,20 @@ async fn fetch_block_settlement_from_table(
     const MAX_PAGES: u32 = 200;
 
     loop {
+        // Always use minimal mask and decode keys via wrapper JSON
         let mut request = ListDynamicFieldsRequest::default();
         request.parent = Some(table_id.to_string());
         request.page_size = Some(PAGE_SIZE);
         request.page_token = page_token.clone();
-        // Specify minimal fields that trigger name loading
-        // The name field is a Bcs message type with subfields like value
         request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
             ],
         });
 
-        let fields_response = client
+        let response = client
             .state_client()
             .list_dynamic_fields(request)
             .await
@@ -466,27 +464,56 @@ async fn fetch_block_settlement_from_table(
                     "Failed to list dynamic fields for block settlements: {}",
                     e
                 ))
-            })?;
-
-        let response = fields_response.into_inner();
+            })?
+            .into_inner();
         pages_searched += 1;
 
-        // Look for our block number in the dynamic fields
+        // Decode key from field wrapper JSON
+        let mut page_field_ids: Vec<String> = Vec::new();
         for field in &response.dynamic_fields {
-            if let Some(name_bcs) = &field.name {
-                if let Some(name_value) = &name_bcs.value {
-                    // Try to decode the key as u64 (block number)
-                    if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
-                    if field_block_number == block_number {
-                        // Found our block! Now fetch the BlockSettlement object
-                        if let Some(field_id) = &field.field_id {
-                            debug!(
-                                "Found BlockSettlement field for block {}: {}",
-                                block_number, field_id
-                            );
-                            return fetch_block_settlement_object(client, field_id).await;
+            if let Some(fid) = &field.field_id {
+                page_field_ids.push(fid.clone());
+            }
+        }
+
+        if !page_field_ids.is_empty() {
+            use sui_rpc::proto::sui::rpc::v2::BatchGetObjectsRequest;
+            let mut batch_req = BatchGetObjectsRequest::default();
+            batch_req.requests = page_field_ids
+                .iter()
+                .map(|fid| {
+                    let mut r = GetObjectRequest::default();
+                    r.object_id = Some(fid.clone());
+                    r
+                })
+                .collect();
+            batch_req.read_mask = Some(prost_types::FieldMask {
+                paths: vec!["object_id".into(), "json".into()],
+            });
+            if let Ok(batch_resp) = client.ledger_client().batch_get_objects(batch_req).await {
+                let objects = batch_resp.into_inner().objects;
+                for (i, gr) in objects.iter().enumerate() {
+                    if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(
+                        obj,
+                    )) = &gr.result
+                    {
+                        if let Some(json) = &obj.json {
+                            if let Some(prost_types::value::Kind::StructValue(sv)) = &json.kind {
+                                if let Some(name_val) = sv.fields.get("name") {
+                                    if let Some(prost_types::value::Kind::StringValue(s)) =
+                                        &name_val.kind
+                                    {
+                                        if let Ok(n) = s.parse::<u64>() {
+                                            if n == block_number {
+                                                let fid = page_field_ids[i].clone();
+                                                return fetch_block_settlement_object(client, &fid)
+                                                    .await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    }
                     }
                 }
             }

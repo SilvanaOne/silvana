@@ -52,6 +52,38 @@ impl fmt::Display for Block {
     }
 }
 
+/// Parse block number from a Field wrapper object's JSON, tolerant to shapes like:
+/// - { name: "140", value: "0x..." }
+/// - { name: { name: "140" }, value: "0x..." }
+/// - { name: { Some: "140" }, value: "0x..." }
+fn parse_block_number_from_wrapper_json(json: &prost_types::Value) -> Option<u64> {
+    if let Some(prost_types::value::Kind::StructValue(sv)) = &json.kind {
+        if let Some(name_val) = sv.fields.get("name") {
+            match &name_val.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => return s.parse::<u64>().ok(),
+                Some(prost_types::value::Kind::NumberValue(n)) => return Some(n.round() as u64),
+                Some(prost_types::value::Kind::StructValue(inner)) => {
+                    if let Some(inner_name) = inner.fields.get("name") {
+                        if let Some(prost_types::value::Kind::StringValue(s)) = &inner_name.kind {
+                            return s.parse::<u64>().ok();
+                        }
+                    }
+                    if let Some(some) = inner.fields.get("Some") {
+                        if let Some(prost_types::value::Kind::StringValue(s)) = &some.kind {
+                            return s.parse::<u64>().ok();
+                        }
+                        if let Some(prost_types::value::Kind::NumberValue(n)) = &some.kind {
+                            return Some(n.round() as u64);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
 /// Fetch Block information from AppInstance by block number (legacy single-block function)
 #[allow(dead_code)]
 pub async fn fetch_block_info(
@@ -111,18 +143,16 @@ async fn fetch_blocks_from_table_range(
     const MAX_PAGES: u32 = 200;
 
     loop {
+        // Always use minimal mask on this endpoint
         let mut request = ListDynamicFieldsRequest::default();
         request.parent = Some(table_id.to_string());
         request.page_size = Some(PAGE_SIZE);
         request.page_token = page_token.clone();
-        // Specify minimal fields that trigger name loading
-        // The name field is a Bcs message type with subfields like value
         request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
             ],
         });
 
@@ -145,15 +175,62 @@ async fn fetch_blocks_from_table_range(
             response.dynamic_fields.len()
         );
 
-        // Collect field IDs for blocks in our range
+        // Collect field IDs for blocks in our range (from DynamicField if available)
+        let mut page_field_ids: Vec<String> = Vec::new();
+        let mut added_from_dynamic = 0usize;
         for field in &response.dynamic_fields {
             if let Some(name) = &field.name {
                 if let Some(name_value) = &name.value {
                     if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
-                        // Check if this block is in our desired range
                         if field_block_number >= start_block && field_block_number <= end_block {
                             if let Some(field_id) = &field.field_id {
                                 field_ids_to_fetch.push((field_id.clone(), field_block_number));
+                                added_from_dynamic += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(fid) = &field.field_id {
+                page_field_ids.push(fid.clone());
+            }
+        }
+
+        // If server didn't return name, decode block numbers from wrapper JSON
+        if added_from_dynamic == 0 && !page_field_ids.is_empty() {
+            let mut batch_request = BatchGetObjectsRequest::default();
+            batch_request.requests = page_field_ids
+                .iter()
+                .map(|fid| {
+                    let mut r = GetObjectRequest::default();
+                    r.object_id = Some(fid.clone());
+                    r
+                })
+                .collect();
+            batch_request.read_mask = Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            });
+            if let Ok(batch_response) = client
+                .ledger_client()
+                .batch_get_objects(batch_request)
+                .await
+            {
+                let results = batch_response.into_inner().objects;
+                for (i, gr) in results.iter().enumerate() {
+                    if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(
+                        obj,
+                    )) = &gr.result
+                    {
+                        if let Some(json) = &obj.json {
+                            if let Some(field_block_number) =
+                                parse_block_number_from_wrapper_json(json)
+                            {
+                                if field_block_number >= start_block
+                                    && field_block_number <= end_block
+                                {
+                                    let fid = page_field_ids[i].clone();
+                                    field_ids_to_fetch.push((fid, field_block_number));
+                                }
                             }
                         }
                     }
@@ -336,18 +413,16 @@ async fn fetch_block_from_table(
     let mut all_found_blocks = Vec::new(); // Collect all found block numbers for debugging
 
     loop {
+        // Always use minimal mask on this endpoint
         let mut request = ListDynamicFieldsRequest::default();
         request.parent = Some(table_id.to_string());
         request.page_size = Some(PAGE_SIZE);
         request.page_token = page_token.clone();
-        // Specify minimal fields that trigger name loading
-        // The name field is a Bcs message type with subfields like value
         request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
             ],
         });
 
@@ -371,30 +446,79 @@ async fn fetch_block_from_table(
         );
 
         // Search in current page for our target block
+        let mut page_field_ids: Vec<String> = Vec::new();
+        let mut found_in_dynamic = false;
         for field in &response.dynamic_fields {
             if let Some(name) = &field.name {
                 if let Some(name_value) = &name.value {
-                    // The name_value is BCS-encoded u64 (block_number)
                     if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
                         all_found_blocks.push(field_block_number);
-                        //debug!("🔢 Found block {} in dynamic fields", field_block_number);
                         if field_block_number == block_number {
                             debug!(
                                 "🎯 Found matching block {} in dynamic fields (page {})",
                                 block_number, pages_searched
                             );
                             if let Some(field_id) = &field.field_id {
-                                // Found the block, fetch its content
-                                return fetch_block_object_by_field_id(client, field_id, block_number)
+                                return fetch_block_object_by_field_id(
+                                    client,
+                                    field_id,
+                                    block_number,
+                                )
+                                .await;
+                            }
+                            found_in_dynamic = true;
+                        }
+                    }
+                }
+            }
+            if let Some(fid) = &field.field_id {
+                page_field_ids.push(fid.clone());
+            }
+        }
+
+        // If not found, try wrapper JSON to decode key and match
+        if !found_in_dynamic && !page_field_ids.is_empty() {
+            let mut batch_request = BatchGetObjectsRequest::default();
+            batch_request.requests = page_field_ids
+                .iter()
+                .map(|fid| {
+                    let mut r = GetObjectRequest::default();
+                    r.object_id = Some(fid.clone());
+                    r
+                })
+                .collect();
+            batch_request.read_mask = Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            });
+            if let Ok(batch_response) = client
+                .ledger_client()
+                .batch_get_objects(batch_request)
+                .await
+            {
+                let objects = batch_response.into_inner().objects;
+                for (i, gr) in objects.iter().enumerate() {
+                    if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(
+                        obj,
+                    )) = &gr.result
+                    {
+                        if let Some(json) = &obj.json {
+                            if let Some(num) = parse_block_number_from_wrapper_json(json) {
+                                all_found_blocks.push(num);
+                                if num == block_number {
+                                    let fid = page_field_ids[i].clone();
+                                    debug!(
+                                        "✅ Found matching block {} via wrapper JSON; field {}",
+                                        num, fid
+                                    );
+                                    return fetch_block_object_by_field_id(
+                                        client,
+                                        &fid,
+                                        block_number,
+                                    )
                                     .await;
+                                }
                             }
                         }
-                    } else {
-                        // Log the raw bytes if BCS decoding fails
-                        debug!(
-                            "⚠️ Failed to decode block number from bytes: {:?}",
-                            name_value
-                        );
                     }
                 }
             }

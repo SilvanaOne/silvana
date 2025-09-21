@@ -10,7 +10,7 @@ use sui_rpc::client::v2::Client;
 use sui_rpc::proto::sui::rpc::v2::{
     BatchGetObjectsRequest, GetObjectRequest, ListDynamicFieldsRequest,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 // Constants matching Move definitions
 pub const PROOF_STATUS_STARTED: u8 = 1;
@@ -50,6 +50,88 @@ impl ProofStatus {
             ProofStatus::Used => PROOF_STATUS_USED,
         }
     }
+}
+
+/// Try to extract block number from a DynamicField either via `name.value` (BCS u64)
+/// or, if not present, from the `field_object.json` representation of the Field wrapper.
+pub(crate) fn extract_block_number_from_field(
+    field: &sui_rpc::proto::sui::rpc::v2::DynamicField,
+) -> Option<u64> {
+    // Preferred: v2 path via name.value
+    if let Some(name_bcs) = &field.name {
+        if let Some(bytes) = &name_bcs.value {
+            if let Ok(num) = bcs::from_bytes::<u64>(bytes) {
+                return Some(num);
+            }
+        }
+    }
+
+    // Fallback: try to read from Field wrapper JSON
+    if let Some(field_object) = &field.field_object {
+        if let Some(json) = &field_object.json {
+            if let Some(prost_types::value::Kind::StructValue(sv)) = &json.kind {
+                if let Some(name_field) = sv.fields.get("name") {
+                    match &name_field.kind {
+                        Some(prost_types::value::Kind::StringValue(s)) => {
+                            if let Ok(num) = s.parse::<u64>() {
+                                return Some(num);
+                            }
+                        }
+                        Some(prost_types::value::Kind::NumberValue(n)) => {
+                            return Some(n.round() as u64);
+                        }
+                        Some(prost_types::value::Kind::StructValue(inner)) => {
+                            // Handle Option::Some("...") style
+                            if let Some(some) = inner.fields.get("Some") {
+                                if let Some(prost_types::value::Kind::StringValue(s)) = &some.kind {
+                                    if let Ok(num) = s.parse::<u64>() {
+                                        return Some(num);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Parse block number from a Field wrapper object's JSON.
+/// Expected shapes observed on chain:
+/// - { name: { name: "140" }, value: "0x..." }
+/// - { name: "140", ... }
+/// - { name: Some("140"), ... }
+fn parse_block_number_from_wrapper_json(json: &prost_types::Value) -> Option<u64> {
+    if let Some(prost_types::value::Kind::StructValue(sv)) = &json.kind {
+        if let Some(name_val) = sv.fields.get("name") {
+            match &name_val.kind {
+                Some(prost_types::value::Kind::StringValue(s)) => return s.parse::<u64>().ok(),
+                Some(prost_types::value::Kind::NumberValue(n)) => return Some(n.round() as u64),
+                Some(prost_types::value::Kind::StructValue(inner)) => {
+                    // Either Option::Some or nested { name: "..." }
+                    if let Some(inner_name) = inner.fields.get("name") {
+                        if let Some(prost_types::value::Kind::StringValue(s)) = &inner_name.kind {
+                            return s.parse::<u64>().ok();
+                        }
+                    }
+                    if let Some(some) = inner.fields.get("Some") {
+                        if let Some(prost_types::value::Kind::StringValue(s)) = &some.kind {
+                            return s.parse::<u64>().ok();
+                        }
+                        if let Some(prost_types::value::Kind::NumberValue(n)) = &some.kind {
+                            return Some(n.round() as u64);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 /// Proof struct matching Move definition
@@ -148,17 +230,16 @@ async fn fetch_proof_calculations_from_table_range(
     const MAX_PAGES: u32 = 200;
 
     loop {
+        // Always use minimal mask; decode keys via wrapper JSON when needed
         let mut request = ListDynamicFieldsRequest::default();
         request.parent = Some(table_id.to_string());
         request.page_size = Some(PAGE_SIZE);
         request.page_token = page_token.clone();
-        // Include the name field directly - it's a message field that will be loaded entirely
         request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
             ],
         });
 
@@ -181,20 +262,54 @@ async fn fetch_proof_calculations_from_table_range(
             response.dynamic_fields.len()
         );
 
-        // Collect field IDs for blocks in our range
-        for field in &response.dynamic_fields {
-            if let Some(name) = &field.name {
-                if let Some(name_value) = &name.value {
-                    if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
-                        // Check if this block is in our desired range
-                        if block_number >= start_block && block_number <= end_block {
-                            if let Some(field_id) = &field.field_id {
-                                field_ids_to_fetch.push((field_id.clone(), block_number));
+        // Collect field IDs and decode keys from wrapper JSONs
+        let page_field_ids: Vec<String> = response
+            .dynamic_fields
+            .iter()
+            .filter_map(|f| f.field_id.clone())
+            .collect();
+
+        if !page_field_ids.is_empty() {
+            let before_len = field_ids_to_fetch.len();
+            let mut batch_request = BatchGetObjectsRequest::default();
+            batch_request.requests = page_field_ids
+                .iter()
+                .map(|fid| {
+                    let mut r = GetObjectRequest::default();
+                    r.object_id = Some(fid.clone());
+                    r
+                })
+                .collect();
+            batch_request.read_mask = Some(prost_types::FieldMask {
+                paths: vec!["object_id".to_string(), "json".to_string()],
+            });
+            if let Ok(batch_response) = client
+                .ledger_client()
+                .batch_get_objects(batch_request)
+                .await
+            {
+                let results = batch_response.into_inner().objects;
+                for (i, gr) in results.iter().enumerate() {
+                    if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(
+                        obj,
+                    )) = &gr.result
+                    {
+                        if let Some(json) = &obj.json {
+                            if let Some(block_number) = parse_block_number_from_wrapper_json(json) {
+                                if block_number >= start_block && block_number <= end_block {
+                                    let fid = page_field_ids[i].clone();
+                                    field_ids_to_fetch.push((fid, block_number));
+                                }
                             }
                         }
                     }
                 }
             }
+            let added = field_ids_to_fetch.len() - before_len;
+            debug!(
+                "Added {} field ids from wrapper JSON decoding (range page)",
+                added
+            );
         }
 
         // Check if we should continue pagination
@@ -377,17 +492,16 @@ async fn fetch_proof_calculation_from_table(
     const MAX_PAGES: u32 = 200; // Higher limit for proofs as there may be many
 
     loop {
+        // Always use minimal mask; decode key via wrapper JSON
         let mut request = ListDynamicFieldsRequest::default();
         request.parent = Some(table_id.to_string());
         request.page_size = Some(PAGE_SIZE);
         request.page_token = page_token.clone();
-        // Include the name field directly - it's a message field that will be loaded entirely
         request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
             ],
         });
 
@@ -410,64 +524,60 @@ async fn fetch_proof_calculation_from_table(
             response.dynamic_fields.len()
         );
 
-        // Search in current page for proof calculations matching our target block
-        for field in &response.dynamic_fields {
-            // The name field contains the block number as BCS-encoded u64
-            if let Some(name) = &field.name {
-                if let Some(value_bytes) = &name.value {
-                    let name_value = &value_bytes[..];
-                    // Decode the block number from BCS bytes
-                    if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
-                        debug!(
-                            "🔍 Dynamic field - Block: {}, Field: {:?}",
-                            block_number, field
-                        );
-
-                        // Only fetch if this is our target block
-                        if block_number == target_block_number {
-                            if let Some(field_id) = &field.field_id {
-                                debug!(
-                                    "✅ Found matching block {}! Fetching proof calculation from field ID: {}",
-                                    block_number, field_id
-                                );
-
-                                // Fetch the proof calculation for this specific block
-                                if let Ok(Some(proof_calculation)) = fetch_proof_object_by_field_id(
-                                    client,
-                                    field_id,
-                                    target_block_number,
-                                )
-                                .await
-                                {
-                                    debug!(
-                                        "✅ Successfully fetched proof for block {}. Full ProofCalculation: {:?}",
-                                        target_block_number, proof_calculation
-                                    );
-                                    return Ok(Some(proof_calculation));
+        // Decode via batch wrapper JSON
+        if !response.dynamic_fields.is_empty() {
+            let page_field_ids: Vec<String> = response
+                .dynamic_fields
+                .iter()
+                .filter_map(|f| f.field_id.clone())
+                .collect();
+            if !page_field_ids.is_empty() {
+                let mut batch_request = BatchGetObjectsRequest::default();
+                batch_request.requests = page_field_ids
+                    .iter()
+                    .map(|fid| {
+                        let mut r = GetObjectRequest::default();
+                        r.object_id = Some(fid.clone());
+                        r
+                    })
+                    .collect();
+                batch_request.read_mask = Some(prost_types::FieldMask {
+                    paths: vec!["object_id".to_string(), "json".to_string()],
+                });
+                if let Ok(batch_response) = client
+                    .ledger_client()
+                    .batch_get_objects(batch_request)
+                    .await
+                {
+                    let objects = batch_response.into_inner().objects;
+                    for (i, gr) in objects.iter().enumerate() {
+                        if let Some(
+                            sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(obj),
+                        ) = &gr.result
+                        {
+                            if let Some(json) = &obj.json {
+                                if let Some(num) = parse_block_number_from_wrapper_json(json) {
+                                    if num == target_block_number {
+                                        let fid = page_field_ids[i].clone();
+                                        debug!(
+                                            "✅ Found matching block {} via wrapper JSON; field {}",
+                                            num, fid
+                                        );
+                                        if let Ok(Some(proof)) = fetch_proof_object_by_field_id(
+                                            client,
+                                            &fid,
+                                            target_block_number,
+                                        )
+                                        .await
+                                        {
+                                            return Ok(Some(proof));
+                                        }
+                                    }
                                 }
                             }
-                        } else {
-                            debug!(
-                                "⏩ Skipping block {} (looking for block {})",
-                                block_number, target_block_number
-                            );
                         }
-                    } else {
-                        warn!(
-                            "❌ Failed to deserialize block number from name_value: {:?}",
-                            name_value
-                        );
                     }
                 }
-            } else {
-                warn!(
-                    "❌ No name field found in dynamic field. Table ID: {}, Target block: {}, Field: {:?}",
-                    table_id, target_block_number, field
-                );
-                info!(
-                    "Field details - field_id: {:?}, value_type: {:?}",
-                    field.field_id, field.value_type
-                );
             }
         }
 
@@ -645,7 +755,7 @@ fn extract_proof_calculation_from_json(
                                         if let Some(proof) =
                                             extract_individual_proof(proof_struct, sequences)
                                         {
-                                            debug!("🔍 Extracted proof: {:?}", proof);
+                                            //debug!("🔍 Extracted proof: {:?}", proof);
                                             proofs_vec.push(proof);
                                         }
                                     }
@@ -676,7 +786,7 @@ fn extract_proof_calculation_from_json(
             block_proof,
             is_finished,
         };
-        debug!("✅ Extracted proof calculation: {:?}", proof_calculation);
+        //debug!("✅ Extracted proof calculation: {:?}", proof_calculation);
         return Some(proof_calculation);
     }
 
@@ -688,14 +798,14 @@ fn extract_individual_proof(
     proof_struct: &prost_types::Struct,
     sequences: Vec<u64>,
 ) -> Option<Proof> {
-    debug!(
-        "🔍 Extracting individual proof with sequences: {:?}",
-        sequences
-    );
-    debug!(
-        "🔍 Proof struct fields: {:?}",
-        proof_struct.fields.keys().collect::<Vec<_>>()
-    );
+    // debug!(
+    //     "🔍 Extracting individual proof with sequences: {:?}",
+    //     sequences
+    // );
+    // debug!(
+    //     "🔍 Proof struct fields: {:?}",
+    //     proof_struct.fields.keys().collect::<Vec<_>>()
+    // );
 
     // Extract fields using helper functions
     let status_u8 = get_u8(proof_struct, "status");

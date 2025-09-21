@@ -1,55 +1,50 @@
-use anyhow::Result;
-use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
-use tracing::debug;
 use crate::error::SilvanaSuiInterfaceError;
 use crate::parse::proto_to_json;
 use crate::state::SharedSuiState;
+use anyhow::Result;
 use serde_json::{Map, Value};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
+use tracing::debug;
 
 /// Fetch a raw Sui object from the blockchain by its ID and return as JSON
-pub async fn fetch_object(
-    object_id: &str,
-) -> Result<serde_json::Value> {
+pub async fn fetch_object(object_id: &str) -> Result<serde_json::Value> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching object with ID: {}", object_id);
-    
+
     // Ensure the object_id has 0x prefix
     let formatted_id = if object_id.starts_with("0x") {
         object_id.to_string()
     } else {
         format!("0x{}", object_id)
     };
-    
+
     // Create request to fetch the object
     let mut request = GetObjectRequest::default();
     request.object_id = Some(formatted_id.clone());
     request.read_mask = Some(prost_types::FieldMask {
         paths: vec!["json".to_string(), "object_id".to_string()],
     });
-    
+
     // Fetch the object
-    let response = client
-        .ledger_client()
-        .get_object(request)
-        .await;
-    
+    let response = client.ledger_client().get_object(request).await;
+
     match response {
         Ok(object_response) => {
             let object_data = object_response.into_inner();
-            
+
             // Convert the proto object to JSON
             if let Some(proto_object) = object_data.object {
                 if let Some(json_value) = &proto_object.json {
                     // Convert prost_types::Value to serde_json::Value
                     let mut json_obj = proto_to_json(json_value);
-                    
+
                     // Recursively check for and fetch dynamic fields in the object tree
                     enhance_with_dynamic_fields(&mut json_obj).await;
-                    
+
                     return Ok(json_obj);
                 }
             }
-            
+
             Err(anyhow::anyhow!(
                 "Failed to parse object {} from blockchain response",
                 object_id
@@ -58,17 +53,23 @@ pub async fn fetch_object(
         Err(e) => {
             // Check if this might be a dynamic field table ID (NotFound error)
             if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                debug!("Object {} not found as regular object, trying as dynamic field table", formatted_id);
-                
+                debug!(
+                    "Object {} not found as regular object, trying as dynamic field table",
+                    formatted_id
+                );
+
                 // Try to fetch dynamic fields directly
                 match fetch_dynamic_fields(&formatted_id).await {
                     Ok(fields) => {
                         // Return as a synthetic object showing it's a dynamic field table
                         let mut result = Map::new();
                         result.insert("id".to_string(), Value::String(formatted_id.clone()));
-                        result.insert("type".to_string(), Value::String("DynamicFieldTable".to_string()));
+                        result.insert(
+                            "type".to_string(),
+                            Value::String("DynamicFieldTable".to_string()),
+                        );
                         result.insert("fields".to_string(), fields);
-                        
+
                         Ok(Value::Object(result))
                     }
                     Err(fields_err) => {
@@ -76,7 +77,8 @@ pub async fn fetch_object(
                         debug!("Failed to fetch as dynamic fields: {}", fields_err);
                         Err(anyhow::anyhow!(
                             "Failed to fetch object {}: {}",
-                            object_id, e
+                            object_id,
+                            e
                         ))
                     }
                 }
@@ -84,7 +86,8 @@ pub async fn fetch_object(
                 // Other error, return as is
                 Err(anyhow::anyhow!(
                     "Failed to fetch object {}: {}",
-                    object_id, e
+                    object_id,
+                    e
                 ))
             }
         }
@@ -102,18 +105,24 @@ async fn enhance_with_dynamic_fields(value: &mut Value) {
                     Box::pin(enhance_with_dynamic_fields(nested_value)).await;
                 }
             }
-            
+
             // Then check if this object itself is a dynamic field collection
             if is_dynamic_field_collection(map) {
                 if let Some(id_value) = map.get("id") {
                     if let Value::String(collection_id) = id_value {
-                        debug!("Detected dynamic field collection, fetching fields for: {}", collection_id);
+                        debug!(
+                            "Detected dynamic field collection, fetching fields for: {}",
+                            collection_id
+                        );
                         match fetch_dynamic_fields(collection_id).await {
                             Ok(fields) => {
                                 map.insert("fields".to_string(), fields);
                             }
                             Err(e) => {
-                                debug!("Failed to fetch dynamic fields for {}: {}", collection_id, e);
+                                debug!(
+                                    "Failed to fetch dynamic fields for {}: {}",
+                                    collection_id, e
+                                );
                                 // Continue without fields rather than failing
                             }
                         }
@@ -137,7 +146,7 @@ fn is_dynamic_field_collection(map: &Map<String, Value>) -> bool {
     if map.len() != 2 {
         return false;
     }
-    
+
     // Check if it has both id and size fields
     map.contains_key("id") && map.contains_key("size")
 }
@@ -150,25 +159,24 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
     const PAGE_SIZE: u32 = 100;
     let mut pages_fetched = 0;
     const MAX_PAGES: u32 = 50; // Limit to prevent infinite loops
-    
+
     debug!("Fetching dynamic fields for parent: {}", parent_id);
-    
+
     loop {
         let mut request = ListDynamicFieldsRequest::default();
         request.parent = Some(parent_id.to_string());
         request.page_size = Some(PAGE_SIZE);
         request.page_token = page_token.clone();
-        // Specify minimal fields that trigger name loading
-        // The name field is a Bcs message type with subfields like value
+        // Request only minimal fields including name Bcs
         request.read_mask = Some(prost_types::FieldMask {
             paths: vec![
                 "parent".to_string(),
                 "field_id".to_string(),
                 "kind".to_string(),
-                "name".to_string(), // Request the entire name Bcs message
+                "name".to_string(),
             ],
         });
-        
+
         let response = client
             .state_client()
             .list_dynamic_fields(request)
@@ -179,7 +187,7 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
                     e
                 ))
             })?;
-        
+
         let fields_response = response.into_inner();
         pages_fetched += 1;
 
@@ -203,12 +211,12 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
         // Process each field
         for field in fields_response.dynamic_fields {
             let mut field_map = Map::new();
-            
+
             // Add field_id
             if let Some(field_id) = field.field_id {
                 field_map.insert("field_id".to_string(), Value::String(field_id));
             }
-            
+
             // Add value_type if available
             if let Some(value_type) = &field.value_type {
                 field_map.insert("name_type".to_string(), Value::String(value_type.clone()));
@@ -225,15 +233,17 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
                         field_map.insert("name".to_string(), Value::String(string_val));
                     } else {
                         // If we can't decode, store as hex
-                        field_map.insert("name_raw".to_string(), Value::String(hex::encode(name_value)));
+                        field_map.insert(
+                            "name_raw".to_string(),
+                            Value::String(hex::encode(name_value)),
+                        );
                     }
                 }
             }
-            
-            
+
             all_fields.push(Value::Object(field_map));
         }
-        
+
         // Check if there are more pages
         if let Some(next_token) = fields_response.next_page_token {
             if !next_token.is_empty() && pages_fetched < MAX_PAGES {
@@ -245,7 +255,7 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
             break;
         }
     }
-    
+
     debug!("Total dynamic fields fetched: {}", all_fields.len());
     Ok(Value::Array(all_fields))
 }

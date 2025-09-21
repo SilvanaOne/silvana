@@ -16,16 +16,23 @@ use crate::object_lock::get_object_lock_manager;
 use crate::state::SharedSuiState;
 
 /// Helper function to check transaction effects for errors
+#[allow(dead_code)]
 fn check_transaction_effects(
     tx_resp: &proto::ExecuteTransactionResponse,
     operation: &str,
 ) -> Result<()> {
-    // Get transaction digest first (available even for failed transactions)
+    // Get transaction digest (prefer ExecutedTransaction.digest; fallback to effects.transaction_digest)
     let tx_digest = tx_resp
         .transaction
         .as_ref()
-        .and_then(|t| t.digest.as_ref())
-        .map(|d| d.to_string())
+        .and_then(|t| t.digest.as_ref().cloned())
+        .or_else(|| {
+            tx_resp
+                .transaction
+                .as_ref()
+                .and_then(|t| t.effects.as_ref())
+                .and_then(|e| e.transaction_digest.clone())
+        })
         .unwrap_or_else(|| "unknown".to_string());
 
     // Check for errors in transaction effects
@@ -100,34 +107,50 @@ fn check_transaction_effects(
         }
     }
 
-    // Check transaction was successful - in v2, checkpoint field indicates finality
-    if tx_resp.transaction.as_ref().and_then(|tx| tx.checkpoint).is_none() {
-        error!(
-            "{} transaction did not achieve finality (tx: {})",
-            operation, tx_digest
+    // Prefer checkpoint for finality, but some servers may not populate it synchronously in ExecuteTransactionResponse.
+    // Do not fail here; rely on subsequent polling and effects.status for execution success.
+    if tx_resp
+        .transaction
+        .as_ref()
+        .and_then(|tx| tx.checkpoint)
+        .is_none()
+    {
+        debug!(
+            "{} executed; checkpoint not present in immediate response; proceeding to poll ledger",
+            operation
         );
-        return Err(SilvanaSuiInterfaceError::TransactionError {
-            message: format!("{} transaction did not achieve finality", operation),
-            tx_digest: Some(tx_digest),
-        }
-        .into());
     }
 
-    // Check for transaction success in effects
-    let tx_successful = tx_resp
+    // Check for transaction success in effects (v2: use status.success)
+    let (tx_successful, status_desc) = tx_resp
         .transaction
         .as_ref()
         .and_then(|t| t.effects.as_ref())
         .and_then(|e| e.status.as_ref())
-        .map(|s| s.error.is_none())
-        .unwrap_or(false);
+        .map(|s| {
+            let success = s.success.unwrap_or(false);
+            let desc = s
+                .error
+                .as_ref()
+                .and_then(|er| er.description.clone())
+                .unwrap_or_default();
+            (success, desc)
+        })
+        .unwrap_or((false, String::new()));
 
     if !tx_successful {
-        error!("{} transaction failed despite being executed", operation);
-        return Err(anyhow!(
-            "{} transaction failed despite being executed",
-            operation
-        ));
+        error!(
+            "{} transaction failed despite being executed (tx: {}, reason: {})",
+            operation, tx_digest, status_desc
+        );
+        return Err(SilvanaSuiInterfaceError::TransactionError {
+            message: format!(
+                "{} transaction failed despite being executed: {}",
+                operation, status_desc
+            ),
+            tx_digest: Some(tx_digest),
+        }
+        .into());
     }
 
     Ok(())
@@ -615,7 +638,8 @@ where
                     "transaction.effects.gas_used".into(),
                 ],
             });
-            simulate_req.checks = Some(simulate_transaction_request::TransactionChecks::Enabled as i32);
+            simulate_req.checks =
+                Some(simulate_transaction_request::TransactionChecks::Enabled as i32);
             simulate_req.do_gas_selection = Some(false); // We're managing gas ourselves
 
             match execution_client.simulate_transaction(simulate_req).await {
@@ -781,8 +805,14 @@ where
         let mut req = proto::ExecuteTransactionRequest::default();
         req.transaction = Some(tx.into());
         req.signatures = vec![sig.into()];
+        // Request only the fields we need for correctness (v2) - mask is validated against ExecutedTransaction
         req.read_mask = Some(FieldMask {
-            paths: vec!["transaction".into()],
+            paths: vec![
+                "digest".into(),
+                "effects.status".into(),
+                "effects.transaction_digest".into(),
+                "checkpoint".into(),
+            ],
         });
 
         let functions_str = function_names.join(", ");
@@ -968,15 +998,19 @@ where
         };
         let tx_resp = resp.into_inner();
 
-        // Check transaction effects for errors
-        check_transaction_effects(&tx_resp, &functions_str)?;
-
+        // Prefer digest from response; if missing, fall back to effects.transaction_digest
         let tx_digest = tx_resp
             .transaction
             .as_ref()
-            .and_then(|t| t.digest.as_ref())
-            .context("Failed to get transaction digest")?
-            .to_string();
+            .and_then(|t| t.digest.as_ref().cloned())
+            .or_else(|| {
+                tx_resp
+                    .transaction
+                    .as_ref()
+                    .and_then(|t| t.effects.as_ref())
+                    .and_then(|e| e.transaction_digest.clone())
+            })
+            .context("Failed to get transaction digest")?;
 
         if retry_count > 0 {
             info!(
@@ -998,6 +1032,42 @@ where
                 functions_str, e
             );
             // Continue anyway, the transaction was successful
+        }
+
+        // Verify final execution status from the ledger (authoritative)
+        {
+            let mut ledger = client.ledger_client();
+            let mut req = proto::GetTransactionRequest::default();
+            req.digest = Some(tx_digest.clone());
+            req.read_mask = Some(FieldMask {
+                paths: vec!["effects.status".into()],
+            });
+
+            if let Ok(ledger_resp) = ledger.get_transaction(req).await {
+                let ledger_tx = ledger_resp.into_inner();
+                if let Some(ref executed) = ledger_tx.transaction {
+                    if let Some(ref effects) = executed.effects {
+                        if let Some(ref status) = effects.status {
+                            let success = status.success.unwrap_or(false);
+                            if !success {
+                                let desc = status
+                                    .error
+                                    .as_ref()
+                                    .and_then(|er| er.description.clone())
+                                    .unwrap_or_default();
+                                return Err(SilvanaSuiInterfaceError::TransactionError {
+                                    message: format!(
+                                        "{} transaction failed despite being executed: {}",
+                                        functions_str, desc
+                                    ),
+                                    tx_digest: Some(tx_digest),
+                                }
+                                .into());
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Release all object locks after transaction is confirmed

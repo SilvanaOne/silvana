@@ -1,7 +1,6 @@
 use crate::constants::{
-    BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS,
-    PROOF_RESERVED_TIMEOUT_MS, PROOF_STARTED_TIMEOUT_MS,
-    PROOF_USED_MERGE_TIMEOUT_MS,
+    BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS, PROOF_RESERVED_TIMEOUT_MS,
+    PROOF_STARTED_TIMEOUT_MS, PROOF_USED_MERGE_TIMEOUT_MS,
 };
 use anyhow::Result;
 use sui::fetch::fetch_proof_calculation;
@@ -34,11 +33,12 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 
     // Check if this block is too far ahead of the last proved block
     // Only create merge jobs for blocks within MAX_BLOCK_LOOKAHEAD blocks of last_proved_block
-    if proof_calc.block_number > app_instance_obj.last_proved_block_number + crate::constants::MAX_BLOCK_LOOKAHEAD {
+    if proof_calc.block_number
+        > app_instance_obj.last_proved_block_number + crate::constants::MAX_BLOCK_LOOKAHEAD
+    {
         debug!(
             "⏭️ Skipping merge job creation for block {} (too far ahead, last_proved={})",
-            proof_calc.block_number,
-            app_instance_obj.last_proved_block_number
+            proof_calc.block_number, app_instance_obj.last_proved_block_number
         );
         return Ok(());
     }
@@ -152,14 +152,14 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 )
             };
 
-            debug!(
-                "   Proof #{}: sequences={}, status={:?}, da_hash={}, timestamp={}",
-                idx + 1,
-                sequences_str,
-                proof.status,
-                proof.da_hash.as_ref().unwrap_or(&"none".to_string()),
-                proof.timestamp
-            );
+            // debug!(
+            //     "   Proof #{}: sequences={}, status={:?}, da_hash={}, timestamp={}",
+            //     idx + 1,
+            //     sequences_str,
+            //     proof.status,
+            //     proof.da_hash.as_ref().unwrap_or(&"none".to_string()),
+            //     proof.timestamp
+            // );
         }
     } else {
         debug!("📝 No proofs found for block {}", proof_calc.block_number);
@@ -253,8 +253,10 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
 
             // Special logging for block 180
             if proof_calc.block_number == 180 {
-                info!("🔨 Block 180: Attempting to create merge job for {:?} + {:?}",
-                      merge_request.sequences1, merge_request.sequences2);
+                info!(
+                    "🔨 Block 180: Attempting to create merge job for {:?} + {:?}",
+                    merge_request.sequences1, merge_request.sequences2
+                );
             }
 
             // Try to create merge job with proof reservation
@@ -276,7 +278,8 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                     }
                     debug!(
                         "✅ Successfully created merge job #{} for block {}",
-                        idx + 1, proof_calc.block_number
+                        idx + 1,
+                        proof_calc.block_number
                     );
                     successful_merges += 1;
                 }
@@ -291,18 +294,23 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                         || error_str.contains("already Started and not timed out")
                         || error_str.contains("Cannot merge")
                         || error_str.contains("Combined proof already exists")
-                        || error_str.contains("Cannot reserve proofs - likely taken by another coordinator")
+                        || error_str
+                            .contains("Cannot reserve proofs - likely taken by another coordinator")
                         || error_str.contains("Proofs not in reservable state")
                     {
                         // These are expected conditions in a concurrent environment
                         debug!(
                             "ℹ️ Merge job #{} for block {} skipped (expected condition): {}",
-                            idx + 1, proof_calc.block_number, e
+                            idx + 1,
+                            proof_calc.block_number,
+                            e
                         );
                     } else {
                         warn!(
                             "⚠️ Failed to create merge job #{} for block {}: {}",
-                            idx + 1, proof_calc.block_number, e
+                            idx + 1,
+                            proof_calc.block_number,
+                            e
                         );
                     }
                     failed_merges += 1;
@@ -390,8 +398,9 @@ fn find_merge_for_target_range(
     let full_range: Vec<u64> = (start..=end).collect();
 
     // Check if the full range proof already exists
-    let full_proof_exists = block_proofs.proofs.iter()
-        .any(|p| arrays_equal(&p.sequences, &full_range) && is_proof_active_or_completed(p, current_time));
+    let full_proof_exists = block_proofs.proofs.iter().any(|p| {
+        arrays_equal(&p.sequences, &full_range) && is_proof_active_or_completed(p, current_time)
+    });
 
     if full_proof_exists {
         return None; // Already have this proof
@@ -408,17 +417,21 @@ fn find_merge_for_target_range(
         let right_range: Vec<u64> = (split..=end).collect();
 
         // Check if this merge is excluded
-        if excluded.iter().any(|(s1, s2)|
-            (arrays_equal(s1, &left_range) && arrays_equal(s2, &right_range)) ||
-            (arrays_equal(s1, &right_range) && arrays_equal(s2, &left_range))
-        ) {
+        if excluded.iter().any(|(s1, s2)| {
+            (arrays_equal(s1, &left_range) && arrays_equal(s2, &right_range))
+                || (arrays_equal(s1, &right_range) && arrays_equal(s2, &left_range))
+        }) {
             return None;
         }
 
         // Check if both parts exist and are available
-        let left_proof = block_proofs.proofs.iter()
+        let left_proof = block_proofs
+            .proofs
+            .iter()
             .find(|p| arrays_equal(&p.sequences, &left_range));
-        let right_proof = block_proofs.proofs.iter()
+        let right_proof = block_proofs
+            .proofs
+            .iter()
             .find(|p| arrays_equal(&p.sequences, &right_range));
 
         if let (Some(left), Some(right)) = (left_proof, right_proof) {
@@ -434,18 +447,33 @@ fn find_merge_for_target_range(
 
         // If parts don't exist, recursively try to create them
         // Try to create the left part first
-        if start < split - 1 { // Only recurse if there's actually a range to process
-            if left_proof.is_none() || (left_proof.is_some() && !is_proof_available(left_proof.unwrap(), current_time)) {
-                if let Some(merge) = find_merge_for_target_range(start, split - 1, block_proofs, current_time, excluded) {
+        if start < split - 1 {
+            // Only recurse if there's actually a range to process
+            if left_proof.is_none()
+                || (left_proof.is_some() && !is_proof_available(left_proof.unwrap(), current_time))
+            {
+                if let Some(merge) = find_merge_for_target_range(
+                    start,
+                    split - 1,
+                    block_proofs,
+                    current_time,
+                    excluded,
+                ) {
                     return Some(merge);
                 }
             }
         }
 
         // Then try to create the right part
-        if split <= end { // Only recurse if there's actually a range to process
-            if right_proof.is_none() || (right_proof.is_some() && !is_proof_available(right_proof.unwrap(), current_time)) {
-                if let Some(merge) = find_merge_for_target_range(split, end, block_proofs, current_time, excluded) {
+        if split <= end {
+            // Only recurse if there's actually a range to process
+            if right_proof.is_none()
+                || (right_proof.is_some()
+                    && !is_proof_available(right_proof.unwrap(), current_time))
+            {
+                if let Some(merge) =
+                    find_merge_for_target_range(split, end, block_proofs, current_time, excluded)
+                {
                     return Some(merge);
                 }
             }
@@ -469,12 +497,16 @@ fn find_proofs_to_merge_excluding(
 
     // CASE 1: end_sequence is known - use deterministic binary split
     if let Some(end_seq) = block_proofs.end_sequence {
-        debug!("Block {} has known end_sequence={}, using deterministic binary tree merge",
-               block_proofs.block_number, end_seq);
+        debug!(
+            "Block {} has known end_sequence={}, using deterministic binary tree merge",
+            block_proofs.block_number, end_seq
+        );
 
         // First, check if we can create the block proof directly
         let full_range: Vec<u64> = (start_seq..=end_seq).collect();
-        let block_proof_exists = block_proofs.proofs.iter()
+        let block_proof_exists = block_proofs
+            .proofs
+            .iter()
             .any(|p| arrays_equal(&p.sequences, &full_range));
 
         if !block_proof_exists {
@@ -484,18 +516,27 @@ fn find_proofs_to_merge_excluding(
                 let right_range: Vec<u64> = (split..=end_seq).collect();
 
                 // Check if this merge is excluded
-                if !excluded.iter().any(|(s1, s2)|
+                if !excluded.iter().any(|(s1, s2)| {
                     (arrays_equal(s1, &left_range) && arrays_equal(s2, &right_range))
-                ) {
+                }) {
                     // Check if both halves exist and are available
-                    let left_proof = block_proofs.proofs.iter()
+                    let left_proof = block_proofs
+                        .proofs
+                        .iter()
                         .find(|p| arrays_equal(&p.sequences, &left_range));
-                    let right_proof = block_proofs.proofs.iter()
+                    let right_proof = block_proofs
+                        .proofs
+                        .iter()
                         .find(|p| arrays_equal(&p.sequences, &right_range));
 
                     if let (Some(left), Some(right)) = (left_proof, right_proof) {
-                        if is_proof_available(left, current_time) && is_proof_available(right, current_time) {
-                            debug!("Found block proof merge: {:?} + {:?}", left_range, right_range);
+                        if is_proof_available(left, current_time)
+                            && is_proof_available(right, current_time)
+                        {
+                            debug!(
+                                "Found block proof merge: {:?} + {:?}",
+                                left_range, right_range
+                            );
                             return Some(MergeRequest {
                                 sequences1: left_range,
                                 sequences2: right_range,
@@ -508,16 +549,22 @@ fn find_proofs_to_merge_excluding(
         }
 
         // If we can't create the block proof directly, work on creating the necessary parts
-        if let Some(merge) = find_merge_for_target_range(start_seq, end_seq, block_proofs, current_time, excluded) {
-            debug!("Found intermediate merge for block completion: {:?} + {:?}",
-                  merge.sequences1, merge.sequences2);
+        if let Some(merge) =
+            find_merge_for_target_range(start_seq, end_seq, block_proofs, current_time, excluded)
+        {
+            debug!(
+                "Found intermediate merge for block completion: {:?} + {:?}",
+                merge.sequences1, merge.sequences2
+            );
             return Some(merge);
         }
     }
 
     // CASE 2: end_sequence is unknown - build binary tree from bottom up
-    debug!("Block {} has unknown end_sequence, building binary tree from bottom up",
-           block_proofs.block_number);
+    debug!(
+        "Block {} has unknown end_sequence, building binary tree from bottom up",
+        block_proofs.block_number
+    );
 
     // Try merging at each level, starting from singles (level 1)
     // Level 1: merge singles into pairs [2n, 2n+1]
@@ -525,9 +572,12 @@ fn find_proofs_to_merge_excluding(
     // Level 4: merge quads into groups of 8, etc.
 
     let mut level = 1u64;
-    while level <= 256 { // Reasonable upper bound
+    while level <= 256 {
+        // Reasonable upper bound
         // Find all proofs at this level
-        let proofs_at_level: Vec<&Proof> = block_proofs.proofs.iter()
+        let proofs_at_level: Vec<&Proof> = block_proofs
+            .proofs
+            .iter()
             .filter(|p| p.sequences.len() as u64 == level)
             .collect();
 
@@ -558,10 +608,13 @@ fn find_proofs_to_merge_excluding(
             // Look for the adjacent proof to merge with
             let expected_next_start = proof1_end + 1;
             let expected_next_end = expected_next_start + level - 1;
-            let expected_next_sequences: Vec<u64> = (expected_next_start..=expected_next_end).collect();
+            let expected_next_sequences: Vec<u64> =
+                (expected_next_start..=expected_next_end).collect();
 
             // Find the adjacent proof
-            let proof2 = block_proofs.proofs.iter()
+            let proof2 = block_proofs
+                .proofs
+                .iter()
                 .find(|p| arrays_equal(&p.sequences, &expected_next_sequences));
 
             if let Some(proof2) = proof2 {
@@ -570,19 +623,24 @@ fn find_proofs_to_merge_excluding(
                 }
 
                 // Check if this merge is excluded
-                if excluded.iter().any(|(s1, s2)|
+                if excluded.iter().any(|(s1, s2)| {
                     (arrays_equal(s1, &proof1.sequences) && arrays_equal(s2, &proof2.sequences))
-                ) {
+                }) {
                     continue;
                 }
 
                 // Check if the combined proof already exists
                 let combined: Vec<u64> = [&proof1.sequences[..], &proof2.sequences[..]].concat();
-                let already_exists = block_proofs.proofs.iter()
-                    .any(|p| arrays_equal(&p.sequences, &combined) && is_proof_active_or_completed(p, current_time));
+                let already_exists = block_proofs.proofs.iter().any(|p| {
+                    arrays_equal(&p.sequences, &combined)
+                        && is_proof_active_or_completed(p, current_time)
+                });
 
                 if !already_exists {
-                    debug!("Found level {} merge: {:?} + {:?}", level, proof1.sequences, proof2.sequences);
+                    debug!(
+                        "Found level {} merge: {:?} + {:?}",
+                        level, proof1.sequences, proof2.sequences
+                    );
                     return Some(MergeRequest {
                         sequences1: proof1.sequences.clone(),
                         sequences2: proof2.sequences.clone(),
@@ -596,7 +654,10 @@ fn find_proofs_to_merge_excluding(
         level *= 2;
     }
 
-    debug!("No merge opportunities found for block {}", block_proofs.block_number);
+    debug!(
+        "No merge opportunities found for block {}",
+        block_proofs.block_number
+    );
     None
 }
 
@@ -619,12 +680,16 @@ pub fn find_all_proofs_to_merge(block_proofs: &ProofCalculation) -> Vec<MergeReq
 
     // CASE 1: end_sequence is known - use deterministic binary split
     if let Some(end_seq) = block_proofs.end_sequence {
-        debug!("Block {} has known end_sequence={}, finding all deterministic binary tree merges",
-               block_proofs.block_number, end_seq);
+        debug!(
+            "Block {} has known end_sequence={}, finding all deterministic binary tree merges",
+            block_proofs.block_number, end_seq
+        );
 
         // First, check if we can create the block proof directly
         let full_range: Vec<u64> = (start_seq..=end_seq).collect();
-        let block_proof_exists = block_proofs.proofs.iter()
+        let block_proof_exists = block_proofs
+            .proofs
+            .iter()
             .any(|p| arrays_equal(&p.sequences, &full_range));
 
         if !block_proof_exists {
@@ -634,14 +699,23 @@ pub fn find_all_proofs_to_merge(block_proofs: &ProofCalculation) -> Vec<MergeReq
                 let right_range: Vec<u64> = (split..=end_seq).collect();
 
                 // Check if both halves exist and are available
-                let left_proof = block_proofs.proofs.iter()
+                let left_proof = block_proofs
+                    .proofs
+                    .iter()
                     .find(|p| arrays_equal(&p.sequences, &left_range));
-                let right_proof = block_proofs.proofs.iter()
+                let right_proof = block_proofs
+                    .proofs
+                    .iter()
                     .find(|p| arrays_equal(&p.sequences, &right_range));
 
                 if let (Some(left), Some(right)) = (left_proof, right_proof) {
-                    if is_proof_available(left, current_time) && is_proof_available(right, current_time) {
-                        debug!("Found block proof merge: {:?} + {:?}", left_range, right_range);
+                    if is_proof_available(left, current_time)
+                        && is_proof_available(right, current_time)
+                    {
+                        debug!(
+                            "Found block proof merge: {:?} + {:?}",
+                            left_range, right_range
+                        );
                         merge_opportunities.push(MergeRequest {
                             sequences1: left_range,
                             sequences2: right_range,
@@ -653,19 +727,30 @@ pub fn find_all_proofs_to_merge(block_proofs: &ProofCalculation) -> Vec<MergeReq
         }
 
         // Find ALL intermediate merges needed for target range
-        find_all_merges_for_target_range(start_seq, end_seq, block_proofs, current_time, &mut merge_opportunities);
+        find_all_merges_for_target_range(
+            start_seq,
+            end_seq,
+            block_proofs,
+            current_time,
+            &mut merge_opportunities,
+        );
     }
 
     // CASE 2: end_sequence is unknown - build binary tree from bottom up
     if block_proofs.end_sequence.is_none() {
-        debug!("Block {} has unknown end_sequence, finding all binary tree merges from bottom up",
-               block_proofs.block_number);
+        debug!(
+            "Block {} has unknown end_sequence, finding all binary tree merges from bottom up",
+            block_proofs.block_number
+        );
 
         // Try merging at each level, starting from singles (level 1)
         let mut level = 1u64;
-        while level <= 256 { // Reasonable upper bound
+        while level <= 256 {
+            // Reasonable upper bound
             // Find all proofs at this level
-            let proofs_at_level: Vec<&Proof> = block_proofs.proofs.iter()
+            let proofs_at_level: Vec<&Proof> = block_proofs
+                .proofs
+                .iter()
                 .filter(|p| p.sequences.len() as u64 == level)
                 .collect();
 
@@ -695,10 +780,13 @@ pub fn find_all_proofs_to_merge(block_proofs: &ProofCalculation) -> Vec<MergeReq
                 // Look for the adjacent proof to merge with
                 let expected_next_start = proof1_end + 1;
                 let expected_next_end = expected_next_start + level - 1;
-                let expected_next_sequences: Vec<u64> = (expected_next_start..=expected_next_end).collect();
+                let expected_next_sequences: Vec<u64> =
+                    (expected_next_start..=expected_next_end).collect();
 
                 // Find the adjacent proof
-                let proof2 = block_proofs.proofs.iter()
+                let proof2 = block_proofs
+                    .proofs
+                    .iter()
                     .find(|p| arrays_equal(&p.sequences, &expected_next_sequences));
 
                 if let Some(proof2) = proof2 {
@@ -707,12 +795,18 @@ pub fn find_all_proofs_to_merge(block_proofs: &ProofCalculation) -> Vec<MergeReq
                     }
 
                     // Check if the combined proof already exists
-                    let combined: Vec<u64> = [&proof1.sequences[..], &proof2.sequences[..]].concat();
-                    let already_exists = block_proofs.proofs.iter()
-                        .any(|p| arrays_equal(&p.sequences, &combined) && is_proof_active_or_completed(p, current_time));
+                    let combined: Vec<u64> =
+                        [&proof1.sequences[..], &proof2.sequences[..]].concat();
+                    let already_exists = block_proofs.proofs.iter().any(|p| {
+                        arrays_equal(&p.sequences, &combined)
+                            && is_proof_active_or_completed(p, current_time)
+                    });
 
                     if !already_exists {
-                        debug!("Found level {} merge: {:?} + {:?}", level, proof1.sequences, proof2.sequences);
+                        debug!(
+                            "Found level {} merge: {:?} + {:?}",
+                            level, proof1.sequences, proof2.sequences
+                        );
                         merge_opportunities.push(MergeRequest {
                             sequences1: proof1.sequences.clone(),
                             sequences2: proof2.sequences.clone(),
@@ -727,7 +821,11 @@ pub fn find_all_proofs_to_merge(block_proofs: &ProofCalculation) -> Vec<MergeReq
         }
     }
 
-    debug!("Found {} merge opportunities for block {}", merge_opportunities.len(), block_proofs.block_number);
+    debug!(
+        "Found {} merge opportunities for block {}",
+        merge_opportunities.len(),
+        block_proofs.block_number
+    );
     merge_opportunities
 }
 
@@ -755,7 +853,9 @@ fn find_all_merges_for_target_range(
         let range_sequences: Vec<u64> = (start..=end).collect();
 
         // Check if this range already exists
-        let range_exists = block_proofs.proofs.iter()
+        let range_exists = block_proofs
+            .proofs
+            .iter()
             .any(|p| arrays_equal(&p.sequences, &range_sequences));
 
         if range_exists {
@@ -768,19 +868,29 @@ fn find_all_merges_for_target_range(
             let right_range: Vec<u64> = (split..=end).collect();
 
             // Check if both parts exist
-            let left_proof = block_proofs.proofs.iter()
+            let left_proof = block_proofs
+                .proofs
+                .iter()
                 .find(|p| arrays_equal(&p.sequences, &left_range));
-            let right_proof = block_proofs.proofs.iter()
+            let right_proof = block_proofs
+                .proofs
+                .iter()
                 .find(|p| arrays_equal(&p.sequences, &right_range));
 
             if let (Some(left), Some(right)) = (left_proof, right_proof) {
-                if is_proof_available(left, current_time) && is_proof_available(right, current_time) {
+                if is_proof_available(left, current_time) && is_proof_available(right, current_time)
+                {
                     // Check if we haven't already added this merge
-                    let already_added = merge_opportunities.iter()
-                        .any(|m| arrays_equal(&m.sequences1, &left_range) && arrays_equal(&m.sequences2, &right_range));
+                    let already_added = merge_opportunities.iter().any(|m| {
+                        arrays_equal(&m.sequences1, &left_range)
+                            && arrays_equal(&m.sequences2, &right_range)
+                    });
 
                     if !already_added {
-                        debug!("Found intermediate merge: {:?} + {:?}", left_range, right_range);
+                        debug!(
+                            "Found intermediate merge: {:?} + {:?}",
+                            left_range, right_range
+                        );
                         merge_opportunities.push(MergeRequest {
                             sequences1: left_range.clone(),
                             sequences2: right_range.clone(),
@@ -793,7 +903,13 @@ fn find_all_merges_for_target_range(
             // Recursively check both halves with proper bounds checking
             // Left half: from start to split-1
             if start < split && split > 0 {
-                recursive_find_merges(start, split - 1, block_proofs, current_time, merge_opportunities);
+                recursive_find_merges(
+                    start,
+                    split - 1,
+                    block_proofs,
+                    current_time,
+                    merge_opportunities,
+                );
             }
             // Right half: from split to end
             if split <= end {
@@ -802,13 +918,18 @@ fn find_all_merges_for_target_range(
         }
     }
 
-    recursive_find_merges(start_seq, end_seq, block_proofs, current_time, merge_opportunities);
+    recursive_find_merges(
+        start_seq,
+        end_seq,
+        block_proofs,
+        current_time,
+        merge_opportunities,
+    );
 }
 
 fn arrays_equal(a: &[u64], b: &[u64]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x == y)
 }
-
 
 fn is_proof_available(proof: &Proof, current_time: u64) -> bool {
     match proof.status {
@@ -822,7 +943,7 @@ fn is_proof_available(proof: &Proof, current_time: u64) -> bool {
             // Allow Used proofs only after timeout to prevent excessive intermediate proofs
             // This gives time for the system to find better merge paths first
             current_time > proof.timestamp + PROOF_USED_MERGE_TIMEOUT_MS
-        },
+        }
         ProofStatus::Rejected => false, // REJECTED proofs are not available for merging
     }
 }
