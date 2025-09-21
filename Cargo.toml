@@ -63,10 +63,10 @@ base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 
 # Sui git dependencies
-sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
-sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
-sui-crypto = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", features = ["ed25519"] }
-sui-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
+sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", branch = "master" }
+sui-sdk-types = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", branch = "master" }
+sui-crypto = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", features = ["ed25519"], branch = "master" }
+sui-transaction-builder = { git = "https://github.com/MystenLabs/sui-rust-sdk.git", branch = "master" }
 
 # Archive and compression dependencies
 tar = "0.4"

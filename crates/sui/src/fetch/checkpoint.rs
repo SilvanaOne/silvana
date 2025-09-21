@@ -1,6 +1,6 @@
 use crate::error::{Result, SilvanaSuiInterfaceError};
 use crate::state::SharedSuiState;
-use sui_rpc::proto::sui::rpc::v2beta2::{
+use sui_rpc::proto::sui::rpc::v2::{
     GetCheckpointRequest, GetTransactionRequest
 };
 use tracing::debug;
@@ -23,7 +23,7 @@ pub async fn fetch_event_with_contents(
     checkpoint_seq: u64,
     tx_index: usize,
     event_index: usize,
-) -> Result<Option<sui_rpc::proto::sui::rpc::v2beta2::Event>> {
+) -> Result<Option<sui_rpc::proto::sui::rpc::v2::Event>> {
     debug!(
         "Fetching event with contents from checkpoint {} (tx_index: {}, event_index: {})",
         checkpoint_seq, tx_index, event_index
@@ -34,12 +34,11 @@ pub async fn fetch_event_with_contents(
 
     // First, we need to get the transaction digest from the checkpoint
     // We'll fetch all transaction digests and select the one we need
-    let checkpoint_request = GetCheckpointRequest {
-        checkpoint_id: Some(sui_rpc::proto::sui::rpc::v2beta2::get_checkpoint_request::CheckpointId::SequenceNumber(checkpoint_seq)),
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["transactions.digest".to_string()],
-        }),
-    };
+    let mut checkpoint_request = GetCheckpointRequest::default();
+    checkpoint_request.checkpoint_id = Some(sui_rpc::proto::sui::rpc::v2::get_checkpoint_request::CheckpointId::SequenceNumber(checkpoint_seq));
+    checkpoint_request.read_mask = Some(prost_types::FieldMask {
+        paths: vec!["transactions.digest".to_string()],
+    });
 
     let checkpoint_response = client
         .ledger_client()
@@ -62,18 +61,17 @@ pub async fn fetch_event_with_contents(
 
     // Now fetch just the transaction with event contents
     if let Some(digest) = tx_digest {
-        let tx_request = GetTransactionRequest {
-            digest: Some(digest.clone()),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "events.events.package_id".to_string(),
-                    "events.events.module".to_string(),
-                    "events.events.sender".to_string(),
-                    "events.events.event_type".to_string(),
-                    "events.events.contents".to_string(),
-                ],
-            }),
-        };
+        let mut tx_request = GetTransactionRequest::default();
+        tx_request.digest = Some(digest.clone());
+        tx_request.read_mask = Some(prost_types::FieldMask {
+            paths: vec![
+                "events.events.package_id".to_string(),
+                "events.events.module".to_string(),
+                "events.events.sender".to_string(),
+                "events.events.event_type".to_string(),
+                "events.events.contents".to_string(),
+            ],
+        });
 
         let tx_response = client
             .ledger_client()

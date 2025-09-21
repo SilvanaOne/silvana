@@ -1,5 +1,5 @@
 use anyhow::{Result, Context};
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use tracing::{debug, warn};
 use crate::state::SharedSuiState;
 use std::env;
@@ -56,7 +56,7 @@ pub async fn get_service_info_full() -> Result<ServiceInfo> {
     let mut client = shared_state.get_sui_client();
     let mut ledger = client.ledger_client();
     
-    let req = proto::GetServiceInfoRequest {};
+    let req = proto::GetServiceInfoRequest::default();
     
     debug!("Fetching service info from gRPC...");
     let resp = ledger.get_service_info(req).await
@@ -112,27 +112,26 @@ pub async fn get_network_info() -> Result<NetworkInfo> {
     let (chain_name, chain_id) = get_service_info().await.unwrap_or((None, None));
     
     // Request current epoch info with system state
-    let req = proto::GetEpochRequest {
-        epoch: None, // None means current epoch
-        read_mask: Some(sui_rpc::field::FieldMask {
-            paths: vec![
-                "epoch".into(),
-                "system_state".into(),
-                "system_state.epoch".into(),
-                "system_state.protocol_version".into(),
-                "system_state.reference_gas_price".into(),
-                "system_state.epoch_start_timestamp_ms".into(),
-                "system_state.safe_mode".into(),
-                "system_state.validators".into(),
-                "system_state.parameters".into(),
-                "system_state.parameters.epoch_duration_ms".into(),
-                "system_state.parameters.stake_subsidy_start_epoch".into(),
+    let mut req = proto::GetEpochRequest::default();
+    req.epoch = None; // None means current epoch
+    req.read_mask = Some(sui_rpc::field::FieldMask {
+        paths: vec![
+            "epoch".into(),
+            "system_state".into(),
+            "system_state.epoch".into(),
+            "system_state.protocol_version".into(),
+            "system_state.reference_gas_price".into(),
+            "system_state.epoch_start_timestamp_ms".into(),
+            "system_state.safe_mode".into(),
+            "system_state.validators".into(),
+            "system_state.parameters".into(),
+            "system_state.parameters.epoch_duration_ms".into(),
+            "system_state.parameters.stake_subsidy_start_epoch".into(),
                 "system_state.parameters.min_validator_count".into(),
                 "system_state.parameters.max_validator_count".into(),
                 "system_state.stake_subsidy".into(),
             ],
-        }),
-    };
+        });
     
     debug!("Fetching network info from gRPC...");
     let resp = ledger.get_epoch(req).await

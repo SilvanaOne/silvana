@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
-use sui_rpc::Client as GrpcClient;
+use sui_rpc::proto::sui::rpc::v2 as proto;
+use sui_rpc::client::v2::Client as GrpcClient;
 use sui_sdk_types as sui;
 use tracing::debug;
 
@@ -116,25 +116,26 @@ pub async fn fetch_coin(
     let lock_manager = get_coin_lock_manager();
 
     for attempt in 1..=MAX_RETRIES {
-        let mut live = client.live_data_client();
+        let mut state = client.state_client();
 
         // List owned objects to find SUI coins
-        let resp = live
-            .list_owned_objects(proto::ListOwnedObjectsRequest {
-                owner: Some(sender.to_string()),
-                page_size: Some(100),
-                page_token: None,
-                read_mask: Some(prost_types::FieldMask {
-                    paths: vec![
-                        "object_id".into(),
-                        "version".into(),
-                        "digest".into(),
-                        "object_type".into(),
-                        "contents".into(),
-                    ],
-                }),
-                object_type: Some("0x2::coin::Coin<0x2::sui::SUI>".to_string()),
-            })
+        let mut list_req = proto::ListOwnedObjectsRequest::default();
+        list_req.owner = Some(sender.to_string());
+        list_req.page_size = Some(100);
+        list_req.page_token = None;
+        list_req.read_mask = Some(prost_types::FieldMask {
+            paths: vec![
+                "object_id".into(),
+                "version".into(),
+                "digest".into(),
+                "object_type".into(),
+                "contents".into(),
+            ],
+        });
+        list_req.object_type = Some("0x2::coin::Coin<0x2::sui::SUI>".to_string());
+
+        let resp = state
+            .list_owned_objects(list_req)
             .await?
             .into_inner();
 
@@ -240,14 +241,15 @@ async fn get_coin_balance_via_get_object(
 ) -> Result<u64> {
     let mut ledger = client.ledger_client();
 
+    let mut get_obj_req = proto::GetObjectRequest::default();
+    get_obj_req.object_id = Some(object_ref.object_id().to_string());
+    get_obj_req.version = Some(object_ref.version());
+    get_obj_req.read_mask = Some(prost_types::FieldMask {
+        paths: vec!["contents".into()],
+    });
+
     let resp = ledger
-        .get_object(proto::GetObjectRequest {
-            object_id: Some(object_ref.object_id().to_string()),
-            version: Some(object_ref.version()),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["contents".into()],
-            }),
-        })
+        .get_object(get_obj_req)
         .await?
         .into_inner();
 
@@ -264,24 +266,25 @@ async fn get_coin_balance_via_get_object(
 
 /// Lists all available coins for a sender with their balances
 pub async fn list_coins(client: &mut GrpcClient, sender: sui::Address) -> Result<Vec<CoinInfo>> {
-    let mut live = client.live_data_client();
+    let mut state = client.state_client();
 
-    let resp = live
-        .list_owned_objects(proto::ListOwnedObjectsRequest {
-            owner: Some(sender.to_string()),
-            page_size: Some(100),
-            page_token: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "object_id".into(),
-                    "version".into(),
-                    "digest".into(),
-                    "object_type".into(),
-                    "contents".into(),
-                ],
-            }),
-            object_type: Some("0x2::coin::Coin<0x2::sui::SUI>".to_string()),
-        })
+    let mut list_req = proto::ListOwnedObjectsRequest::default();
+    list_req.owner = Some(sender.to_string());
+    list_req.page_size = Some(100);
+    list_req.page_token = None;
+    list_req.read_mask = Some(prost_types::FieldMask {
+        paths: vec![
+            "object_id".into(),
+            "version".into(),
+            "digest".into(),
+            "object_type".into(),
+            "contents".into(),
+        ],
+    });
+    list_req.object_type = Some("0x2::coin::Coin<0x2::sui::SUI>".to_string());
+
+    let resp = state
+        .list_owned_objects(list_req)
         .await?
         .into_inner();
 

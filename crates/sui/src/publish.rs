@@ -175,7 +175,7 @@ pub struct PublishResult {
 async fn extract_package_id_from_digest(digest: &str) -> Result<String> {
     use prost_types::FieldMask;
     use sui_rpc::field::FieldMaskUtil;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+    use sui_rpc::proto::sui::rpc::v2 as proto;
 
     debug!("Extracting package ID from transaction digest: {}", digest);
 
@@ -188,10 +188,9 @@ async fn extract_package_id_from_digest(digest: &str) -> Result<String> {
 
     // Request transaction with effects using proper field mask
     // The paths are relative to ExecutedTransaction, not GetTransactionResponse
-    let req = proto::GetTransactionRequest {
-        digest: Some(digest.to_string()),
-        read_mask: Some(FieldMask::from_paths(["digest", "effects"])),
-    };
+    let mut req = proto::GetTransactionRequest::default();
+    req.digest = Some(digest.to_string());
+    req.read_mask = Some(FieldMask::from_paths(["digest", "effects"]));
 
     let resp = ledger
         .get_transaction(req)

@@ -2,8 +2,8 @@ use anyhow::{Context, Result, anyhow};
 use std::str::FromStr;
 use sui_crypto::SuiSigner;
 use sui_rpc::field::FieldMask;
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
-use sui_rpc::proto::sui::rpc::v2beta2::{SimulateTransactionRequest, simulate_transaction_request};
+use sui_rpc::proto::sui::rpc::v2 as proto;
+use sui_rpc::proto::sui::rpc::v2::{SimulateTransactionRequest, simulate_transaction_request};
 use sui_sdk_types as sui;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
@@ -100,8 +100,8 @@ fn check_transaction_effects(
         }
     }
 
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
+    // Check transaction was successful - in v2, checkpoint field indicates finality
+    if tx_resp.transaction.as_ref().and_then(|tx| tx.checkpoint).is_none() {
         error!(
             "{} transaction did not achieve finality (tx: {})",
             operation, tx_digest
@@ -162,12 +162,11 @@ async fn wait_for_transaction(
         }
 
         // Try to get the transaction - just check if it exists
-        let req = proto::GetTransactionRequest {
-            digest: Some(tx_digest.to_string()),
-            read_mask: Some(FieldMask {
-                paths: vec!["digest".into()], // Just request minimal data to check existence
-            }),
-        };
+        let mut req = proto::GetTransactionRequest::default();
+        req.digest = Some(tx_digest.to_string());
+        req.read_mask = Some(FieldMask {
+            paths: vec!["digest".into()], // Just request minimal data to check existence
+        });
 
         match ledger.get_transaction(req).await {
             Ok(_) => {
@@ -213,19 +212,19 @@ async fn get_object_details(
     let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut ledger = client.ledger_client();
 
+    let mut request = proto::GetObjectRequest::default();
+    request.object_id = Some(object_id.to_string());
+    request.read_mask = Some(prost_types::FieldMask {
+        paths: vec![
+            "object_id".to_string(),
+            "version".to_string(),
+            "digest".to_string(),
+            "owner".to_string(),
+        ],
+    });
+
     let response = ledger
-        .get_object(proto::GetObjectRequest {
-            object_id: Some(object_id.to_string()),
-            version: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "object_id".to_string(),
-                    "version".to_string(),
-                    "digest".to_string(),
-                    "owner".to_string(),
-                ],
-            }),
-        })
+        .get_object(request)
         .await
         .context("Failed to get object")?
         .into_inner();
@@ -294,7 +293,7 @@ where
     F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
         Vec<sui_sdk_types::Argument>, // object_args (can be empty)
-        sui_sdk_types::Argument, // clock_arg
+        sui_sdk_types::Argument,      // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
     const MAX_RETRIES: u32 = 3;
@@ -304,7 +303,10 @@ where
         return Err(anyhow!("No operations or publish options provided"));
     }
 
-    let function_names: Vec<String> = operations.iter().map(|(_, _, name, _)| name.clone()).collect();
+    let function_names: Vec<String> = operations
+        .iter()
+        .map(|(_, _, name, _)| name.clone())
+        .collect();
     let all_object_ids: Vec<String> = operations
         .iter()
         .flat_map(|(object_ids, _, _, _)| object_ids.clone())
@@ -399,16 +401,24 @@ where
         let (gas_coin, new_gas_guard) = match fetch_coin(&mut client, sender, gas_budget).await? {
             Some((coin, guard)) => (coin, guard),
             None => {
-                warn!("No available coins with sufficient balance for gas, attempting to request from faucet...");
-                
+                warn!(
+                    "No available coins with sufficient balance for gas, attempting to request from faucet..."
+                );
+
                 // Request fixed amount from faucet
-                match crate::faucet::ensure_sufficient_balance(crate::constants::FAUCET_REQUEST_AMOUNT_SUI).await {
+                match crate::faucet::ensure_sufficient_balance(
+                    crate::constants::FAUCET_REQUEST_AMOUNT_SUI,
+                )
+                .await
+                {
                     Ok(true) => {
-                        info!("Faucet tokens requested successfully ({} SUI), retrying coin fetch...", 
-                            crate::constants::FAUCET_REQUEST_AMOUNT_SUI);
+                        info!(
+                            "Faucet tokens requested successfully ({} SUI), retrying coin fetch...",
+                            crate::constants::FAUCET_REQUEST_AMOUNT_SUI
+                        );
                         // Wait a bit more for tokens to be available
                         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        
+
                         // Try to fetch coin again after faucet
                         match fetch_coin(&mut client, sender, gas_budget).await? {
                             Some((coin, guard)) => (coin, guard),
@@ -503,19 +513,22 @@ where
 
         // If publish options are provided, publish the modules first
         let published_package = if let Some(ref publish_opts) = publish_options {
-            debug!("Publishing {} modules with {} dependencies", 
-                publish_opts.modules.len(), 
-                publish_opts.dependencies.len());
-            
+            debug!(
+                "Publishing {} modules with {} dependencies",
+                publish_opts.modules.len(),
+                publish_opts.dependencies.len()
+            );
+
             // Decode base64 modules
-            use base64::{engine::general_purpose::STANDARD, Engine};
+            use base64::{Engine, engine::general_purpose::STANDARD};
             let mut decoded_modules = Vec::new();
             for module_b64 in &publish_opts.modules {
-                let decoded = STANDARD.decode(module_b64)
+                let decoded = STANDARD
+                    .decode(module_b64)
                     .map_err(|e| anyhow!("Failed to decode module: {}", e))?;
                 decoded_modules.push(decoded);
             }
-            
+
             // Parse dependencies as addresses
             let mut parsed_deps = Vec::new();
             for dep in &publish_opts.dependencies {
@@ -526,13 +539,13 @@ where
                 } else {
                     format!("0x{}", dep)
                 };
-                
+
                 let addr = sui::Address::from_str(&dep_with_prefix)
                     .map_err(|e| anyhow!("Failed to parse dependency address {}: {}", dep, e))?;
                 parsed_deps.push(addr);
                 debug!("Successfully parsed dependency: {} -> {}", dep, addr);
             }
-            
+
             // Call tb.publish to publish the modules
             let published = tb.publish(decoded_modules, parsed_deps);
             debug!("Published package, result argument: {:?}", published);
@@ -546,9 +559,9 @@ where
             // Collect the object arguments for this operation
             let mut op_object_args = Vec::new();
             for object_id_str in object_ids_for_op {
-                let obj_arg = object_args.get(object_id_str).ok_or_else(|| {
-                    anyhow!("Object argument not found for: {}", object_id_str)
-                })?;
+                let obj_arg = object_args
+                    .get(object_id_str)
+                    .ok_or_else(|| anyhow!("Object argument not found for: {}", object_id_str))?;
                 op_object_args.push(*obj_arg);
             }
 
@@ -593,20 +606,19 @@ where
             );
 
             // Try gas estimation once - no retries
-            let mut live_data = client.live_data_client();
-            let simulate_req = SimulateTransactionRequest {
-                transaction: Some(temp_tx.clone().into()),
-                read_mask: Some(FieldMask {
-                    paths: vec![
-                        "transaction.effects.status".into(),
-                        "transaction.effects.gas_used".into(),
-                    ],
-                }),
-                checks: Some(simulate_transaction_request::TransactionChecks::Enabled as i32),
-                do_gas_selection: Some(false), // We're managing gas ourselves
-            };
+            let mut execution_client = client.execution_client();
+            let mut simulate_req = SimulateTransactionRequest::default();
+            simulate_req.transaction = Some(temp_tx.clone().into());
+            simulate_req.read_mask = Some(FieldMask {
+                paths: vec![
+                    "transaction.effects.status".into(),
+                    "transaction.effects.gas_used".into(),
+                ],
+            });
+            simulate_req.checks = Some(simulate_transaction_request::TransactionChecks::Enabled as i32);
+            simulate_req.do_gas_selection = Some(false); // We're managing gas ourselves
 
-            match live_data.simulate_transaction(simulate_req).await {
+            match execution_client.simulate_transaction(simulate_req).await {
                 Ok(sim_resp) => {
                     let sim_result = sim_resp.into_inner();
 
@@ -766,13 +778,12 @@ where
 
         // Execute transaction via gRPC
         let mut exec = client.execution_client();
-        let req = proto::ExecuteTransactionRequest {
-            transaction: Some(tx.into()),
-            signatures: vec![sig.into()],
-            read_mask: Some(FieldMask {
-                paths: vec!["finality".into(), "transaction".into()],
-            }),
-        };
+        let mut req = proto::ExecuteTransactionRequest::default();
+        req.transaction = Some(tx.into());
+        req.signatures = vec![sig.into()];
+        req.read_mask = Some(FieldMask {
+            paths: vec!["transaction".into()],
+        });
 
         let functions_str = function_names.join(", ");
         debug!(
@@ -794,21 +805,26 @@ where
                 let clean_error = if error_str.contains("grpc-status header missing") {
                     // Handle grpc-status header missing error specially
                     if error_str.contains("HTTP status code 400") {
-                        format!("Transaction rejected by server (HTTP 400): Likely invalid transaction parameters or object state. Original error: {}", 
-                                if let Some(idx) = error_str.find(", details: [") {
-                                    &error_str[..idx]
-                                } else {
-                                    &error_str
-                                })
+                        format!(
+                            "Transaction rejected by server (HTTP 400): Likely invalid transaction parameters or object state. Original error: {}",
+                            if let Some(idx) = error_str.find(", details: [") {
+                                &error_str[..idx]
+                            } else {
+                                &error_str
+                            }
+                        )
                     } else if error_str.contains("HTTP status code 503") {
-                        "Service temporarily unavailable (HTTP 503) - server may be overloaded".to_string()
+                        "Service temporarily unavailable (HTTP 503) - server may be overloaded"
+                            .to_string()
                     } else {
-                        format!("Server communication error: {}", 
-                                if let Some(idx) = error_str.find(", details: [") {
-                                    &error_str[..idx]
-                                } else {
-                                    &error_str
-                                })
+                        format!(
+                            "Server communication error: {}",
+                            if let Some(idx) = error_str.find(", details: [") {
+                                &error_str[..idx]
+                            } else {
+                                &error_str
+                            }
+                        )
                     }
                 } else if error_str.contains("Object ID")
                     && error_str.contains("is not available for consumption")
@@ -843,34 +859,52 @@ where
                 let should_retry = (clean_error.contains("version conflict")
                     || clean_error.contains("not available for consumption")
                     || clean_error.contains("Service temporarily unavailable")
-                    || (clean_error.contains("grpc-status header missing") && clean_error.contains("HTTP status code 503")))
+                    || (clean_error.contains("grpc-status header missing")
+                        && clean_error.contains("HTTP status code 503")))
                     && retry_count < MAX_RETRIES;
 
                 if should_retry {
                     retry_count += 1;
-                    
+
                     // Different retry strategies for different errors
-                    let (delay_ms, log_msg) = if clean_error.contains("Service temporarily unavailable") 
-                        || clean_error.contains("HTTP status code 503") {
+                    let (delay_ms, log_msg) = if clean_error
+                        .contains("Service temporarily unavailable")
+                        || clean_error.contains("HTTP status code 503")
+                    {
                         // Longer delay for service unavailable
-                        (2000 * (2_u64.pow(retry_count - 1)), 
-                         format!("service unavailability on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            2000 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "service unavailability on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     } else if clean_error.contains("version conflict") {
                         // Standard exponential backoff for version conflicts
-                        (1000 * (2_u64.pow(retry_count - 1)), 
-                         format!("version conflict on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            1000 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "version conflict on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     } else {
                         // Shorter delay for other retryable errors
-                        (500 * (2_u64.pow(retry_count - 1)), 
-                         format!("transient error on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            500 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "transient error on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     };
 
                     info!(
                         "Batch transaction [{}] failed with {}. Retrying after {}ms. Error: {}",
-                        functions_str,
-                        log_msg,
-                        delay_ms,
-                        clean_error
+                        functions_str, log_msg, delay_ms, clean_error
                     );
 
                     // Add exponential backoff delay before retry
@@ -890,14 +924,19 @@ where
                         retry_count + 1,
                         clean_error
                     );
-                    
+
                     // Log transaction details for debugging
                     debug!("Failed transaction details:");
                     debug!("  Package ID: {}", package_id);
                     debug!("  Operations count: {}", operations.len());
                     for (i, (obj_ids, module, func, _)) in operations.iter().enumerate() {
-                        debug!("  Operation {}: {}::{} with {} objects", 
-                               i, module, func, obj_ids.len());
+                        debug!(
+                            "  Operation {}: {}::{} with {} objects",
+                            i,
+                            module,
+                            func,
+                            obj_ids.len()
+                        );
                         for (j, obj_id) in obj_ids.iter().enumerate() {
                             debug!("    Object {}: {}", j, obj_id);
                         }
@@ -986,12 +1025,11 @@ pub async fn fetch_transaction_events(tx_digest: &str) -> Result<Vec<String>> {
 
     // Fetch transaction with events
     let mut ledger = client.ledger_client();
-    let req = proto::GetTransactionRequest {
-        digest: Some(digest.to_string()),
-        read_mask: Some(FieldMask {
-            paths: vec!["events".into()],
-        }),
-    };
+    let mut req = proto::GetTransactionRequest::default();
+    req.digest = Some(digest.to_string());
+    req.read_mask = Some(FieldMask {
+        paths: vec!["events".into()],
+    });
 
     let resp = ledger
         .get_transaction(req)
@@ -1040,12 +1078,11 @@ pub async fn fetch_transaction_events_as_json(tx_digest: &str) -> Result<serde_j
 
     // Fetch transaction with events
     let mut ledger = client.ledger_client();
-    let req = proto::GetTransactionRequest {
-        digest: Some(digest.to_string()),
-        read_mask: Some(FieldMask {
-            paths: vec!["events".into()],
-        }),
-    };
+    let mut req = proto::GetTransactionRequest::default();
+    req.digest = Some(digest.to_string());
+    req.read_mask = Some(FieldMask {
+        paths: vec!["events".into()],
+    });
 
     let resp = ledger
         .get_transaction(req)

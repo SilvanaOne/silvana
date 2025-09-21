@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::str::FromStr;
-use sui_rpc::Client;
+use sui_rpc::client::v2::Client;
 use sui_sdk_types as sui;
 use sui_crypto::ed25519::Ed25519PrivateKey;
 use tracing::info;

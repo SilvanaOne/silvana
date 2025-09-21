@@ -2,7 +2,7 @@ use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_u64, get_bytes, get_option_bytes, get_option_string};
 use crate::state::SharedSuiState;
 use super::AppInstance;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, error};
 
 /// Represents a sequence state from the Move SequenceState struct
@@ -49,21 +49,23 @@ pub async fn fetch_sequence_state_by_id(
     // Loop through pages to find the sequence
     loop {
         // List dynamic fields to find the specific sequence state
-        let list_request = ListDynamicFieldsRequest {
-            parent: Some(sequence_states_table_id.to_string()),
-            page_size: Some(500), // Process 500 at a time
-            page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
-        };
+        let mut list_request = ListDynamicFieldsRequest::default();
+        list_request.parent = Some(sequence_states_table_id.to_string());
+        list_request.page_size = Some(500); // Process 500 at a time
+        list_request.page_token = page_token.clone();
+        // Specify minimal fields that trigger name loading
+        // The name field is a Bcs message type with subfields like value
+        list_request.read_mask = Some(prost_types::FieldMask {
+            paths: vec![
+                "parent".to_string(),
+                "field_id".to_string(),
+                "kind".to_string(),
+                "name".to_string(), // Request the entire name Bcs message
+            ],
+        });
         
         let list_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(list_request)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
@@ -80,9 +82,11 @@ pub async fn fetch_sequence_state_by_id(
         if page_token.is_none() || current_page_size > 0 {
             let mut found_sequences: Vec<u64> = Vec::new();
             for field in &response.dynamic_fields {
-                if let Some(name_value) = &field.name_value {
-                    if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
-                        found_sequences.push(field_sequence);
+                if let Some(name) = &field.name {
+                    if let Some(name_value) = &name.value {
+                        if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
+                            found_sequences.push(field_sequence);
+                        }
                     }
                 }
             }
@@ -105,81 +109,79 @@ pub async fn fetch_sequence_state_by_id(
         
         // Find the specific sequence state entry
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // The name_value is BCS-encoded u64 (sequence)
-                if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
-                    if field_sequence == sequence {
-                        debug!("🎯 Found matching sequence {} in dynamic fields", sequence);
-                        if let Some(field_id) = &field.field_id {
-                        debug!("📄 Fetching sequence state field object: {}", field_id);
-                        // Fetch the sequence state field wrapper
-                        let sequence_state_field_request = GetObjectRequest {
-                            object_id: Some(field_id.clone()),
-                            version: None,
-                            read_mask: Some(prost_types::FieldMask {
-                                paths: vec![
-                                    "object_id".to_string(),
-                                    "json".to_string(),
-                                ],
-                            }),
-                        };
-                        
-                        let sequence_state_field_response = client
-                            .ledger_client()
-                            .get_object(sequence_state_field_request)
-                            .await
-                            .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                                format!("Failed to fetch sequence state field {}: {}", sequence, e)
-                            ))?;
-                        
-                        if let Some(sequence_state_field_object) = sequence_state_field_response.into_inner().object {
-                            // Extract the actual sequence state object ID from the Field wrapper
-                            if let Some(json_value) = &sequence_state_field_object.json {
-                                if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                                    if let Some(value_field) = struct_value.fields.get("value") {
-                                        if let Some(prost_types::value::Kind::StringValue(sequence_state_object_id)) = &value_field.kind {
-                                            // Fetch the actual sequence state object
-                                            let sequence_state_request = GetObjectRequest {
-                                                object_id: Some(sequence_state_object_id.clone()),
-                                                version: None,
-                                                read_mask: Some(prost_types::FieldMask {
-                                                    paths: vec![
-                                                        "object_id".to_string(),
-                                                        "json".to_string(),
-                                                    ],
-                                                }),
-                                            };
+            if let Some(name) = &field.name {
+                if let Some(name_value) = &name.value {
+                    // The name_value is BCS-encoded u64 (sequence)
+                    if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
+                        if field_sequence == sequence {
+                            debug!("🎯 Found matching sequence {} in dynamic fields", sequence);
+                            if let Some(field_id) = &field.field_id {
+                                debug!("📄 Fetching sequence state field object: {}", field_id);
+                                // Fetch the sequence state field wrapper
+                                let mut sequence_state_field_request = GetObjectRequest::default();
+                                sequence_state_field_request.object_id = Some(field_id.clone());
+                                sequence_state_field_request.read_mask = Some(prost_types::FieldMask {
+                                    paths: vec![
+                                        "object_id".to_string(),
+                                        "json".to_string(),
+                                    ],
+                                });
+
+                                let sequence_state_field_response = client
+                                    .ledger_client()
+                                    .get_object(sequence_state_field_request)
+                                    .await
+                                    .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+                                        format!("Failed to fetch sequence state field {}: {}", sequence, e)
+                                    ))?;
+
+                                if let Some(sequence_state_field_object) = sequence_state_field_response.into_inner().object {
+                                    // Extract the actual sequence state object ID from the Field wrapper
+                                    if let Some(json_value) = &sequence_state_field_object.json {
+                                        if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
+                                            if let Some(value_field) = struct_value.fields.get("value") {
+                                                if let Some(prost_types::value::Kind::StringValue(sequence_state_object_id)) = &value_field.kind {
+                                                    // Fetch the actual sequence state object
+                                                    let mut sequence_state_request = GetObjectRequest::default();
+                                                    sequence_state_request.object_id = Some(sequence_state_object_id.clone());
+                                                    sequence_state_request.read_mask = Some(prost_types::FieldMask {
+                                                        paths: vec![
+                                                            "object_id".to_string(),
+                                                            "json".to_string(),
+                                                        ],
+                                                    });
                                             
-                                            let sequence_state_response = client
-                                                .ledger_client()
-                                                .get_object(sequence_state_request)
-                                                .await
-                                                .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
-                                                    format!("Failed to fetch sequence state {}: {}", sequence, e)
-                                                ))?;
+                                                    let sequence_state_response = client
+                                                        .ledger_client()
+                                                        .get_object(sequence_state_request)
+                                                        .await
+                                                        .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
+                                                            format!("Failed to fetch sequence state {}: {}", sequence, e)
+                                                        ))?;
                                             
-                                            if let Some(sequence_state_object) = sequence_state_response.into_inner().object {
-                                                if let Some(sequence_state_json) = &sequence_state_object.json {
-                                                    //debug!("🔍 FULL SequenceState JSON for sequence {}: {:#?}", sequence, sequence_state_json);
-                                                    if let Ok(sequence_state) = extract_sequence_state_from_json(sequence_state_json) {
-                                                        debug!("✅ Successfully extracted sequence state {}: has_state={}, has_data_availability={}", 
-                                                            sequence, sequence_state.state.is_some(), sequence_state.data_availability.is_some());
-                                                        return Ok(Some(sequence_state));
+                                                    if let Some(sequence_state_object) = sequence_state_response.into_inner().object {
+                                                        if let Some(sequence_state_json) = &sequence_state_object.json {
+                                                            //debug!("🔍 FULL SequenceState JSON for sequence {}: {:#?}", sequence, sequence_state_json);
+                                                            if let Ok(sequence_state) = extract_sequence_state_from_json(sequence_state_json) {
+                                                                debug!("✅ Successfully extracted sequence state {}: has_state={}, has_data_availability={}",
+                                                                    sequence, sequence_state.state.is_some(), sequence_state.data_availability.is_some());
+                                                                return Ok(Some(sequence_state));
+                                                            } else {
+                                                                error!("❌ Failed to extract sequence state {} from JSON", sequence);
+                                                            }
+                                                        } else {
+                                                            error!("❌ No JSON found for sequence state object {}", sequence);
+                                                        }
                                                     } else {
-                                                        error!("❌ Failed to extract sequence state {} from JSON", sequence);
+                                                        error!("❌ No sequence state object found for sequence {}", sequence);
                                                     }
-                                                } else {
-                                                    error!("❌ No JSON found for sequence state object {}", sequence);
-                                                }
-                                            } else {
-                                                error!("❌ No sequence state object found for sequence {}", sequence);
-                                            }
                                         }
+                                    }
+                                }
                                     }
                                 }
                             }
                         }
-                    }
                     }
                 }
             }

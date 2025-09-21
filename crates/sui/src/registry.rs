@@ -139,7 +139,7 @@ async fn wait_for_object_availability(object_id: &str) -> Result<()> {
     use crate::state::SharedSuiState;
     use prost_types::FieldMask;
     use std::time::Duration;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+    use sui_rpc::proto::sui::rpc::v2 as proto;
     use tokio::time::sleep;
 
     debug!("Waiting for object {} to be available", object_id);
@@ -154,14 +154,14 @@ async fn wait_for_object_availability(object_id: &str) -> Result<()> {
         let mut client = SharedSuiState::get_instance().get_sui_client();
         let mut ledger = client.ledger_client();
 
+        let mut request = proto::GetObjectRequest::default();
+        request.object_id = Some(object_address.to_string());
+        request.read_mask = Some(FieldMask {
+            paths: vec!["object_id".to_string()],
+        });
+
         let response = ledger
-            .get_object(proto::GetObjectRequest {
-                object_id: Some(object_address.to_string()),
-                version: None,
-                read_mask: Some(FieldMask {
-                    paths: vec!["object_id".to_string()],
-                }),
-            })
+            .get_object(request)
             .await;
 
         match response {
@@ -251,7 +251,7 @@ async fn fetch_created_object_from_transaction(tx_digest: &str) -> Result<String
 async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<String> {
     use crate::state::SharedSuiState;
     use prost_types::FieldMask;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+    use sui_rpc::proto::sui::rpc::v2 as proto;
 
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
@@ -262,12 +262,11 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
 
     // Fetch transaction with output_objects
     let mut ledger = client.ledger_client();
-    let req = proto::GetTransactionRequest {
-        digest: Some(digest.to_string()),
-        read_mask: Some(FieldMask {
-            paths: vec!["transaction.output_objects".into()],
-        }),
-    };
+    let mut req = proto::GetTransactionRequest::default();
+    req.digest = Some(digest.to_string());
+    req.read_mask = Some(FieldMask {
+        paths: vec!["transaction.effects.changed_objects".into()],
+    });
 
     let resp = ledger
         .get_transaction(req)
@@ -277,15 +276,18 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
     let response = resp.into_inner();
 
     if let Some(ref executed_tx) = response.transaction {
-        if !executed_tx.output_objects.is_empty() {
-            for output_object in &executed_tx.output_objects {
-                // Check if this is a registry object by looking at the type
-                if let Some(ref object_type) = output_object.object_type {
-                    if object_type.contains("::registry::SilvanaRegistry")
-                        || object_type.contains("::registry::AgentRegistry")
-                    {
-                        if let Some(ref object_id) = output_object.object_id {
-                            return Ok(object_id.clone());
+        if let Some(ref effects) = executed_tx.effects {
+            for changed_obj in &effects.changed_objects {
+                // Check if this is a newly created registry object
+                if changed_obj.input_state.is_none() && changed_obj.output_state.is_some() {
+                    // This is a created object
+                    if let Some(ref object_type) = changed_obj.object_type {
+                        if object_type.contains("::registry::SilvanaRegistry")
+                            || object_type.contains("::registry::AgentRegistry")
+                        {
+                            if let Some(ref object_id) = changed_obj.object_id {
+                                return Ok(object_id.clone());
+                            }
                         }
                     }
                 }

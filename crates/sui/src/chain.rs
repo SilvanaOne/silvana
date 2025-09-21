@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow};
 use prost_types;
 use std::env;
 use std::str::FromStr;
-use sui_rpc::Client as GrpcClient;
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::client::v2::Client as GrpcClient;
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types as sui;
 use tracing::debug;
 
@@ -198,7 +198,7 @@ pub fn load_sender_from_env_or_key(
 pub async fn get_reference_gas_price(client: &mut GrpcClient) -> Result<u64> {
     let mut ledger = client.ledger_client();
     let _resp = ledger
-        .get_service_info(proto::GetServiceInfoRequest {})
+        .get_service_info(proto::GetServiceInfoRequest::default())
         .await?
         .into_inner();
     // ServiceInfo does not expose gas price yet; default to 1000
@@ -212,24 +212,25 @@ pub async fn pick_gas_object(
     client: &mut GrpcClient,
     sender: sui::Address,
 ) -> Result<sui::ObjectReference> {
-    let mut live = client.live_data_client();
+    let mut state = client.state_client();
     debug!("Listing owned objects for sender: {}", sender);
 
-    let resp = live
-        .list_owned_objects(proto::ListOwnedObjectsRequest {
-            owner: Some(sender.to_string()),
-            page_size: Some(100),
-            page_token: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "object_id".into(),
-                    "version".into(),
-                    "digest".into(),
-                    "object_type".into(),
-                ],
-            }),
-            object_type: None,
-        })
+    let mut list_req = proto::ListOwnedObjectsRequest::default();
+    list_req.owner = Some(sender.to_string());
+    list_req.page_size = Some(100);
+    list_req.page_token = None;
+    list_req.read_mask = Some(prost_types::FieldMask {
+        paths: vec![
+            "object_id".into(),
+            "version".into(),
+            "digest".into(),
+            "object_type".into(),
+        ],
+    });
+    list_req.object_type = None;
+
+    let resp = state
+        .list_owned_objects(list_req)
         .await?
         .into_inner();
 
@@ -255,12 +256,13 @@ pub async fn pick_gas_object(
             .object_id
             .clone()
             .ok_or_else(|| anyhow::anyhow!("missing object id"))?;
+        let mut get_obj_req = proto::GetObjectRequest::default();
+        get_obj_req.object_id = Some(object_id_str.clone());
+        get_obj_req.version = None;
+        get_obj_req.read_mask = None;
+
         let got = ledger
-            .get_object(proto::GetObjectRequest {
-                object_id: Some(object_id_str.clone()),
-                version: None,
-                read_mask: None,
-            })
+            .get_object(get_obj_req)
             .await?
             .into_inner();
 

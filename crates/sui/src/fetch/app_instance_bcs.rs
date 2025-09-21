@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
+use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
 use tracing::debug;
 
 use crate::error::SilvanaSuiInterfaceError;
@@ -387,13 +387,11 @@ pub async fn fetch_app_instance_bcs(
     debug!("Fetching AppInstance (BCS) with ID: {}", formatted_id);
 
     // Ask only for the fields we need: Move struct contents (BCS) and object_id for convenience
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["contents".to_string(), "object_id".to_string()],
-        }),
-    };
+    let mut request = GetObjectRequest::default();
+    request.object_id = Some(formatted_id.clone());
+    request.read_mask = Some(prost_types::FieldMask {
+        paths: vec!["contents".to_string(), "object_id".to_string()],
+    });
 
     let response = client
         .ledger_client()
