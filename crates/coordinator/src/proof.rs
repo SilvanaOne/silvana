@@ -366,34 +366,64 @@ pub async fn analyze_proof_completion(
     // The Move contract purges when last_purged_sequence < last_settled_sequence
     if app_instance.last_purged_sequence < app_instance.last_settled_sequence {
         let sequences_to_purge = crate::constants::DEFAULT_PURGE_SEQUENCES;
-        let purgeable_sequences =
+        let initial_purgeable_sequences =
             app_instance.last_settled_sequence - app_instance.last_purged_sequence;
 
         debug!(
-            "🗑️ Purge opportunity detected: {} sequences can be purged (last_purged: {}, last_settled: {})",
-            purgeable_sequences,
+            "🗑️ Initial purge opportunity detected: {} sequences can be purged (last_purged: {}, last_settled: {})",
+            initial_purgeable_sequences,
             app_instance.last_purged_sequence,
             app_instance.last_settled_sequence
         );
 
-        // Create a Sui interface and call purge
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-        match sui_interface
-            .purge(&app_instance.id, sequences_to_purge, None)
-            .await
-        {
-            Ok(tx_digest) => {
-                info!(
-                    "✅ Successfully purged of up to {} sequences (tx: {})",
-                    sequences_to_purge, tx_digest
-                );
+        // Refetch the app instance to ensure the condition is still valid
+        match sui::fetch::fetch_app_instance(&app_instance.id).await {
+            Ok(fresh_app_instance) => {
+                // Re-check the condition with fresh data
+                if fresh_app_instance.last_purged_sequence < fresh_app_instance.last_settled_sequence {
+                    let fresh_purgeable_sequences =
+                        fresh_app_instance.last_settled_sequence - fresh_app_instance.last_purged_sequence;
+
+                    debug!(
+                        "🗑️ Confirmed purge opportunity after refetch: {} sequences can be purged (last_purged: {}, last_settled: {})",
+                        fresh_purgeable_sequences,
+                        fresh_app_instance.last_purged_sequence,
+                        fresh_app_instance.last_settled_sequence
+                    );
+
+                    // Create a Sui interface and call purge
+                    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+                    match sui_interface
+                        .purge(&app_instance.id, sequences_to_purge, None)
+                        .await
+                    {
+                        Ok(tx_digest) => {
+                            info!(
+                                "✅ Successfully initiated purge of up to {} sequences (tx: {})",
+                                sequences_to_purge, tx_digest
+                            );
+                        }
+                        Err((error_msg, tx_digest)) => {
+                            // Log as warn since we confirmed the condition but still failed
+                            warn!(
+                                "⚠️ Failed to purge sequences: {}{}",
+                                error_msg,
+                                tx_digest.map_or(String::new(), |d| format!(" (tx: {})", d))
+                            );
+                        }
+                    }
+                } else {
+                    debug!(
+                        "🔍 Purge opportunity no longer valid after refetch (last_purged: {}, last_settled: {})",
+                        fresh_app_instance.last_purged_sequence,
+                        fresh_app_instance.last_settled_sequence
+                    );
+                }
             }
-            Err((error_msg, tx_digest)) => {
-                // Log as debug instead of warn since purging is an optimization, not critical
+            Err(e) => {
                 warn!(
-                    "⚠️ Failed to purge sequences: {}{}",
-                    error_msg,
-                    tx_digest.map_or(String::new(), |d| format!(" (tx: {})", d))
+                    "⚠️ Failed to refetch app instance for purge validation: {}",
+                    e
                 );
             }
         }
