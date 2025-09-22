@@ -73,7 +73,10 @@ impl MulticallProcessor {
                         // Try to process any stuck operations during shutdown
                         if pending_operations > 0 && buffer_size == 0 && current_agents == 0 {
                             // Operations exist but no active work - might be stuck
-                            debug!("Attempting to process {} potentially stuck operations during shutdown", pending_operations);
+                            debug!(
+                                "Attempting to process {} potentially stuck operations during shutdown",
+                                pending_operations
+                            );
                             if let Err(e) = self.execute_multicall_batch().await {
                                 error!("Failed to execute stuck operations during shutdown: {}", e);
                             }
@@ -211,7 +214,11 @@ impl MulticallProcessor {
 
                         info!(
                             "Added {} operations from app_instance {} to batch (batch total: {}, max: {}, attempt: {})",
-                            operation_count, app_instance, current_operation_count, current_max_operations, attempt_count
+                            operation_count,
+                            app_instance,
+                            current_operation_count,
+                            current_max_operations,
+                            attempt_count
                         );
 
                         current_batch_operations.push(operations);
@@ -240,169 +247,180 @@ impl MulticallProcessor {
                 .multicall_job_operations(current_batch_operations.clone(), None)
                 .await
             {
-            Ok(result) => {
-                let batch_duration = batch_start_time.elapsed();
-                info!(
-                    "Successfully executed batch multicall with {} operations (tx: {})",
-                    current_operation_count, result.tx_digest
-                );
-
-                // Send CoordinationTxEvent
-                self.state.send_coordination_tx_event(result.tx_digest.clone());
-
-                // Report successful multicall metrics
-                if let Some(ref metrics) = self.metrics {
-                    metrics.increment_multicall_batch_executed(
-                        current_operation_count,
-                        batch_duration.as_millis() as usize,
-                    );
-                }
-
-                // Add only successfully started jobs to buffer for container launching
-                let successful_start_sequences = result.successful_start_jobs();
-                let failed_start_sequences = result.failed_start_jobs();
-
-                if !failed_start_sequences.is_empty() {
-                    info!("Some start jobs failed: {:?}", failed_start_sequences);
-                }
-
-                // Filter started jobs to only include successful ones
-                let successful_started_jobs: Vec<StartedJob> = current_batch_started_jobs
-                    .into_iter()
-                    .filter(|(_, sequence, _, _, _, _)| successful_start_sequences.contains(sequence))
-                    .map(|(app_instance, sequence, memory_req, job_type, block_number, sequences)| StartedJob {
-                        app_instance,
-                        job_sequence: sequence,
-                        memory_requirement: memory_req,
-                        job_type,
-                        block_number,
-                        sequences,
-                    })
-                    .collect();
-
-                // Add successful jobs to the buffer
-                if !successful_started_jobs.is_empty() {
+                Ok(result) => {
+                    let batch_duration = batch_start_time.elapsed();
                     info!(
-                        "Adding {} successfully started jobs to container launch buffer",
-                        successful_started_jobs.len()
+                        "Successfully executed batch multicall with {} operations (tx: {})",
+                        current_operation_count, result.tx_digest
                     );
-                    self.state
-                        .add_started_jobs(successful_started_jobs.clone())
-                        .await;
 
-                    // Report start jobs metrics
+                    // Send CoordinationTxEvent
+                    self.state
+                        .send_coordination_tx_event(result.tx_digest.clone());
+
+                    // Report successful multicall metrics
                     if let Some(ref metrics) = self.metrics {
-                        metrics.add_multicall_start_jobs_result(
-                            successful_started_jobs.len(),
-                            failed_start_sequences.len(),
+                        metrics.increment_multicall_batch_executed(
+                            current_operation_count,
+                            batch_duration.as_millis() as usize,
                         );
                     }
-                }
 
-                info!(
-                    "Multicall complete: {} jobs started successfully, {} failed",
-                    successful_start_sequences.len(),
-                    failed_start_sequences.len()
-                );
+                    // Add only successfully started jobs to buffer for container launching
+                    let successful_start_sequences = result.successful_start_jobs();
+                    let failed_start_sequences = result.failed_start_jobs();
 
-                // Update the last multicall timestamp after successful execution
-                self.state.update_last_multicall_timestamp().await;
+                    if !failed_start_sequences.is_empty() {
+                        info!("Some start jobs failed: {:?}", failed_start_sequences);
+                    }
 
-                // Success - break out of retry loop
-                break;
-            }
-            Err((error_msg, tx_digest_opt)) => {
-                // Check if it's a gas-related error
-                let is_gas_issue = error_msg.contains("InsufficientGas")
-                    || error_msg.contains("gas")
-                    || error_msg.contains("Balance of gas object");
+                    // Filter started jobs to only include successful ones
+                    let successful_started_jobs: Vec<StartedJob> = current_batch_started_jobs
+                        .into_iter()
+                        .filter(|(_, sequence, _, _, _, _)| {
+                            successful_start_sequences.contains(sequence)
+                        })
+                        .map(
+                            |(
+                                app_instance,
+                                sequence,
+                                memory_req,
+                                job_type,
+                                block_number,
+                                sequences,
+                            )| StartedJob {
+                                app_instance,
+                                job_sequence: sequence,
+                                memory_requirement: memory_req,
+                                job_type,
+                                block_number,
+                                sequences,
+                            },
+                        )
+                        .collect();
 
-                // Return operations to queue for retry
-                let mut total_returned = 0;
-                for operations in current_batch_operations {
-                    let op_count = operations.total_operations();
-                    self.state.return_operations_to_queue(operations).await;
-                    total_returned += op_count;
-                }
+                    // Add successful jobs to the buffer
+                    if !successful_started_jobs.is_empty() {
+                        info!(
+                            "Adding {} successfully started jobs to container launch buffer",
+                            successful_started_jobs.len()
+                        );
+                        self.state
+                            .add_started_jobs(successful_started_jobs.clone())
+                            .await;
 
-                // Calculate next batch size
-                let next_max_operations = if current_max_operations > 1 {
-                    (current_max_operations / 2).max(1)
-                } else {
-                    1
-                };
+                        // Report start jobs metrics
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.add_multicall_start_jobs_result(
+                                successful_started_jobs.len(),
+                                failed_start_sequences.len(),
+                            );
+                        }
+                    }
 
-                // Check if we should retry or give up
-                if current_max_operations == 1 || next_max_operations == current_max_operations {
-                    // Already at minimum batch size, no more retries
-                    let full_error = format!(
-                        "Batch multicall failed: {} (tx: {:?})",
-                        error_msg, tx_digest_opt
+                    info!(
+                        "Multicall complete: {} jobs started successfully, {} failed",
+                        successful_start_sequences.len(),
+                        failed_start_sequences.len()
                     );
-                    error!("{}", full_error);
-                    error!(
-                        "❌ Failed to execute multicall even with batch size of 1 after {} attempts",
-                        attempt_count
-                    );
 
-                    warn!(
-                        "Returned {} operations to queue for later retry after all attempts failed",
+                    // Update the last multicall timestamp after successful execution
+                    self.state.update_last_multicall_timestamp().await;
+
+                    // Success - break out of retry loop
+                    break;
+                }
+                Err((error_msg, tx_digest_opt)) => {
+                    // Check if it's a gas-related error
+                    let is_gas_issue = error_msg.contains("InsufficientGas")
+                        || error_msg.contains("gas")
+                        || error_msg.contains("Computation cost")
+                        || error_msg.contains("Balance of gas object");
+
+                    // Return operations to queue for retry
+                    let mut total_returned = 0;
+                    for operations in current_batch_operations {
+                        let op_count = operations.total_operations();
+                        self.state.return_operations_to_queue(operations).await;
+                        total_returned += op_count;
+                    }
+
+                    // Calculate next batch size
+                    let next_max_operations = if current_max_operations > 1 {
+                        (current_max_operations / 2).max(1)
+                    } else {
+                        1
+                    };
+
+                    // Check if we should retry or give up
+                    if current_max_operations == 1 || next_max_operations == current_max_operations
+                    {
+                        // Already at minimum batch size, no more retries
+                        let full_error = format!(
+                            "Batch multicall failed: {} (tx: {:?})",
+                            error_msg, tx_digest_opt
+                        );
+                        error!("{}", full_error);
+                        error!(
+                            "❌ Failed to execute multicall even with batch size of 1 after {} attempts",
+                            attempt_count
+                        );
+
+                        warn!(
+                            "Returned {} operations to queue for later retry after all attempts failed",
+                            total_returned
+                        );
+
+                        // Send error event to RPC
+                        self.state.send_coordinator_message_event(
+                            proto::LogLevel::Error,
+                            format!(
+                                "{} - All retry attempts failed. Returned {} operations to queue",
+                                full_error, total_returned
+                            ),
+                        );
+
+                        // Report failed multicall metrics
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.increment_multicall_batch_failed();
+                        }
+
+                        // Don't update timestamp on failure - allow retry in next cycle
+                        info!("Operations returned to queue, will retry in next multicall cycle");
+                        break;
+                    }
+
+                    // Log the retry attempt
+                    if is_gas_issue {
+                        warn!(
+                            "⚠️ Multicall failed due to gas constraints with batch size {} (attempt {}): {}. Retrying with batch size {}...",
+                            current_max_operations, attempt_count, error_msg, next_max_operations
+                        );
+                    } else {
+                        warn!(
+                            "⚠️ Multicall failed with batch size {} (attempt {}): {}. Retrying with batch size {}...",
+                            current_max_operations, attempt_count, error_msg, next_max_operations
+                        );
+                    }
+
+                    info!(
+                        "Returned {} operations to queue for retry with smaller batch size",
                         total_returned
                     );
 
-                    // Send error event to RPC
-                    self.state.send_coordinator_message_event(
-                        proto::LogLevel::Error,
-                        format!("{} - All retry attempts failed. Returned {} operations to queue", full_error, total_returned)
-                    );
+                    // Update max operations for next attempt
+                    current_max_operations = next_max_operations;
 
-                    // Report failed multicall metrics
-                    if let Some(ref metrics) = self.metrics {
-                        metrics.increment_multicall_batch_failed();
-                    }
+                    // Small delay before retry to avoid hammering the network
+                    sleep(Duration::from_millis(500)).await;
 
-                    // Don't update timestamp on failure - allow retry in next cycle
-                    info!("Operations returned to queue, will retry in next multicall cycle");
-                    break;
+                    // Continue loop to retry with smaller batch
+                    continue;
                 }
-
-                // Log the retry attempt
-                if is_gas_issue {
-                    warn!(
-                        "⚠️ Multicall failed due to gas constraints with batch size {} (attempt {}): {}. Retrying with batch size {}...",
-                        current_max_operations,
-                        attempt_count,
-                        error_msg,
-                        next_max_operations
-                    );
-                } else {
-                    warn!(
-                        "⚠️ Multicall failed with batch size {} (attempt {}): {}. Retrying with batch size {}...",
-                        current_max_operations,
-                        attempt_count,
-                        error_msg,
-                        next_max_operations
-                    );
-                }
-
-                info!(
-                    "Returned {} operations to queue for retry with smaller batch size",
-                    total_returned
-                );
-
-                // Update max operations for next attempt
-                current_max_operations = next_max_operations;
-
-                // Small delay before retry to avoid hammering the network
-                sleep(Duration::from_millis(500)).await;
-
-                // Continue loop to retry with smaller batch
-                continue;
             }
         }
-    }
 
-    Ok(())
+        Ok(())
     }
 
     /// Take partial operations from an app instance up to the specified limit

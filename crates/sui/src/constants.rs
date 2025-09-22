@@ -23,14 +23,17 @@ pub const FAUCET_REQUEST_AMOUNT_SUI: f64 = 10.0;
 // Gas budget configuration
 // 1 SUI = 1,000,000,000 MIST
 
-/// Maximum gas budget allowed by Sui network (5 SUI)
+/// Maximum gas budget allowed by Sui network
 pub const SIMULATION_GAS_BUDGET_MIST: u64 = 5_000_000_000;
 
-/// Minimum gas budget for any transaction (0.005 SUI)
+/// Minimum gas budget for any transaction
 pub const MIN_GAS_BUDGET_MIST: u64 = 5_000_000;
 
-/// Maximum gas budget for any transaction (0.1 SUI)
+/// Maximum gas budget for any transaction
 pub const MAX_GAS_BUDGET_MIST: u64 = 500_000_000;
 
-/// Fallback gas budget when simulation fails or no custom budget provided (0.1 SUI)
+/// Maximum computation cost for any transaction
+pub const MAX_COMPUTATION_COST_MIST: u64 = 5_000_000;
+
+/// Fallback gas budget when simulation fails or no custom budget provided
 pub const FALLBACK_GAS_BUDGET_MIST: u64 = 100_000_000;

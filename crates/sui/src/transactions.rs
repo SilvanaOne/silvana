@@ -10,7 +10,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::chain::get_reference_gas_price;
 use crate::coin::fetch_coin;
-use crate::constants::{MAX_GAS_BUDGET_MIST, MIN_GAS_BUDGET_MIST, SIMULATION_GAS_BUDGET_MIST};
+use crate::constants::{
+    MAX_COMPUTATION_COST_MIST, MAX_GAS_BUDGET_MIST, MIN_GAS_BUDGET_MIST, SIMULATION_GAS_BUDGET_MIST,
+};
 use crate::error::SilvanaSuiInterfaceError;
 use crate::object_lock::get_object_lock_manager;
 use crate::state::SharedSuiState;
@@ -294,7 +296,7 @@ where
     F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
         Vec<sui_sdk_types::Argument>, // object_args (can be empty)
-        sui_sdk_types::Argument, // clock_arg
+        sui_sdk_types::Argument,      // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
     const MAX_RETRIES: u32 = 3;
@@ -304,7 +306,10 @@ where
         return Err(anyhow!("No operations or publish options provided"));
     }
 
-    let function_names: Vec<String> = operations.iter().map(|(_, _, name, _)| name.clone()).collect();
+    let function_names: Vec<String> = operations
+        .iter()
+        .map(|(_, _, name, _)| name.clone())
+        .collect();
     let all_object_ids: Vec<String> = operations
         .iter()
         .flat_map(|(object_ids, _, _, _)| object_ids.clone())
@@ -398,16 +403,24 @@ where
         let (gas_coin, new_gas_guard) = match fetch_coin(&mut client, sender, gas_budget).await? {
             Some((coin, guard)) => (coin, guard),
             None => {
-                warn!("No available coins with sufficient balance for gas, attempting to request from faucet...");
-                
+                warn!(
+                    "No available coins with sufficient balance for gas, attempting to request from faucet..."
+                );
+
                 // Request fixed amount from faucet
-                match crate::faucet::ensure_sufficient_balance(crate::constants::FAUCET_REQUEST_AMOUNT_SUI).await {
+                match crate::faucet::ensure_sufficient_balance(
+                    crate::constants::FAUCET_REQUEST_AMOUNT_SUI,
+                )
+                .await
+                {
                     Ok(true) => {
-                        info!("Faucet tokens requested successfully ({} SUI), retrying coin fetch...", 
-                            crate::constants::FAUCET_REQUEST_AMOUNT_SUI);
+                        info!(
+                            "Faucet tokens requested successfully ({} SUI), retrying coin fetch...",
+                            crate::constants::FAUCET_REQUEST_AMOUNT_SUI
+                        );
                         // Wait a bit more for tokens to be available
                         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        
+
                         // Try to fetch coin again after faucet
                         match fetch_coin(&mut client, sender, gas_budget).await? {
                             Some((coin, guard)) => (coin, guard),
@@ -502,19 +515,22 @@ where
 
         // If publish options are provided, publish the modules first
         let published_package = if let Some(ref publish_opts) = publish_options {
-            debug!("Publishing {} modules with {} dependencies", 
-                publish_opts.modules.len(), 
-                publish_opts.dependencies.len());
-            
+            debug!(
+                "Publishing {} modules with {} dependencies",
+                publish_opts.modules.len(),
+                publish_opts.dependencies.len()
+            );
+
             // Decode base64 modules
-            use base64::{engine::general_purpose::STANDARD, Engine};
+            use base64::{Engine, engine::general_purpose::STANDARD};
             let mut decoded_modules = Vec::new();
             for module_b64 in &publish_opts.modules {
-                let decoded = STANDARD.decode(module_b64)
+                let decoded = STANDARD
+                    .decode(module_b64)
                     .map_err(|e| anyhow!("Failed to decode module: {}", e))?;
                 decoded_modules.push(decoded);
             }
-            
+
             // Parse dependencies as addresses
             let mut parsed_deps = Vec::new();
             for dep in &publish_opts.dependencies {
@@ -525,13 +541,13 @@ where
                 } else {
                     format!("0x{}", dep)
                 };
-                
+
                 let addr = sui::Address::from_str(&dep_with_prefix)
                     .map_err(|e| anyhow!("Failed to parse dependency address {}: {}", dep, e))?;
                 parsed_deps.push(addr);
                 debug!("Successfully parsed dependency: {} -> {}", dep, addr);
             }
-            
+
             // Call tb.publish to publish the modules
             let published = tb.publish(decoded_modules, parsed_deps);
             debug!("Published package, result argument: {:?}", published);
@@ -545,9 +561,9 @@ where
             // Collect the object arguments for this operation
             let mut op_object_args = Vec::new();
             for object_id_str in object_ids_for_op {
-                let obj_arg = object_args.get(object_id_str).ok_or_else(|| {
-                    anyhow!("Object argument not found for: {}", object_id_str)
-                })?;
+                let obj_arg = object_args
+                    .get(object_id_str)
+                    .ok_or_else(|| anyhow!("Object argument not found for: {}", object_id_str))?;
                 op_object_args.push(*obj_arg);
             }
 
@@ -633,7 +649,8 @@ where
                                         let estimated_budget = (total_gas_used as f64 * 2.0) as u64;
 
                                         // Ensure minimum budget
-                                        let calculated_budget = estimated_budget.max(MIN_GAS_BUDGET_MIST);
+                                        let calculated_budget =
+                                            estimated_budget.max(MIN_GAS_BUDGET_MIST);
 
                                         // Calculate average per move call
                                         let num_calls = operations.len() as u64;
@@ -674,9 +691,24 @@ where
                                             calculated_budget as f64 / 1_000_000_000.0
                                         );
 
+                                        if computation_cost > MAX_COMPUTATION_COST_MIST {
+                                            info!(
+                                                "Calculated computation cost {} MIST ({:.4} SUI) exceeds MAX_COMPUTATION_COST_MIST {} MIST ({} SUI)",
+                                                computation_cost,
+                                                computation_cost as f64 / 1_000_000_000.0,
+                                                MAX_COMPUTATION_COST_MIST,
+                                                MAX_COMPUTATION_COST_MIST as f64 / 1_000_000_000.0
+                                            );
+                                            return Err(anyhow!(
+                                                "Computation cost {} MIST exceeds maximum allowed {} MIST",
+                                                computation_cost,
+                                                MAX_COMPUTATION_COST_MIST
+                                            ));
+                                        }
+
                                         // Check if calculated budget exceeds maximum
                                         if calculated_budget > MAX_GAS_BUDGET_MIST {
-                                            error!(
+                                            info!(
                                                 "Calculated gas budget {} MIST ({:.4} SUI) exceeds MAX_GAS_BUDGET_MIST {} MIST ({} SUI)",
                                                 calculated_budget,
                                                 calculated_budget as f64 / 1_000_000_000.0,
@@ -709,11 +741,13 @@ where
                                             }
                                             // Custom budget is sufficient, use it for the actual transaction
                                             info!(
-                                                "Custom gas budget {} MIST ({:.4} SUI) is sufficient. Dry run calculated: {} MIST ({:.4} SUI)",
+                                                "Custom gas budget {} MIST ({:.4} SUI) is sufficient. Dry run calculated: {} MIST ({:.4} SUI), computation cost: {} MIST ({:.4} SUI)",
                                                 custom_budget,
                                                 custom_budget as f64 / 1_000_000_000.0,
                                                 calculated_budget,
-                                                calculated_budget as f64 / 1_000_000_000.0
+                                                calculated_budget as f64 / 1_000_000_000.0,
+                                                computation_cost,
+                                                computation_cost as f64 / 1_000_000_000.0
                                             );
                                             // Set the actual requested budget for the transaction
                                             gas_budget = custom_budget;
@@ -769,7 +803,8 @@ where
                                     if let Some(ref error) = status.error {
                                         // Check if it's an InsufficientGas error
                                         let error_str = format!("{:?}", error);
-                                        let is_insufficient_gas = error_str.contains("InsufficientGas");
+                                        let is_insufficient_gas =
+                                            error_str.contains("InsufficientGas");
 
                                         // If custom budget was provided and dry run shows insufficient gas, fail immediately
                                         if let Some(custom_budget) = custom_gas_budget {
@@ -777,7 +812,8 @@ where
                                                 error!(
                                                     "Dry run failed with InsufficientGas even with {} MIST ({} SUI) simulation budget. Custom budget {} MIST ({:.4} SUI) is definitely insufficient",
                                                     SIMULATION_GAS_BUDGET_MIST,
-                                                    SIMULATION_GAS_BUDGET_MIST as f64 / 1_000_000_000.0,
+                                                    SIMULATION_GAS_BUDGET_MIST as f64
+                                                        / 1_000_000_000.0,
                                                     custom_budget,
                                                     custom_budget as f64 / 1_000_000_000.0
                                                 );
@@ -891,21 +927,26 @@ where
                 let clean_error = if error_str.contains("grpc-status header missing") {
                     // Handle grpc-status header missing error specially
                     if error_str.contains("HTTP status code 400") {
-                        format!("Transaction rejected by server (HTTP 400): Likely invalid transaction parameters or object state. Original error: {}", 
-                                if let Some(idx) = error_str.find(", details: [") {
-                                    &error_str[..idx]
-                                } else {
-                                    &error_str
-                                })
+                        format!(
+                            "Transaction rejected by server (HTTP 400): Likely invalid transaction parameters or object state. Original error: {}",
+                            if let Some(idx) = error_str.find(", details: [") {
+                                &error_str[..idx]
+                            } else {
+                                &error_str
+                            }
+                        )
                     } else if error_str.contains("HTTP status code 503") {
-                        "Service temporarily unavailable (HTTP 503) - server may be overloaded".to_string()
+                        "Service temporarily unavailable (HTTP 503) - server may be overloaded"
+                            .to_string()
                     } else {
-                        format!("Server communication error: {}", 
-                                if let Some(idx) = error_str.find(", details: [") {
-                                    &error_str[..idx]
-                                } else {
-                                    &error_str
-                                })
+                        format!(
+                            "Server communication error: {}",
+                            if let Some(idx) = error_str.find(", details: [") {
+                                &error_str[..idx]
+                            } else {
+                                &error_str
+                            }
+                        )
                     }
                 } else if error_str.contains("Object ID")
                     && error_str.contains("is not available for consumption")
@@ -940,34 +981,52 @@ where
                 let should_retry = (clean_error.contains("version conflict")
                     || clean_error.contains("not available for consumption")
                     || clean_error.contains("Service temporarily unavailable")
-                    || (clean_error.contains("grpc-status header missing") && clean_error.contains("HTTP status code 503")))
+                    || (clean_error.contains("grpc-status header missing")
+                        && clean_error.contains("HTTP status code 503")))
                     && retry_count < MAX_RETRIES;
 
                 if should_retry {
                     retry_count += 1;
-                    
+
                     // Different retry strategies for different errors
-                    let (delay_ms, log_msg) = if clean_error.contains("Service temporarily unavailable") 
-                        || clean_error.contains("HTTP status code 503") {
+                    let (delay_ms, log_msg) = if clean_error
+                        .contains("Service temporarily unavailable")
+                        || clean_error.contains("HTTP status code 503")
+                    {
                         // Longer delay for service unavailable
-                        (2000 * (2_u64.pow(retry_count - 1)), 
-                         format!("service unavailability on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            2000 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "service unavailability on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     } else if clean_error.contains("version conflict") {
                         // Standard exponential backoff for version conflicts
-                        (1000 * (2_u64.pow(retry_count - 1)), 
-                         format!("version conflict on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            1000 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "version conflict on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     } else {
                         // Shorter delay for other retryable errors
-                        (500 * (2_u64.pow(retry_count - 1)), 
-                         format!("transient error on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            500 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "transient error on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     };
 
                     info!(
                         "Batch transaction [{}] failed with {}. Retrying after {}ms. Error: {}",
-                        functions_str,
-                        log_msg,
-                        delay_ms,
-                        clean_error
+                        functions_str, log_msg, delay_ms, clean_error
                     );
 
                     // Add exponential backoff delay before retry
@@ -987,14 +1046,19 @@ where
                         retry_count + 1,
                         clean_error
                     );
-                    
+
                     // Log transaction details for debugging
                     debug!("Failed transaction details:");
                     debug!("  Package ID: {}", package_id);
                     debug!("  Operations count: {}", operations.len());
                     for (i, (obj_ids, module, func, _)) in operations.iter().enumerate() {
-                        debug!("  Operation {}: {}::{} with {} objects", 
-                               i, module, func, obj_ids.len());
+                        debug!(
+                            "  Operation {}: {}::{} with {} objects",
+                            i,
+                            module,
+                            func,
+                            obj_ids.len()
+                        );
                         for (j, obj_id) in obj_ids.iter().enumerate() {
                             debug!("    Object {}: {}", j, obj_id);
                         }

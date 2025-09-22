@@ -380,9 +380,11 @@ pub async fn analyze_proof_completion(
         match sui::fetch::fetch_app_instance(&app_instance.id).await {
             Ok(fresh_app_instance) => {
                 // Re-check the condition with fresh data
-                if fresh_app_instance.last_purged_sequence < fresh_app_instance.last_settled_sequence {
-                    let fresh_purgeable_sequences =
-                        fresh_app_instance.last_settled_sequence - fresh_app_instance.last_purged_sequence;
+                if fresh_app_instance.last_purged_sequence
+                    < fresh_app_instance.last_settled_sequence
+                {
+                    let fresh_purgeable_sequences = fresh_app_instance.last_settled_sequence
+                        - fresh_app_instance.last_purged_sequence;
 
                     debug!(
                         "🗑️ Confirmed purge opportunity after refetch: {} sequences can be purged (last_purged: {}, last_settled: {})",
@@ -419,9 +421,11 @@ pub async fn analyze_proof_completion(
                                 // Check if it's a gas budget issue or other failure
                                 let is_gas_issue = error_msg.contains("Insufficient gas budget")
                                     || error_msg.contains("InsufficientGas")
+                                    || error_msg.contains("Computation cost")
                                     || error_msg.contains("gas");
 
-                                let tx_info = tx_digest.map_or(String::new(), |d| format!(" (tx: {})", d));
+                                let tx_info =
+                                    tx_digest.map_or(String::new(), |d| format!(" (tx: {})", d));
 
                                 // Calculate next retry sequences by dividing by 2
                                 let next_sequences = if current_sequences > 1 {
@@ -431,8 +435,7 @@ pub async fn analyze_proof_completion(
                                     // Already tried with 1, no more retries
                                     error!(
                                         "❌ Failed to purge even with sequences=1: {}{}",
-                                        error_msg,
-                                        tx_info
+                                        error_msg, tx_info
                                     );
                                     break;
                                 };
@@ -441,8 +444,7 @@ pub async fn analyze_proof_completion(
                                 if current_sequences == 1 {
                                     error!(
                                         "❌ Failed to purge even with sequences=1: {}{}",
-                                        error_msg,
-                                        tx_info
+                                        error_msg, tx_info
                                     );
                                     break;
                                 }
@@ -450,18 +452,12 @@ pub async fn analyze_proof_completion(
                                 if is_gas_issue {
                                     warn!(
                                         "⚠️ Failed to purge {} sequences due to gas constraints: {}{}. Retrying with {} sequences...",
-                                        current_sequences,
-                                        error_msg,
-                                        tx_info,
-                                        next_sequences
+                                        current_sequences, error_msg, tx_info, next_sequences
                                     );
                                 } else {
                                     warn!(
                                         "⚠️ Failed to purge {} sequences: {}{}. Retrying with {} sequences...",
-                                        current_sequences,
-                                        error_msg,
-                                        tx_info,
-                                        next_sequences
+                                        current_sequences, error_msg, tx_info, next_sequences
                                     );
                                 }
 
