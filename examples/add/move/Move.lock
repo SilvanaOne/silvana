@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "37C84B96F9A4D8919FF9C9A5FE0AA6CDD169F7F79FF7D4BF553B3490B7A74881"
+manifest_digest = "6D08A5E077E9944174F3996E4EF7630C5D4263CE1B20AA51454C691B74CAC971"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "348032854c8e2d90a2632cc2c20630466e61a5ef", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "a5ddca79878fbe6647c365c3485d95bd97d42b7c", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "348032854c8e2d90a2632cc2c20630466e61a5ef", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "a5ddca79878fbe6647c365c3485d95bd97d42b7c", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "348032854c8e2d90a2632cc2c20630466e61a5ef", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "a5ddca79878fbe6647c365c3485d95bd97d42b7c", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -81,14 +81,14 @@ dependencies = [
 ]
 
 [move.toolchain-version]
-compiler-version = "1.56.1"
+compiler-version = "1.56.2"
 edition = "2024.beta"
 flavor = "sui"
 
 [env]
 
 [env.devnet]
-chain-id = "d4b07478"
-original-published-id = "0xd8d9c75faf8087dd749df8635755ac04cd6107ad8deeda3dee9038b0a89b1ac9"
-latest-published-id = "0xd8d9c75faf8087dd749df8635755ac04cd6107ad8deeda3dee9038b0a89b1ac9"
+chain-id = "a5e2ba5d"
+original-published-id = "0x33506da491e987c23d8786d82479ee6ac7008c31f5401620e2f3e2e6d6ea2eb2"
+latest-published-id = "0x33506da491e987c23d8786d82479ee6ac7008c31f5401620e2f3e2e6d6ea2eb2"
 published-version = "1"
