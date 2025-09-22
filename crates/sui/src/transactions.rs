@@ -633,21 +633,7 @@ where
                                         let estimated_budget = (total_gas_used as f64 * 2.0) as u64;
 
                                         // Ensure minimum budget
-                                        let final_budget = estimated_budget.max(MIN_GAS_BUDGET_MIST);
-
-                                        // Cap at maximum allowed by Sui network
-                                        let final_budget = if final_budget > MAX_GAS_BUDGET_MIST {
-                                            info!(
-                                                "Gas estimation returned excessive value: {} MIST ({:.4} SUI), capping at {} MIST ({} SUI)",
-                                                final_budget,
-                                                final_budget as f64 / 1_000_000_000.0,
-                                                MAX_GAS_BUDGET_MIST,
-                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
-                                            );
-                                            MAX_GAS_BUDGET_MIST
-                                        } else {
-                                            final_budget
-                                        };
+                                        let calculated_budget = estimated_budget.max(MIN_GAS_BUDGET_MIST);
 
                                         // Calculate average per move call
                                         let num_calls = operations.len() as u64;
@@ -671,38 +657,54 @@ where
                                             estimated_budget
                                         );
                                         debug!(
-                                            "  Final budget: {} MIST ({} SUI)",
-                                            final_budget,
-                                            final_budget as f64 / 1_000_000_000.0
+                                            "  Calculated budget: {} MIST ({} SUI)",
+                                            calculated_budget,
+                                            calculated_budget as f64 / 1_000_000_000.0
                                         );
 
                                         // Info log with key metrics
                                         debug!(
-                                            "Gas estimation complete: {} Move calls, total gas used: {} MIST ({:.4} SUI), avg per call: {} MIST ({:.6} SUI), final budget: {} MIST ({:.4} SUI)",
+                                            "Gas estimation complete: {} Move calls, total gas used: {} MIST ({:.4} SUI), avg per call: {} MIST ({:.6} SUI), calculated budget: {} MIST ({:.4} SUI)",
                                             num_calls,
                                             total_gas_used,
                                             total_gas_used as f64 / 1_000_000_000.0,
                                             avg_per_call,
                                             avg_per_call as f64 / 1_000_000_000.0,
-                                            final_budget,
-                                            final_budget as f64 / 1_000_000_000.0
+                                            calculated_budget,
+                                            calculated_budget as f64 / 1_000_000_000.0
                                         );
+
+                                        // Check if calculated budget exceeds maximum
+                                        if calculated_budget > MAX_GAS_BUDGET_MIST {
+                                            error!(
+                                                "Calculated gas budget {} MIST ({:.4} SUI) exceeds MAX_GAS_BUDGET_MIST {} MIST ({} SUI)",
+                                                calculated_budget,
+                                                calculated_budget as f64 / 1_000_000_000.0,
+                                                MAX_GAS_BUDGET_MIST,
+                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                                            );
+                                            return Err(anyhow!(
+                                                "Gas requirement {} MIST exceeds maximum allowed {} MIST",
+                                                calculated_budget,
+                                                MAX_GAS_BUDGET_MIST
+                                            ));
+                                        }
 
                                         // Check if custom gas budget was provided
                                         if let Some(custom_budget) = custom_gas_budget {
-                                            // Custom budget provided - validate but DO NOT change it
-                                            if custom_budget < final_budget {
+                                            // Compare with the actual calculated budget, not a capped value
+                                            if custom_budget < calculated_budget {
                                                 error!(
                                                     "Provided gas budget {} MIST ({:.4} SUI) is insufficient. Required: {} MIST ({:.4} SUI) based on dry run",
                                                     custom_budget,
                                                     custom_budget as f64 / 1_000_000_000.0,
-                                                    final_budget,
-                                                    final_budget as f64 / 1_000_000_000.0
+                                                    calculated_budget,
+                                                    calculated_budget as f64 / 1_000_000_000.0
                                                 );
                                                 return Err(anyhow!(
                                                     "Insufficient gas budget: provided {} MIST, but dry run indicates {} MIST required",
                                                     custom_budget,
-                                                    final_budget
+                                                    calculated_budget
                                                 ));
                                             }
                                             // Custom budget is sufficient, use it for the actual transaction
@@ -710,17 +712,17 @@ where
                                                 "Custom gas budget {} MIST ({:.4} SUI) is sufficient. Dry run calculated: {} MIST ({:.4} SUI)",
                                                 custom_budget,
                                                 custom_budget as f64 / 1_000_000_000.0,
-                                                final_budget,
-                                                final_budget as f64 / 1_000_000_000.0
+                                                calculated_budget,
+                                                calculated_budget as f64 / 1_000_000_000.0
                                             );
                                             // Set the actual requested budget for the transaction
                                             gas_budget = custom_budget;
                                             tb.set_gas_budget(gas_budget);
                                         } else {
-                                            // No custom budget, use the estimated value
-                                            if final_budget != gas_budget {
+                                            // No custom budget provided, use the calculated budget (already validated to be within MAX_GAS_BUDGET_MIST)
+                                            if calculated_budget != gas_budget {
                                                 let old_budget = gas_budget;
-                                                gas_budget = final_budget;
+                                                gas_budget = calculated_budget;
 
                                                 debug!(
                                                     "Updating gas budget from simulation: {} MIST ({:.4} SUI) -> {} MIST ({:.4} SUI)",
