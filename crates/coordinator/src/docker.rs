@@ -250,11 +250,17 @@ pub async fn run_docker_container_task(
     docker_manager: Arc<DockerManager>,
     container_timeout_secs: u64,
     mut secrets_client: Option<SecretsClient>,
-    _job_lock: JobLockGuard, // Hold the lock for the duration of the task
+    job_lock: JobLockGuard, // Hold the lock for the duration of the task
     metrics: Option<Arc<CoordinatorMetrics>>,
 ) {
     let job_start = Instant::now();
     let session_start_time = std::time::SystemTime::now();
+
+    // Log lock acquisition
+    debug!(
+        "🔒 Lock acquired for job {} from app_instance {}",
+        job.job_sequence, job.app_instance
+    );
 
     // Early check: coordinator_id must be available for running jobs
     let coordinator_id = match state.get_coordinator_id() {
@@ -265,6 +271,11 @@ pub async fn run_docker_container_task(
                  The coordinator must be properly initialized with SUI_ADDRESS.",
                 job.job_sequence
             );
+            debug!(
+                "🔓 Releasing lock for job {} from app_instance {} (coordinator_id not available)",
+                job.job_sequence, job.app_instance
+            );
+            drop(job_lock);
             return;
         }
     };
@@ -283,6 +294,11 @@ pub async fn run_docker_container_task(
                 job.job_sequence, e
             );
             // Can't send finished event without session ID
+            debug!(
+                "🔓 Releasing lock for job {} from app_instance {} (failed to generate session)",
+                job.job_sequence, job.app_instance
+            );
+            drop(job_lock);
             return;
         }
     };
@@ -426,6 +442,11 @@ pub async fn run_docker_container_task(
             session_guard.set_logs(format!("Error: Failed to fetch AppInstance: {}", e));
 
             // Agent state cleanup handled by AgentStateGuard Drop
+            debug!(
+                "🔓 Releasing lock for job {} from app_instance {} (failed to fetch AppInstance)",
+                job.job_sequence, job.app_instance
+            );
+            drop(job_lock);
             return;
         }
     };
@@ -489,6 +510,11 @@ pub async fn run_docker_container_task(
             );
             // Set error log in guard before returning
             session_guard.set_logs(format!("Error: Failed to create agent job: {}", e));
+            debug!(
+                "🔓 Releasing lock for job {} from app_instance {} (failed to create agent job)",
+                job.job_sequence, job.app_instance
+            );
+            drop(job_lock);
             return;
         }
     };
@@ -532,6 +558,11 @@ pub async fn run_docker_container_task(
                     );
                     // Set error log in guard before returning
                     session_guard.set_logs(format!("Error: Docker image SHA256 mismatch. Expected: {}, Got: {}", expected_sha, digest));
+                    debug!(
+                        "🔓 Releasing lock for job {} from app_instance {} (SHA256 mismatch)",
+                        job.job_sequence, job.app_instance
+                    );
+                    drop(job_lock);
                     return;
                 }
             }
@@ -555,6 +586,11 @@ pub async fn run_docker_container_task(
                 loading_count, running_count
             );
             // Agent state cleanup handled by AgentStateGuard Drop
+            debug!(
+                "🔓 Releasing lock for job {} from app_instance {} (image pull failed)",
+                job.job_sequence, job.app_instance
+            );
+            drop(job_lock);
             return;
         }
     };
@@ -710,6 +746,13 @@ pub async fn run_docker_container_task(
         job.job_sequence,
         job_start.elapsed()
     );
+
+    // Log lock release (will happen automatically via Drop, but log it)
+    debug!(
+        "🔓 Releasing lock for job {} from app_instance {} (task completed)",
+        job.job_sequence, job.app_instance
+    );
+    drop(job_lock);
 }
 
 /// Ensure a job is failed on blockchain if it wasn't completed
