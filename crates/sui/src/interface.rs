@@ -1738,18 +1738,22 @@ impl SilvanaSuiInterface {
     /// Purge old sequence states that have been settled
     /// This cleans up storage by removing sequence states up to the specified number of sequences
     /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
+    /// Note: Uses a default gas budget of 10_000_000 MIST if no gas_budget_sui is provided
     pub async fn purge(
         &mut self,
         app_instance: &str,
         sequences_to_purge: u64,
         gas_budget_sui: Option<f64>,
     ) -> Result<String, (String, Option<String>)> {
-        debug!(
-            "Attempting to purge {} sequences from app instance {} on Sui blockchain",
-            sequences_to_purge, app_instance
-        );
+        // Use provided gas budget or default to 10_000_000 MIST (0.01 SUI)
+        let gas_budget_mist = gas_budget_sui
+            .map(|sui| (sui * 1_000_000_000.0) as u64)
+            .or(Some(10_000_000u64));
 
-        let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
+        debug!(
+            "Attempting to purge {} sequences from app instance {} on Sui blockchain (gas budget: {} MIST)",
+            sequences_to_purge, app_instance, gas_budget_mist.unwrap_or(0)
+        );
 
         match purge_tx(app_instance, sequences_to_purge, gas_budget_mist).await {
             Ok(tx_digest) => {

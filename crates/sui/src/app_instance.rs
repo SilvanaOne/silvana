@@ -1172,20 +1172,24 @@ pub async fn try_create_block_tx(app_instance_str: &str) -> Result<String> {
 /// Purge old sequence states that have been settled
 /// This function calls the purge Move function on the blockchain
 /// to clean up sequence states up to the specified number of sequences
+/// Note: Uses a default gas budget of 10_000_000 MIST if no gas_budget is provided
 pub async fn purge_tx(
     app_instance_str: &str,
     sequences_to_purge: u64,
     gas_budget: Option<u64>,
 ) -> Result<String> {
+    // Use provided gas budget or default to 10_000_000 MIST (0.005 SUI)
+    let final_gas_budget = gas_budget.or(Some(10_000_000));
+
     debug!(
-        "Creating purge transaction for app_instance: {} with sequences_to_purge: {}",
-        app_instance_str, sequences_to_purge
+        "Creating purge transaction for app_instance: {} with sequences_to_purge: {} (gas budget: {} MIST)",
+        app_instance_str, sequences_to_purge, final_gas_budget.unwrap_or(0)
     );
 
     execute_app_instance_function_with_gas(
         app_instance_str,
         "purge",
-        gas_budget,
+        final_gas_budget,
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences_to_purge));
