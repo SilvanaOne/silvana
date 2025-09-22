@@ -23,7 +23,7 @@ impl Drop for JobLockGuard {
     fn drop(&mut self) {
         self.manager.release_job(&self.job_key.0, self.job_key.1);
         debug!(
-            "Released lock for job {} from app_instance {}",
+            "🔓 Released lock for job {} from app_instance {} (guard dropped)",
             self.job_key.1, self.job_key.0
         );
     }
@@ -56,11 +56,12 @@ impl JobLockManager {
         locks.retain(|key, lock_time| {
             let keep = now.duration_since(*lock_time) < self.lock_timeout;
             if !keep {
-                trace!(
-                    "Removing expired lock for job {} from app_instance {} (locked for {:?})",
+                debug!(
+                    "⚠️ Removing EXPIRED lock for job {} from app_instance {} (locked for {:?}, timeout: {:?})",
                     key.1,
                     key.0,
-                    now.duration_since(*lock_time)
+                    now.duration_since(*lock_time),
+                    self.lock_timeout
                 );
             }
             keep
@@ -68,17 +69,19 @@ impl JobLockManager {
 
         use std::collections::hash_map::Entry;
         match locks.entry(job_key.clone()) {
-            Entry::Occupied(_) => {
+            Entry::Occupied(occupied_entry) => {
+                let lock_time = occupied_entry.get();
+                let duration = now.duration_since(*lock_time);
                 debug!(
-                    "Job {} from app_instance {} is already locked",
-                    job_sequence, app_instance
+                    "🔒 Job {} from app_instance {} is already locked (locked for {:?})",
+                    job_sequence, app_instance, duration
                 );
                 None // already locked
             }
             Entry::Vacant(entry) => {
                 entry.insert(now);
                 debug!(
-                    "Successfully locked job {} from app_instance {}",
+                    "🔒 Successfully acquired lock for job {} from app_instance {}",
                     job_sequence, app_instance
                 );
                 Some(JobLockGuard {
@@ -93,7 +96,17 @@ impl JobLockManager {
     fn release_job(&self, app_instance: &str, job_sequence: u64) {
         let mut locks = self.locks.lock();
         let job_key = (app_instance.to_string(), job_sequence);
-        locks.remove(&job_key);
+        if locks.remove(&job_key).is_some() {
+            trace!(
+                "🔓 Lock explicitly released for job {} from app_instance {}",
+                job_sequence, app_instance
+            );
+        } else {
+            trace!(
+                "Attempted to release non-existent lock for job {} from app_instance {}",
+                job_sequence, app_instance
+            );
+        }
     }
 
     /// Checks if a job is currently locked
@@ -106,11 +119,12 @@ impl JobLockManager {
         locks.retain(|key, lock_time| {
             let keep = now.duration_since(*lock_time) < self.lock_timeout;
             if !keep {
-                trace!(
-                    "Removing expired lock for job {} from app_instance {} (locked for {:?})",
+                debug!(
+                    "⚠️ Removing EXPIRED lock for job {} from app_instance {} (locked for {:?}, timeout: {:?})",
                     key.1,
                     key.0,
-                    now.duration_since(*lock_time)
+                    now.duration_since(*lock_time),
+                    self.lock_timeout
                 );
             }
             keep
@@ -133,7 +147,7 @@ impl JobLockManager {
         let count = locks.len();
         locks.clear();
         if count > 0 {
-            debug!("Cleared {} job locks", count);
+            debug!("⚠️ Cleared {} job locks", count);
         }
     }
 }

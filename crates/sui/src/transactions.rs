@@ -10,7 +10,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::chain::get_reference_gas_price;
 use crate::coin::fetch_coin;
-use crate::constants::{FALLBACK_GAS_BUDGET, MAX_GAS_BUDGET_MIST, MIN_GAS_BUDGET};
+use crate::constants::{
+    MAX_COMPUTATION_COST_MIST, MAX_GAS_BUDGET_MIST, MIN_GAS_BUDGET_MIST, SIMULATION_GAS_BUDGET_MIST,
+};
 use crate::error::SilvanaSuiInterfaceError;
 use crate::object_lock::get_object_lock_manager;
 use crate::state::SharedSuiState;
@@ -294,7 +296,7 @@ where
     F: Fn(
         &mut sui_transaction_builder::TransactionBuilder,
         Vec<sui_sdk_types::Argument>, // object_args (can be empty)
-        sui_sdk_types::Argument, // clock_arg
+        sui_sdk_types::Argument,      // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
     const MAX_RETRIES: u32 = 3;
@@ -304,7 +306,10 @@ where
         return Err(anyhow!("No operations or publish options provided"));
     }
 
-    let function_names: Vec<String> = operations.iter().map(|(_, _, name, _)| name.clone()).collect();
+    let function_names: Vec<String> = operations
+        .iter()
+        .map(|(_, _, name, _)| name.clone())
+        .collect();
     let all_object_ids: Vec<String> = operations
         .iter()
         .flat_map(|(object_ids, _, _, _)| object_ids.clone())
@@ -338,16 +343,15 @@ where
         debug!("Object: {} -> ID: {}", object_id_str, object_id);
     }
 
-    // Determine if we need to estimate gas
-    let needs_gas_estimation = custom_gas_budget.is_none();
+    // Use SIMULATION_GAS_BUDGET_MIST (5 SUI) for dry run simulation to ensure it can complete and provide accurate estimates
+    // But keep track of the actual requested budget for validation
+    let mut gas_budget = SIMULATION_GAS_BUDGET_MIST;
 
-    // Use custom gas budget or default to 0.5 SUI for simulation
-    let mut gas_budget = custom_gas_budget.unwrap_or(FALLBACK_GAS_BUDGET);
     debug!(
-        "Initial gas budget: {} MIST ({} SUI), needs estimation: {}",
+        "Gas budget: using {} MIST ({} SUI) for simulation, custom budget provided: {:?} MIST",
         gas_budget,
         gas_budget as f64 / 1_000_000_000.0,
-        needs_gas_estimation
+        custom_gas_budget
     );
 
     // Lock all object objects BEFORE fetching their versions
@@ -399,16 +403,24 @@ where
         let (gas_coin, new_gas_guard) = match fetch_coin(&mut client, sender, gas_budget).await? {
             Some((coin, guard)) => (coin, guard),
             None => {
-                warn!("No available coins with sufficient balance for gas, attempting to request from faucet...");
-                
+                warn!(
+                    "No available coins with sufficient balance for gas, attempting to request from faucet..."
+                );
+
                 // Request fixed amount from faucet
-                match crate::faucet::ensure_sufficient_balance(crate::constants::FAUCET_REQUEST_AMOUNT_SUI).await {
+                match crate::faucet::ensure_sufficient_balance(
+                    crate::constants::FAUCET_REQUEST_AMOUNT_SUI,
+                )
+                .await
+                {
                     Ok(true) => {
-                        info!("Faucet tokens requested successfully ({} SUI), retrying coin fetch...", 
-                            crate::constants::FAUCET_REQUEST_AMOUNT_SUI);
+                        info!(
+                            "Faucet tokens requested successfully ({} SUI), retrying coin fetch...",
+                            crate::constants::FAUCET_REQUEST_AMOUNT_SUI
+                        );
                         // Wait a bit more for tokens to be available
                         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        
+
                         // Try to fetch coin again after faucet
                         match fetch_coin(&mut client, sender, gas_budget).await? {
                             Some((coin, guard)) => (coin, guard),
@@ -503,19 +515,22 @@ where
 
         // If publish options are provided, publish the modules first
         let published_package = if let Some(ref publish_opts) = publish_options {
-            debug!("Publishing {} modules with {} dependencies", 
-                publish_opts.modules.len(), 
-                publish_opts.dependencies.len());
-            
+            debug!(
+                "Publishing {} modules with {} dependencies",
+                publish_opts.modules.len(),
+                publish_opts.dependencies.len()
+            );
+
             // Decode base64 modules
-            use base64::{engine::general_purpose::STANDARD, Engine};
+            use base64::{Engine, engine::general_purpose::STANDARD};
             let mut decoded_modules = Vec::new();
             for module_b64 in &publish_opts.modules {
-                let decoded = STANDARD.decode(module_b64)
+                let decoded = STANDARD
+                    .decode(module_b64)
                     .map_err(|e| anyhow!("Failed to decode module: {}", e))?;
                 decoded_modules.push(decoded);
             }
-            
+
             // Parse dependencies as addresses
             let mut parsed_deps = Vec::new();
             for dep in &publish_opts.dependencies {
@@ -526,13 +541,13 @@ where
                 } else {
                     format!("0x{}", dep)
                 };
-                
+
                 let addr = sui::Address::from_str(&dep_with_prefix)
                     .map_err(|e| anyhow!("Failed to parse dependency address {}: {}", dep, e))?;
                 parsed_deps.push(addr);
                 debug!("Successfully parsed dependency: {} -> {}", dep, addr);
             }
-            
+
             // Call tb.publish to publish the modules
             let published = tb.publish(decoded_modules, parsed_deps);
             debug!("Published package, result argument: {:?}", published);
@@ -546,9 +561,9 @@ where
             // Collect the object arguments for this operation
             let mut op_object_args = Vec::new();
             for object_id_str in object_ids_for_op {
-                let obj_arg = object_args.get(object_id_str).ok_or_else(|| {
-                    anyhow!("Object argument not found for: {}", object_id_str)
-                })?;
+                let obj_arg = object_args
+                    .get(object_id_str)
+                    .ok_or_else(|| anyhow!("Object argument not found for: {}", object_id_str))?;
                 op_object_args.push(*obj_arg);
             }
 
@@ -576,9 +591,9 @@ where
             tb.transfer_objects(vec![published], sender_arg);
         }
 
-        // Perform dry run if gas estimation is needed
-        if needs_gas_estimation && retry_count == 0 {
-            // Build temporary transaction for gas estimation
+        // Always perform dry run on first attempt to estimate or validate gas budget
+        if retry_count == 0 {
+            // Build temporary transaction for gas estimation/validation
             let temp_tx = tb.clone().finish()?;
             let num_operations = operations.len();
             debug!(
@@ -634,21 +649,8 @@ where
                                         let estimated_budget = (total_gas_used as f64 * 2.0) as u64;
 
                                         // Ensure minimum budget
-                                        let final_budget = estimated_budget.max(MIN_GAS_BUDGET);
-
-                                        // Cap at maximum allowed by Sui network
-                                        let final_budget = if final_budget > MAX_GAS_BUDGET_MIST {
-                                            info!(
-                                                "Gas estimation returned excessive value: {} MIST ({:.4} SUI), capping at {} MIST ({} SUI)",
-                                                final_budget,
-                                                final_budget as f64 / 1_000_000_000.0,
-                                                MAX_GAS_BUDGET_MIST,
-                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
-                                            );
-                                            MAX_GAS_BUDGET_MIST
-                                        } else {
-                                            final_budget
-                                        };
+                                        let calculated_budget =
+                                            estimated_budget.max(MIN_GAS_BUDGET_MIST);
 
                                         // Calculate average per move call
                                         let num_calls = operations.len() as u64;
@@ -672,69 +674,188 @@ where
                                             estimated_budget
                                         );
                                         debug!(
-                                            "  Final budget: {} MIST ({} SUI)",
-                                            final_budget,
-                                            final_budget as f64 / 1_000_000_000.0
+                                            "  Calculated budget: {} MIST ({} SUI)",
+                                            calculated_budget,
+                                            calculated_budget as f64 / 1_000_000_000.0
                                         );
 
                                         // Info log with key metrics
                                         debug!(
-                                            "Gas estimation complete: {} Move calls, total gas used: {} MIST ({:.4} SUI), avg per call: {} MIST ({:.6} SUI), final budget: {} MIST ({:.4} SUI)",
+                                            "Gas estimation complete: {} Move calls, total gas used: {} MIST ({:.4} SUI), avg per call: {} MIST ({:.6} SUI), calculated budget: {} MIST ({:.4} SUI)",
                                             num_calls,
                                             total_gas_used,
                                             total_gas_used as f64 / 1_000_000_000.0,
                                             avg_per_call,
                                             avg_per_call as f64 / 1_000_000_000.0,
-                                            final_budget,
-                                            final_budget as f64 / 1_000_000_000.0
+                                            calculated_budget,
+                                            calculated_budget as f64 / 1_000_000_000.0
                                         );
 
-                                        // Update gas budget with the estimated value
-                                        if final_budget != gas_budget {
-                                            let old_budget = gas_budget;
-                                            gas_budget = final_budget;
-
-                                            debug!(
-                                                "Updating gas budget from simulation: {} MIST ({:.4} SUI) -> {} MIST ({:.4} SUI)",
-                                                old_budget,
-                                                old_budget as f64 / 1_000_000_000.0,
-                                                gas_budget,
-                                                gas_budget as f64 / 1_000_000_000.0
+                                        if computation_cost > MAX_COMPUTATION_COST_MIST {
+                                            info!(
+                                                "Calculated computation cost {} MIST ({:.4} SUI) exceeds MAX_COMPUTATION_COST_MIST {} MIST ({} SUI)",
+                                                computation_cost,
+                                                computation_cost as f64 / 1_000_000_000.0,
+                                                MAX_COMPUTATION_COST_MIST,
+                                                MAX_COMPUTATION_COST_MIST as f64 / 1_000_000_000.0
                                             );
+                                            return Err(anyhow!(
+                                                "Computation cost {} MIST exceeds maximum allowed {} MIST",
+                                                computation_cost,
+                                                MAX_COMPUTATION_COST_MIST
+                                            ));
+                                        }
 
-                                            // Set the new gas budget on the transaction builder
+                                        // Check if calculated budget exceeds maximum
+                                        if calculated_budget > MAX_GAS_BUDGET_MIST {
+                                            info!(
+                                                "Calculated gas budget {} MIST ({:.4} SUI) exceeds MAX_GAS_BUDGET_MIST {} MIST ({} SUI)",
+                                                calculated_budget,
+                                                calculated_budget as f64 / 1_000_000_000.0,
+                                                MAX_GAS_BUDGET_MIST,
+                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                                            );
+                                            return Err(anyhow!(
+                                                "Gas requirement {} MIST exceeds maximum allowed {} MIST",
+                                                calculated_budget,
+                                                MAX_GAS_BUDGET_MIST
+                                            ));
+                                        }
+
+                                        // Check if custom gas budget was provided
+                                        if let Some(custom_budget) = custom_gas_budget {
+                                            // Compare with the actual calculated budget, not a capped value
+                                            if custom_budget < calculated_budget {
+                                                error!(
+                                                    "Provided gas budget {} MIST ({:.4} SUI) is insufficient. Required: {} MIST ({:.4} SUI) based on dry run",
+                                                    custom_budget,
+                                                    custom_budget as f64 / 1_000_000_000.0,
+                                                    calculated_budget,
+                                                    calculated_budget as f64 / 1_000_000_000.0
+                                                );
+                                                return Err(anyhow!(
+                                                    "Insufficient gas budget: provided {} MIST, but dry run indicates {} MIST required",
+                                                    custom_budget,
+                                                    calculated_budget
+                                                ));
+                                            }
+                                            // Custom budget is sufficient, use it for the actual transaction
+                                            info!(
+                                                "Custom gas budget {} MIST ({:.4} SUI) is sufficient. Dry run calculated: {} MIST ({:.4} SUI), computation cost: {} MIST ({:.4} SUI)",
+                                                custom_budget,
+                                                custom_budget as f64 / 1_000_000_000.0,
+                                                calculated_budget,
+                                                calculated_budget as f64 / 1_000_000_000.0,
+                                                computation_cost,
+                                                computation_cost as f64 / 1_000_000_000.0
+                                            );
+                                            // Set the actual requested budget for the transaction
+                                            gas_budget = custom_budget;
                                             tb.set_gas_budget(gas_budget);
-
-                                            debug!("Gas budget updated on transaction builder");
                                         } else {
-                                            debug!(
-                                                "Gas estimation result: using estimated budget {} MIST ({:.4} SUI)",
-                                                gas_budget,
-                                                gas_budget as f64 / 1_000_000_000.0
-                                            );
+                                            // No custom budget provided, use the calculated budget (already validated to be within MAX_GAS_BUDGET_MIST)
+                                            if calculated_budget != gas_budget {
+                                                let old_budget = gas_budget;
+                                                gas_budget = calculated_budget;
+
+                                                debug!(
+                                                    "Updating gas budget from simulation: {} MIST ({:.4} SUI) -> {} MIST ({:.4} SUI)",
+                                                    old_budget,
+                                                    old_budget as f64 / 1_000_000_000.0,
+                                                    gas_budget,
+                                                    gas_budget as f64 / 1_000_000_000.0
+                                                );
+
+                                                // Set the new gas budget on the transaction builder
+                                                tb.set_gas_budget(gas_budget);
+
+                                                debug!("Gas budget updated on transaction builder");
+                                            } else {
+                                                debug!(
+                                                    "Gas estimation result: using estimated budget {} MIST ({:.4} SUI)",
+                                                    gas_budget,
+                                                    gas_budget as f64 / 1_000_000_000.0
+                                                );
+                                            }
                                         }
                                     } else {
-                                        warn!(
-                                            "Dry run succeeded but no gas cost summary available, using fallback budget of 0.5 SUI"
-                                        );
-                                        gas_budget = FALLBACK_GAS_BUDGET;
-                                        // Update transaction builder with fallback gas budget
+                                        // No gas summary available
+                                        // If custom budget was provided, use it for the actual transaction
+                                        if let Some(custom_budget) = custom_gas_budget {
+                                            warn!(
+                                                "Dry run succeeded but no gas cost summary available, using custom budget of {} MIST",
+                                                custom_budget
+                                            );
+                                            gas_budget = custom_budget;
+                                        } else {
+                                            warn!(
+                                                "Dry run succeeded but no gas cost summary available, using MAX_GAS_BUDGET_MIST of {} MIST ({} SUI)",
+                                                MAX_GAS_BUDGET_MIST,
+                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                                            );
+                                            gas_budget = MAX_GAS_BUDGET_MIST;
+                                        }
+                                        // Update transaction builder with the chosen gas budget
                                         tb.set_gas_budget(gas_budget);
                                     }
                                 } else {
                                     // Simulation failed
                                     if let Some(ref error) = status.error {
-                                        warn!(
-                                            "Dry run failed with error: {:?}, using fallback budget of 0.5 SUI",
-                                            error
-                                        );
+                                        // Check if it's an InsufficientGas error
+                                        let error_str = format!("{:?}", error);
+                                        let is_insufficient_gas =
+                                            error_str.contains("InsufficientGas");
+
+                                        // If custom budget was provided and dry run shows insufficient gas, fail immediately
+                                        if let Some(custom_budget) = custom_gas_budget {
+                                            if is_insufficient_gas {
+                                                error!(
+                                                    "Dry run failed with InsufficientGas even with {} MIST ({} SUI) simulation budget. Custom budget {} MIST ({:.4} SUI) is definitely insufficient",
+                                                    SIMULATION_GAS_BUDGET_MIST,
+                                                    SIMULATION_GAS_BUDGET_MIST as f64
+                                                        / 1_000_000_000.0,
+                                                    custom_budget,
+                                                    custom_budget as f64 / 1_000_000_000.0
+                                                );
+                                                return Err(anyhow!(
+                                                    "Insufficient gas budget: dry run failed with InsufficientGas for {} MIST",
+                                                    custom_budget
+                                                ));
+                                            }
+                                            warn!(
+                                                "Dry run failed with error: {:?}, keeping custom budget of {} MIST",
+                                                error, custom_budget
+                                            );
+                                            // Keep using the custom budget for non-gas errors
+                                            gas_budget = custom_budget;
+                                        } else {
+                                            warn!(
+                                                "Dry run failed with error: {:?}, using MAX_GAS_BUDGET_MIST of {} MIST ({} SUI)",
+                                                error,
+                                                MAX_GAS_BUDGET_MIST,
+                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                                            );
+                                            gas_budget = MAX_GAS_BUDGET_MIST;
+                                        }
                                     } else {
-                                        warn!(
-                                            "Dry run failed with unknown error, using fallback budget of 0.5 SUI"
-                                        );
+                                        // If custom budget was provided, don't change it even if dry run fails
+                                        if let Some(custom_budget) = custom_gas_budget {
+                                            warn!(
+                                                "Dry run failed with unknown error, keeping custom budget of {} MIST",
+                                                custom_budget
+                                            );
+                                            // Keep using the custom budget
+                                            gas_budget = custom_budget;
+                                        } else {
+                                            warn!(
+                                                "Dry run failed with unknown error, using MAX_GAS_BUDGET_MIST of {} MIST ({} SUI)",
+                                                MAX_GAS_BUDGET_MIST,
+                                                MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                                            );
+                                            gas_budget = MAX_GAS_BUDGET_MIST;
+                                        }
                                     }
-                                    gas_budget = FALLBACK_GAS_BUDGET;
-                                    // Update transaction builder with fallback gas budget
+                                    // Update transaction builder with the chosen gas budget
                                     tb.set_gas_budget(gas_budget);
                                 }
                             }
@@ -742,12 +863,24 @@ where
                     }
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to perform dry run: {}, using fallback budget of 0.5 SUI",
-                        e
-                    );
-                    gas_budget = FALLBACK_GAS_BUDGET;
-                    // Update transaction builder with fallback gas budget
+                    // Dry run request failed entirely
+                    // If custom budget was provided, keep it
+                    if let Some(custom_budget) = custom_gas_budget {
+                        warn!(
+                            "Failed to perform dry run: {}, keeping custom budget of {} MIST",
+                            e, custom_budget
+                        );
+                        gas_budget = custom_budget;
+                    } else {
+                        warn!(
+                            "Failed to perform dry run: {}, using MAX_GAS_BUDGET_MIST of {} MIST ({} SUI)",
+                            e,
+                            MAX_GAS_BUDGET_MIST,
+                            MAX_GAS_BUDGET_MIST as f64 / 1_000_000_000.0
+                        );
+                        gas_budget = MAX_GAS_BUDGET_MIST;
+                    }
+                    // Update transaction builder with the chosen gas budget
                     tb.set_gas_budget(gas_budget);
                 }
             }
@@ -794,21 +927,26 @@ where
                 let clean_error = if error_str.contains("grpc-status header missing") {
                     // Handle grpc-status header missing error specially
                     if error_str.contains("HTTP status code 400") {
-                        format!("Transaction rejected by server (HTTP 400): Likely invalid transaction parameters or object state. Original error: {}", 
-                                if let Some(idx) = error_str.find(", details: [") {
-                                    &error_str[..idx]
-                                } else {
-                                    &error_str
-                                })
+                        format!(
+                            "Transaction rejected by server (HTTP 400): Likely invalid transaction parameters or object state. Original error: {}",
+                            if let Some(idx) = error_str.find(", details: [") {
+                                &error_str[..idx]
+                            } else {
+                                &error_str
+                            }
+                        )
                     } else if error_str.contains("HTTP status code 503") {
-                        "Service temporarily unavailable (HTTP 503) - server may be overloaded".to_string()
+                        "Service temporarily unavailable (HTTP 503) - server may be overloaded"
+                            .to_string()
                     } else {
-                        format!("Server communication error: {}", 
-                                if let Some(idx) = error_str.find(", details: [") {
-                                    &error_str[..idx]
-                                } else {
-                                    &error_str
-                                })
+                        format!(
+                            "Server communication error: {}",
+                            if let Some(idx) = error_str.find(", details: [") {
+                                &error_str[..idx]
+                            } else {
+                                &error_str
+                            }
+                        )
                     }
                 } else if error_str.contains("Object ID")
                     && error_str.contains("is not available for consumption")
@@ -843,34 +981,52 @@ where
                 let should_retry = (clean_error.contains("version conflict")
                     || clean_error.contains("not available for consumption")
                     || clean_error.contains("Service temporarily unavailable")
-                    || (clean_error.contains("grpc-status header missing") && clean_error.contains("HTTP status code 503")))
+                    || (clean_error.contains("grpc-status header missing")
+                        && clean_error.contains("HTTP status code 503")))
                     && retry_count < MAX_RETRIES;
 
                 if should_retry {
                     retry_count += 1;
-                    
+
                     // Different retry strategies for different errors
-                    let (delay_ms, log_msg) = if clean_error.contains("Service temporarily unavailable") 
-                        || clean_error.contains("HTTP status code 503") {
+                    let (delay_ms, log_msg) = if clean_error
+                        .contains("Service temporarily unavailable")
+                        || clean_error.contains("HTTP status code 503")
+                    {
                         // Longer delay for service unavailable
-                        (2000 * (2_u64.pow(retry_count - 1)), 
-                         format!("service unavailability on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            2000 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "service unavailability on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     } else if clean_error.contains("version conflict") {
                         // Standard exponential backoff for version conflicts
-                        (1000 * (2_u64.pow(retry_count - 1)), 
-                         format!("version conflict on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            1000 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "version conflict on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     } else {
                         // Shorter delay for other retryable errors
-                        (500 * (2_u64.pow(retry_count - 1)), 
-                         format!("transient error on attempt {}/{}", retry_count, MAX_RETRIES + 1))
+                        (
+                            500 * (2_u64.pow(retry_count - 1)),
+                            format!(
+                                "transient error on attempt {}/{}",
+                                retry_count,
+                                MAX_RETRIES + 1
+                            ),
+                        )
                     };
 
                     info!(
                         "Batch transaction [{}] failed with {}. Retrying after {}ms. Error: {}",
-                        functions_str,
-                        log_msg,
-                        delay_ms,
-                        clean_error
+                        functions_str, log_msg, delay_ms, clean_error
                     );
 
                     // Add exponential backoff delay before retry
@@ -890,14 +1046,19 @@ where
                         retry_count + 1,
                         clean_error
                     );
-                    
+
                     // Log transaction details for debugging
                     debug!("Failed transaction details:");
                     debug!("  Package ID: {}", package_id);
                     debug!("  Operations count: {}", operations.len());
                     for (i, (obj_ids, module, func, _)) in operations.iter().enumerate() {
-                        debug!("  Operation {}: {}::{} with {} objects", 
-                               i, module, func, obj_ids.len());
+                        debug!(
+                            "  Operation {}: {}::{} with {} objects",
+                            i,
+                            module,
+                            func,
+                            obj_ids.len()
+                        );
                         for (j, obj_id) in obj_ids.iter().enumerate() {
                             debug!("    Object {}: {}", j, obj_id);
                         }

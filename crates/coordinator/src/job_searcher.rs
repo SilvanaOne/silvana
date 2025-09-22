@@ -397,7 +397,7 @@ impl JobSearcher {
                     // Skip if job is currently locked (being processed)
                     if lock_manager.is_locked(&job.app_instance, job.job_sequence) {
                         warn!(
-                            "Skipping job {} from app_instance {} (currently locked)",
+                            "🔒 Skipping job {} from app_instance {} (currently locked)",
                             job.job_sequence, job.app_instance
                         );
                         locked_count += 1;
@@ -474,14 +474,8 @@ impl JobSearcher {
                 // Sort settlement jobs by sequence
                 settlement_jobs.sort_by_key(|j| j.job_sequence);
 
-                debug!(
-                    "Collected {} settlement jobs",
-                    settlement_jobs.len()
-                );
-                debug!(
-                    "Collected jobs for {} blocks",
-                    jobs_by_block.len()
-                );
+                debug!("Collected {} settlement jobs", settlement_jobs.len());
+                debug!("Collected jobs for {} blocks", jobs_by_block.len());
 
                 // Build the job pool respecting pool size limit
                 let mut job_pool = Vec::new();
@@ -495,17 +489,25 @@ impl JobSearcher {
                     block_jobs.sort_by(|a, b| {
                         let a_size = a.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
                         let b_size = b.sequences.as_ref().map(|s| s.len()).unwrap_or(0);
-                        a_size.cmp(&b_size)
+                        a_size
+                            .cmp(&b_size)
                             .then_with(|| a.job_sequence.cmp(&b.job_sequence))
                     });
 
                     // Count job types for logging
-                    let merge_count = block_jobs.iter().filter(|j| j.app_instance_method == "merge").count();
+                    let merge_count = block_jobs
+                        .iter()
+                        .filter(|j| j.app_instance_method == "merge")
+                        .count();
                     let other_count = block_jobs.len() - merge_count;
 
                     debug!(
                         "Block {}: {} total jobs ({} merge, {} other), sorted by sequence size",
-                        if block == u64::MAX { "None".to_string() } else { block.to_string() },
+                        if block == u64::MAX {
+                            "None".to_string()
+                        } else {
+                            block.to_string()
+                        },
                         block_jobs.len(),
                         merge_count,
                         other_count
@@ -513,13 +515,17 @@ impl JobSearcher {
 
                     // Add jobs respecting pool size limit
                     let remaining = JOB_SELECTION_POOL_SIZE.saturating_sub(job_pool.len());
-                    if remaining == 0 { break; }
+                    if remaining == 0 {
+                        break;
+                    }
 
                     let jobs_to_add = block_jobs.len().min(remaining);
                     job_pool.extend(block_jobs.into_iter().take(jobs_to_add));
 
                     // Break if we've filled the pool
-                    if job_pool.len() >= JOB_SELECTION_POOL_SIZE { break; }
+                    if job_pool.len() >= JOB_SELECTION_POOL_SIZE {
+                        break;
+                    }
                 }
 
                 // Count jobs by type for logging

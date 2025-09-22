@@ -2,7 +2,7 @@
 
 /// Maximum number of operations that can be passed to multicall_job_operations in a single call.
 /// This limit ensures the Move function doesn't exceed gas or computational limits.
-pub const MAX_OPERATIONS_PER_MULTICALL: usize = 6;
+pub const MAX_OPERATIONS_PER_MULTICALL: usize = 8;
 
 /// Get the maximum number of operations per multicall
 pub fn get_max_operations_per_multicall() -> usize {
@@ -23,11 +23,17 @@ pub const FAUCET_REQUEST_AMOUNT_SUI: f64 = 10.0;
 // Gas budget configuration
 // 1 SUI = 1,000,000,000 MIST
 
-/// Maximum gas budget allowed by Sui network (5 SUI)
-pub const MAX_GAS_BUDGET_MIST: u64 = 5_000_000_000;
+/// Maximum gas budget allowed by Sui network
+pub const SIMULATION_GAS_BUDGET_MIST: u64 = 5_000_000_000;
 
-/// Minimum gas budget for any transaction (0.05 SUI)
-pub const MIN_GAS_BUDGET: u64 = 50_000_000;
+/// Minimum gas budget for any transaction
+pub const MIN_GAS_BUDGET_MIST: u64 = 5_000_000;
 
-/// Fallback gas budget when simulation fails or no custom budget provided (0.5 SUI)
-pub const FALLBACK_GAS_BUDGET: u64 = 500_000_000;
+/// Maximum gas budget for any transaction
+pub const MAX_GAS_BUDGET_MIST: u64 = 500_000_000;
+
+/// Maximum computation cost for any transaction
+pub const MAX_COMPUTATION_COST_MIST: u64 = 5_000_000;
+
+/// Fallback gas budget when simulation fails or no custom budget provided
+pub const FALLBACK_GAS_BUDGET_MIST: u64 = 100_000_000;

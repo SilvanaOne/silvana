@@ -6,7 +6,7 @@ use sui::fetch::{
     AppInstance, Settlement, fetch_block_settlement, fetch_blocks_range,
     fetch_proof_calculations_range,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 // Helper function to check if a block needs settlement on any chain
 async fn block_needs_settlement(
@@ -366,34 +366,125 @@ pub async fn analyze_proof_completion(
     // The Move contract purges when last_purged_sequence < last_settled_sequence
     if app_instance.last_purged_sequence < app_instance.last_settled_sequence {
         let sequences_to_purge = crate::constants::DEFAULT_PURGE_SEQUENCES;
-        let purgeable_sequences =
+        let initial_purgeable_sequences =
             app_instance.last_settled_sequence - app_instance.last_purged_sequence;
 
         debug!(
-            "🗑️ Purge opportunity detected: {} sequences can be purged (last_purged: {}, last_settled: {})",
-            purgeable_sequences,
+            "🗑️ Initial purge opportunity detected: {} sequences can be purged (last_purged: {}, last_settled: {})",
+            initial_purgeable_sequences,
             app_instance.last_purged_sequence,
             app_instance.last_settled_sequence
         );
 
-        // Create a Sui interface and call purge
-        let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-        match sui_interface
-            .purge(&app_instance.id, sequences_to_purge, None)
-            .await
-        {
-            Ok(tx_digest) => {
-                info!(
-                    "✅ Successfully purged of up to {} sequences (tx: {})",
-                    sequences_to_purge, tx_digest
-                );
+        // Refetch the app instance to ensure the condition is still valid
+        match sui::fetch::fetch_app_instance(&app_instance.id).await {
+            Ok(fresh_app_instance) => {
+                // Re-check the condition with fresh data
+                if fresh_app_instance.last_purged_sequence
+                    < fresh_app_instance.last_settled_sequence
+                {
+                    let fresh_purgeable_sequences = fresh_app_instance.last_settled_sequence
+                        - fresh_app_instance.last_purged_sequence;
+
+                    debug!(
+                        "🗑️ Confirmed purge opportunity after refetch: {} sequences can be purged (last_purged: {}, last_settled: {})",
+                        fresh_purgeable_sequences,
+                        fresh_app_instance.last_purged_sequence,
+                        fresh_app_instance.last_settled_sequence
+                    );
+
+                    // Create a Sui interface and call purge
+                    let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
+
+                    // Progressive retry mechanism: divide by 2 on each retry
+                    // With DEFAULT_PURGE_SEQUENCES=32: 32 -> 16 -> 8 -> 4 -> 2 -> 1
+                    let mut current_sequences = sequences_to_purge;
+                    let mut attempt_count = 0;
+                    let mut purge_succeeded = false;
+
+                    loop {
+                        attempt_count += 1;
+
+                        match sui_interface
+                            .purge(&app_instance.id, current_sequences, None)
+                            .await
+                        {
+                            Ok(tx_digest) => {
+                                info!(
+                                    "✅ Successfully initiated purge of up to {} sequences (tx: {}, attempt: {})",
+                                    current_sequences, tx_digest, attempt_count
+                                );
+                                purge_succeeded = true;
+                                break;
+                            }
+                            Err((error_msg, tx_digest)) => {
+                                // Check if it's a gas budget issue or other failure
+                                let is_gas_issue = error_msg.contains("Insufficient gas budget")
+                                    || error_msg.contains("InsufficientGas")
+                                    || error_msg.contains("Computation cost")
+                                    || error_msg.contains("gas");
+
+                                let tx_info =
+                                    tx_digest.map_or(String::new(), |d| format!(" (tx: {})", d));
+
+                                // Calculate next retry sequences by dividing by 2
+                                let next_sequences = if current_sequences > 1 {
+                                    // Divide by 2, but ensure at least 1
+                                    (current_sequences / 2).max(1)
+                                } else {
+                                    // Already tried with 1, no more retries
+                                    error!(
+                                        "❌ Failed to purge even with sequences=1: {}{}",
+                                        error_msg, tx_info
+                                    );
+                                    break;
+                                };
+
+                                // Don't retry if we're already at 1 and it failed
+                                if current_sequences == 1 {
+                                    error!(
+                                        "❌ Failed to purge even with sequences=1: {}{}",
+                                        error_msg, tx_info
+                                    );
+                                    break;
+                                }
+
+                                if is_gas_issue {
+                                    warn!(
+                                        "⚠️ Failed to purge {} sequences due to gas constraints: {}{}. Retrying with {} sequences...",
+                                        current_sequences, error_msg, tx_info, next_sequences
+                                    );
+                                } else {
+                                    warn!(
+                                        "⚠️ Failed to purge {} sequences: {}{}. Retrying with {} sequences...",
+                                        current_sequences, error_msg, tx_info, next_sequences
+                                    );
+                                }
+
+                                // Update for next attempt
+                                current_sequences = next_sequences;
+                            }
+                        }
+                    }
+
+                    if !purge_succeeded && attempt_count > 1 {
+                        error!(
+                            "❌ Failed to purge sequences after {} attempts with progressively smaller batches",
+                            attempt_count
+                        );
+                    }
+                } else {
+                    debug!(
+                        "🔍 Purge opportunity no longer valid after refetch (last_purged: {}, last_settled: {})",
+                        fresh_app_instance.last_purged_sequence,
+                        fresh_app_instance.last_settled_sequence
+                    );
+                }
             }
-            Err((error_msg, tx_digest)) => {
-                // Log as debug instead of warn since purging is an optimization, not critical
+            Err(e) => {
                 warn!(
-                    "⚠️ Failed to purge sequences: {}{}",
-                    error_msg,
-                    tx_digest.map_or(String::new(), |d| format!(" (tx: {})", d))
+                    "⚠️ Failed to refetch app instance for purge validation: {}",
+                    e
                 );
             }
         }

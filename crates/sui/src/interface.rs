@@ -9,7 +9,7 @@ use crate::app_instance::{
 };
 use crate::registry::{
     CreateRegistryResult, add_agent, add_app, add_developer, add_method, create_registry,
-    remove_agent, remove_app, remove_developer, remove_default_method, remove_method,
+    remove_agent, remove_app, remove_default_method, remove_developer, remove_method,
     set_default_method, update_agent, update_app, update_developer, update_method,
 };
 use sui_sdk_types as sui;
@@ -557,7 +557,7 @@ impl SilvanaSuiInterface {
             }
             Err(e) => {
                 let error_msg = e.to_string();
-                error!(
+                warn!(
                     "Failed to execute multicall job operations on blockchain: {}",
                     error_msg
                 );
@@ -1247,7 +1247,17 @@ impl SilvanaSuiInterface {
     ) -> Result<String, String> {
         debug!("Adding developer '{}' to registry '{}'", name, registry_id);
 
-        match add_developer(registry_id, developer_owner, name.clone(), github, image, description, site).await {
+        match add_developer(
+            registry_id,
+            developer_owner,
+            name.clone(),
+            github,
+            image,
+            description,
+            site,
+        )
+        .await
+        {
             Ok(tx_digest) => {
                 info!(
                     "Successfully added developer '{}' to registry '{}' (tx: {})",
@@ -1711,13 +1721,7 @@ impl SilvanaSuiInterface {
             agent_name, developer, registry_id
         );
 
-        match remove_default_method(
-            registry_id,
-            developer.clone(),
-            agent_name.clone(),
-        )
-        .await
-        {
+        match remove_default_method(registry_id, developer.clone(), agent_name.clone()).await {
             Ok(tx_digest) => {
                 info!(
                     "Successfully removed default method from agent '{}' for developer '{}' in registry '{}' (tx: {})",
@@ -1738,18 +1742,24 @@ impl SilvanaSuiInterface {
     /// Purge old sequence states that have been settled
     /// This cleans up storage by removing sequence states up to the specified number of sequences
     /// Returns Ok(tx_digest) if successful, Err((error_msg, optional_tx_digest)) if failed
+    /// Note: Uses a default gas budget of 10_000_000 MIST if no gas_budget_sui is provided
     pub async fn purge(
         &mut self,
         app_instance: &str,
         sequences_to_purge: u64,
         gas_budget_sui: Option<f64>,
     ) -> Result<String, (String, Option<String>)> {
-        debug!(
-            "Attempting to purge {} sequences from app instance {} on Sui blockchain",
-            sequences_to_purge, app_instance
-        );
+        // Use provided gas budget or default to 10_000_000 MIST (0.01 SUI)
+        let gas_budget_mist = gas_budget_sui
+            .map(|sui| (sui * 1_000_000_000.0) as u64)
+            .or(Some(10_000_000u64));
 
-        let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
+        debug!(
+            "Attempting to purge {} sequences from app instance {} on Sui blockchain (gas budget: {} MIST)",
+            sequences_to_purge,
+            app_instance,
+            gas_budget_mist.unwrap_or(0)
+        );
 
         match purge_tx(app_instance, sequences_to_purge, gas_budget_mist).await {
             Ok(tx_digest) => {

@@ -118,6 +118,7 @@ pub const DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS: u64 = 5;
 /// together using multicall at this interval to reduce transaction costs.
 pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
 
+
 /// Memory calculation coefficient for job buffer sizing.
 /// Multiplies available memory to allow more jobs to be buffered between multicalls.
 /// Higher coefficient = more jobs in buffer to avoid running out before next multicall.
@@ -236,7 +237,7 @@ pub const JOB_STATUS_CHECK_DELAY_SECS: u64 = 5;
 /// Default number of sequences to purge in a single transaction.
 /// This is used when automatically purging old sequence states that have been settled.
 /// A smaller value reduces gas costs per transaction but may require more transactions.
-pub const DEFAULT_PURGE_SEQUENCES: u64 = 10;
+pub const DEFAULT_PURGE_SEQUENCES: u64 = 32;
 
 // =============================================================================
 // Data Availability Configuration
