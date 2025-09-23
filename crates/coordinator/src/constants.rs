@@ -62,11 +62,6 @@ pub const PERIODIC_JOB_EXECUTION_BUFFER_MS: u64 = 10000; // 10 seconds
 /// This simplifies the logic and ensures no proof can block forever.
 pub const PROOF_TIMEOUT_MS: u64 = 5 * 60 * 1000; // 5 minutes
 
-// Keep the old constants for backward compatibility (all set to same value)
-pub const PROOF_RESERVED_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
-pub const PROOF_STARTED_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
-pub const PROOF_USED_MERGE_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
-
 // =============================================================================
 // Retry and Recovery Configuration
 // =============================================================================
@@ -117,7 +112,6 @@ pub const DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS: u64 = 5;
 /// Job operations (start, complete, fail, terminate) are batched and executed
 /// together using multicall at this interval to reduce transaction costs.
 pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
-
 
 /// Memory calculation coefficient for job buffer sizing.
 /// Multiplies available memory to allow more jobs to be buffered between multicalls.
