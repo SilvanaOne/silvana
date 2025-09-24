@@ -124,7 +124,7 @@ async function agent() {
               console.log(
                 `Failing job ${response.job.jobId} due to settlement error...`
               );
-              await failJob(`Settlement failed: ${error}`);
+              await failJob(`Settlement failed: ${err}`);
               console.log("Job marked as failed");
               continue;
             }
@@ -517,28 +517,24 @@ async function agent() {
               `Failed to complete job ${response.job.jobSequence}: ${completeResponse.message}`
             );
           }
-        } catch (error) {
+        } catch (err) {
           console.error(
             `Job ${response.job.jobSequence} processing failed:`,
-            error
+            err
           );
 
           // Fail the job
           try {
             // Extract a meaningful error message
             let errorMessage = "Job processing failed";
-            if (error instanceof Error) {
-              errorMessage = `Job processing failed: ${error.message}`;
-            } else if (typeof error === "string") {
-              errorMessage = `Job processing failed: ${error}`;
-            } else if (
-              error &&
-              typeof error === "object" &&
-              "message" in error
-            ) {
+            if (err instanceof Error) {
+              errorMessage = `Job processing failed: ${err.message}`;
+            } else if (typeof err === "string") {
+              errorMessage = `Job processing failed: ${err}`;
+            } else if (err && typeof err === "object" && "message" in err) {
               errorMessage = `Job processing failed: ${(error as any).message}`;
             } else {
-              errorMessage = `Job processing failed: ${JSON.stringify(error)}`;
+              errorMessage = `Job processing failed: ${JSON.stringify(err)}`;
             }
 
             console.log(`Failing job ${response.job.jobId}...`);

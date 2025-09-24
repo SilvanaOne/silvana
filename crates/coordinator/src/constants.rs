@@ -17,11 +17,11 @@ pub const JOB_SELECTION_POOL_SIZE: usize = 30;
 
 /// Maximum number of jobs to process per app instance in a single batch.
 /// This prevents any single app instance from monopolizing processing resources.
-pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 1000;
+pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 10000;
 
 /// Maximum number of blocks to look ahead when creating merge jobs.
 /// This prevents creating too many jobs for future blocks that can't be processed yet.
-pub const MAX_BLOCK_LOOKAHEAD: u64 = 10;
+pub const MAX_BLOCK_LOOKAHEAD: u64 = 4;
 
 // =============================================================================
 // Delays and Intervals (in milliseconds)
