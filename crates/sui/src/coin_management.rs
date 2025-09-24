@@ -24,10 +24,10 @@ pub struct CoinPoolConfig {
 impl Default for CoinPoolConfig {
     fn default() -> Self {
         Self {
-            target_gas_coins: 9,
-            target_coin_balance: 1_000_000_000, // 1.0 SUI per coin
-            min_coin_balance: 500_000_000,      // 0.5 SUI minimum
-            min_faucet_coin_balance: 9_100_000_000, // 5 SUI minimum for splitting
+            target_gas_coins: 4,
+            target_coin_balance: 2_000_000_000,
+            min_coin_balance: 1_000_000_000,
+            min_faucet_coin_balance: 8_100_000_000,
         }
     }
 }
@@ -289,7 +289,7 @@ pub async fn ensure_gas_coin_pool() -> Result<()> {
     );
 
     // Check if we have too many dust coins that should be merged
-    if gas_info.dust_coins.len() >= 10 {
+    if gas_info.dust_coins.len() >= 5 {
         info!(
             "Found {} dust coins, merging them to reduce clutter",
             gas_info.dust_coins.len()
@@ -341,7 +341,7 @@ pub async fn ensure_gas_coin_pool() -> Result<()> {
             // Try to get tokens from faucet if we don't have enough
             // Request more tokens to ensure we have splittable coins
             info!("Attempting to request tokens from faucet for coin splitting...");
-            if let Err(e) = crate::faucet::ensure_sufficient_balance(10.0).await {
+            if let Err(e) = crate::faucet::ensure_sufficient_balance(1000.0).await {
                 warn!("Failed to request faucet tokens: {}", e);
             }
 

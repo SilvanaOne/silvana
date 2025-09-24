@@ -95,7 +95,7 @@ export async function action(params: {
   });
 
   tx.setSender(address);
-  tx.setGasBudget(100_000_000);
+  tx.setGasBudget(200_000_000);
 
   const result = await executeTx({
     tx,

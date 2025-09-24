@@ -1,9 +1,9 @@
+use crate::constants::STUCK_JOB_TIMEOUT_SECS;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, trace};
-use crate::constants::PROOF_RESERVED_TIMEOUT_MS;
 
 /// Guard that automatically releases a job lock when dropped
 pub struct JobLockGuard {
@@ -158,7 +158,7 @@ static JOB_LOCK_MANAGER: std::sync::OnceLock<JobLockManager> = std::sync::OnceLo
 /// Get the global job lock manager instance
 /// The lock timeout is set to account for slow blockchain transactions
 pub fn get_job_lock_manager() -> &'static JobLockManager {
-    JOB_LOCK_MANAGER.get_or_init(|| JobLockManager::new((PROOF_RESERVED_TIMEOUT_MS / 1000) as u64))
+    JOB_LOCK_MANAGER.get_or_init(|| JobLockManager::new((STUCK_JOB_TIMEOUT_SECS / 1000) as u64))
 }
 
 #[cfg(test)]

@@ -17,11 +17,11 @@ pub const JOB_SELECTION_POOL_SIZE: usize = 30;
 
 /// Maximum number of jobs to process per app instance in a single batch.
 /// This prevents any single app instance from monopolizing processing resources.
-pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 1000;
+pub const MAX_JOBS_PER_INSTANCE_BATCH: usize = 10000;
 
 /// Maximum number of blocks to look ahead when creating merge jobs.
 /// This prevents creating too many jobs for future blocks that can't be processed yet.
-pub const MAX_BLOCK_LOOKAHEAD: u64 = 10;
+pub const MAX_BLOCK_LOOKAHEAD: u64 = 4;
 
 // =============================================================================
 // Delays and Intervals (in milliseconds)
@@ -61,11 +61,6 @@ pub const PERIODIC_JOB_EXECUTION_BUFFER_MS: u64 = 10000; // 10 seconds
 /// After this timeout, any proof can be restarted/reserved/merged regardless of status.
 /// This simplifies the logic and ensures no proof can block forever.
 pub const PROOF_TIMEOUT_MS: u64 = 5 * 60 * 1000; // 5 minutes
-
-// Keep the old constants for backward compatibility (all set to same value)
-pub const PROOF_RESERVED_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
-pub const PROOF_STARTED_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
-pub const PROOF_USED_MERGE_TIMEOUT_MS: u64 = PROOF_TIMEOUT_MS;
 
 // =============================================================================
 // Retry and Recovery Configuration
@@ -117,7 +112,6 @@ pub const DOCKER_CONTAINER_FORCE_STOP_TIMEOUT_SECS: u64 = 5;
 /// Job operations (start, complete, fail, terminate) are batched and executed
 /// together using multicall at this interval to reduce transaction costs.
 pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
-
 
 /// Memory calculation coefficient for job buffer sizing.
 /// Multiplies available memory to allow more jobs to be buffered between multicalls.

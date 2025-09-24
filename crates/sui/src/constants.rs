@@ -30,10 +30,10 @@ pub const SIMULATION_GAS_BUDGET_MIST: u64 = 5_000_000_000;
 pub const MIN_GAS_BUDGET_MIST: u64 = 5_000_000;
 
 /// Maximum gas budget for any transaction
-pub const MAX_GAS_BUDGET_MIST: u64 = 500_000_000;
+pub const MAX_GAS_BUDGET_MIST: u64 = 1_000_000_000;
 
 /// Maximum computation cost for any transaction
-pub const MAX_COMPUTATION_COST_MIST: u64 = 5_000_000;
+pub const MAX_COMPUTATION_COST_MIST: u64 = 500_000_000;
 
 /// Fallback gas budget when simulation fails or no custom budget provided
 pub const FALLBACK_GAS_BUDGET_MIST: u64 = 100_000_000;
