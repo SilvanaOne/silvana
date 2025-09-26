@@ -326,6 +326,7 @@ pub async fn publish_move_package(
         vec![], // No additional operations, just publish
         gas_budget,
         Some(publish_options),
+        None,
     )
     .await?;
 

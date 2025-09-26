@@ -205,7 +205,7 @@ pub async fn handle_transaction_command(
                 );
             }
 
-            match interface.purge(&instance, sequences, gas).await {
+            match interface.purge(&instance, sequences, gas, None).await {
                 Ok(tx_digest) => {
                     println!("✅ Transaction executed successfully");
                     println!("Transaction digest: {}", tx_digest);

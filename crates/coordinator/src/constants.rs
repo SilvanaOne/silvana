@@ -233,6 +233,10 @@ pub const JOB_STATUS_CHECK_DELAY_SECS: u64 = 5;
 /// A smaller value reduces gas costs per transaction but may require more transactions.
 pub const DEFAULT_PURGE_SEQUENCES: u64 = 32;
 
+/// Maximum computation cost in MIST for multicall transactions.
+/// This is used when batching multiple operations to ensure the transaction doesn't exceed gas limits.
+pub const MAX_COMPUTATION_COST_MIST: u64 = 5_000_000;
+
 // =============================================================================
 // Data Availability Configuration
 // =============================================================================

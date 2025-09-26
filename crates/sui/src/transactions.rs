@@ -291,6 +291,7 @@ pub(crate) async fn execute_transaction_block<F>(
     operations: Vec<(Vec<String>, String, String, F)>, // object_ids, module_name, function_name, args_builder
     custom_gas_budget: Option<u64>,
     publish_options: Option<PublishOptions>,
+    max_computation_cost: Option<u64>,
 ) -> Result<String>
 where
     F: Fn(
@@ -691,18 +692,19 @@ where
                                             calculated_budget as f64 / 1_000_000_000.0
                                         );
 
-                                        if computation_cost > MAX_COMPUTATION_COST_MIST {
+                                        let max_comp_cost = max_computation_cost.unwrap_or(MAX_COMPUTATION_COST_MIST);
+                                        if computation_cost > max_comp_cost {
                                             info!(
-                                                "Calculated computation cost {} MIST ({:.4} SUI) exceeds MAX_COMPUTATION_COST_MIST {} MIST ({} SUI)",
+                                                "Calculated computation cost {} MIST ({:.4} SUI) exceeds max computation cost {} MIST ({} SUI)",
                                                 computation_cost,
                                                 computation_cost as f64 / 1_000_000_000.0,
-                                                MAX_COMPUTATION_COST_MIST,
-                                                MAX_COMPUTATION_COST_MIST as f64 / 1_000_000_000.0
+                                                max_comp_cost,
+                                                max_comp_cost as f64 / 1_000_000_000.0
                                             );
                                             return Err(anyhow!(
                                                 "Computation cost {} MIST exceeds maximum allowed {} MIST",
                                                 computation_cost,
-                                                MAX_COMPUTATION_COST_MIST
+                                                max_comp_cost
                                             ));
                                         }
 

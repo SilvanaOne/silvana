@@ -274,6 +274,7 @@ impl SilvanaSuiInterface {
         &mut self,
         operations: Vec<crate::types::MulticallOperations>,
         gas_budget_sui: Option<f64>,
+        max_computation_cost: Option<u64>,
     ) -> Result<crate::types::MulticallResult, (String, Option<String>)> {
         use crate::constants::MAX_OPERATIONS_PER_MULTICALL;
 
@@ -317,7 +318,7 @@ impl SilvanaSuiInterface {
 
         let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
 
-        match multicall_job_operations_tx(operations.clone(), gas_budget_mist).await {
+        match multicall_job_operations_tx(operations.clone(), gas_budget_mist, max_computation_cost).await {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully executed multicall job operations on blockchain, tx: {}",
@@ -1748,6 +1749,7 @@ impl SilvanaSuiInterface {
         app_instance: &str,
         sequences_to_purge: u64,
         gas_budget_sui: Option<f64>,
+        max_computation_cost: Option<u64>,
     ) -> Result<String, (String, Option<String>)> {
         // Use provided gas budget or default to 10_000_000 MIST (0.01 SUI)
         let gas_budget_mist = gas_budget_sui
@@ -1761,7 +1763,7 @@ impl SilvanaSuiInterface {
             gas_budget_mist.unwrap_or(0)
         );
 
-        match purge_tx(app_instance, sequences_to_purge, gas_budget_mist).await {
+        match purge_tx(app_instance, sequences_to_purge, gas_budget_mist, max_computation_cost).await {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully purged {} sequences from app instance {} on blockchain, tx: {}",
