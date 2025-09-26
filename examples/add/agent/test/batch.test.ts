@@ -1,12 +1,24 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { action } from "./helpers/action.js";
+import { AppInstanceManager } from "@silvana-one/coordination";
 
 describe("Batch", async () => {
   it("should batch add", async () => {
     let batchIteration = 0;
     const testStartTime = Date.now();
     let totalTransactions = 0;
+
+    const registryId = process.env.SILVANA_REGISTRY;
+    const appInstanceId = process.env.APP_INSTANCE_ID;
+
+    if (!registryId || !appInstanceId) {
+      throw new Error(
+        "SILVANA_REGISTRY and APP_INSTANCE_ID must be set in environment"
+      );
+    }
+
+    const appInstanceManager = new AppInstanceManager({ registry: registryId });
 
     while (true) {
       batchIteration++;
@@ -24,6 +36,35 @@ describe("Batch", async () => {
           maxDelay / 1000
         }s - Total TX: ${totalTransactions} - TPS: ${tps}`
       );
+
+      // Get app instance to check block numbers
+      const appInstance = await appInstanceManager.getAppInstance(
+        appInstanceId
+      );
+      if (
+        !appInstance ||
+        !appInstance.blockNumber ||
+        !appInstance.lastSettledBlockNumber
+      ) {
+        console.error("❌ Failed to fetch app instance block numbers");
+        await sleep(5000);
+        continue;
+      }
+
+      const blockDiff =
+        appInstance.blockNumber - appInstance.lastSettledBlockNumber;
+      console.log(
+        `Block status: current=${appInstance.blockNumber}, lastSettled=${appInstance.lastSettledBlockNumber}, diff=${blockDiff}`
+      );
+
+      if (blockDiff >= 5) {
+        console.log(
+          `⏸️ Skipping transactions: block difference (${blockDiff}) >= 5`
+        );
+        await sleep(60000);
+        continue;
+      }
+
       for (let i = 0; i < 10; i++) {
         try {
           await action({
