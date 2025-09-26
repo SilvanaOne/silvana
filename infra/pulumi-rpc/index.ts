@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 export = async () => {
+  const stack = pulumi.getStack();
   // Get ARM64 AMI for eu-central-1 region
   const amiIdArm64 = (
     await aws.ssm.getParameter({
@@ -456,7 +457,7 @@ export = async () => {
       },
 
       // User data script loaded from user-data.sh file
-      userData: fs.readFileSync("./user-data.sh", "utf8"),
+      userData: fs.readFileSync(`./user-data.${stack}.sh`, "utf8"),
       userDataReplaceOnChange: true,
 
       tags: {
