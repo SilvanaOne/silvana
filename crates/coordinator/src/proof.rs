@@ -405,8 +405,13 @@ pub async fn analyze_proof_completion(
                     loop {
                         attempt_count += 1;
 
+                        let max_computation_cost = if current_sequences > 1 {
+                            Some(crate::constants::MAX_COMPUTATION_COST_MIST)
+                        } else {
+                            None
+                        };
                         match sui_interface
-                            .purge(&app_instance.id, current_sequences, None)
+                            .purge(&app_instance.id, current_sequences, None, max_computation_cost)
                             .await
                         {
                             Ok(tx_digest) => {

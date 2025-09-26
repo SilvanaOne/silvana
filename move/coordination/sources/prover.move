@@ -503,6 +503,12 @@ public(package) fun start_proving(
     } else {
         // New proof - first check if we can reserve the sub-proofs before inserting
         if (sorted_sequence1.is_some()) {
+            // Check if proof1 exists first
+            if (!vec_map::contains(&proof_calculation.proofs, sorted_sequence1.borrow())) {
+                // Proof doesn't exist - cannot reserve
+                return false
+            };
+
             let proof1 = vec_map::get(
                 &proof_calculation.proofs,
                 sorted_sequence1.borrow(),
@@ -514,7 +520,7 @@ public(package) fun start_proving(
             // Check if proof1 can be reserved
             if (
                 !(
-                    proof1.status == PROOF_STATUS_CALCULATED || 
+                    proof1.status == PROOF_STATUS_CALCULATED ||
                   is_timed_out ||  // Any status is OK after 5 minute timeout
                   (isBlockProof && (proof1.status == PROOF_STATUS_USED || proof1.status == PROOF_STATUS_RESERVED)),
                 )
@@ -525,6 +531,12 @@ public(package) fun start_proving(
         };
 
         if (sorted_sequence2.is_some()) {
+            // Check if proof2 exists first
+            if (!vec_map::contains(&proof_calculation.proofs, sorted_sequence2.borrow())) {
+                // Proof doesn't exist - cannot reserve
+                return false
+            };
+
             let proof2 = vec_map::get(
                 &proof_calculation.proofs,
                 sorted_sequence2.borrow(),
@@ -536,7 +548,7 @@ public(package) fun start_proving(
             // Check if proof2 can be reserved
             if (
                 !(
-                    proof2.status == PROOF_STATUS_CALCULATED || 
+                    proof2.status == PROOF_STATUS_CALCULATED ||
                   is_timed_out ||  // Any status is OK after 5 minute timeout
                   (isBlockProof && (proof2.status == PROOF_STATUS_USED || proof2.status == PROOF_STATUS_RESERVED)),
                 )

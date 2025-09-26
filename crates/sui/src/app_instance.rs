@@ -115,6 +115,7 @@ pub(crate) async fn terminate_job_tx(
         app_instance_str,
         "terminate_app_job",
         gas_budget,
+        None,
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequence_arg = tb.input(sui_transaction_builder::Serialized(&job_sequence));
@@ -130,6 +131,7 @@ pub(crate) async fn terminate_job_tx(
 pub(crate) async fn multicall_job_operations_tx(
     operations: Vec<crate::types::MulticallOperations>,
     gas_budget: Option<u64>,
+    max_computation_cost: Option<u64>,
 ) -> Result<String> {
     if operations.is_empty() {
         return Err(anyhow!("No operations provided"));
@@ -475,7 +477,7 @@ pub(crate) async fn multicall_job_operations_tx(
     }
 
     // Use the updated execute_transaction_block for multiple move calls across multiple app instances
-    execute_transaction_block(package_id, tx_operations, gas_budget, None).await
+    execute_transaction_block(package_id, tx_operations, gas_budget, None, max_computation_cost).await
 }
 
 /// Create and submit a transaction to restart failed jobs (with optional specific job sequences)
@@ -496,6 +498,7 @@ pub async fn restart_failed_jobs_with_sequences_tx(
         app_instance_str,
         "restart_failed_app_jobs",
         gas,
+        None,
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
@@ -520,6 +523,7 @@ pub async fn remove_failed_jobs_tx(
         app_instance_str,
         "remove_failed_app_jobs",
         gas_budget,
+        None,
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let job_sequences_arg = tb.input(sui_transaction_builder::Serialized(&job_sequences));
@@ -1117,7 +1121,7 @@ where
         sui_sdk_types::Argument,      // clock_arg
     ) -> Vec<sui_sdk_types::Argument>,
 {
-    execute_app_instance_function_with_gas(app_instance_str, function_name, None, build_args).await
+    execute_app_instance_function_with_gas(app_instance_str, function_name, None, None, build_args).await
 }
 
 /// Common helper function to execute app instance transactions with custom gas budget
@@ -1128,6 +1132,7 @@ async fn execute_app_instance_function_with_gas<F>(
     app_instance_str: &str,
     function_name: &str,
     custom_gas_budget: Option<u64>,
+    max_computation_cost: Option<u64>,
     build_args: F,
 ) -> Result<String>
 where
@@ -1150,6 +1155,7 @@ where
         )],
         custom_gas_budget,
         None,
+        max_computation_cost,
     )
     .await
 }
@@ -1177,6 +1183,7 @@ pub async fn purge_tx(
     app_instance_str: &str,
     sequences_to_purge: u64,
     gas_budget: Option<u64>,
+    max_computation_cost: Option<u64>,
 ) -> Result<String> {
     // Use provided gas budget or default to 10_000_000 MIST (0.005 SUI)
     let final_gas_budget = gas_budget.or(Some(10_000_000));
@@ -1190,6 +1197,7 @@ pub async fn purge_tx(
         app_instance_str,
         "purge",
         final_gas_budget,
+        max_computation_cost,
         move |tb, object_args, clock_arg| {
             let app_instance_arg = *object_args.get(0).expect("App instance argument required");
             let sequences_arg = tb.input(sui_transaction_builder::Serialized(&sequences_to_purge));

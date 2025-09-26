@@ -448,6 +448,11 @@ public fun start_proving(
     clock: &Clock,
     ctx: &mut TxContext,
 ): bool {
+    // Check if the ProofCalculation exists for this block_number
+    if (!object_table::contains(&app_instance.proof_calculations, block_number)) {
+        return false
+    };
+
     let proof_calculation = borrow_mut(
         &mut app_instance.proof_calculations,
         block_number,
@@ -477,6 +482,11 @@ public fun submit_proof(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    // Check if the ProofCalculation exists for this block_number
+    if (!object_table::contains(&app_instance.proof_calculations, block_number)) {
+        return
+    };
+
     let proof_calculation = borrow_mut(
         &mut app_instance.proof_calculations,
         block_number,
@@ -517,6 +527,11 @@ public fun reject_proof(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    // Check if the ProofCalculation exists for this block_number
+    if (!object_table::contains(&app_instance.proof_calculations, block_number)) {
+        return
+    };
+
     let proof_calculation = borrow_mut(
         &mut app_instance.proof_calculations,
         block_number,

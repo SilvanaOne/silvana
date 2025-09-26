@@ -243,8 +243,13 @@ impl MulticallProcessor {
             let batch_start_time = Instant::now();
 
             let mut sui_interface = sui::SilvanaSuiInterface::new();
+            let max_computation_cost = if current_operation_count > 1 {
+                Some(crate::constants::MAX_COMPUTATION_COST_MIST)
+            } else {
+                None
+            };
             match sui_interface
-                .multicall_job_operations(current_batch_operations.clone(), None)
+                .multicall_job_operations(current_batch_operations.clone(), None, max_computation_cost)
                 .await
             {
                 Ok(result) => {

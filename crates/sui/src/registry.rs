@@ -51,6 +51,7 @@ where
         )],
         None, // Use default gas budget
         None, // No modules to publish
+        None, // Use default max computation cost
     )
     .await
 }
@@ -106,6 +107,7 @@ pub(crate) async fn create_registry(
         )],
         None, // Use default gas budget
         None, // No modules to publish
+        None, // Use default max computation cost
     )
     .await?;
 
