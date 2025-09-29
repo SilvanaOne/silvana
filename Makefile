@@ -145,7 +145,7 @@ build-rpc: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
 	@echo "🔨 Building Docker image for ARM64 (Graviton), compiling RPC, and creating tar archive..."
 	@DOCKER_BUILDKIT=1 docker build \
 		--platform linux/arm64 \
-		--secret id=aws,src=docker/rpc/.env \
+		--secret id=aws,src=docker/rpc/.env.testnet \
 		-f docker/rpc/Dockerfile \
 		-t rpc-builder:al2023-arm64 \
 		--progress=plain \
@@ -156,12 +156,12 @@ build-rpc: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
 	@echo "📦 Archive: rpc.tar.gz (contains rpc folder + ARM64 RPC executable)"
 	@echo "🔄 Updating user-data.sh timestamp to trigger Pulumi redeploy..."
 	@# Update the timestamp comment in user-data.sh to force Pulumi to see a change
-	@if grep -q "^# Deploy timestamp:" infra/pulumi-rpc/user-data.sh; then \
-		sed -i.bak "s/^# Deploy timestamp:.*/$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)/" infra/pulumi-rpc/user-data.sh; \
+	@if grep -q "^# Deploy timestamp:" infra/pulumi-rpc/user-data.testnet.sh; then \
+		sed -i.bak "s/^# Deploy timestamp:.*/$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)/" infra/pulumi-rpc/user-data.testnet.sh; \
 	else \
-		sed -i.bak "4a\\$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)" infra/pulumi-rpc/user-data.sh; \
+		sed -i.bak "4a\\$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)" infra/pulumi-rpc/user-data.testnet.sh; \
 	fi
-	@rm -f infra/pulumi-rpc/user-data.sh.bak
+	@rm -f infra/pulumi-rpc/user-data-testnet.sh.bak
 
 build-arm: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
 	@echo "🐳 Building Silvana for Ubuntu Linux ARM64..."

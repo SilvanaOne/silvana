@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 export = async () => {
+  const stack = pulumi.getStack();
   // Get ARM64 AMI for eu-central-1 region
   const amiIdArm64 = (
     await aws.ssm.getParameter({
@@ -75,11 +76,11 @@ export = async () => {
     description: "KMS key for encrypting Silvana secrets at rest",
     keyUsage: "ENCRYPT_DECRYPT",
     customerMasterKeySpec: "SYMMETRIC_DEFAULT",
-    tags: {
-      Name: "silvana-secrets-encryption",
-      Purpose: "Encrypt secrets at rest",
-      Project: "silvana-rpc",
-    },
+    // tags: {
+    //   Name: "silvana-secrets-encryption",
+    //   Purpose: "Encrypt secrets at rest",
+    //   Project: "silvana-rpc",
+    // },
   });
 
   const secretsKmsKeyAlias = new aws.kms.Alias(
@@ -191,8 +192,8 @@ export = async () => {
   // -------------------------
   // S3 Bucket for Proofs Cache
   // -------------------------
-  const proofsCacheBucket = new aws.s3.Bucket("proofs-cache", {
-    bucket: "proofs-cache",
+  const proofsCacheBucket = new aws.s3.Bucket(`proofs-cache-${stack}`, {
+    bucket: `proofs-cache-${stack}`,
     acl: "private",
     lifecycleRules: [
       {
@@ -204,7 +205,7 @@ export = async () => {
       },
     ],
     tags: {
-      Name: "proofs-cache",
+      Name: `proofs-cache-${stack}`,
       Purpose: "Cache for proof data with automatic expiration",
       Project: "silvana-rpc",
     },
@@ -222,7 +223,7 @@ export = async () => {
         {
           "Effect": "Allow",
           "Action": ["s3:GetObject", "s3:PutObject"],
-          "Resource": "arn:aws:s3:::silvana-tee-images/*"
+          "Resource": "arn:aws:s3:::silvana-images-${stack}/*"
         },
         {
           "Effect": "Allow",
@@ -256,7 +257,7 @@ export = async () => {
       ]
     }`,
       tags: {
-        Name: "silvana-rpc-s3-policy-with-proofs",
+        Name: `silvana-rpc-s3-policy-with-proofs-${stack}`,
         Project: "silvana-rpc",
       },
     }
@@ -291,7 +292,10 @@ export = async () => {
   pulumi
     .all([s3UploaderAccessKey.id, s3UploaderAccessKey.secret])
     .apply(([accessKeyId, secretAccessKey]) => {
-      const envFilePath = path.resolve(__dirname, "../../docker/rpc/.env");
+      const envFilePath = path.resolve(
+        __dirname,
+        `../../docker/rpc/.env.${stack}`
+      );
       fs.writeFileSync(
         envFilePath,
         `[default]\naws_access_key_id     = ${accessKeyId}\naws_secret_access_key = ${secretAccessKey}\n`,
@@ -337,14 +341,14 @@ export = async () => {
   // Append the S3 bucket name and config table name to the environment variables
   const envContentWithResources = pulumi.interpolate`${envContent}\nPROOFS_CACHE_BUCKET=${proofsCacheBucket.bucket}\nDYNAMODB_CONFIG_TABLE=${configTable.name}`;
 
-  const envParameter = new aws.ssm.Parameter("silvana-rpc-env-dev", {
-    name: "/silvana-rpc/dev/env",
+  const envParameter = new aws.ssm.Parameter(`silvana-rpc-env-${stack}`, {
+    name: `/silvana-rpc/${stack}/env`,
     type: "SecureString",
     value: envContentWithResources,
     keyId: "alias/aws/ssm",
     description: "Silvana RPC environment variables for development",
     tags: {
-      Name: "silvana-rpc-env-dev",
+      Name: `silvana-rpc-env-${stack}`,
       Project: "silvana-rpc",
       Environment: "dev",
     },
@@ -456,7 +460,7 @@ export = async () => {
       },
 
       // User data script loaded from user-data.sh file
-      userData: fs.readFileSync("./user-data.sh", "utf8"),
+      userData: fs.readFileSync(`./user-data.${stack}.sh`, "utf8"),
       userDataReplaceOnChange: true,
 
       tags: {

@@ -43,11 +43,16 @@ describe("Batch", async () => {
       );
       if (
         !appInstance ||
-        !appInstance.blockNumber ||
-        !appInstance.lastSettledBlockNumber
+        appInstance.blockNumber === undefined ||
+        appInstance.lastSettledBlockNumber === undefined ||
+        appInstance.blockNumber === null ||
+        appInstance.lastSettledBlockNumber === null
       ) {
-        console.error("❌ Failed to fetch app instance block numbers");
-        await sleep(5000);
+        console.error("❌ Failed to fetch app instance block numbers", {
+          blockNumber: appInstance?.blockNumber,
+          lastSettledBlockNumber: appInstance?.lastSettledBlockNumber,
+        });
+        await sleep(60000);
         continue;
       }
 
@@ -59,7 +64,7 @@ describe("Batch", async () => {
 
       if (blockDiff >= 5) {
         console.log(
-          `⏸️ Skipping transactions: block difference (${blockDiff}) >= 5`
+          `⏸️ Skipping transactions: block difference (${blockDiff}) =${appInstance.blockNumber} - ${appInstance.lastSettledBlockNumber} >= 5`
         );
         await sleep(60000);
         continue;
