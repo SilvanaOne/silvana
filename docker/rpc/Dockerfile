@@ -34,7 +34,7 @@ RUN cargo build --release --target aarch64-unknown-linux-gnu -p rpc
 
 # Create build directory and copy contents
 RUN mkdir -p /app/rpc
-COPY docker/rpc/build/ /app/rpc/
+COPY docker/rpc/build/start-testnet.sh /app/rpc/start.sh
 RUN cp target/aarch64-unknown-linux-gnu/release/rpc /app/rpc/
 
 # Verify ARM64 binary architecture
@@ -48,4 +48,4 @@ RUN cd /app && tar -czf rpc.tar.gz -C /app rpc
 RUN --mount=type=secret,id=aws \
     export AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws && \
     echo $AWS_SHARED_CREDENTIALS_FILE && \
-    aws s3 cp /app/rpc.tar.gz s3://silvana-tee-images/rpc.tar.gz
+    aws s3 cp /app/rpc.tar.gz s3://silvana-images-testnet/rpc.tar.gz
