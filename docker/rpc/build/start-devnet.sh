@@ -49,7 +49,7 @@ fi
 
 echo "Fetching .env from Parameter Store..."
 sudo -u ec2-user aws ssm get-parameter \
-     --name "/silvana-rpc/dev/env" \
+     --name "/silvana-rpc/devnet/env" \
      --with-decryption \
      --query Parameter.Value \
      --output text > /home/ec2-user/rpc/.env
@@ -143,7 +143,7 @@ fi
 
 # Check for existing certificates in S3 first
 echo "Checking for existing SSL certificates in S3..."
-if sudo -u ec2-user aws s3 cp s3://silvana-tee-images/rpc-cert.tar.gz /tmp/rpc-cert.tar.gz 2>/dev/null; then
+if sudo -u ec2-user aws s3 cp s3://silvana-images-devnet/rpc-cert.tar.gz /tmp/rpc-cert.tar.gz 2>/dev/null; then
     echo "✅ Found existing certificates in S3, extracting..."
     cd /tmp
     sudo tar -xzf rpc-cert.tar.gz -C /
@@ -171,7 +171,7 @@ if [ "$cert_from_s3" = false ]; then
         echo "📤 Uploading new certificates to S3..."
         cd /tmp
         sudo tar -czf rpc-cert.tar.gz -C / etc/letsencrypt/live/${DOMAIN_NAME} etc/letsencrypt/archive/${DOMAIN_NAME} etc/letsencrypt/renewal/${DOMAIN_NAME}.conf
-        sudo -u ec2-user aws s3 cp rpc-cert.tar.gz s3://silvana-tee-images/rpc-cert.tar.gz
+        sudo -u ec2-user aws s3 cp rpc-cert.tar.gz s3://silvana-images-devnet/rpc-cert.tar.gz
         echo "✅ Certificates uploaded to S3 for future deployments"
         sudo rm -f /tmp/rpc-cert.tar.gz
     else
@@ -275,7 +275,7 @@ echo "\$(date): Uploading renewed certificates to S3..."
 cd /tmp
 tar -czf rpc-cert-renewed.tar.gz -C / etc/letsencrypt/live/\${DOMAIN_NAME} etc/letsencrypt/archive/\${DOMAIN_NAME} etc/letsencrypt/renewal/\${DOMAIN_NAME}.conf
 
-if sudo -u ec2-user aws s3 cp rpc-cert-renewed.tar.gz s3://silvana-tee-images/rpc-cert.tar.gz; then
+if sudo -u ec2-user aws s3 cp rpc-cert-renewed.tar.gz s3://silvana-images-devnet/rpc-cert.tar.gz; then
     echo "\$(date): ✅ Renewed certificates uploaded to S3 successfully"
     rm -f rpc-cert-renewed.tar.gz
 else
@@ -333,6 +333,12 @@ echo "Setting up certificate access for NATS..."
 sudo groupadd ssl-cert 2>/dev/null || true
 sudo usermod -a -G ssl-cert nats
 
+# Ensure Let's Encrypt directories are accessible
+echo "Setting Let's Encrypt directory permissions..."
+sudo chmod 755 /etc/letsencrypt
+sudo chmod 755 /etc/letsencrypt/live
+sudo chmod 755 /etc/letsencrypt/archive
+
 # Verify nats user is in ssl-cert group
 echo "Verifying nats user group membership..."
 if sudo groups nats | grep -q ssl-cert; then
@@ -350,6 +356,8 @@ cat <<CERT_SCRIPT | sudo tee /etc/letsencrypt/renewal-hooks/deploy/nats-cert-per
 #!/bin/bash
 # Apply permissions to actual certificate files, not symlinks
 if [ -d "/etc/letsencrypt/archive/${DOMAIN_NAME}" ]; then
+    chmod 755 "/etc/letsencrypt/archive/${DOMAIN_NAME}"
+    chmod 755 "/etc/letsencrypt/live/${DOMAIN_NAME}"
     chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
     chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
     chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
@@ -366,6 +374,8 @@ if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
     echo "Setting certificate permissions for NATS..."
     # Apply permissions to actual certificate files in archive directory, not symlinks
     echo "Applying permissions to certificate files in archive directory..."
+    sudo chmod 755 "/etc/letsencrypt/archive/${DOMAIN_NAME}"
+    sudo chmod 755 "/etc/letsencrypt/live/${DOMAIN_NAME}"
     sudo chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
     sudo chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
     sudo chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
@@ -508,6 +518,30 @@ EOF
 
 # Start NATS server
 echo "Starting NATS JetStream server..."
+
+# Verify NATS can read certificates before starting
+if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
+    echo "Testing certificate readability for NATS user..."
+    if sudo -u nats test -r "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" && \
+       sudo -u nats test -r "/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem"; then
+        echo "✅ NATS user can read SSL certificates"
+    else
+        echo "⚠️  NATS user cannot read certificates, applying additional permissions..."
+        # Additional fallback permissions
+        sudo chmod o+rx /etc/letsencrypt/live
+        sudo chmod o+rx /etc/letsencrypt/archive
+        sudo chmod o+rx "/etc/letsencrypt/archive/${DOMAIN_NAME}"
+        sudo chmod o+rx "/etc/letsencrypt/live/${DOMAIN_NAME}"
+
+        # Test again
+        if sudo -u nats test -r "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
+            echo "✅ NATS user can now read SSL certificates after permission fix"
+        else
+            echo "❌ NATS user still cannot read certificates - will start without TLS"
+        fi
+    fi
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable nats-server
 sudo systemctl start nats-server
