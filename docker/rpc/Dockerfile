@@ -1,5 +1,8 @@
 FROM --platform=linux/arm64 amazonlinux:2023
 
+# Accept chain as build argument (devnet, testnet, mainnet)
+ARG CHAIN=devnet
+
 # Install development tools, dependencies, and AWS CLI
 RUN dnf update -y && \
     dnf groupinstall -y "Development Tools" && \
@@ -34,7 +37,7 @@ RUN cargo build --release --target aarch64-unknown-linux-gnu -p rpc
 
 # Create build directory and copy contents
 RUN mkdir -p /app/rpc
-COPY docker/rpc/build/start-testnet.sh /app/rpc/start.sh
+COPY docker/rpc/build/start.sh /app/rpc/start.sh
 RUN cp target/aarch64-unknown-linux-gnu/release/rpc /app/rpc/
 
 # Verify ARM64 binary architecture
@@ -44,8 +47,8 @@ RUN ls -lh /app/rpc/
 # Create tar archive
 RUN cd /app && tar -czf rpc.tar.gz -C /app rpc
 
-# Upload to S3 
+# Upload to S3 using chain-specific bucket
 RUN --mount=type=secret,id=aws \
     export AWS_SHARED_CREDENTIALS_FILE=/run/secrets/aws && \
-    echo $AWS_SHARED_CREDENTIALS_FILE && \
-    aws s3 cp /app/rpc.tar.gz s3://silvana-images-testnet/rpc.tar.gz
+    echo "Uploading to s3://silvana-images-${CHAIN}/rpc.tar.gz" && \
+    aws s3 cp /app/rpc.tar.gz s3://silvana-images-${CHAIN}/rpc.tar.gz

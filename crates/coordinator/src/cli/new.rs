@@ -59,7 +59,7 @@ pub async fn handle_new_command(name: String, force: bool) -> Result<()> {
 
     // Get RPC endpoint from environment or use default
     let rpc_endpoint = std::env::var("SILVANA_RPC_SERVER")
-        .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
+        .unwrap_or_else(|_| "https://rpc-devnet.silvana.dev".to_string());
 
     // Initialize RPC client
     let mut rpc_client =

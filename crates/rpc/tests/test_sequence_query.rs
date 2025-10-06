@@ -102,7 +102,7 @@ async fn test_get_events_by_sequence() -> Result<()> {
                 println!("\n🚨 JSON/BLOB TYPE MISMATCH ERROR DETECTED!");
                 println!("   This is the error we're debugging.");
                 println!("   The entity expects Vec<u8> (BLOB) but database has JSON column.");
-                println!("\n   This error occurs in production at rpc.silvana.dev");
+                println!("\n   This error occurs in production at rpc-devnet.silvana.dev");
                 println!("   but the local entities should have JsonBinary annotations.");
             }
         }

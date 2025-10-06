@@ -14,7 +14,7 @@ pub async fn handle_secrets_command(subcommand: SecretsCommands) -> Result<()> {
     // Get default endpoint if not specified
     let get_endpoint = || {
         std::env::var("SILVANA_RPC_SERVER")
-            .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string())
+            .unwrap_or_else(|_| "https://rpc-devnet.silvana.dev".to_string())
     };
 
     match subcommand {

@@ -6,14 +6,13 @@ use tracing::{error, info};
 
 // Re-export proto types for convenience
 pub use proto::{
-    Event, EventWithRelevance,
-    GetEventsByAppInstanceSequenceRequest, GetEventsByAppInstanceSequenceResponse,
-    SearchEventsRequest, SearchEventsResponse,
-    GetConfigRequest, GetConfigResponse, WriteConfigRequest, WriteConfigResponse,
-    ReadBinaryRequest, ReadBinaryResponse, WriteBinaryRequest, WriteBinaryResponse,
-    RetrieveSecretRequest, RetrieveSecretResponse, SecretReference, StoreSecretRequest,
-    StoreSecretResponse, SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest,
-    SubmitEventsResponse, GetProofRequest, GetProofResponse, SubmitProofRequest, SubmitProofResponse,
+    Event, EventWithRelevance, GetConfigRequest, GetConfigResponse,
+    GetEventsByAppInstanceSequenceRequest, GetEventsByAppInstanceSequenceResponse, GetProofRequest,
+    GetProofResponse, ReadBinaryRequest, ReadBinaryResponse, RetrieveSecretRequest,
+    RetrieveSecretResponse, SearchEventsRequest, SearchEventsResponse, SecretReference,
+    StoreSecretRequest, StoreSecretResponse, SubmitEventRequest, SubmitEventResponse,
+    SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest, SubmitProofResponse,
+    WriteBinaryRequest, WriteBinaryResponse, WriteConfigRequest, WriteConfigResponse,
 };
 
 // Re-export the proto module
@@ -50,7 +49,7 @@ pub type RpcClient = SilvanaRpcServiceClient<Channel>;
 /// Configuration for the RPC client
 #[derive(Debug, Clone)]
 pub struct RpcClientConfig {
-    /// RPC server endpoint (e.g., "https://rpc.silvana.dev")
+    /// RPC server endpoint (e.g., "https://rpc-devnet.silvana.dev")
     pub endpoint: String,
 }
 
@@ -70,7 +69,7 @@ impl RpcClientConfig {
         // Get SILVANA_RPC_SERVER from environment, fallback to default if not set
         let endpoint = std::env::var("SILVANA_RPC_SERVER").unwrap_or_else(|_| {
             error!("SILVANA_RPC_SERVER not set, using default");
-            "https://rpc.silvana.dev".to_string()
+            "https://rpc-devnet.silvana.dev".to_string()
         });
 
         Self { endpoint }
@@ -78,9 +77,7 @@ impl RpcClientConfig {
 }
 
 /// Create a new gRPC client for the Silvana RPC service
-pub async fn create_rpc_client(
-    config: RpcClientConfig,
-) -> Result<RpcClient, RpcClientError> {
+pub async fn create_rpc_client(config: RpcClientConfig) -> Result<RpcClient, RpcClientError> {
     // Initialize rustls crypto provider (required for HTTPS)
     init_rustls();
 
@@ -131,14 +128,20 @@ impl SilvanaRpcClient {
     }
 
     /// Submit a single event
-    pub async fn submit_event(&mut self, event: Event) -> Result<SubmitEventResponse, RpcClientError> {
+    pub async fn submit_event(
+        &mut self,
+        event: Event,
+    ) -> Result<SubmitEventResponse, RpcClientError> {
         let request = SubmitEventRequest { event: Some(event) };
         let response = self.inner.submit_event(request).await?;
         Ok(response.into_inner())
     }
 
     /// Submit multiple events
-    pub async fn submit_events(&mut self, events: Vec<Event>) -> Result<SubmitEventsResponse, RpcClientError> {
+    pub async fn submit_events(
+        &mut self,
+        events: Vec<Event>,
+    ) -> Result<SubmitEventsResponse, RpcClientError> {
         let request = SubmitEventsRequest { events };
         let response = self.inner.submit_events(request).await?;
         Ok(response.into_inner())
@@ -201,10 +204,7 @@ impl SilvanaRpcClient {
     }
 
     /// Get configuration for a chain
-    pub async fn get_config(
-        &mut self,
-        chain: &str,
-    ) -> Result<GetConfigResponse, RpcClientError> {
+    pub async fn get_config(&mut self, chain: &str) -> Result<GetConfigResponse, RpcClientError> {
         let request = GetConfigRequest {
             chain: chain.to_string(),
         };
@@ -242,7 +242,10 @@ impl SilvanaRpcClient {
         &mut self,
         request: GetEventsByAppInstanceSequenceRequest,
     ) -> Result<GetEventsByAppInstanceSequenceResponse, RpcClientError> {
-        let response = self.inner.get_events_by_app_instance_sequence(request).await?;
+        let response = self
+            .inner
+            .get_events_by_app_instance_sequence(request)
+            .await?;
         Ok(response.into_inner())
     }
 

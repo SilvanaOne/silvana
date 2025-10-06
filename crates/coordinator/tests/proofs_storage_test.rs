@@ -126,7 +126,7 @@ async fn test_cache_storage() {
     unsafe {
         env::set_var(
             "RPC_ENDPOINT",
-            env::var("TEST_SERVER").unwrap_or_else(|_| "https://rpc.silvana.dev".to_string()),
+            env::var("TEST_SERVER").unwrap_or_else(|_| "https://rpc-devnet.silvana.dev".to_string()),
         );
     }
 

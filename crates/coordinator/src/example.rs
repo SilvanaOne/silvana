@@ -517,7 +517,7 @@ fn display_setup_summary(
 async fn store_agent_secret(name: &str, secret: &str, developer: &str, agent: &str) -> Result<()> {
     // Get the default RPC endpoint
     let endpoint = std::env::var("SILVANA_RPC_SERVER")
-        .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
+        .unwrap_or_else(|_| "https://rpc-devnet.silvana.dev".to_string());
 
     // Connect to secrets client
     let mut client = secrets_client::SecretsClient::new(&endpoint).await?;

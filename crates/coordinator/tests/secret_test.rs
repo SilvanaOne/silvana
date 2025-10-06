@@ -10,7 +10,7 @@ use uuid::Uuid;
 /// 2. Retrieve the same secret to verify it was stored correctly
 ///
 /// Prerequisites:
-/// - SILVANA_RPC_SERVER environment variable should be set (defaults to https://rpc.silvana.dev)
+/// - SILVANA_RPC_SERVER environment variable should be set (defaults to https://rpc-devnet.silvana.dev)
 /// - The RPC server should have secrets storage configured
 #[tokio::test]
 async fn test_coordinator_secret_storage_and_retrieval() {

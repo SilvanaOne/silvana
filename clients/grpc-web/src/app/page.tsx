@@ -52,7 +52,7 @@ export default function Home() {
     const initializeGrpc = async () => {
       try {
         const transport = createGrpcWebTransport({
-          baseUrl: "https://rpc.silvana.dev",
+          baseUrl: "https://rpc-devnet.silvana.dev",
         });
         const grpc = createClient(SilvanaRpcService, transport);
 
@@ -83,7 +83,7 @@ export default function Home() {
     const initializeNats = async () => {
       try {
         const nc = await wsconnect({
-          servers: ["wss://rpc.silvana.dev:8080/ws"],
+          servers: ["wss://rpc-devnet.silvana.dev:8080/ws"],
           timeout: 2000,
         });
         const stream = "silvana";

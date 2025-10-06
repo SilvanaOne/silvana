@@ -318,7 +318,9 @@ impl SilvanaSuiInterface {
 
         let gas_budget_mist = gas_budget_sui.map(|sui| (sui * 1_000_000_000.0) as u64);
 
-        match multicall_job_operations_tx(operations.clone(), gas_budget_mist, max_computation_cost).await {
+        match multicall_job_operations_tx(operations.clone(), gas_budget_mist, max_computation_cost)
+            .await
+        {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully executed multicall job operations on blockchain, tx: {}",
@@ -1763,7 +1765,14 @@ impl SilvanaSuiInterface {
             gas_budget_mist.unwrap_or(0)
         );
 
-        match purge_tx(app_instance, sequences_to_purge, gas_budget_mist, max_computation_cost).await {
+        match purge_tx(
+            app_instance,
+            sequences_to_purge,
+            gas_budget_mist,
+            max_computation_cost,
+        )
+        .await
+        {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully purged {} sequences from app instance {} on blockchain, tx: {}",
