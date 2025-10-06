@@ -3,6 +3,7 @@
 # Silvana RPC Server Setup Script
 # This script sets up NATS JetStream, Nginx with TLS, and gRPC proxy
 # Called from user-data.sh after basic system preparation
+# Supports multiple chains: devnet, testnet, mainnet
 
 set -e  # Exit on any error
 
@@ -11,13 +12,42 @@ exec > >(tee -a /var/log/start-script.log)
 exec 2>&1
 echo "Starting Silvana RPC setup script at $(date)"
 
-# Configuration
-DOMAIN_NAME="rpc.silvana.dev"
+# Get chain from environment or default to devnet
+CHAIN="${CHAIN:-devnet}"
+echo "🔗 Configuring for chain: ${CHAIN}"
+
+# Configuration based on chain
+case "${CHAIN}" in
+    devnet)
+        DOMAIN_NAME="rpc-devnet.silvana.dev"
+        S3_BUCKET="silvana-images-devnet"
+        PARAMETER_PATH="/silvana-rpc/devnet/env"
+        ;;
+    testnet)
+        DOMAIN_NAME="rpc-testnet.silvana.dev"
+        S3_BUCKET="silvana-images-testnet"
+        PARAMETER_PATH="/silvana-rpc/testnet/env"
+        ;;
+    mainnet)
+        DOMAIN_NAME="rpc-mainnet.silvana.dev"
+        S3_BUCKET="silvana-images-mainnet"
+        PARAMETER_PATH="/silvana-rpc/mainnet/env"
+        ;;
+    *)
+        echo "❌ ERROR: Unknown chain '${CHAIN}'. Must be devnet, testnet, or mainnet"
+        exit 1
+        ;;
+esac
+
 EMAIL="dev@silvana.one"
 NATS_VERSION="2.11.6"
 NATS_CLI_VERSION="0.2.3"
 
 echo "🚀 Initializing Silvana RPC server setup..."
+echo "   Chain: ${CHAIN}"
+echo "   Domain: ${DOMAIN_NAME}"
+echo "   S3 Bucket: ${S3_BUCKET}"
+echo "   Parameter Path: ${PARAMETER_PATH}"
 
 # -------------------------
 # Fetch Environment Variables from Parameter Store
@@ -48,16 +78,26 @@ else
 fi
 
 echo "Fetching .env from Parameter Store..."
-sudo -u ec2-user aws ssm get-parameter \
-     --name "/silvana-rpc/devnet/env" \
+if sudo -u ec2-user aws ssm get-parameter \
+     --name "${PARAMETER_PATH}" \
      --with-decryption \
      --query Parameter.Value \
-     --output text > /home/ec2-user/rpc/.env
+     --output text > /home/ec2-user/rpc/.env 2>/dev/null; then
+    echo "✅ Environment variables fetched from Parameter Store"
+else
+    echo "⚠️  Parameter ${PARAMETER_PATH} not found in Parameter Store"
+    echo "Creating minimal .env file..."
+    cat <<ENVFILE > /home/ec2-user/rpc/.env
+# Minimal configuration for ${CHAIN}
+CHAIN=${CHAIN}
+DOMAIN_NAME=${DOMAIN_NAME}
+ENVFILE
+fi
 
 # Lock down permissions
 sudo chown ec2-user:ec2-user /home/ec2-user/rpc/.env
 sudo chmod 600 /home/ec2-user/rpc/.env
-echo "✅ Environment variables fetched, updated, and secured"
+echo "✅ Environment variables secured"
 
 # -------------------------
 # Prepare NATS JetStream Server
@@ -143,11 +183,11 @@ fi
 
 # Check for existing certificates in S3 first
 echo "Checking for existing SSL certificates in S3..."
-if sudo -u ec2-user aws s3 cp s3://silvana-images-devnet/rpc-cert.tar.gz /tmp/rpc-cert.tar.gz 2>/dev/null; then
+if sudo -u ec2-user aws s3 cp s3://${S3_BUCKET}/rpc-cert.tar.gz /tmp/rpc-cert.tar.gz 2>/dev/null; then
     echo "✅ Found existing certificates in S3, extracting..."
     cd /tmp
     sudo tar -xzf rpc-cert.tar.gz -C /
-    
+
     # Verify certificates were extracted successfully
     if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
         echo "✅ Certificates restored from S3 successfully"
@@ -165,13 +205,13 @@ fi
 if [ "$cert_from_s3" = false ]; then
     echo "Obtaining new SSL certificates..."
     sudo certbot certonly --webroot -w /var/www/letsencrypt --non-interactive --agree-tos -m "$EMAIL" -d "$DOMAIN_NAME"
-    
+
     # Upload new certificates to S3 for future use
     if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
         echo "📤 Uploading new certificates to S3..."
         cd /tmp
         sudo tar -czf rpc-cert.tar.gz -C / etc/letsencrypt/live/${DOMAIN_NAME} etc/letsencrypt/archive/${DOMAIN_NAME} etc/letsencrypt/renewal/${DOMAIN_NAME}.conf
-        sudo -u ec2-user aws s3 cp rpc-cert.tar.gz s3://silvana-images-devnet/rpc-cert.tar.gz
+        sudo -u ec2-user aws s3 cp rpc-cert.tar.gz s3://${S3_BUCKET}/rpc-cert.tar.gz
         echo "✅ Certificates uploaded to S3 for future deployments"
         sudo rm -f /tmp/rpc-cert.tar.gz
     else
@@ -188,7 +228,7 @@ echo "Testing final nginx configuration..."
 if sudo nginx -t; then
     echo "✅ Final nginx configuration is valid"
     sudo systemctl reload nginx
-    
+
     # Verify nginx is listening on port 80 (HTTP only)
     sleep 2
     if sudo netstat -tlnp | grep -q ":80.*nginx"; then
@@ -210,22 +250,22 @@ echo "Copying SSL certificates to RPC project directory..."
 if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
     # Create certificates directory in RPC project
     sudo mkdir -p /home/ec2-user/rpc/certs
-    
+
     # Copy certificates to RPC project directory with proper ownership
     sudo cp "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" /home/ec2-user/rpc/certs/
     sudo cp "/etc/letsencrypt/live/${DOMAIN_NAME}/privkey.pem" /home/ec2-user/rpc/certs/
-    
+
     # Set proper ownership and permissions
     sudo chown ec2-user:ec2-user /home/ec2-user/rpc/certs/*
     sudo chmod 600 /home/ec2-user/rpc/certs/*
-    
+
     # Add TLS certificate paths to .env file
     echo "" | sudo -u ec2-user tee -a /home/ec2-user/rpc/.env
     echo "# TLS Certificate Configuration" | sudo -u ec2-user tee -a /home/ec2-user/rpc/.env
     echo "TLS_CERT_PATH=/home/ec2-user/rpc/certs/fullchain.pem" | sudo -u ec2-user tee -a /home/ec2-user/rpc/.env
     echo "TLS_KEY_PATH=/home/ec2-user/rpc/certs/privkey.pem" | sudo -u ec2-user tee -a /home/ec2-user/rpc/.env
     echo "SERVER_ADDRESS=0.0.0.0:443" | sudo -u ec2-user tee -a /home/ec2-user/rpc/.env
-    
+
     echo "✅ SSL certificates copied to RPC project directory"
     echo "   📁 Location: /home/ec2-user/rpc/certs/"
     echo "✅ TLS certificate paths added to .env file"
@@ -270,12 +310,13 @@ cat <<UPLOAD_SCRIPT | sudo tee /usr/local/bin/upload-renewed-certs.sh
 #!/bin/bash
 # Script to upload renewed certificates to S3
 DOMAIN_NAME="${DOMAIN_NAME}"
+S3_BUCKET="${S3_BUCKET}"
 
 echo "\$(date): Uploading renewed certificates to S3..."
 cd /tmp
 tar -czf rpc-cert-renewed.tar.gz -C / etc/letsencrypt/live/\${DOMAIN_NAME} etc/letsencrypt/archive/\${DOMAIN_NAME} etc/letsencrypt/renewal/\${DOMAIN_NAME}.conf
 
-if sudo -u ec2-user aws s3 cp rpc-cert-renewed.tar.gz s3://silvana-images-devnet/rpc-cert.tar.gz; then
+if sudo -u ec2-user aws s3 cp rpc-cert-renewed.tar.gz s3://\${S3_BUCKET}/rpc-cert.tar.gz; then
     echo "\$(date): ✅ Renewed certificates uploaded to S3 successfully"
     rm -f rpc-cert-renewed.tar.gz
 else
@@ -299,11 +340,11 @@ if [ -f "/etc/letsencrypt/live/\${DOMAIN_NAME}/fullchain.pem" ]; then
     # Copy renewed certificates to RPC project
     cp "/etc/letsencrypt/live/\${DOMAIN_NAME}/fullchain.pem" "\${RPC_CERTS_DIR}/"
     cp "/etc/letsencrypt/live/\${DOMAIN_NAME}/privkey.pem" "\${RPC_CERTS_DIR}/"
-    
+
     # Set proper ownership and permissions
     chown ec2-user:ec2-user "\${RPC_CERTS_DIR}"/*
     chmod 600 "\${RPC_CERTS_DIR}"/*
-    
+
     echo "\$(date): ✅ RPC project certificates updated successfully"
 else
     echo "\$(date): ❌ Failed to find renewed certificates"
@@ -380,28 +421,28 @@ if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
     sudo chgrp ssl-cert /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
     sudo chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem
     sudo chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
-    
+
     # Verify permissions were applied correctly
     echo "Verifying certificate file permissions..."
-    
+
     # Check both fullchain and privkey files separately for better debugging
     fullchain_ok=false
     privkey_ok=false
-    
+
     if sudo ls -la /etc/letsencrypt/archive/${DOMAIN_NAME}/fullchain*.pem | grep -q "ssl-cert"; then
         echo "✅ fullchain certificate permissions OK"
         fullchain_ok=true
     else
         echo "❌ fullchain certificate permissions incorrect"
     fi
-    
+
     if sudo ls -la /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem | grep -q "ssl-cert"; then
         echo "✅ privkey certificate permissions OK"
         privkey_ok=true
     else
         echo "❌ privkey certificate permissions incorrect"
     fi
-    
+
     if [ "$fullchain_ok" = true ] && [ "$privkey_ok" = true ]; then
         echo "✅ All certificate permissions set correctly"
     else
@@ -718,7 +759,7 @@ sleep 10
 # Start the RPC service
 if sudo systemctl start silvana-rpc; then
     echo "✅ Silvana RPC service started successfully"
-    
+
     # Check service status
     sleep 5
     if sudo systemctl is-active --quiet silvana-rpc; then
@@ -767,7 +808,8 @@ echo "   • Check Nginx status: sudo systemctl status nginx"
 echo "   • View NATS logs: sudo journalctl -u nats-server -f"
 echo "   • NATS CLI: nats --help"
 echo ""
+echo "🔗 Chain: ${CHAIN}"
+echo "🌐 Domain: ${DOMAIN_NAME}"
+echo ""
 
-echo "RPC server started! 🚀" 
-
-
+echo "RPC server started! 🚀"

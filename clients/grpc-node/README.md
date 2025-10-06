@@ -6,8 +6,8 @@ This directory contains Node.js TypeScript test examples demonstrating how to us
 
 - Node.js >= 22.x
 - Access to Silvana services:
-  - gRPC server: `https://rpc.silvana.dev:443`
-  - NATS server: `nats://rpc.silvana.dev:4222`
+  - gRPC server: `https://rpc-devnet.silvana.dev:443`
+  - NATS server: `nats://rpc-devnet.silvana.dev:4222`
 
 ### Installation
 
@@ -29,8 +29,8 @@ This will generate TypeScript types from the proto files in `../../proto/`.
 The project uses environment variables from the root `.env` file (`../../.env`):
 
 ```bash
-NATS_URL=nats://rpc.silvana.dev:4222
-TEST_SERVER=https://rpc.silvana.dev
+NATS_URL=nats://rpc-devnet.silvana.dev:4222
+TEST_SERVER=https://rpc-devnet.silvana.dev
 ```
 
 ## Running Test Examples

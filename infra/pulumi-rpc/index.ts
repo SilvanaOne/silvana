@@ -335,8 +335,8 @@ export = async () => {
   // Store Environment Variables in Parameter Store
   // -------------------------
 
-  // Read and store the .env.rpc file in Parameter Store
-  const envContent = fs.readFileSync("./.env.rpc", "utf8");
+  // Read and store the .env.${stack} file in Parameter Store
+  const envContent = fs.readFileSync(`./.env.${stack}`, "utf8");
 
   // Append the S3 bucket name and config table name to the environment variables
   const envContentWithResources = pulumi.interpolate`${envContent}\nPROOFS_CACHE_BUCKET=${proofsCacheBucket.bucket}\nDYNAMODB_CONFIG_TABLE=${configTable.name}`;
@@ -459,8 +459,20 @@ export = async () => {
         deleteOnTermination: true,
       },
 
-      // User data script loaded from user-data.sh file
-      userData: fs.readFileSync(`./user-data.${stack}.sh`, "utf8"),
+      // User data script loaded from template and processed
+      userData: (() => {
+        const timestamp = new Date()
+          .toISOString()
+          .replace("T", " ")
+          .substring(0, 19);
+        const s3Bucket = `silvana-images-${stack}`;
+        const template = fs.readFileSync("./user-data.sh", "utf8");
+
+        return template
+          .replace(/{{DEPLOY_TIMESTAMP}}/g, timestamp)
+          .replace(/{{CHAIN}}/g, stack)
+          .replace(/{{S3_BUCKET}}/g, s3Bucket);
+      })(),
       userDataReplaceOnChange: true,
 
       tags: {

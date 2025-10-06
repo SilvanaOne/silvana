@@ -1,19 +1,19 @@
 use clap::{Parser, Subcommand};
 use duct::cmd;
+use rpc_client::{RpcClientConfig, SilvanaRpcClient};
 use secrets_client::SecretsClient;
-use rpc_client::{SilvanaRpcClient, RpcClientConfig};
-use storage;
 use std::collections::HashMap;
 use std::fs;
+use storage;
 
 /// Get the default RPC server endpoint from environment or fallback
 fn get_default_endpoint() -> String {
     // Load .env file if it exists
     dotenvy::dotenv().ok();
-    
+
     // Get SILVANA_RPC_SERVER from environment, fallback to default if not set
     std::env::var("SILVANA_RPC_SERVER")
-        .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string())
+        .unwrap_or_else(|_| "https://rpc-devnet.silvana.dev".to_string())
 }
 
 #[derive(Parser)]
@@ -190,14 +190,14 @@ async fn store_secret(
     }
 
     println!("🔗 Connecting to RPC endpoint: {}", endpoint);
-    
+
     let mut client = match SecretsClient::new(endpoint).await {
         Ok(client) => client,
         Err(e) => {
             anyhow::bail!("Failed to connect to RPC endpoint {}: {}", endpoint, e);
         }
     };
-    
+
     println!("📦 Storing secret...");
     println!("  Developer: {}", developer);
     println!("  Agent: {}", agent);
@@ -209,10 +209,10 @@ async fn store_secret(
         println!("  App Instance: {}", app_instance);
     }
     println!("  Secret length: {} characters", secret.len());
-    
+
     // TODO: For now using empty signature - will be replaced with actual signature validation
     let placeholder_signature = vec![];
-    
+
     match client
         .store_secret(
             developer,
@@ -232,7 +232,7 @@ async fn store_secret(
             anyhow::bail!("Failed to store secret: {}", e);
         }
     }
-    
+
     Ok(())
 }
 
@@ -256,14 +256,14 @@ async fn retrieve_secret(
     }
 
     println!("🔗 Connecting to RPC endpoint: {}", endpoint);
-    
+
     let mut client = match SecretsClient::new(endpoint).await {
         Ok(client) => client,
         Err(e) => {
             anyhow::bail!("Failed to connect to RPC endpoint {}: {}", endpoint, e);
         }
     };
-    
+
     println!("🔍 Retrieving secret...");
     println!("  Developer: {}", developer);
     println!("  Agent: {}", agent);
@@ -274,10 +274,10 @@ async fn retrieve_secret(
     if let Some(app_instance) = app_instance {
         println!("  App Instance: {}", app_instance);
     }
-    
+
     // TODO: For now using empty signature - will be replaced with actual signature validation
     let placeholder_signature = vec![];
-    
+
     match client
         .retrieve_secret(
             developer,
@@ -296,23 +296,28 @@ async fn retrieve_secret(
         }
         Err(secrets_client::SecretsClientError::SecretNotFound) => {
             println!("❌ Secret not found with the specified parameters");
-            println!("💡 Try checking if the secret exists with different scope parameters (app, app-instance)");
+            println!(
+                "💡 Try checking if the secret exists with different scope parameters (app, app-instance)"
+            );
             std::process::exit(1);
         }
         Err(e) => {
             anyhow::bail!("Failed to retrieve secret: {}", e);
         }
     }
-    
+
     Ok(())
 }
 
 async fn write_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
     // Validate chain
     if !["devnet", "testnet", "mainnet"].contains(&chain) {
-        anyhow::bail!("Invalid chain: {}. Must be devnet, testnet, or mainnet", chain);
+        anyhow::bail!(
+            "Invalid chain: {}. Must be devnet, testnet, or mainnet",
+            chain
+        );
     }
-    
+
     // Determine the config file path
     let config_file = match chain {
         "devnet" => "infra/config/.env.devnet",
@@ -320,59 +325,60 @@ async fn write_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
         "mainnet" => "infra/config/.env.mainnet",
         _ => unreachable!(),
     };
-    
+
     // Check if the config file exists
     if !std::path::Path::new(config_file).exists() {
         anyhow::bail!("Config file not found: {}", config_file);
     }
-    
+
     println!("📖 Reading configuration from: {}", config_file);
-    
+
     // Read the config file
     let content = fs::read_to_string(config_file)?;
-    
+
     // Parse the .env file into a HashMap
     let mut config = HashMap::new();
     for line in content.lines() {
         let line = line.trim();
-        
+
         // Skip empty lines and comments
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        
+
         // Parse KEY=VALUE format
         if let Some(pos) = line.find('=') {
             let key = line[..pos].trim().to_string();
             let value = line[pos + 1..].trim().to_string();
-            
+
             // Remove quotes if present
-            let value = if (value.starts_with('"') && value.ends_with('"')) 
-                || (value.starts_with('\'') && value.ends_with('\'')) {
+            let value = if (value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with('\'') && value.ends_with('\''))
+            {
                 value[1..value.len() - 1].to_string()
             } else {
                 value
             };
-            
+
             config.insert(key, value);
         }
     }
-    
+
     if config.is_empty() {
         anyhow::bail!("No configuration found in {}", config_file);
     }
-    
+
     println!("📊 Found {} configuration items", config.len());
-    
+
     // Connect to RPC
     println!("🔗 Connecting to RPC endpoint: {}", endpoint);
-    
+
     let mut client = SilvanaRpcClient::new(rpc_client::RpcClientConfig::new(endpoint))
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to RPC endpoint {}: {}", endpoint, e))?;
-    
+
     println!("📤 Writing configuration for chain: {}", chain);
-    
+
     // Write the config
     match client.write_config(chain, config).await {
         Ok(response) => {
@@ -390,48 +396,52 @@ async fn write_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
             anyhow::bail!("Failed to write configuration: {}", e);
         }
     }
-    
+
     Ok(())
 }
 
 async fn read_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
     // Validate chain
     if !["devnet", "testnet", "mainnet"].contains(&chain) {
-        anyhow::bail!("Invalid chain: {}. Must be devnet, testnet, or mainnet", chain);
+        anyhow::bail!(
+            "Invalid chain: {}. Must be devnet, testnet, or mainnet",
+            chain
+        );
     }
-    
+
     println!("🔗 Connecting to RPC endpoint: {}", endpoint);
-    
+
     let mut client = SilvanaRpcClient::new(rpc_client::RpcClientConfig::new(endpoint))
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to RPC endpoint {}: {}", endpoint, e))?;
-    
+
     println!("📥 Reading configuration for chain: {}", chain);
-    
+
     // Read the config
     match client.get_config(chain).await {
         Ok(response) => {
             if response.success {
                 println!("✅ Configuration retrieved successfully!");
                 println!("  Message: {}", response.message);
-                
+
                 if response.config.is_empty() {
                     println!("  ⚠️  No configuration found for chain: {}", chain);
                 } else {
                     println!("\n📋 Configuration ({} items):", response.config.len());
                     println!("  {}", "-".repeat(60));
-                    
+
                     // Sort keys for consistent output
                     let mut keys: Vec<_> = response.config.keys().collect();
                     keys.sort();
-                    
+
                     for key in keys {
                         if let Some(value) = response.config.get(key) {
                             // Mask sensitive values
-                            let display_value = if key.to_lowercase().contains("key") 
+                            let display_value = if key.to_lowercase().contains("key")
                                 || key.to_lowercase().contains("secret")
                                 || key.to_lowercase().contains("password")
-                                || key.to_lowercase().contains("token") {
+                                || key.to_lowercase().contains("token")
+                            {
                                 if value.len() > 8 {
                                     format!("{}...{}", &value[..4], &value[value.len() - 4..])
                                 } else {
@@ -440,7 +450,7 @@ async fn read_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
                             } else {
                                 value.clone()
                             };
-                            
+
                             println!("  {} = {}", key, display_value);
                         }
                     }
@@ -456,61 +466,63 @@ async fn read_config(endpoint: &str, chain: &str) -> anyhow::Result<()> {
             anyhow::bail!("Failed to read configuration: {}", e);
         }
     }
-    
+
     Ok(())
 }
 
 async fn pack_examples_add() -> anyhow::Result<()> {
     println!("📦 Packing examples/add folder...");
-    
+
     // Get the examples/add folder path
     let current_dir = std::env::current_dir()?;
     let examples_add_path = current_dir.join("examples").join("add");
-    
+
     // Verify source folder exists
     if !examples_add_path.exists() {
         anyhow::bail!("examples/add folder not found at {:?}", examples_add_path);
     }
-    
+
     println!("Source folder: {:?}", examples_add_path);
-    
+
     // Create the archive using storage utility
     let archive_data = storage::pack_folder_to_bytes(
         &examples_add_path,
         None, // Use default config with max compression
     )?;
-    
+
     println!("✅ Archive created: {} bytes", archive_data.len());
-    
+
     // Calculate SHA256
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(&archive_data);
     let hash = format!("{:x}", hasher.finalize());
     println!("   SHA256: {}", hash);
-    
+
     // Upload via RPC
     println!("📤 Uploading to RPC server...");
-    
+
     // Get RPC endpoint from environment or use default
     let rpc_endpoint = std::env::var("SILVANA_RPC_SERVER")
-        .unwrap_or_else(|_| "https://rpc.silvana.dev".to_string());
-    
+        .unwrap_or_else(|_| "https://rpc-devnet.silvana.dev".to_string());
+
     // Initialize RPC client
     let mut rpc_client = SilvanaRpcClient::new(RpcClientConfig::new(&rpc_endpoint)).await?;
-    
+
     // Use fixed S3 key for consistent retrieval
     let s3_key = "examples/add.tar.zst";
-    
+
     // Upload via RPC
-    let response = rpc_client.write_binary(
-        archive_data,
-        s3_key,
-        "application/zstd",
-        Some(hash.clone()),
-        std::collections::HashMap::new(),
-    ).await?;
-    
+    let response = rpc_client
+        .write_binary(
+            archive_data,
+            s3_key,
+            "application/zstd",
+            Some(hash.clone()),
+            std::collections::HashMap::new(),
+        )
+        .await?;
+
     if response.success {
         println!("✅ Archive uploaded successfully!");
         println!("   S3 Key: {}", s3_key);
@@ -522,6 +534,6 @@ async fn pack_examples_add() -> anyhow::Result<()> {
     } else {
         anyhow::bail!("Failed to upload archive: {}", response.message);
     }
-    
+
     Ok(())
 }

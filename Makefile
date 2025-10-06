@@ -94,6 +94,7 @@ help: ## Show this help message
 	@echo "  Configuration Management:"
 	@echo "    make write-config CHAIN=devnet"
 	@echo "    make read-config CHAIN=testnet ENDPOINT=http://localhost:8080"
+	@echo "    make build-rpc CHAIN=testnet      # Build for testnet"
 	@echo ""
 	@echo "  Build and Release:"
 	@echo "    make build-all                    # Build for all platforms"
@@ -139,29 +140,38 @@ setup: ## Create necessary directories
 	@mkdir -p $(ENTITY_DIR)
 	@echo "✅ Directories created"
 
-build-rpc: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3
-	@echo "🐳 Building RPC and creating deployment archive for Amazon Linux 2023 ARM64..."
+# Build RPC with CHAIN parameter (defaults to devnet)
+CHAIN ?= devnet
+
+build-rpc: ## Build ARM64 RPC for Graviton and create tar archive, upload to S3 (use CHAIN=testnet/mainnet)
+	@echo "🐳 Building RPC for chain: $(CHAIN)..."
+	@echo "📦 Creating deployment archive for Amazon Linux 2023 ARM64..."
 	@mkdir -p build
-	@echo "🔨 Building Docker image for ARM64 (Graviton), compiling RPC, and creating tar archive..."
+	@# Validate chain parameter
+	@if [ "$(CHAIN)" != "devnet" ] && [ "$(CHAIN)" != "testnet" ] && [ "$(CHAIN)" != "mainnet" ]; then \
+		echo "❌ ERROR: CHAIN must be devnet, testnet, or mainnet. Got: $(CHAIN)"; \
+		exit 1; \
+	fi
+	@# Check for AWS credentials file for the specific chain
+	@if [ ! -f "docker/rpc/.env.$(CHAIN)" ]; then \
+		echo "❌ ERROR: AWS credentials file docker/rpc/.env.$(CHAIN) not found"; \
+		echo "Please create the file with AWS credentials for $(CHAIN) environment"; \
+		exit 1; \
+	fi
+	@echo "🔨 Building Docker image for ARM64 (Graviton), compiling RPC..."
 	@DOCKER_BUILDKIT=1 docker build \
 		--platform linux/arm64 \
-		--secret id=aws,src=docker/rpc/.env.devnet \
+		--build-arg CHAIN=$(CHAIN) \
+		--secret id=aws,src=docker/rpc/.env.$(CHAIN) \
 		-f docker/rpc/Dockerfile \
-		-t rpc-builder:al2023-arm64 \
+		-t rpc-builder:al2023-arm64-$(CHAIN) \
 		--progress=plain \
 		.
 	@echo "🧹 Cleaning up Docker image..."
-	@docker rmi rpc-builder:al2023-arm64 2>/dev/null || true
-	@echo "✅ RPC deployment archive built successfully for ARM64"
-	@echo "📦 Archive: rpc.tar.gz (contains rpc folder + ARM64 RPC executable)"
-	@echo "🔄 Updating user-data.sh timestamp to trigger Pulumi redeploy..."
-	@# Update the timestamp comment in user-data.sh to force Pulumi to see a change
-	@if grep -q "^# Deploy timestamp:" infra/pulumi-rpc/user-data.devnet.sh; then \
-		sed -i.bak "s/^# Deploy timestamp:.*/$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)/" infra/pulumi-rpc/user-data.devnet.sh; \
-	else \
-		sed -i.bak "4a\\$$(echo '# Deploy timestamp: '`date '+%Y-%m-%d %H:%M:%S'`)" infra/pulumi-rpc/user-data.devnet.sh; \
-	fi
-	@rm -f infra/pulumi-rpc/user-data.devnet.sh.bak
+	@docker rmi rpc-builder:al2023-arm64-$(CHAIN) 2>/dev/null || true
+	@echo "✅ RPC deployment archive built successfully for ARM64 ($(CHAIN))"
+	@echo "📦 Archive uploaded to: s3://silvana-images-$(CHAIN)/rpc.tar.gz"
+	@echo "🚀 To deploy, run: cd infra/pulumi-rpc && pulumi up -s $(CHAIN)"
 
 build-arm: ## Build coordinator for Ubuntu Linux ARM64 (aarch64) using Docker
 	@echo "🐳 Building Silvana for Ubuntu Linux ARM64..."

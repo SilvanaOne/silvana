@@ -232,7 +232,7 @@ impl S3Client {
             }
         }
 
-        info!(
+        debug!(
             "Successfully wrote to S3 bucket {} with key: {}",
             self.bucket_name, key
         );
@@ -292,7 +292,7 @@ impl S3Client {
             metadata.insert(key, value);
         }
 
-        info!(
+        debug!(
             "Successfully read from S3 bucket {} with key: {}",
             self.bucket_name, key
         );

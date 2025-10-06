@@ -89,19 +89,31 @@ impl ProofsCache {
             expires_at
         );
 
-        match self.s3_client
+        match self
+            .s3_client
             .write(&hash, proof_data.clone(), metadata.clone(), expires_at)
-            .await {
-            Ok(_) => {},
+            .await
+        {
+            Ok(_) => {}
             Err(e) => {
-                error!("ProofsCache: Failed to submit proof - Hash: {}, Data size: {} bytes", 
-                    hash, proof_data.len());
+                error!(
+                    "ProofsCache: Failed to submit proof - Hash: {}, Data size: {} bytes",
+                    hash,
+                    proof_data.len()
+                );
                 if let Some(ref meta) = metadata {
                     error!("ProofsCache: Metadata count: {}", meta.len());
                     for (key, value) in meta.iter() {
-                        error!("  Metadata: {}={} (len={})", key, 
-                            if value.len() > 50 { format!("{}...", &value[..50]) } else { value.clone() },
-                            value.len());
+                        error!(
+                            "  Metadata: {}={} (len={})",
+                            key,
+                            if value.len() > 50 {
+                                format!("{}...", &value[..50])
+                            } else {
+                                value.clone()
+                            },
+                            value.len()
+                        );
                     }
                 }
                 error!("ProofsCache: Expires at: {}", expires_at);
@@ -109,7 +121,7 @@ impl ProofsCache {
             }
         }
 
-        info!("Successfully submitted proof to cache with hash: {}", hash);
+        debug!("Successfully submitted proof to cache with hash: {}", hash);
         Ok(hash)
     }
 
@@ -122,7 +134,7 @@ impl ProofsCache {
     ///
     /// # Returns
     /// * The hash of the quilt
-    /// 
+    ///
     /// # Note
     /// S3 has a limit of 10 tags per object. This method prioritizes essential metadata
     /// to ensure we don't exceed that limit. Priority order:
@@ -151,7 +163,7 @@ impl ProofsCache {
 
         // Build metadata with quilts flag - using HashMap first for processing
         let mut quilt_metadata = HashMap::new();
-        
+
         // Add user metadata first to extract chain and app_instance
         let mut chain = None;
         let mut app_instance = None;
@@ -165,25 +177,25 @@ impl ProofsCache {
                 quilt_metadata.insert(key.clone(), value.clone());
             }
         }
-        
+
         // Override/add essential metadata
         quilt_metadata.insert("quilts".to_string(), "true".to_string());
         quilt_metadata.insert("pieces_count".to_string(), pieces.len().to_string());
-        
+
         // Add chain if provided
         if let Some(chain_value) = chain {
             quilt_metadata.insert("chain".to_string(), chain_value);
         }
-        
+
         // Add app_instance if provided
         if let Some(app_instance_value) = app_instance {
             quilt_metadata.insert("app_instance".to_string(), app_instance_value);
         }
-        
+
         // Add created_at timestamp
         let created_at = chrono::Utc::now().to_rfc3339();
         quilt_metadata.insert("created_at".to_string(), created_at.clone());
-        
+
         // Add identifiers list (might be truncated if we hit tag limit)
         let identifiers: Vec<String> = pieces.iter().map(|(id, _)| id.clone()).collect();
         quilt_metadata.insert("identifiers".to_string(), identifiers.join(","));
@@ -196,7 +208,7 @@ impl ProofsCache {
 
         // Serialize the quilt
         let quilt_json = serde_json::to_string_pretty(&quilt_data)?;
-        
+
         // Calculate hash of the quilt
         let mut hasher = Sha256::new();
         hasher.update(quilt_json.as_bytes());
@@ -211,13 +223,17 @@ impl ProofsCache {
             now + (7 * 24 * 60 * 60 * 1000) // 7 days for quilts
         });
 
-        warn!("Submitting quilt to cache with hash: {}, {} pieces", hash, pieces.len());
-        
+        warn!(
+            "Submitting quilt to cache with hash: {}, {} pieces",
+            hash,
+            pieces.len()
+        );
+
         // Convert metadata to Vec format for S3, prioritizing important tags
         // S3 allows max 10 tags, and expires_at takes 1 slot, so we have 9 slots for metadata
         const MAX_METADATA_TAGS: usize = 9;
         let mut metadata_vec: Vec<(String, String)> = Vec::new();
-        
+
         // Priority 1: Essential quilt metadata
         if let Some(v) = quilt_metadata.get("quilts") {
             metadata_vec.push(("quilts".to_string(), v.clone()));
@@ -225,7 +241,7 @@ impl ProofsCache {
         if let Some(v) = quilt_metadata.get("pieces_count") {
             metadata_vec.push(("pieces_count".to_string(), v.clone()));
         }
-        
+
         // Priority 2: Chain and app_instance
         if let Some(v) = quilt_metadata.get("chain") {
             metadata_vec.push(("chain".to_string(), v.clone()));
@@ -233,47 +249,60 @@ impl ProofsCache {
         if let Some(v) = quilt_metadata.get("app_instance") {
             metadata_vec.push(("app_instance".to_string(), v.clone()));
         }
-        
+
         // Priority 3: created_at
         if let Some(v) = quilt_metadata.get("created_at") {
             metadata_vec.push(("created_at".to_string(), v.clone()));
         }
-        
+
         // Priority 4: identifiers (if we have space)
         if metadata_vec.len() < MAX_METADATA_TAGS {
             if let Some(v) = quilt_metadata.get("identifiers") {
                 metadata_vec.push(("identifiers".to_string(), v.clone()));
             }
         }
-        
+
         // Priority 5: Other metadata (if we have space)
         for (key, value) in quilt_metadata.iter() {
             if metadata_vec.len() >= MAX_METADATA_TAGS {
-                warn!("Reached S3 tag limit ({}), skipping remaining metadata", MAX_METADATA_TAGS);
+                warn!(
+                    "Reached S3 tag limit ({}), skipping remaining metadata",
+                    MAX_METADATA_TAGS
+                );
                 break;
             }
             // Skip already added keys
-            if !["quilts", "pieces_count", "chain", "app_instance", "created_at", "identifiers"]
-                .contains(&key.as_str()) {
+            if ![
+                "quilts",
+                "pieces_count",
+                "chain",
+                "app_instance",
+                "created_at",
+                "identifiers",
+            ]
+            .contains(&key.as_str())
+            {
                 metadata_vec.push((key.clone(), value.clone()));
             }
         }
 
         // Store to S3
-        match self.s3_client
+        match self
+            .s3_client
             .write(&hash, quilt_json, Some(metadata_vec), expires_at)
-            .await {
+            .await
+        {
             Ok(_) => {
                 warn!("✅ Successfully stored quilt to cache:");
                 warn!("  Hash: {}", hash);
                 warn!("  Pieces: {}", identifiers.join(", "));
-                
+
                 // Generate piece IDs for compatibility
                 let piece_ids: Vec<String> = identifiers
                     .iter()
                     .map(|id| format!("cache:{}:{}", hash, id))
                     .collect();
-                
+
                 Ok((hash, piece_ids))
             }
             Err(e) => {
@@ -301,7 +330,7 @@ impl ProofsCache {
             }
         };
 
-        info!(
+        debug!(
             "Successfully read proof from cache with hash: {}",
             proof_hash
         );
@@ -316,8 +345,15 @@ impl ProofsCache {
     ///
     /// # Returns
     /// * The requested proof data or the first proof if block_number is None
-    pub async fn read_quilt(&self, quilt_hash: &str, block_number: Option<&str>) -> Result<ProofData> {
-        debug!("Reading quilt from cache with hash: {}, block: {:?}", quilt_hash, block_number);
+    pub async fn read_quilt(
+        &self,
+        quilt_hash: &str,
+        block_number: Option<&str>,
+    ) -> Result<ProofData> {
+        debug!(
+            "Reading quilt from cache with hash: {}, block: {:?}",
+            quilt_hash, block_number
+        );
 
         let (data, metadata) = match self.s3_client.read(quilt_hash).await {
             Ok(result) => result,
@@ -334,15 +370,17 @@ impl ProofsCache {
 
         // Parse the quilt data
         let quilt_data: QuiltData = serde_json::from_str(&data)?;
-        
+
         // Find the requested piece or return the first one
         let piece = if let Some(block_num) = block_number {
-            quilt_data.pieces
+            quilt_data
+                .pieces
                 .iter()
                 .find(|p| p.identifier == block_num)
                 .ok_or_else(|| anyhow!("Block {} not found in quilt", block_num))?
         } else {
-            quilt_data.pieces
+            quilt_data
+                .pieces
                 .first()
                 .ok_or_else(|| anyhow!("Quilt has no pieces"))?
         };
@@ -351,12 +389,12 @@ impl ProofsCache {
             "Successfully read piece '{}' from quilt {}",
             piece.identifier, quilt_hash
         );
-        
+
         // Return the piece data with quilt metadata
         let mut piece_metadata = metadata.clone();
         piece_metadata.insert("quilt_hash".to_string(), quilt_hash.to_string());
         piece_metadata.insert("piece_identifier".to_string(), piece.identifier.clone());
-        
+
         Ok(ProofData {
             data: piece.data.clone(),
             metadata: piece_metadata,

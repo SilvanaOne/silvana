@@ -7,7 +7,7 @@
 //    PROOFS_CACHE_BUCKET=proofs-cache cargo run -p rpc
 //
 // 2. Or set TEST_SERVER environment variable to point to a running server:
-//    TEST_SERVER=https://rpc.silvana.dev:443 cargo test -p rpc --test proof_storage_tests
+//    TEST_SERVER=https://rpc-devnet.silvana.dev:443 cargo test -p rpc --test proof_storage_tests
 //
 // The tests will gracefully skip if the server is not available.
 

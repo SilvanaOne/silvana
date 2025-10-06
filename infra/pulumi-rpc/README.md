@@ -21,9 +21,9 @@ pulumi up
 ```sh
 ssh -i "RPC.pem" ec2-user@18.194.39.156
 sudo less /var/log/cloud-init-output.log
-grpcurl rpc.silvana.dev:443 list
-grpcurl rpc.silvana.dev:443 describe silvana.events.v1.SilvanaEventsService
-grpcurl rpc.silvana.dev:443 describe silvana.events.v1.Event
+grpcurl rpc-devnet.silvana.dev:443 list
+grpcurl rpc-devnet.silvana.dev:443 describe silvana.events.v1.SilvanaEventsService
+grpcurl rpc-devnet.silvana.dev:443 describe silvana.events.v1.Event
 ```
 
 Logs are at rpc/logs:

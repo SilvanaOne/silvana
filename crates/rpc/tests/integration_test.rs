@@ -22,7 +22,7 @@ fn get_server_addr() -> String {
     // Get TEST_SERVER from environment, fallback to default if not set
     std::env::var("TEST_SERVER").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string())
 }
-const NATS_URL: &str = "nats://rpc.silvana.dev:4222";
+const NATS_URL: &str = "nats://rpc-devnet.silvana.dev:4222";
 const NATS_STREAM_NAME: &str = "silvana";
 
 // Shared structure to collect all sent events for comparison
