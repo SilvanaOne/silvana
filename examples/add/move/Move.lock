@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "1B4CBE925037FCC40DD0E938F793FC12316623470F8540FF9AC7EA1727E52686"
+manifest_digest = "C985208309AF4BBD5AE9FE163C5BD7A86E86A4D8B50F3C255B2C7A48FD102233"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "530a7b7e6704bf070da58da0b0b65eb564dfcaf5", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "7ecd90a7a5fcd600b17653dce0a320306f02ed02", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "530a7b7e6704bf070da58da0b0b65eb564dfcaf5", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "7ecd90a7a5fcd600b17653dce0a320306f02ed02", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "530a7b7e6704bf070da58da0b0b65eb564dfcaf5", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "7ecd90a7a5fcd600b17653dce0a320306f02ed02", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -81,7 +81,7 @@ dependencies = [
 ]
 
 [move.toolchain-version]
-compiler-version = "1.57.0"
+compiler-version = "1.57.2"
 edition = "2024.beta"
 flavor = "sui"
 
@@ -91,4 +91,10 @@ flavor = "sui"
 chain-id = "bc718b80"
 original-published-id = "0x547f0669de57ae0d504abdbd5ccf83c08de6ed3abe3d1bd6862fe4271d4ca3bd"
 latest-published-id = "0x547f0669de57ae0d504abdbd5ccf83c08de6ed3abe3d1bd6862fe4271d4ca3bd"
+published-version = "1"
+
+[env.testnet]
+chain-id = "4c78adac"
+original-published-id = "0xb30f753d8a0e4cf28a5a0774f1109663199ffbce1d88a5d4ab6a8d8f61dd91b5"
+latest-published-id = "0xb30f753d8a0e4cf28a5a0774f1109663199ffbce1d88a5d4ab6a8d8f61dd91b5"
 published-version = "1"
