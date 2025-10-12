@@ -64,12 +64,19 @@ pub async fn handle_faucet_command(subcommand: FaucetCommands) -> Result<()> {
                 .await
                 .map_err(CoordinatorError::Other)?;
 
-            // Check balance before faucet
+            // Check balance before faucet (non-blocking)
             info!("📊 Balance before faucet:");
-            let balance_before = sui::get_balance_in_sui(&target_address)
-                .await
-                .map_err(CoordinatorError::Other)?;
-            info!("   {:.4} SUI", balance_before);
+            let balance_before = match sui::get_balance_in_sui(&target_address).await {
+                Ok(balance) => {
+                    info!("   {:.4} SUI", balance);
+                    Some(balance)
+                }
+                Err(e) => {
+                    tracing::warn!("   ⚠️ Could not retrieve balance: {}", e);
+                    tracing::warn!("   Proceeding with faucet request anyway...");
+                    None
+                }
+            };
 
             // Call the faucet
             info!("🚰 Calling faucet...");
@@ -104,16 +111,24 @@ pub async fn handle_faucet_command(subcommand: FaucetCommands) -> Result<()> {
                     ))
                     .await;
 
-                    // Check balance after faucet
+                    // Check balance after faucet (non-blocking)
                     info!("📊 Balance after faucet:");
-                    let balance_after = sui::get_balance_in_sui(&target_address)
-                        .await
-                        .map_err(CoordinatorError::Other)?;
-                    info!("   {:.4} SUI", balance_after);
+                    match sui::get_balance_in_sui(&target_address).await {
+                        Ok(balance_after) => {
+                            info!("   {:.4} SUI", balance_after);
 
-                    let received = balance_after - balance_before;
-                    if received > 0.0 {
-                        info!("💰 Received: {:.4} SUI", received);
+                            // Only calculate received amount if we have both balances
+                            if let Some(balance_before) = balance_before {
+                                let received = balance_after - balance_before;
+                                if received > 0.0 {
+                                    info!("💰 Received: {:.4} SUI", received);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("   ⚠️ Could not retrieve balance: {}", e);
+                            tracing::warn!("   Check your balance manually on the explorer");
+                        }
                     }
                 }
                 Err(e) => {
