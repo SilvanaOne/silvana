@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "C985208309AF4BBD5AE9FE163C5BD7A86E86A4D8B50F3C255B2C7A48FD102233"
+manifest_digest = "240420314E439295839F9C803D419FBEF1D261FDD7868320478179B2A60D206C"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "7ecd90a7a5fcd600b17653dce0a320306f02ed02", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "260fde8847a07490522c944f0ef4ebeb3dde93ca", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "7ecd90a7a5fcd600b17653dce0a320306f02ed02", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "260fde8847a07490522c944f0ef4ebeb3dde93ca", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "7ecd90a7a5fcd600b17653dce0a320306f02ed02", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "260fde8847a07490522c944f0ef4ebeb3dde93ca", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -88,9 +88,9 @@ flavor = "sui"
 [env]
 
 [env.devnet]
-chain-id = "bc718b80"
-original-published-id = "0x547f0669de57ae0d504abdbd5ccf83c08de6ed3abe3d1bd6862fe4271d4ca3bd"
-latest-published-id = "0x547f0669de57ae0d504abdbd5ccf83c08de6ed3abe3d1bd6862fe4271d4ca3bd"
+chain-id = "665947b9"
+original-published-id = "0x937fce6228c5a8b51725030a8084521d215f5fbe281f7ff1c24144813d7ebc3c"
+latest-published-id = "0x937fce6228c5a8b51725030a8084521d215f5fbe281f7ff1c24144813d7ebc3c"
 published-version = "1"
 
 [env.testnet]

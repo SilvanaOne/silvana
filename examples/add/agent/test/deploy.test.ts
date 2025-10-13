@@ -36,7 +36,8 @@ describe("Deploy App for Coordinator", async () => {
     console.log("📦 Package ID:", packageID);
     const contractAddress = process.env.ADD_CONTRACT_ADDRESS;
     const adminAddress = process.env.ADD_CONTRACT_ADMIN_ADDRESS;
-    if (!contractAddress || !adminAddress) {
+    const chain = process.env.MINA_CHAIN;
+    if (!contractAddress || !adminAddress || !chain) {
       throw new Error("AddContract deployment failed");
     }
 
@@ -48,7 +49,7 @@ describe("Deploy App for Coordinator", async () => {
     const appID = await createApp({
       contractAddress,
       adminAddress,
-      chain: "mina:devnet",
+      chain,
       nonce,
     });
     assert.ok(appID !== undefined, "appID is not set");
