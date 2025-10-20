@@ -1002,6 +1002,21 @@ public fun get_settlement_address(
     settlement::get_settlement_address(settlement)
 }
 
+public fun set_settlement_address(
+    app_instance: &mut AppInstance,
+    chain: String,
+    settlement_address: Option<String>,
+    ctx: &TxContext,
+) {
+    only_admin(app_instance, ctx);
+    assert!(
+        vec_map::contains(&app_instance.settlements, &chain),
+        ESettlementChainNotFound,
+    );
+    let settlement = vec_map::get_mut(&mut app_instance.settlements, &chain);
+    settlement::set_settlement_address(settlement, settlement_address);
+}
+
 public fun is_paused(app_instance: &AppInstance): bool {
     app_instance.isPaused
 }
