@@ -195,6 +195,13 @@ public fun set_last_settled_block_number(
     settlement.last_settled_block_number = block_number;
 }
 
+public fun set_settlement_address(
+    settlement: &mut Settlement,
+    settlement_address: Option<String>,
+) {
+    settlement.settlement_address = settlement_address;
+}
+
 public fun get_settlement_job(settlement: &Settlement): Option<u64> {
     settlement.settlement_job
 }
