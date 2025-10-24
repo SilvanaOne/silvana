@@ -886,6 +886,46 @@ impl EventDatabase {
         &self.connection
     }
 
+    /// Query settlement proofs by app_instance_id and block_number
+    /// Uses the composite index: idx_app_instance_id_block_number_settlement_proof
+    pub async fn get_settlement_proofs(
+        &self,
+        app_instance_id: &str,
+        block_number: u64,
+    ) -> Result<Vec<entities::proof_event::Model>> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+        debug!(
+            "Querying settlement proofs: app_instance_id={}, block_number={}",
+            app_instance_id, block_number
+        );
+
+        // Normalize app_instance_id by removing 0x prefix if present
+        let normalized_app_id = if app_instance_id.starts_with("0x") || app_instance_id.starts_with("0X") {
+            &app_instance_id[2..]
+        } else {
+            app_instance_id
+        };
+
+        // Query proof_event table using the composite index
+        // idx_app_instance_id_block_number_settlement_proof
+        let results = entities::proof_event::Entity::find()
+            .filter(entities::proof_event::Column::AppInstanceId.eq(normalized_app_id))
+            .filter(entities::proof_event::Column::BlockNumber.eq(block_number as i64))
+            .filter(entities::proof_event::Column::SettlementProof.eq(true))
+            .all(&self.connection)
+            .await?;
+
+        debug!(
+            "Found {} settlement proofs for app_instance_id={}, block_number={}",
+            results.len(),
+            normalized_app_id,
+            block_number
+        );
+
+        Ok(results)
+    }
+
     // Query methods for retrieving events by sequence
     pub async fn get_agent_transaction_events_by_sequence(
         &self,
@@ -1636,6 +1676,7 @@ fn convert_proof_event(
         data_availability: ActiveValue::Set(event.data_availability.clone()),
         block_number: ActiveValue::Set(event.block_number as i64),
         block_proof: ActiveValue::Set(event.block_proof),
+        settlement_proof: ActiveValue::Set(event.settlement_proof),
         proof_event_type: ActiveValue::Set(proof_type_str.to_string()),
         sequences: ActiveValue::Set(sequences_json),
         merged_sequences_1: ActiveValue::Set(merged_sequences_1_json),

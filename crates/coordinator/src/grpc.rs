@@ -22,11 +22,13 @@ use coordinator::{
     GetBlockProofRequest, GetBlockProofResponse, GetBlockRequest, GetBlockResponse,
     GetBlockSettlementRequest, GetBlockSettlementResponse, GetJobRequest, GetJobResponse,
     GetKvRequest, GetKvResponse, GetMetadataRequest, GetMetadataResponse, GetProofRequest,
-    GetProofResponse, GetSequenceStatesRequest, GetSequenceStatesResponse, Job, LogLevel, Metadata,
+    GetProofResponse, GetSequenceStatesRequest, GetSequenceStatesResponse,
+    GetSettlementProofRequest, GetSettlementProofResponse, Job, LogLevel, Metadata,
     ProofEventRequest, ProofEventResponse, ProofEventType, ReadDataAvailabilityRequest,
     ReadDataAvailabilityResponse, RejectProofRequest, RejectProofResponse, RetrieveSecretRequest,
-    RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse, SubmitProofRequest,
-    SubmitProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
+    RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse,
+    SubmitProofRequest, SubmitProofResponse, SubmitSettlementProofRequest,
+    SubmitSettlementProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
     TerminateJobResponse, TryCreateBlockRequest, TryCreateBlockResponse,
     UpdateBlockProofDataAvailabilityRequest, UpdateBlockProofDataAvailabilityResponse,
     UpdateBlockSettlementRequest, UpdateBlockSettlementResponse,
@@ -216,6 +218,7 @@ impl CoordinatorServiceImpl {
                         data_availability: String::new(), // No DA for rejected proofs
                         block_number,
                         block_proof: Some(false), // Regular proof rejection
+                        settlement_proof: Some(false), // Not a settlement proof
                         proof_event_type: proto::ProofEventType::ProofRejected as i32,
                         sequences,
                         merged_sequences_1: vec![],
@@ -297,6 +300,7 @@ impl CoordinatorServiceImpl {
                         data_availability,
                         block_number,
                         block_proof,
+                        settlement_proof: None, // Regular proof event
                         proof_event_type: proof_event_type as i32,
                         sequences,
                         merged_sequences_1,
@@ -565,6 +569,7 @@ impl CoordinatorServiceImpl {
                         data_availability,
                         block_number,
                         block_proof,
+                        settlement_proof: None, // Regular proof event
                         proof_event_type: proof_event_type as i32,
                         sequences,
                         merged_sequences_1,
@@ -2412,6 +2417,197 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 }))
             }
         }
+    }
+
+    async fn get_settlement_proof(
+        &self,
+        request: Request<GetSettlementProofRequest>,
+    ) -> Result<Response<GetSettlementProofResponse>, Status> {
+        let start_time = std::time::Instant::now();
+        let req = request.into_inner();
+
+        debug!(
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            job_id = %req.job_id,
+            "Received GetSettlementProof request"
+        );
+
+        // Get job from agent database to validate it exists and get app_instance
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("GetSettlementProof request for unknown job_id: {}", req.job_id);
+                return Ok(Response::new(GetSettlementProofResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    proof: None,
+                }));
+            }
+        };
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "Session mismatch for GetSettlementProof: session agent={}/{}/{}, job agent={}/{}/{}",
+                    current.developer,
+                    current.agent,
+                    current.agent_method,
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method
+                );
+                return Ok(Response::new(GetSettlementProofResponse {
+                    success: false,
+                    message: "Session does not match job assignment".to_string(),
+                    proof: None,
+                }));
+            }
+        } else {
+            warn!(
+                "GetSettlementProof request from unknown session: {}",
+                req.session_id
+            );
+            return Ok(Response::new(GetSettlementProofResponse {
+                success: false,
+                message: "Invalid session ID".to_string(),
+                proof: None,
+            }));
+        }
+
+        let app_instance_id = agent_job.app_instance.clone();
+
+        // Query RPC service for settlement proofs
+        let rpc_client = self.state.get_rpc_client().await;
+        if let Some(mut client) = rpc_client {
+            match client
+                .get_settlement_proofs(proto::GetSettlementProofsRequest {
+                    app_instance_id: app_instance_id.clone(),
+                    block_number: req.block_number,
+                })
+                .await
+            {
+                Ok(response) => {
+                    let resp = response.into_inner();
+
+                    if !resp.success || resp.proof_events.is_empty() {
+                        let elapsed = start_time.elapsed();
+                        info!(
+                            "⏳ GetSettlementProof: app={}, block={}, job_id={}, not_found, time={}ms",
+                            app_instance_id,
+                            req.block_number,
+                            req.job_id,
+                            elapsed.as_millis()
+                        );
+                        return Ok(Response::new(GetSettlementProofResponse {
+                            success: false,
+                            message: format!(
+                                "No settlement proof found for block {}",
+                                req.block_number
+                            ),
+                            proof: None,
+                        }));
+                    }
+
+                    // Sort proof events by event_timestamp DESC and get the latest one
+                    let mut sorted_proofs = resp.proof_events;
+                    sorted_proofs.sort_by(|a, b| b.event_timestamp.cmp(&a.event_timestamp));
+
+                    let latest_proof_event = &sorted_proofs[0];
+                    let da_hash = &latest_proof_event.data_availability;
+
+                    debug!(
+                        "Found {} settlement proof(s), using latest with timestamp={}, da_hash={}",
+                        sorted_proofs.len(),
+                        latest_proof_event.event_timestamp,
+                        da_hash
+                    );
+
+                    // Retrieve actual proof data from storage using DA hash
+                    match self.proof_storage.get_proof(da_hash).await {
+                        Ok((data, _metadata)) => {
+                            let elapsed = start_time.elapsed();
+                            info!(
+                                "✅ GetSettlementProof: app={}, block={}, job_id={}, descriptor={}, proof_size={} bytes, timestamp={}, time={}ms",
+                                app_instance_id,
+                                req.block_number,
+                                req.job_id,
+                                da_hash,
+                                data.len(),
+                                latest_proof_event.event_timestamp,
+                                elapsed.as_millis()
+                            );
+                            Ok(Response::new(GetSettlementProofResponse {
+                                success: true,
+                                message: "Settlement proof retrieved successfully".to_string(),
+                                proof: Some(data),
+                            }))
+                        }
+                        Err(e) => {
+                            let elapsed = start_time.elapsed();
+                            error!(
+                                "❌ GetSettlementProof: app={}, block={}, job_id={}, descriptor={}, error={}, time={}ms",
+                                app_instance_id,
+                                req.block_number,
+                                req.job_id,
+                                da_hash,
+                                e,
+                                elapsed.as_millis()
+                            );
+                            Ok(Response::new(GetSettlementProofResponse {
+                                success: false,
+                                message: format!("Failed to read settlement proof from storage: {}", e),
+                                proof: None,
+                            }))
+                        }
+                    }
+                }
+                Err(e) => {
+                    let elapsed = start_time.elapsed();
+                    error!(
+                        "❌ GetSettlementProof: RPC query failed for app={}, block={}, error={}, time={}ms",
+                        app_instance_id, req.block_number, e, elapsed.as_millis()
+                    );
+                    Ok(Response::new(GetSettlementProofResponse {
+                        success: false,
+                        message: format!("Failed to query settlement proofs: {}", e),
+                        proof: None,
+                    }))
+                }
+            }
+        } else {
+            error!("GetSettlementProof: RPC client not available");
+            Ok(Response::new(GetSettlementProofResponse {
+                success: false,
+                message: "RPC client not available".to_string(),
+                proof: None,
+            }))
+        }
+    }
+
+    async fn submit_settlement_proof(
+        &self,
+        request: Request<SubmitSettlementProofRequest>,
+    ) -> Result<Response<SubmitSettlementProofResponse>, Status> {
+        let _req = request.into_inner();
+
+        // TODO: Implement settlement proof submission
+        warn!("submit_settlement_proof not yet implemented");
+
+        Ok(Response::new(SubmitSettlementProofResponse {
+            success: false,
+            message: "Not yet implemented".to_string(),
+        }))
     }
 
     async fn retrieve_secret(

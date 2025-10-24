@@ -451,6 +451,7 @@ fn parse_proof_event(row: &QueryResult, relevance_score: f64) -> Option<proto::E
     let data_availability = row.try_get::<String>("", "data_availability").ok()?;
     let block_number = row.try_get::<i64>("", "block_number").ok()? as u64;
     let block_proof = row.try_get::<Option<bool>>("", "block_proof").ok()?;
+    let settlement_proof = row.try_get::<Option<bool>>("", "settlement_proof").ok()?;
     let proof_event_type_str = row.try_get::<String>("", "proof_event_type").ok()?;
     let event_timestamp = row.try_get::<i64>("", "event_timestamp").ok()? as u64;
 
@@ -493,6 +494,7 @@ fn parse_proof_event(row: &QueryResult, relevance_score: f64) -> Option<proto::E
             data_availability,
             block_number,
             block_proof,
+            settlement_proof,
             proof_event_type,
             sequences,
             merged_sequences_1,

@@ -12,7 +12,8 @@ use db::secrets_storage::SecureSecretsStorage;
 use monitoring::record_grpc_request;
 use proto::{
     Event, GetConfigRequest, GetConfigResponse, GetEventsByAppInstanceSequenceRequest,
-    GetEventsByAppInstanceSequenceResponse, GetProofRequest, GetProofResponse, ReadBinaryRequest,
+    GetEventsByAppInstanceSequenceResponse, GetProofRequest, GetProofResponse,
+    GetSettlementProofsRequest, GetSettlementProofsResponse, ReadBinaryRequest,
     ReadBinaryResponse, RetrieveSecretRequest, RetrieveSecretResponse, SearchEventsRequest,
     SearchEventsResponse, StoreSecretRequest, StoreSecretResponse, SubmitEventRequest,
     SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest,
@@ -311,6 +312,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                         data_availability: proof.data_availability,
                         block_number: proof.block_number as u64,
                         block_proof: proof.block_proof,
+                        settlement_proof: proof.settlement_proof,
                         proof_event_type,
                         sequences: parse_json_array(&proof.sequences),
                         merged_sequences_1: parse_json_array(&proof.merged_sequences_1),
@@ -755,6 +757,108 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                 }
             }
         }
+    }
+
+    async fn get_settlement_proofs(
+        &self,
+        request: Request<GetSettlementProofsRequest>,
+    ) -> Result<Response<GetSettlementProofsResponse>, Status> {
+        let start_time = Instant::now();
+        let req = request.into_inner();
+
+        debug!(
+            "Received GetSettlementProofs request: app_instance_id={}, block_number={}",
+            req.app_instance_id, req.block_number
+        );
+
+        // Validate input
+        if req.app_instance_id.is_empty() {
+            return Err(Status::invalid_argument("app_instance_id is required"));
+        }
+
+        // Query database
+        let proof_models = match self
+            ._database
+            .get_settlement_proofs(&req.app_instance_id, req.block_number)
+            .await
+        {
+            Ok(proofs) => proofs,
+            Err(e) => {
+                error!("Failed to query settlement proofs: {}", e);
+                return Ok(Response::new(GetSettlementProofsResponse {
+                    success: false,
+                    message: format!("Database query failed: {}", e),
+                    proof_events: vec![],
+                }));
+            }
+        };
+
+        if proof_models.is_empty() {
+            debug!(
+                "No settlement proofs found for app_instance_id={}, block_number={}",
+                req.app_instance_id, req.block_number
+            );
+            return Ok(Response::new(GetSettlementProofsResponse {
+                success: true,
+                message: format!(
+                    "No settlement proofs found for block {}",
+                    req.block_number
+                ),
+                proof_events: vec![],
+            }));
+        }
+
+        // Convert database models to proto ProofEvent messages
+        let proof_events: Vec<proto::ProofEvent> = proof_models
+            .into_iter()
+            .map(|proof| {
+                // Convert ProofEventType from string to enum
+                let proof_event_type = match proof.proof_event_type.as_str() {
+                    "PROOF_SUBMITTED" => proto::ProofEventType::ProofSubmitted as i32,
+                    "PROOF_FETCHED" => proto::ProofEventType::ProofFetched as i32,
+                    "PROOF_VERIFIED" => proto::ProofEventType::ProofVerified as i32,
+                    "PROOF_UNAVAILABLE" => proto::ProofEventType::ProofUnavailable as i32,
+                    "PROOF_REJECTED" => proto::ProofEventType::ProofRejected as i32,
+                    _ => proto::ProofEventType::Unspecified as i32,
+                };
+
+                proto::ProofEvent {
+                    coordinator_id: proof.coordinator_id,
+                    session_id: proof.session_id,
+                    app_instance_id: proof.app_instance_id,
+                    job_id: proof.job_id,
+                    data_availability: proof.data_availability,
+                    block_number: proof.block_number as u64,
+                    block_proof: proof.block_proof,
+                    settlement_proof: proof.settlement_proof,
+                    proof_event_type,
+                    sequences: parse_json_array(&proof.sequences),
+                    merged_sequences_1: parse_json_array(&proof.merged_sequences_1),
+                    merged_sequences_2: parse_json_array(&proof.merged_sequences_2),
+                    event_timestamp: proof.event_timestamp as u64,
+                }
+            })
+            .collect();
+
+        let count = proof_events.len();
+        let elapsed = start_time.elapsed();
+
+        record_grpc_request(
+            "get_settlement_proofs",
+            "success",
+            elapsed.as_secs_f64(),
+        );
+
+        debug!(
+            "GetSettlementProofs completed in {:?}: found {} settlement proofs",
+            elapsed, count
+        );
+
+        Ok(Response::new(GetSettlementProofsResponse {
+            success: true,
+            message: format!("Found {} settlement proof(s)", count),
+            proof_events,
+        }))
     }
 
     async fn write_binary(
