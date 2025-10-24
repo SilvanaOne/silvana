@@ -122,11 +122,13 @@ message ProofEvent {
   string data_availability = 5;
   uint64 block_number = 6;
   optional bool block_proof = 7;
-  ProofEventType proof_event_type = 8;
-  repeated uint64 sequences = 9 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_1 = 10 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_2 = 11 [ (silvana.options.v1.sequences) = true];
-  uint64 event_timestamp = 12;
+  optional bool settlement_proof = 8;
+  optional string settlement_proof_chain = 9 [ (silvana.options.v1.composite_index) = "app_instance_id,block_number,settlement_proof,settlement_proof_chain"];
+  ProofEventType proof_event_type = 10;
+  repeated uint64 sequences = 11 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_1 = 12 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_2 = 13 [ (silvana.options.v1.sequences) = true];
+  uint64 event_timestamp = 14;
 }
 
 message SettlementTransactionEvent {
@@ -287,6 +289,20 @@ message GetProofResponse {
   repeated QuiltPiece quilt_pieces = 6;  // If is_quilt=true, contains the pieces
 }
 
+// Request message for getting settlement proofs by app instance and block number
+message GetSettlementProofsRequest {
+  string app_instance_id = 1;
+  uint64 block_number = 2;
+  string settlement_chain = 3;
+}
+
+// Response message for getting settlement proofs
+message GetSettlementProofsResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ProofEvent proof_events = 3; // All settlement proof events matching criteria
+}
+
 // Configuration storage messages
 
 message GetConfigRequest {
@@ -385,6 +401,7 @@ service SilvanaRpcService {
   // Proof cache methods
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  rpc GetSettlementProofs(GetSettlementProofsRequest) returns (GetSettlementProofsResponse);
 
   // Secrets storage methods
   rpc StoreSecret(StoreSecretRequest) returns (StoreSecretResponse);

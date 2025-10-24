@@ -449,7 +449,9 @@ public fun start_proving(
     ctx: &mut TxContext,
 ): bool {
     // Check if the ProofCalculation exists for this block_number
-    if (!object_table::contains(&app_instance.proof_calculations, block_number)) {
+    if (
+        !object_table::contains(&app_instance.proof_calculations, block_number)
+    ) {
         return false
     };
 
@@ -483,7 +485,9 @@ public fun submit_proof(
     ctx: &mut TxContext,
 ) {
     // Check if the ProofCalculation exists for this block_number
-    if (!object_table::contains(&app_instance.proof_calculations, block_number)) {
+    if (
+        !object_table::contains(&app_instance.proof_calculations, block_number)
+    ) {
         return
     };
 
@@ -528,7 +532,9 @@ public fun reject_proof(
     ctx: &mut TxContext,
 ) {
     // Check if the ProofCalculation exists for this block_number
-    if (!object_table::contains(&app_instance.proof_calculations, block_number)) {
+    if (
+        !object_table::contains(&app_instance.proof_calculations, block_number)
+    ) {
         return
     };
 
@@ -1280,22 +1286,40 @@ public fun terminate_app_job(
     clock: &Clock,
     ctx: &TxContext,
 ): bool {
-    // Check if this job is a settlement job for any chain and clear it
+    // First check if the job exists to ensure atomic operation
+    if (!jobs::job_exists(&app_instance.jobs, job_id)) {
+        // Job doesn't exist, return false without modifying settlement_job
+        return false
+    };
+
+    // Job exists, now find and clear any settlement_job reference
+    // Store which settlement (if any) references this job for potential rollback
+    let mut found_settlement_chain: Option<String> = option::none();
     let keys = vec_map::keys(&app_instance.settlements);
     let mut i = 0;
     let len = vector::length(&keys);
     while (i < len) {
         let chain = vector::borrow(&keys, i);
-        let settlement = vec_map::get_mut(&mut app_instance.settlements, chain);
+        let settlement = vec_map::get(&app_instance.settlements, chain);
         let settlement_job_id = settlement::get_settlement_job(settlement);
         if (
-            option::is_some(&settlement_job_id) && *option::borrow(&settlement_job_id) == job_id
+            option::is_some(&settlement_job_id) &&
+            *option::borrow(&settlement_job_id) == job_id
         ) {
-            settlement::set_settlement_job(settlement, option::none());
+            found_settlement_chain = option::some(*chain);
+            break
         };
         i = i + 1;
     };
 
+    // Clear the settlement_job reference if found
+    if (option::is_some(&found_settlement_chain)) {
+        let chain = option::borrow(&found_settlement_chain);
+        let settlement = vec_map::get_mut(&mut app_instance.settlements, chain);
+        settlement::set_settlement_job(settlement, option::none());
+    };
+
+    // Now attempt to terminate the job
     jobs::terminate_job(&mut app_instance.jobs, job_id, clock, ctx)
 }
 
@@ -1327,6 +1351,37 @@ public fun multicall_app_job_operations(
     clock: &Clock,
     ctx: &TxContext,
 ) {
+    // Clear settlement_job references for any jobs being terminated
+    // This must be done BEFORE calling jobs::multicall_job_operations
+    // to ensure settlement jobs are properly cleaned up even in batch operations
+    let terminate_len = vector::length(&terminate_job_sequences);
+    let mut i = 0;
+    while (i < terminate_len) {
+        let job_id = *vector::borrow(&terminate_job_sequences, i);
+
+        // Check if this job is a settlement job for any chain and clear it
+        let keys = vec_map::keys(&app_instance.settlements);
+        let mut j = 0;
+        let settlements_len = vector::length(&keys);
+        while (j < settlements_len) {
+            let chain = vector::borrow(&keys, j);
+            let settlement = vec_map::get_mut(
+                &mut app_instance.settlements,
+                chain,
+            );
+            let settlement_job_id = settlement::get_settlement_job(settlement);
+            if (
+                option::is_some(&settlement_job_id) &&
+                *option::borrow(&settlement_job_id) == job_id
+            ) {
+                settlement::set_settlement_job(settlement, option::none());
+            };
+            j = j + 1;
+        };
+        i = i + 1;
+    };
+
+    // Now proceed with the batch job operations
     jobs::multicall_job_operations(
         &mut app_instance.jobs,
         complete_job_sequences,
@@ -1359,6 +1414,66 @@ public fun get_next_pending_app_job(app_instance: &AppInstance): Option<u64> {
 
 public fun get_app_failed_jobs(app_instance: &AppInstance): vector<u64> {
     jobs::get_failed_jobs(&app_instance.jobs)
+}
+
+// Validate and repair settlement job references
+// This function checks all settlements and clears any orphaned job references
+// Returns the number of orphaned references that were cleared
+public fun validate_settlement_jobs(app_instance: &mut AppInstance): u64 {
+    let mut cleared_count = 0u64;
+    let keys = vec_map::keys(&app_instance.settlements);
+    let mut i = 0;
+    let len = vector::length(&keys);
+
+    while (i < len) {
+        let chain = vector::borrow(&keys, i);
+        let settlement = vec_map::get_mut(&mut app_instance.settlements, chain);
+        let settlement_job_id = settlement::get_settlement_job(settlement);
+
+        // Check if the settlement has a job reference
+        if (option::is_some(&settlement_job_id)) {
+            let job_id = *option::borrow(&settlement_job_id);
+
+            // Check if the referenced job actually exists
+            if (!jobs::job_exists(&app_instance.jobs, job_id)) {
+                // Job doesn't exist - clear the orphaned reference
+                settlement::set_settlement_job(settlement, option::none());
+                cleared_count = cleared_count + 1;
+            }
+        };
+        i = i + 1;
+    };
+
+    cleared_count
+}
+
+// Check if all settlement job references are valid (read-only validation)
+// Returns true if all references are valid, false if any orphaned references exist
+public fun are_settlement_jobs_valid(app_instance: &AppInstance): bool {
+    let keys = vec_map::keys(&app_instance.settlements);
+    let mut i = 0;
+    let len = vector::length(&keys);
+
+    while (i < len) {
+        let chain = vector::borrow(&keys, i);
+        let settlement = vec_map::get(&app_instance.settlements, chain);
+        let settlement_job_id = settlement::get_settlement_job(settlement);
+
+        // Check if the settlement has a job reference
+        if (option::is_some(&settlement_job_id)) {
+            let job_id = *option::borrow(&settlement_job_id);
+
+            // Check if the referenced job actually exists
+            if (!jobs::job_exists(&app_instance.jobs, job_id)) {
+                // Found an orphaned reference
+                return false
+            }
+        };
+        i = i + 1;
+    };
+
+    // All references are valid
+    true
 }
 
 public fun get_app_failed_jobs_count(app_instance: &AppInstance): u64 {

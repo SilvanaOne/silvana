@@ -19,6 +19,7 @@ pub struct ProtoField {
     pub is_optional: bool,
     pub has_search_option: bool,
     pub has_sequences_option: bool,
+    pub composite_index: Option<String>,
 }
 
 pub fn parse_proto_file(content: &str) -> Result<Vec<ProtoMessage>> {
@@ -94,6 +95,7 @@ fn parse_message_fields(message_body: &str) -> Result<Vec<ProtoField>> {
             // Parse field options if present
             let mut has_search_option = false;
             let mut has_sequences_option = false;
+            let mut composite_index = None;
 
             if let Some(options_match) = captures.get(4) {
                 let options_str = options_match.as_str();
@@ -102,6 +104,19 @@ fn parse_message_fields(message_body: &str) -> Result<Vec<ProtoField>> {
                 has_sequences_option = options_str
                     .contains("(silvana.options.v1.sequences) = true")
                     || options_str.contains("(sequences) = true");
+
+                // Parse composite_index option
+                if let Some(start) = options_str.find("(silvana.options.v1.composite_index)") {
+                    if let Some(eq_pos) = options_str[start..].find('=') {
+                        let after_eq = &options_str[start + eq_pos + 1..];
+                        if let Some(quote_start) = after_eq.find('"') {
+                            if let Some(quote_end) = after_eq[quote_start + 1..].find('"') {
+                                let index_spec = &after_eq[quote_start + 1..quote_start + 1 + quote_end];
+                                composite_index = Some(index_spec.to_string());
+                            }
+                        }
+                    }
+                }
             }
 
             fields.push(ProtoField {
@@ -112,6 +127,7 @@ fn parse_message_fields(message_body: &str) -> Result<Vec<ProtoField>> {
                 is_optional,
                 has_search_option,
                 has_sequences_option,
+                composite_index,
             });
         }
     }
@@ -290,6 +306,52 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                     ddl.push_str(&format!(
                         ",\n    FULLTEXT INDEX ft_idx_{} (`{}`) WITH PARSER STANDARD",
                         column_name, column_name
+                    ));
+                }
+            }
+        }
+
+        // Add composite indexes defined via field annotations
+        let mut added_composite_indexes = std::collections::HashSet::new();
+        for field in &message.fields {
+            if let Some(ref index_spec) = field.composite_index {
+                // Avoid duplicate indexes
+                if !added_composite_indexes.contains(index_spec) {
+                    added_composite_indexes.insert(index_spec.clone());
+
+                    // Parse comma-separated field names
+                    let index_fields: Vec<&str> = index_spec.split(',')
+                        .map(|s| s.trim())
+                        .collect();
+
+                    // Abbreviate field names to keep index name under 64 chars
+                    fn abbreviate_field(field: &str) -> String {
+                        let parts: Vec<&str> = field.split('_').collect();
+                        if parts.len() > 1 {
+                            // For multi-word fields, take first letter of each word
+                            parts.iter().map(|p| p.chars().next().unwrap_or('_')).collect()
+                        } else {
+                            // For single word, take first 4 chars
+                            field.chars().take(4).collect()
+                        }
+                    }
+
+                    // Generate index name from field list
+                    let abbreviated_fields: Vec<String> = index_fields.iter()
+                        .map(|f| abbreviate_field(f))
+                        .collect();
+                    let index_name = format!("idx_{}",
+                        abbreviated_fields.join("_").replace(".", "_"));
+
+                    // Generate column list with backticks
+                    let column_list = index_fields.iter()
+                        .map(|f| format!("`{}`", f))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    ddl.push_str(&format!(
+                        ",\n    INDEX {} ({})",
+                        index_name, column_list
                     ));
                 }
             }

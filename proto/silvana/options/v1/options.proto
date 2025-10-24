@@ -10,4 +10,5 @@ option go_package = "github.com/SilvanaOne/silvana/proto;options";
 extend google.protobuf.FieldOptions {
   bool sequences = 55550;
   bool search = 55551;
+  string composite_index = 55552; // Comma-separated list of fields for composite index
 } 

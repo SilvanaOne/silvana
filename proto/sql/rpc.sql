@@ -204,6 +204,8 @@ CREATE TABLE IF NOT EXISTS proof_event (
     `data_availability` VARCHAR(255) NOT NULL,
     `block_number` BIGINT NOT NULL,
     `block_proof` BOOLEAN NULL,
+    `settlement_proof` BOOLEAN NULL,
+    `settlement_proof_chain` VARCHAR(255) NULL,
     `proof_event_type` ENUM('PROOF_EVENT_TYPE_UNSPECIFIED', 'PROOF_SUBMITTED', 'PROOF_FETCHED', 'PROOF_VERIFIED', 'PROOF_UNAVAILABLE', 'PROOF_REJECTED') NOT NULL,
     `sequences` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
     `merged_sequences_1` JSON NULL COMMENT 'Array of BIGINT UNSIGNED',
@@ -220,7 +222,8 @@ CREATE TABLE IF NOT EXISTS proof_event (
     FULLTEXT INDEX ft_idx_coordinator_id (`coordinator_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_session_id (`session_id`) WITH PARSER STANDARD,
     FULLTEXT INDEX ft_idx_app_instance_id (`app_instance_id`) WITH PARSER STANDARD,
-    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD
+    FULLTEXT INDEX ft_idx_job_id (`job_id`) WITH PARSER STANDARD,
+    INDEX idx_aii_bn_sp_spc (`app_instance_id`, `block_number`, `settlement_proof`, `settlement_proof_chain`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Proof event sequences table for mapping (app_instance_id, sequence) => proof_event_id

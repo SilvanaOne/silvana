@@ -14,6 +14,8 @@ pub struct Model {
     pub data_availability: String,
     pub block_number: i64,
     pub block_proof: Option<bool>,
+    pub settlement_proof: Option<bool>,
+    pub settlement_proof_chain: Option<String>,
     pub proof_event_type: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub sequences: Option<Json>, // JSON array of u64

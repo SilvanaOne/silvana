@@ -241,6 +241,36 @@ message GetBlockProofResponse {
   string message = 3; // error message or status details
 }
 
+// Request message for getting a settlement proof
+message GetSettlementProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  string job_id = 3;
+  string settlement_chain = 4;
+}
+
+// Response message for getting a settlement proof
+message GetSettlementProofResponse {
+  bool success = 1;
+  string message = 2;
+  optional string proof = 3; // available when success is true
+}
+
+// Request message for submitting a settlement proof
+message SubmitSettlementProofRequest {
+  string session_id = 1;
+  uint64 block_number = 2;
+  string job_id = 6;
+  string proof = 7;
+  uint64 cpu_time = 8; // in milliseconds
+}
+
+// Response message for submitting a settlement proof
+message SubmitSettlementProofResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // Request message for retrieving a secret
 message RetrieveSecretRequest {
   string job_id = 1;
@@ -562,6 +592,8 @@ service CoordinatorService {
   rpc ReadDataAvailability(ReadDataAvailabilityRequest) returns (ReadDataAvailabilityResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
   rpc GetBlockProof(GetBlockProofRequest) returns (GetBlockProofResponse);
+  rpc GetSettlementProof(GetSettlementProofRequest) returns (GetSettlementProofResponse);
+  rpc SubmitSettlementProof(SubmitSettlementProofRequest) returns (SubmitSettlementProofResponse);
   rpc RetrieveSecret(RetrieveSecretRequest) returns (RetrieveSecretResponse);
   rpc SetKV(SetKVRequest) returns (SetKVResponse);
   rpc GetKV(GetKVRequest) returns (GetKVResponse);

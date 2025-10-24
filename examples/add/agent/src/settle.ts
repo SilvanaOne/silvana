@@ -613,12 +613,13 @@ export async function settle(params: SettleParams): Promise<void> {
       console.time("proved tx");
       await tx.prove();
       console.timeEnd("proved tx");
+      const signedTx = tx.sign([senderPrivateKey]);
 
       // Sign and send the transaction
       console.log("📤 Sending transaction...");
       console.time("sent tx");
       const sentTx = await sendTx({
-        tx: tx.sign([senderPrivateKey]),
+        tx: signedTx,
         description: `Silvana AddContract: settle block ${currentBlockNumber}`,
         wait: false,
         verbose: true,
