@@ -288,6 +288,19 @@ message GetProofResponse {
   repeated QuiltPiece quilt_pieces = 6;  // If is_quilt=true, contains the pieces
 }
 
+// Request message for getting settlement proofs by app instance and block number
+message GetSettlementProofsRequest {
+  string app_instance_id = 1;
+  uint64 block_number = 2;
+}
+
+// Response message for getting settlement proofs
+message GetSettlementProofsResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ProofEvent proof_events = 3; // All settlement proof events matching criteria
+}
+
 // Configuration storage messages
 
 message GetConfigRequest {
@@ -386,6 +399,7 @@ service SilvanaRpcService {
   // Proof cache methods
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  rpc GetSettlementProofs(GetSettlementProofsRequest) returns (GetSettlementProofsResponse);
 
   // Secrets storage methods
   rpc StoreSecret(StoreSecretRequest) returns (StoreSecretResponse);
