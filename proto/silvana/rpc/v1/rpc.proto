@@ -122,11 +122,12 @@ message ProofEvent {
   string data_availability = 5;
   uint64 block_number = 6;
   optional bool block_proof = 7;
-  ProofEventType proof_event_type = 8;
-  repeated uint64 sequences = 9 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_1 = 10 [ (silvana.options.v1.sequences) = true];
-  repeated uint64 merged_sequences_2 = 11 [ (silvana.options.v1.sequences) = true];
-  uint64 event_timestamp = 12;
+  optional bool settlement_proof = 8 [ (silvana.options.v1.composite_index) = "app_instance_id,block_number,settlement_proof"];
+  ProofEventType proof_event_type = 9;
+  repeated uint64 sequences = 10 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_1 = 11 [ (silvana.options.v1.sequences) = true];
+  repeated uint64 merged_sequences_2 = 12 [ (silvana.options.v1.sequences) = true];
+  uint64 event_timestamp = 13;
 }
 
 message SettlementTransactionEvent {
