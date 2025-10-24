@@ -179,7 +179,7 @@ const EInvalidArguments: vector<u8> =
     b"Invalid arguments: fail_job_sequences and fail_errors must have same length";
 
 // Initialize Jobs storage with optional max_attempts
-public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
+public(package) fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
     let attempts = if (option::is_some(&max_attempts)) {
         *option::borrow(&max_attempts)
     } else {
@@ -200,7 +200,7 @@ public fun create_jobs(max_attempts: Option<u8>, ctx: &mut TxContext): Jobs {
 }
 
 // Create a new job
-public fun create_job(
+public(package) fun create_job(
     jobs: &mut Jobs,
     description: Option<String>,
     developer: String,
@@ -292,7 +292,7 @@ public fun create_job(
 }
 
 // Update job status to running - returns true if successful, false otherwise
-public fun start_job(
+public(package) fun start_job(
     jobs: &mut Jobs,
     job_sequence: u64,
     clock: &Clock,
@@ -376,7 +376,7 @@ public fun start_job(
 
 // Mark job as completed and remove it (or reschedule if periodic)
 // Only running jobs can be completed - returns true if successful, false otherwise
-public fun complete_job(
+public(package) fun complete_job(
     jobs: &mut Jobs,
     job_sequence: u64,
     clock: &Clock,
@@ -466,7 +466,7 @@ public fun complete_job(
 
 // Mark job as failed and retry or remove (or reschedule if periodic)
 // Only running jobs can fail - returns true if successful, false otherwise
-public fun fail_job(
+public(package) fun fail_job(
     jobs: &mut Jobs,
     job_sequence: u64,
     error: String,
@@ -572,7 +572,7 @@ public fun get_failed_jobs_count(jobs: &Jobs): u64 {
     jobs.failed_jobs_count
 }
 
-public fun restart_failed_jobs(
+public(package) fun restart_failed_jobs(
     jobs: &mut Jobs,
     job_sequences: Option<vector<u64>>,
     clock: &Clock,
@@ -637,7 +637,7 @@ public fun restart_failed_jobs(
     });
 }
 
-public fun remove_failed_jobs(
+public(package) fun remove_failed_jobs(
     jobs: &mut Jobs,
     job_sequences: Option<vector<u64>>,
     clock: &Clock,
@@ -685,7 +685,7 @@ public fun remove_failed_jobs(
 
 // Terminate a job (one-time or periodic) - removes it completely
 // Returns true if successful, false otherwise
-public fun terminate_job(
+public(package) fun terminate_job(
     jobs: &mut Jobs,
     job_sequence: u64,
     clock: &Clock,
@@ -732,7 +732,7 @@ public fun terminate_job(
 // Multicall function to batch execute multiple job operations
 // Executes in order: complete, fail, terminate, then start (with memory management)
 // For start operations: only starts jobs if sufficient memory is available
-public fun multicall_job_operations(
+public(package) fun multicall_job_operations(
     jobs: &mut Jobs,
     complete_job_sequences: vector<u64>,
     fail_job_sequences: vector<u64>,
@@ -921,7 +921,7 @@ fun is_periodic_job(job: &Job): bool {
 }
 
 // Update max attempts for the Jobs storage
-public fun update_max_attempts(jobs: &mut Jobs, max_attempts: u8) {
+public(package) fun update_max_attempts(jobs: &mut Jobs, max_attempts: u8) {
     jobs.max_attempts = max_attempts;
 }
 
