@@ -324,9 +324,24 @@ pub fn generate_mysql_ddl(messages: &[ProtoMessage], database: &str) -> Result<S
                         .map(|s| s.trim())
                         .collect();
 
+                    // Abbreviate field names to keep index name under 64 chars
+                    fn abbreviate_field(field: &str) -> String {
+                        let parts: Vec<&str> = field.split('_').collect();
+                        if parts.len() > 1 {
+                            // For multi-word fields, take first letter of each word
+                            parts.iter().map(|p| p.chars().next().unwrap_or('_')).collect()
+                        } else {
+                            // For single word, take first 4 chars
+                            field.chars().take(4).collect()
+                        }
+                    }
+
                     // Generate index name from field list
+                    let abbreviated_fields: Vec<String> = index_fields.iter()
+                        .map(|f| abbreviate_field(f))
+                        .collect();
                     let index_name = format!("idx_{}",
-                        index_fields.join("_").replace(".", "_"));
+                        abbreviated_fields.join("_").replace(".", "_"));
 
                     // Generate column list with backticks
                     let column_list = index_fields.iter()
