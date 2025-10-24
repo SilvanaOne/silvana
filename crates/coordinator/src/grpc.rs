@@ -219,6 +219,7 @@ impl CoordinatorServiceImpl {
                         block_number,
                         block_proof: Some(false), // Regular proof rejection
                         settlement_proof: Some(false), // Not a settlement proof
+                        settlement_proof_chain: None,
                         proof_event_type: proto::ProofEventType::ProofRejected as i32,
                         sequences,
                         merged_sequences_1: vec![],
@@ -301,6 +302,7 @@ impl CoordinatorServiceImpl {
                         block_number,
                         block_proof,
                         settlement_proof: None, // Regular proof event
+                        settlement_proof_chain: None,
                         proof_event_type: proof_event_type as i32,
                         sequences,
                         merged_sequences_1,
@@ -570,6 +572,7 @@ impl CoordinatorServiceImpl {
                         block_number,
                         block_proof,
                         settlement_proof: None, // Regular proof event
+                        settlement_proof_chain: None,
                         proof_event_type: proof_event_type as i32,
                         sequences,
                         merged_sequences_1,
@@ -2494,6 +2497,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 .get_settlement_proofs(proto::GetSettlementProofsRequest {
                     app_instance_id: app_instance_id.clone(),
                     block_number: req.block_number,
+                    settlement_chain: req.settlement_chain.clone(),
                 })
                 .await
             {

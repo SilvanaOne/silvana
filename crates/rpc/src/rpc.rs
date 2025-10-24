@@ -313,6 +313,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                         block_number: proof.block_number as u64,
                         block_proof: proof.block_proof,
                         settlement_proof: proof.settlement_proof,
+                        settlement_proof_chain: proof.settlement_proof_chain.clone(),
                         proof_event_type,
                         sequences: parse_json_array(&proof.sequences),
                         merged_sequences_1: parse_json_array(&proof.merged_sequences_1),
@@ -767,19 +768,22 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
         let req = request.into_inner();
 
         debug!(
-            "Received GetSettlementProofs request: app_instance_id={}, block_number={}",
-            req.app_instance_id, req.block_number
+            "Received GetSettlementProofs request: app_instance_id={}, block_number={}, settlement_chain={}",
+            req.app_instance_id, req.block_number, req.settlement_chain
         );
 
         // Validate input
         if req.app_instance_id.is_empty() {
             return Err(Status::invalid_argument("app_instance_id is required"));
         }
+        if req.settlement_chain.is_empty() {
+            return Err(Status::invalid_argument("settlement_chain is required"));
+        }
 
         // Query database
         let proof_models = match self
             ._database
-            .get_settlement_proofs(&req.app_instance_id, req.block_number)
+            .get_settlement_proofs(&req.app_instance_id, req.block_number, &req.settlement_chain)
             .await
         {
             Ok(proofs) => proofs,
@@ -831,6 +835,7 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                     block_number: proof.block_number as u64,
                     block_proof: proof.block_proof,
                     settlement_proof: proof.settlement_proof,
+                    settlement_proof_chain: proof.settlement_proof_chain.clone(),
                     proof_event_type,
                     sequences: parse_json_array(&proof.sequences),
                     merged_sequences_1: parse_json_array(&proof.merged_sequences_1),

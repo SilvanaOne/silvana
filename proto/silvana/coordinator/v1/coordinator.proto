@@ -246,6 +246,7 @@ message GetSettlementProofRequest {
   string session_id = 1;
   uint64 block_number = 2;
   string job_id = 3;
+  string settlement_chain = 4;
 }
 
 // Response message for getting a settlement proof
