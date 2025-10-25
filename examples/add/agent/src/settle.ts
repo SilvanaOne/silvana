@@ -633,9 +633,16 @@ export async function settle(params: SettleParams): Promise<void> {
         agent.error(
           `Failed to submit settlement proof for block ${currentBlockNumber}: ${submitSettlementProofResponse.message}`
         );
+        console.error(
+          `Failed to submit settlement proof for block ${currentBlockNumber}: ${submitSettlementProofResponse.message}`
+        );
       }
       agent.info(
         `✅ Settlement proof submitted successfully for block ${currentBlockNumber}`
+      );
+      console.log(
+        `✅ Settlement proof submitted successfully for block ${currentBlockNumber}`,
+        submitSettlementProofResponse
       );
 
       // Sign and send the transaction
