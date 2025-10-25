@@ -588,14 +588,6 @@ message AppMethod {
   string agent_method = 4;
 }
 
-// Settlement information for a specific chain
-message SettlementInfo {
-  string chain = 1;
-  uint64 last_settled_block_number = 2;
-  optional string settlement_address = 3;
-  optional uint64 settlement_job = 4;
-}
-
 // App instance data structure
 message AppInstanceData {
   string id = 1;
