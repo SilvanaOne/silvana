@@ -8,8 +8,8 @@ import {
   fetchMinaAccount,
   accountBalanceMina,
   sendTx,
-  CanonicalBlockchain,
 } from "@silvana-one/mina-utils";
+import { CanonicalBlockchain } from "@silvana-one/api";
 import {
   getBlock,
   getBlockSettlement,
@@ -25,7 +25,9 @@ import {
   rejectProof,
   proofEvent,
   ProofEventType,
-  info,
+  getSettlementProof,
+  submitSettlementProof,
+  agent,
 } from "@silvana-one/agent";
 
 interface SettleParams {
@@ -130,7 +132,7 @@ export async function settle(params: SettleParams): Promise<void> {
   }
 
   // Initialize blockchain
-  await initBlockchain(settlementChain);
+  await initBlockchain({ chain: settlementChain });
 
   // Check that the contract is deployed
   console.log("🔍 Checking contract deployment...");
@@ -165,7 +167,10 @@ export async function settle(params: SettleParams): Promise<void> {
     }
 
     // Get block settlement for this specific chain
-    const blockSettlement = await getBlockSettlement(i, settlementChain);
+    const blockSettlement = await getBlockSettlement({
+      blockNumber: i,
+      chain: settlementChain,
+    });
     if (
       !blockSettlement ||
       !blockSettlement.success ||
@@ -182,12 +187,14 @@ export async function settle(params: SettleParams): Promise<void> {
       !blockSettlement.blockSettlement ||
       blockSettlement.blockSettlement?.settlementTxIncludedInBlock === false
     ) {
-      info(`Recording tx inclusion for block ${i} on chain ${settlementChain}`);
-      const updateResult = await updateBlockSettlementTxIncludedInBlock(
-        i,
-        BigInt(Date.now()),
-        settlementChain
+      agent.info(
+        `Recording tx inclusion for block ${i} on chain ${settlementChain}`
       );
+      const updateResult = await updateBlockSettlementTxIncludedInBlock({
+        blockNumber: i,
+        settledAt: BigInt(Date.now()),
+        settlementChain,
+      });
       if (!updateResult.success) {
         console.error(
           `Failed to update tx inclusion for block ${i} on ${settlementChain}: ${updateResult.message}`
@@ -283,10 +290,10 @@ export async function settle(params: SettleParams): Promise<void> {
       break;
     }
 
-    const blockSettlement = await getBlockSettlement(
-      currentBlockNumber,
-      settlementChain
-    );
+    const blockSettlement = await getBlockSettlement({
+      blockNumber: currentBlockNumber,
+      chain: settlementChain,
+    });
     const settlementData = blockSettlement?.blockSettlement;
 
     // Format block data for logging (exclude commitments, convert times to UTC)
@@ -398,10 +405,10 @@ export async function settle(params: SettleParams): Promise<void> {
         }
       }
 
-      const rejectProofResponse = await rejectProof(
-        currentBlockNumber,
-        sequences
-      );
+      const rejectProofResponse = await rejectProof({
+        blockNumber: currentBlockNumber,
+        sequences,
+      });
       if (!rejectProofResponse.success) {
         throw new Error(
           `Failed to reject proof for block ${currentBlockNumber}: ${rejectProofResponse.message}`
@@ -452,10 +459,10 @@ export async function settle(params: SettleParams): Promise<void> {
         }
       }
 
-      const rejectProofResponse = await rejectProof(
-        currentBlockNumber,
-        sequences
-      );
+      const rejectProofResponse = await rejectProof({
+        blockNumber: currentBlockNumber,
+        sequences,
+      });
       if (!rejectProofResponse.success) {
         throw new Error(
           `Failed to reject proof for block ${currentBlockNumber}: ${rejectProofResponse.message}`
@@ -468,10 +475,10 @@ export async function settle(params: SettleParams): Promise<void> {
 
     // Update block state data availability on Sui (using the same serialized data that contains both proof and state)
     console.log("📝 Updating block state data availability on Sui...");
-    const updateStateDAResponse = await updateBlockStateDataAvailability(
-      currentBlockNumber,
-      blockProofSerialized // The serialized proof contains both proof and state data
-    );
+    const updateStateDAResponse = await updateBlockStateDataAvailability({
+      blockNumber: currentBlockNumber,
+      stateDataAvailability: blockProofSerialized, // The serialized proof contains both proof and state data
+    });
 
     if (!updateStateDAResponse.success) {
       console.error(
@@ -495,10 +502,10 @@ export async function settle(params: SettleParams): Promise<void> {
 
     // Update block proof data availability on Sui
     console.log("📝 Updating block proof data availability on Sui...");
-    const updateDAResponse = await updateBlockProofDataAvailability(
-      currentBlockNumber,
-      blockProofSerialized
-    );
+    const updateDAResponse = await updateBlockProofDataAvailability({
+      blockNumber: currentBlockNumber,
+      proofDataAvailability: blockProofSerialized,
+    });
 
     if (!updateDAResponse.success) {
       console.error(
@@ -610,10 +617,25 @@ export async function settle(params: SettleParams): Promise<void> {
       console.timeEnd("prepared tx");
       // Prove the transaction
       console.log("🔐 Proving transaction...");
+      const proveStartTime = Date.now();
       console.time("proved tx");
       await tx.prove();
       console.timeEnd("proved tx");
       const signedTx = tx.sign([senderPrivateKey]);
+      const settlementProof = signedTx.toJSON();
+      const submitSettlementProofResponse = await submitSettlementProof({
+        blockNumber: currentBlockNumber,
+        proof: settlementProof,
+        cpuTime: BigInt(Date.now() - proveStartTime),
+      });
+      if (!submitSettlementProofResponse.success) {
+        agent.error(
+          `Failed to submit settlement proof for block ${currentBlockNumber}: ${submitSettlementProofResponse.message}`
+        );
+      }
+      agent.info(
+        `✅ Settlement proof submitted successfully for block ${currentBlockNumber}`
+      );
 
       // Sign and send the transaction
       console.log("📤 Sending transaction...");
@@ -636,7 +658,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
         // Reset nonce on failure
         console.log("🔄 Resetting nonce to 0 due to failure");
-        await setKv(NONCE_KEY, "0");
+        await setKv({ key: NONCE_KEY, value: "0" });
 
         throw new Error(
           `Settlement transaction failed for block ${currentBlockNumber}: ${
@@ -653,11 +675,11 @@ export async function settle(params: SettleParams): Promise<void> {
       console.log(`  Transaction Hash: ${txHash}`);
 
       // Save transaction hash to blockchain for this specific chain
-      const updateResult = await updateBlockSettlementTxHash(
-        currentBlockNumber,
-        txHash,
-        settlementChain
-      );
+      const updateResult = await updateBlockSettlementTxHash({
+        blockNumber: currentBlockNumber,
+        settlementTxHash: txHash,
+        settlementChain,
+      });
       if (!updateResult.success) {
         console.warn(
           `⚠️ Failed to update settlement tx hash on chain ${settlementChain}: ${updateResult.message}`
@@ -670,7 +692,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
       // Increment and save nonce
       nonce++;
-      await setKv(NONCE_KEY, nonce.toString());
+      await setKv({ key: NONCE_KEY, value: nonce.toString() });
       console.log(`  Updated nonce to: ${nonce}`);
 
       // Move to next block
@@ -683,7 +705,7 @@ export async function settle(params: SettleParams): Promise<void> {
 
       // Reset nonce on error
       console.log("🔄 Resetting nonce to 0 due to error");
-      await setKv(NONCE_KEY, "0");
+      await setKv({ key: NONCE_KEY, value: "0" });
 
       // Re-throw the error to fail the job
       throw error;

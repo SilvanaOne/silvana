@@ -11,9 +11,9 @@ import {
   initBlockchain,
   accountBalanceMina,
   sendTx,
-  CanonicalBlockchain,
 } from "@silvana-one/mina-utils";
 import { compile } from "./compile.js";
+import { CanonicalBlockchain } from "@silvana-one/api";
 
 const expectedTxStatus = "pending";
 
@@ -52,7 +52,7 @@ export async function deployAddContract(): Promise<{
   console.log(`Chain: ${chain}`);
 
   // Initialize blockchain connection
-  await initBlockchain(chain);
+  await initBlockchain({ chain });
   const { vkProgram, vkContract } = await compile({ compileContract: true });
   if (!vkProgram || !vkContract) {
     throw new Error("Failed to compile circuit for merging");

@@ -44,7 +44,7 @@ describe("Add Rollup", async () => {
   });
   it("should compile", async () => {
     // Initialize blockchain connection
-    await initBlockchain("devnet");
+    await initBlockchain({ chain: "mina:devnet" });
     const { vkProgram, vkContract } = await compile({ compileContract: true });
     assert.ok(vkProgram !== undefined, "vkProgram is not set");
     assert.ok(vkContract !== undefined, "vkContract is not set");

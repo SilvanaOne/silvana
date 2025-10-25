@@ -11,7 +11,7 @@ import {
   rejectProof,
   proofEvent,
   ProofEventType,
-  error,
+  agent,
 } from "@silvana-one/agent";
 import {
   UInt32,
@@ -52,7 +52,7 @@ export async function merge(params: {
   // Ensure the circuit is compiled
   const { vkProgram } = await compile();
   if (!vkProgram) {
-    error("Failed to compile circuit for merging");
+    agent.error("Failed to compile circuit for merging");
     throw new Error("Failed to compile circuit for merging");
   }
 
@@ -73,15 +73,15 @@ export async function merge(params: {
       proof = await AddProgramProof.fromJSON(
         JSON.parse(serialized) as JsonProof
       );
-    } catch (err) {
-      error(`Error deserializing ${name}:`, error);
-      const rejectProofResponse = await rejectProof(blockNumber, sequences);
+    } catch (err: any) {
+      agent.error(`Error deserializing ${name}:`, err?.message);
+      const rejectProofResponse = await rejectProof({ blockNumber, sequences });
       if (!rejectProofResponse.success) {
         throw new Error(
           `Failed to reject ${name}: ${rejectProofResponse.message}`
         );
       }
-      throw error;
+      throw err;
     }
 
     // Verify the proof
@@ -104,21 +104,21 @@ export async function merge(params: {
           dataAvailability: "",
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       await proofEvent({
         proofEventType: ProofEventType.PROOF_REJECTED,
         sequences: sequences,
         blockNumber: blockNumber,
         dataAvailability: "",
       });
-      error(`Error verifying ${name}:`, err);
-      const rejectProofResponse = await rejectProof(blockNumber, sequences);
+      agent.error(`Error verifying ${name}:`, err?.message);
+      const rejectProofResponse = await rejectProof({ blockNumber, sequences });
       if (!rejectProofResponse.success) {
         throw new Error(
           `Failed to reject ${name}: ${rejectProofResponse.message}`
         );
       }
-      throw error;
+      throw err;
     }
     console.log(`${name} verified`);
 
