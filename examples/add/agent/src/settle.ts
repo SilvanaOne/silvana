@@ -627,6 +627,7 @@ export async function settle(params: SettleParams): Promise<void> {
         blockNumber: currentBlockNumber,
         proof: settlementProof,
         cpuTime: BigInt(Date.now() - proveStartTime),
+        chain: settlementChain,
       });
       if (!submitSettlementProofResponse.success) {
         agent.error(
