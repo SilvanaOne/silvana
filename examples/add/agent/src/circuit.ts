@@ -5,7 +5,7 @@ import {
   Struct,
   SelfProof,
   UInt64,
-  Experimental,
+  IndexedMerkleMap,
   Encoding,
 } from "o1js";
 import { AddProgramCommitment, calculateNewCommitment } from "./commitment.js";
@@ -16,8 +16,6 @@ import {
 import { R, scalar } from "@silvana-one/mina-utils";
 
 export const MAP_HEIGHT = 10;
-const IndexedMerkleMap = Experimental.IndexedMerkleMap;
-type IndexedMerkleMap = Experimental.IndexedMerkleMap;
 
 export class AddMap extends IndexedMerkleMap(MAP_HEIGHT) {}
 

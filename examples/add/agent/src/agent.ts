@@ -6,17 +6,16 @@ import {
   submitProof,
   submitState,
   getProof,
-  info,
-  error,
+  agent,
 } from "@silvana-one/agent";
 import { deserializeTransitionData } from "./transition.js";
 import { getStateAndProof, SequenceState, merge } from "./state.js";
 import { serializeProofAndState, serializeState } from "./proof.js";
 import { settle } from "./settle.js";
 
-async function agent() {
+async function runAgent() {
   console.time("Agent runtime");
-  info("Agent is running");
+  agent.info("Agent is running");
 
   const startTime = Date.now();
   const maxRunTimeMs = 500 * 1000; // 500 seconds (8.33 minutes) - absolute maximum runtime
@@ -26,13 +25,13 @@ async function agent() {
 
   try {
     while (Date.now() - startTime < maxRunTimeMs) {
-      info("Requesting job from coordinator...");
+      agent.info("Requesting job from coordinator...");
 
       const response = await getJob();
 
       if (response.job) {
         jobCount++;
-        info(
+        agent.info(
           `Received job ${jobCount}: ID=${response.job.jobSequence}, job_id=${response.job.jobId}`
         );
 
@@ -110,7 +109,7 @@ async function agent() {
                     `✅ Settle job completed successfully: ${completeResponse.message}`
                   );
                 } else {
-                  error(
+                  agent.error(
                     `Failed to complete settle job: ${completeResponse.message}`
                   );
                 }
@@ -118,7 +117,7 @@ async function agent() {
                 throw settleError; // Re-throw to be caught by outer catch
               }
             } catch (err) {
-              error(`\n❌ Failed to settle block: ${err}`);
+              agent.error(`\n❌ Failed to settle block: ${err}`);
 
               // Fail the job
               console.log(
@@ -187,7 +186,10 @@ async function agent() {
               console.log(
                 `Fetching proof 1: sequences ${sequences1.join(", ")}`
               );
-              const proof1Response = await getProof(blockNumber, sequences1);
+              const proof1Response = await getProof({
+                blockNumber,
+                sequences: sequences1,
+              });
               if (!proof1Response.success || !proof1Response.proof) {
                 throw new Error(
                   `Failed to fetch proof 1: ${
@@ -207,7 +209,10 @@ async function agent() {
               console.log(
                 `Fetching proof 2: sequences ${sequences2.join(", ")}`
               );
-              const proof2Response = await getProof(blockNumber, sequences2);
+              const proof2Response = await getProof({
+                blockNumber,
+                sequences: sequences2,
+              });
               if (!proof2Response.success || !proof2Response.proof) {
                 throw new Error(
                   `Failed to fetch proof 2: ${
@@ -250,14 +255,14 @@ async function agent() {
               );
 
               // Submit the merged proof
-              const submitProofResponse = await submitProof(
+              const submitProofResponse = await submitProof({
                 blockNumber,
-                allSequences,
-                mergedProof,
-                BigInt(mergeTimeMs),
-                sequences1,
-                sequences2
-              );
+                sequences: allSequences,
+                proof: mergedProof,
+                cpuTime: BigInt(mergeTimeMs),
+                mergedSequences1: sequences1,
+                mergedSequences2: sequences2,
+              });
               console.log(
                 `Merged proof submitted successfully! TX: ${submitProofResponse.txHash}, DA: ${submitProofResponse.daHash}`
               );
@@ -371,8 +376,11 @@ async function agent() {
                   `Successfully deserialized sequence ${state.sequence} with transition sequence: ${transition.sequence}`
                 );
               } catch (err) {
-                error(`Failed to deserialize sequence ${state.sequence}:`, err);
-                error(
+                agent.error(
+                  `Failed to deserialize sequence ${state.sequence}:`,
+                  err
+                );
+                agent.error(
                   `TransitionData bytes: [${Array.from(
                     state.transitionData
                   ).join(",")}]`
@@ -436,12 +444,13 @@ async function agent() {
                   console.log(
                     `Submitting proof for sequence ${transitionData.sequence}...`
                   );
-                  const submitProofResponse = await submitProof(
-                    BigInt(transitionData.block_number),
-                    [transitionData.sequence],
-                    serializedProofAndState,
-                    BigInt(cpuTimeMs)
-                  );
+                  const submitProofResponse = await submitProof({
+                    blockNumber: BigInt(transitionData.block_number),
+                    sequences: [transitionData.sequence],
+                    proof: serializedProofAndState,
+                    cpuTime: BigInt(cpuTimeMs),
+                  });
+
                   console.log(
                     `Proof submitted successfully for sequence ${transitionData.sequence}`
                   );
@@ -450,11 +459,10 @@ async function agent() {
                   console.log(
                     `Submitting state for sequence ${transitionData.sequence}...`
                   );
-                  const submitStateResponse = await submitState(
-                    transitionData.sequence,
-                    undefined,
-                    serializedStateOnly
-                  );
+                  const submitStateResponse = await submitState({
+                    sequence: transitionData.sequence,
+                    serializedState: serializedStateOnly,
+                  });
                   console.log(
                     `State submitted successfully for sequence ${transitionData.sequence}`
                   );
@@ -532,7 +540,7 @@ async function agent() {
             } else if (typeof err === "string") {
               errorMessage = `Job processing failed: ${err}`;
             } else if (err && typeof err === "object" && "message" in err) {
-              errorMessage = `Job processing failed: ${(error as any).message}`;
+              errorMessage = `Job processing failed: ${(err as any).message}`;
             } else {
               errorMessage = `Job processing failed: ${JSON.stringify(err)}`;
             }
@@ -590,11 +598,11 @@ async function agent() {
       }
     }
   } catch (err) {
-    error("gRPC call failed:", err);
+    agent.error("gRPC call failed:", err);
   }
 
-  info(`Agent processed ${jobCount} jobs`);
+  agent.info(`Agent processed ${jobCount} jobs`);
   console.timeEnd("Agent runtime");
 }
 
-agent().catch(console.error);
+runAgent().catch(console.error);

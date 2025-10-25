@@ -263,6 +263,7 @@ message SubmitSettlementProofRequest {
   string job_id = 6;
   string proof = 7;
   uint64 cpu_time = 8; // in milliseconds
+  string chain = 9; // Chain identifier for settlement
 }
 
 // Response message for submitting a settlement proof

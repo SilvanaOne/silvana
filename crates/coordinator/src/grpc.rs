@@ -332,6 +332,79 @@ impl CoordinatorServiceImpl {
         });
     }
 
+    /// Send ProofEvent for settlement proof to RPC service (fire and forget)
+    fn send_settlement_proof_event(
+        &self,
+        agent_job: &crate::agent::AgentJob,
+        req: &SubmitSettlementProofRequest,
+        data_availability: String,
+    ) {
+        // Get coordinator ID
+        let coordinator_id = match self.state.get_coordinator_id() {
+            Some(id) => id,
+            None => {
+                debug!("Cannot send ProofEvent: coordinator_id not available");
+                return;
+            }
+        };
+
+        // Clone what we need for the async task
+        let state_clone = self.state.clone();
+        let session_id = agent_job.session_id.clone();
+        let app_instance_id = agent_job.app_instance.clone();
+        let job_id = agent_job.job_id.clone();
+        let block_number = req.block_number;
+        let settlement_chain = req.chain.clone();
+
+        let event_timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Spawn async task to send the event
+        tokio::spawn(async move {
+            let rpc_client = state_clone.get_rpc_client().await;
+            if let Some(mut client) = rpc_client {
+                let event = proto::Event {
+                    event: Some(proto::event::Event::ProofEvent(proto::ProofEvent {
+                        coordinator_id,
+                        session_id,
+                        app_instance_id,
+                        job_id: job_id.clone(),
+                        data_availability,
+                        block_number,
+                        block_proof: None, // Not a block proof
+                        settlement_proof: Some(true), // This is a settlement proof
+                        settlement_proof_chain: Some(settlement_chain),
+                        proof_event_type: proto::ProofEventType::ProofSubmitted as i32,
+                        sequences: vec![], // No sequences for settlement proofs
+                        merged_sequences_1: vec![],
+                        merged_sequences_2: vec![],
+                        event_timestamp,
+                    })),
+                };
+
+                let request = proto::SubmitEventRequest { event: Some(event) };
+
+                match client.submit_event(request).await {
+                    Ok(response) => {
+                        let resp = response.into_inner();
+                        if resp.success {
+                            debug!("Sent ProofEvent (settlement) for job_id {}", job_id);
+                        } else {
+                            warn!("Failed to send ProofEvent (settlement): {}", resp.message);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to send ProofEvent (settlement): {}", e);
+                    }
+                }
+            } else {
+                debug!("No RPC client available to send ProofEvent");
+            }
+        });
+    }
+
     /// Send SettlementTransactionEvent to RPC service (fire and forget)
     fn send_settlement_transaction_event(
         &self,
@@ -2603,14 +2676,139 @@ impl CoordinatorService for CoordinatorServiceImpl {
         &self,
         request: Request<SubmitSettlementProofRequest>,
     ) -> Result<Response<SubmitSettlementProofResponse>, Status> {
-        let _req = request.into_inner();
+        let start_time = std::time::Instant::now();
+        let req = request.into_inner();
 
-        // TODO: Implement settlement proof submission
-        warn!("submit_settlement_proof not yet implemented");
+        // Get job early to log app_instance
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                warn!("SubmitSettlementProof request for unknown job_id: {}", req.job_id);
+                return Err(Status::not_found(format!("Job not found: {}", req.job_id)));
+            }
+        };
+
+        debug!(
+            app_instance = %agent_job.app_instance,
+            session_id = %req.session_id,
+            block_number = %req.block_number,
+            job_id = %req.job_id,
+            chain = %req.chain,
+            cpu_time = %req.cpu_time,
+            "Received SubmitSettlementProof request"
+        );
+
+        // Validate that the requesting session matches the current agent for this job
+        let current_agent = self.state.get_current_agent(&req.session_id).await;
+        if let Some(current) = current_agent {
+            if current.developer != agent_job.developer
+                || current.agent != agent_job.agent
+                || current.agent_method != agent_job.agent_method
+            {
+                warn!(
+                    "SubmitSettlementProof request from mismatched session: job belongs to {}/{}/{}, session is {}/{}/{}",
+                    agent_job.developer,
+                    agent_job.agent,
+                    agent_job.agent_method,
+                    current.developer,
+                    current.agent,
+                    current.agent_method
+                );
+                return Err(Status::permission_denied(
+                    "Job does not belong to requesting session",
+                ));
+            }
+        } else {
+            warn!(
+                "SubmitSettlementProof request from unknown session: {}",
+                req.session_id
+            );
+            return Err(Status::unauthenticated("Invalid session ID"));
+        }
+
+        // Save proof to cache storage
+        debug!("Saving settlement proof to cache storage for job {}", req.job_id);
+
+        // Prepare metadata for the proof
+        let mut metadata = ProofMetadata::default();
+        metadata
+            .data
+            .insert("job_id".to_string(), req.job_id.clone());
+        metadata
+            .data
+            .insert("session_id".to_string(), req.session_id.clone());
+        metadata.data.insert(
+            "app_instance_id".to_string(),
+            agent_job.app_instance.clone(),
+        );
+        metadata
+            .data
+            .insert("block_number".to_string(), req.block_number.to_string());
+        metadata
+            .data
+            .insert("settlement_chain".to_string(), req.chain.clone());
+        metadata
+            .data
+            .insert("proof_type".to_string(), "settlement".to_string());
+        metadata
+            .data
+            .insert("project".to_string(), "silvana".to_string());
+        metadata.data.insert(
+            "sui_chain".to_string(),
+            std::env::var("SUI_CHAIN").unwrap_or_else(|_| "devnet".to_string()),
+        );
+
+        let storage_start = std::time::Instant::now();
+        let descriptor = match self
+            .proof_storage
+            .store_proof("cache", "public", &req.proof, Some(metadata))
+            .await
+        {
+            Ok(desc) => {
+                let storage_duration = storage_start.elapsed();
+                debug!(
+                    "Successfully saved settlement proof to cache with descriptor: {} (took {}ms)",
+                    desc.to_string(),
+                    storage_duration.as_millis()
+                );
+                desc
+            }
+            Err(e) => {
+                error!("Error saving settlement proof to cache storage: {}", e);
+                return Err(Status::internal("Failed to save proof to storage"));
+            }
+        };
+
+        // Send ProofEvent for settlement proof
+        self.send_settlement_proof_event(
+            &agent_job,
+            &req,
+            descriptor.to_string(),
+        );
+
+        let elapsed = start_time.elapsed();
+        info!(
+            "✅ SubmitSettlementProof: app={}, dev={}, agent={}/{}, job_seq={}, block={}, chain={}, da={}, time={:?}",
+            agent_job.app_instance,
+            agent_job.developer,
+            agent_job.agent,
+            agent_job.agent_method,
+            agent_job.job_sequence,
+            req.block_number,
+            req.chain,
+            descriptor.to_string(),
+            elapsed
+        );
+        debug!("Successfully submitted settlement proof for job {}", req.job_id);
 
         Ok(Response::new(SubmitSettlementProofResponse {
-            success: false,
-            message: "Not yet implemented".to_string(),
+            success: true,
+            message: format!("Settlement proof submitted successfully for chain {}", req.chain),
         }))
     }
 
