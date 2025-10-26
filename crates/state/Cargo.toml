@@ -1,0 +1,83 @@
+[package]
+name = "state"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+default-run = "state"
+
+[[bin]]
+name = "state"
+path = "src/main.rs"
+required-features = ["binary"]
+
+[dependencies]
+# Proto definitions (will generate state service)
+proto = { path = "../proto" }
+prost.workspace = true
+prost-types.workspace = true
+prost-reflect.workspace = true
+tonic = { workspace = true, features = ["tls-webpki-roots"] }
+tonic-web = "0.13"
+tonic-reflection.workspace = true
+
+# Storage for S3 operations
+storage = { path = "../storage" }
+
+# Database
+sea-orm.workspace = true
+chrono.workspace = true
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# Authentication
+ed25519-dalek = "2.1"
+jsonwebtoken = "9.3"
+
+# AWS SDK for S3
+aws-config.workspace = true
+aws-sdk-s3.workspace = true
+
+# Async runtime
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
+async-trait.workspace = true
+futures.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+bcs.workspace = true
+
+# Error handling and logging
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+# Environment configuration
+dotenvy.workspace = true
+
+# Utilities
+hex.workspace = true
+base64.workspace = true
+sha2.workspace = true
+once_cell.workspace = true
+
+# Optional: For binary only
+tower-http = { version = "0.6", features = ["cors"], optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+url = { version = "2", optional = true }
+
+[build-dependencies]
+tonic-build.workspace = true
+prost-build = "0.13"
+prost-reflect-build.workspace = true
+once_cell.workspace = true
+
+[features]
+default = []
+binary = ["tower-http", "tracing-subscriber", "clap", "url"]
+
+[dev-dependencies]
+# For testing
+tempfile = "3.8"
+mockall = "0.12"
