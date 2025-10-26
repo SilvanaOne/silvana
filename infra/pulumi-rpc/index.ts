@@ -268,8 +268,12 @@ export = async () => {
           storageClass: "STANDARD_IA", // Infrequent Access (cheaper)
         },
         {
+          days: 60, // After 2 months
+          storageClass: "GLACIER_IR", // Glacier Instant Retrieval (cheaper, instant access)
+        },
+        {
           days: 365, // After 1 year
-          storageClass: "DEEP_ARCHIVE", // Cheapest storage, still accessible on request
+          storageClass: "DEEP_ARCHIVE", // Cheapest storage, 12-48 hour retrieval
         },
       ],
       // No expiration - data stored forever
