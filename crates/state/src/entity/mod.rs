@@ -12,6 +12,7 @@ pub mod object_lock_queue;
 pub mod lock_request_bundle;
 pub mod jobs;
 pub mod action_seq;
+pub mod job_seq;
 
 // Re-export entities for convenience
 pub use app_instances::Entity as AppInstances;
@@ -26,3 +27,4 @@ pub use object_lock_queue::Entity as ObjectLockQueue;
 pub use lock_request_bundle::Entity as LockRequestBundle;
 pub use jobs::Entity as Jobs;
 pub use action_seq::Entity as ActionSeq;
+pub use job_seq::Entity as JobSeq;

@@ -277,6 +277,20 @@ CREATE TABLE IF NOT EXISTS action_seq (
 COMMENT='Sequence counter for generating gapless action sequences per app instance';
 
 -- ============================================================================
+-- Job Sequence Counter Table for gapless job sequences
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS job_seq (
+    `app_instance_id` VARCHAR(255) PRIMARY KEY,
+    `next_seq` BIGINT UNSIGNED NOT NULL DEFAULT 1,
+
+    -- Foreign key to app_instances for cascade delete
+    CONSTRAINT fk_job_seq_app_instance FOREIGN KEY (`app_instance_id`)
+        REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+COMMENT='Sequence counter for generating gapless job sequences per app instance';
+
+-- ============================================================================
 -- Helper Views (Optional - for common query patterns)
 -- ============================================================================
 

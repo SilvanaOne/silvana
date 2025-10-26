@@ -311,7 +311,9 @@ message GetOptimisticStateRequest {
 }
 
 message GetOptimisticStateResponse {
-  OptimisticState optimistic_state = 1;
+  bool success = 1;
+  string message = 2;
+  optional OptimisticState optimistic_state = 3;
 }
 
 // Proved State operations
@@ -356,7 +358,9 @@ message GetLatestStateRequest {
 }
 
 message GetLatestStateResponse {
-  State state = 1;
+  bool success = 1;
+  string message = 2;
+  optional State state = 3;
 }
 
 message GetStateRangeRequest {
@@ -381,7 +385,9 @@ message GetKVStringRequest {
 }
 
 message GetKVStringResponse {
-  KVStringEntry entry = 1;
+  bool success = 1;
+  string message = 2;
+  optional KVStringEntry entry = 3;
 }
 
 message SetKVStringRequest {
@@ -439,7 +445,9 @@ message GetKVBinaryRequest {
 }
 
 message GetKVBinaryResponse {
-  KVBinaryEntry entry = 1;
+  bool success = 1;
+  string message = 2;
+  optional KVBinaryEntry entry = 3;
 }
 
 message SetKVBinaryRequest {
@@ -527,7 +535,9 @@ message GetObjectRequest {
 }
 
 message GetObjectResponse {
-  Object object = 1;
+  bool success = 1;
+  string message = 2;
+  optional Object object = 3;
 }
 
 message GetObjectVersionsRequest {
@@ -602,24 +612,24 @@ message GetLockQueueResponse {
 message CreateJobRequest {
   JWTAuth auth = 1;
   string app_instance_id = 2;
-  uint64 job_sequence = 3;
-  optional string description = 4;
-  string developer = 5;
-  string agent = 6;
-  string agent_method = 7;
-  optional uint64 block_number = 8;
-  repeated uint64 sequences = 9;
-  repeated uint64 sequences1 = 10;
-  repeated uint64 sequences2 = 11;
-  optional bytes data = 12;
-  optional string data_da = 13;
-  optional int64 interval_ms = 14;         // For periodic jobs
+  optional string description = 3;  // Renumbered from 4
+  string developer = 4;              // Renumbered from 5
+  string agent = 5;                  // Renumbered from 6
+  string agent_method = 6;           // Renumbered from 7
+  optional uint64 block_number = 7;  // Renumbered from 8
+  repeated uint64 sequences = 8;     // Renumbered from 9
+  repeated uint64 sequences1 = 9;    // Renumbered from 10
+  repeated uint64 sequences2 = 10;   // Renumbered from 11
+  optional bytes data = 11;          // Renumbered from 12
+  optional string data_da = 12;      // Renumbered from 13
+  optional int64 interval_ms = 13;   // Renumbered from 14 - For periodic jobs
 }
 
 message CreateJobResponse {
   bool success = 1;
   string message = 2;
-  Job job = 3;
+  uint64 job_sequence = 3;  // The server-assigned sequence
+  Job job = 4;              // Renumbered from 3
 }
 
 message StartJobRequest {
@@ -665,7 +675,9 @@ message GetJobRequest {
 }
 
 message GetJobResponse {
-  Job job = 1;
+  bool success = 1;
+  string message = 2;
+  optional Job job = 3;
 }
 
 message ListJobsRequest {

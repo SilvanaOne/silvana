@@ -606,18 +606,50 @@ impl StateService for StateServiceImpl {
         let auth = self.extract_auth_from_body(&req.auth)?;
         self.verify_ownership(&req.app_instance_id, &auth).await?;
 
-        let sequence = req.sequence.ok_or_else(|| Status::invalid_argument("Sequence required"))?;
+        // Build query based on whether sequence is provided
+        let opt_state = match req.sequence {
+            Some(sequence) => {
+                // Get specific sequence
+                optimistic_state::Entity::find()
+                    .filter(optimistic_state::Column::AppInstanceId.eq(&req.app_instance_id))
+                    .filter(optimistic_state::Column::Sequence.eq(sequence as i64))
+                    .one(self.db.connection())
+                    .await
+                    .map_err(|e| {
+                        warn!("Database error: {}", e);
+                        Status::internal(format!("Failed to fetch optimistic state: {}", e))
+                    })?
+            }
+            None => {
+                // Get latest optimistic state (highest sequence)
+                optimistic_state::Entity::find()
+                    .filter(optimistic_state::Column::AppInstanceId.eq(&req.app_instance_id))
+                    .order_by_desc(optimistic_state::Column::Sequence)
+                    .one(self.db.connection())
+                    .await
+                    .map_err(|e| {
+                        warn!("Database error: {}", e);
+                        Status::internal(format!("Failed to fetch latest optimistic state: {}", e))
+                    })?
+            }
+        };
 
-        let opt_state = optimistic_state::Entity::find()
-            .filter(optimistic_state::Column::AppInstanceId.eq(&req.app_instance_id))
-            .filter(optimistic_state::Column::Sequence.eq(sequence as i64))
-            .one(self.db.connection())
-            .await
-            .map_err(|e| {
-                warn!("Database error: {}", e);
-                Status::internal("Failed to fetch optimistic state")
-            })?
-            .ok_or_else(|| Status::not_found("Optimistic state not found"))?;
+        // Handle not found case gracefully
+        let opt_state = match opt_state {
+            Some(state) => state,
+            None => {
+                let msg = if req.sequence.is_some() {
+                    format!("Optimistic state not found for sequence {}", req.sequence.unwrap())
+                } else {
+                    "No optimistic state found for this app instance".to_string()
+                };
+                return Ok(Response::new(GetOptimisticStateResponse {
+                    success: false,
+                    message: msg,
+                    optimistic_state: None,
+                }));
+            }
+        };
 
         let inline_state = if opt_state.state_data.is_empty() { None } else { Some(opt_state.state_data.clone()) };
         let state_data = self.storage
@@ -635,6 +667,8 @@ impl StateService for StateServiceImpl {
         };
 
         Ok(Response::new(GetOptimisticStateResponse {
+            success: true,
+            message: "Optimistic state found".to_string(),
             optimistic_state: Some(OptimisticState {
                 app_instance_id: opt_state.app_instance_id,
                 sequence: opt_state.sequence as u64,
@@ -779,8 +813,19 @@ impl StateService for StateServiceImpl {
             .order_by_desc(state::Column::Sequence)
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("No proved state found"))?;
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+
+        // Handle not found case gracefully
+        let latest = match latest {
+            Some(state) => state,
+            None => {
+                return Ok(Response::new(GetLatestStateResponse {
+                    success: false,
+                    message: "No proved state found for this app instance".to_string(),
+                    state: None,
+                }));
+            }
+        };
 
         let state_data = if latest.state_da.is_some() || latest.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
             Some(self.storage
@@ -792,6 +837,8 @@ impl StateService for StateServiceImpl {
         };
 
         Ok(Response::new(GetLatestStateResponse {
+            success: true,
+            message: "Latest proved state found".to_string(),
             state: Some(State {
                 app_instance_id: latest.app_instance_id,
                 sequence: latest.sequence as u64,
@@ -943,18 +990,26 @@ impl StateService for StateServiceImpl {
             .filter(app_instance_kv_string::Column::Key.eq(&req.key))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("Key not found"))?;
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
 
-        Ok(Response::new(GetKvStringResponse {
-            entry: Some(KvStringEntry {
-                app_instance_id: entry.app_instance_id,
-                key: entry.key,
-                value: entry.value,
-                created_at: Some(to_timestamp(entry.created_at)),
-                updated_at: Some(to_timestamp(entry.updated_at)),
-            }),
-        }))
+        match entry {
+            Some(entry) => Ok(Response::new(GetKvStringResponse {
+                success: true,
+                message: "Key found".to_string(),
+                entry: Some(KvStringEntry {
+                    app_instance_id: entry.app_instance_id,
+                    key: entry.key,
+                    value: entry.value,
+                    created_at: Some(to_timestamp(entry.created_at)),
+                    updated_at: Some(to_timestamp(entry.updated_at)),
+                }),
+            })),
+            None => Ok(Response::new(GetKvStringResponse {
+                success: false,
+                message: format!("Key '{}' not found", req.key),
+                entry: None,
+            })),
+        }
     }
 
     async fn set_kv_string(
@@ -1134,19 +1189,27 @@ impl StateService for StateServiceImpl {
             .filter(app_instance_kv_binary::Column::Key.eq(req.key.clone()))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("Key not found"))?;
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
 
-        Ok(Response::new(GetKvBinaryResponse {
-            entry: Some(KvBinaryEntry {
-                app_instance_id: entry.app_instance_id,
-                key: entry.key,
-                value: entry.value,
-                value_da: entry.value_da,
-                created_at: Some(to_timestamp(entry.created_at)),
-                updated_at: Some(to_timestamp(entry.updated_at)),
-            }),
-        }))
+        match entry {
+            Some(entry) => Ok(Response::new(GetKvBinaryResponse {
+                success: true,
+                message: "Key found".to_string(),
+                entry: Some(KvBinaryEntry {
+                    app_instance_id: entry.app_instance_id,
+                    key: entry.key.clone(),
+                    value: entry.value,
+                    value_da: entry.value_da,
+                    created_at: Some(to_timestamp(entry.created_at)),
+                    updated_at: Some(to_timestamp(entry.updated_at)),
+                }),
+            })),
+            None => Ok(Response::new(GetKvBinaryResponse {
+                success: false,
+                message: "Key not found".to_string(),
+                entry: None,
+            })),
+        }
     }
 
     async fn set_kv_binary(
@@ -1532,40 +1595,57 @@ impl StateService for StateServiceImpl {
         let auth = self.extract_auth_from_body(&req.auth)?;
 
         // Get object (version-specific or latest)
-        let object = if let Some(version) = req.version {
+        let object_result = if let Some(version) = req.version {
             object_versions::Entity::find()
                 .filter(object_versions::Column::ObjectId.eq(&req.object_id))
                 .filter(object_versions::Column::Version.eq(version as i64))
                 .one(self.db.connection())
                 .await
                 .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-                .ok_or_else(|| Status::not_found("Object version not found"))?
         } else {
             // Get latest from objects table then convert to version format
             let obj = objects::Entity::find_by_id(&req.object_id)
                 .one(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-                .ok_or_else(|| Status::not_found("Object not found"))?;
+                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
 
-            // Check access: owner or shared
-            if obj.owner != auth.public_key && !obj.shared {
-                return Err(Status::permission_denied("Access denied"));
-            }
+            obj.map(|obj| {
+                // Check access: owner or shared
+                if obj.owner != auth.public_key && !obj.shared {
+                    return None;
+                }
 
-            // Convert to version model structure for uniform handling
-            object_versions::Model {
-                id: 0,
-                object_id: obj.object_id,
-                version: obj.version,
-                object_data: obj.object_data,
-                object_da: obj.object_da,
-                object_hash: obj.object_hash,
-                owner: obj.owner,
-                object_type: obj.object_type,
-                shared: obj.shared,
-                previous_tx: obj.previous_tx,
-                created_at: obj.created_at,
+                // Convert to version model structure for uniform handling
+                Some(object_versions::Model {
+                    id: 0,
+                    object_id: obj.object_id,
+                    version: obj.version,
+                    object_data: obj.object_data,
+                    object_da: obj.object_da,
+                    object_hash: obj.object_hash,
+                    owner: obj.owner,
+                    object_type: obj.object_type,
+                    shared: obj.shared,
+                    previous_tx: obj.previous_tx,
+                    created_at: obj.created_at,
+                })
+            }).flatten()
+        };
+
+        // Handle not found case
+        let object = match object_result {
+            Some(obj) => obj,
+            None => {
+                let msg = if let Some(v) = req.version {
+                    format!("Object version {} not found", v)
+                } else {
+                    "Object not found".to_string()
+                };
+                return Ok(Response::new(GetObjectResponse {
+                    success: false,
+                    message: msg,
+                    object: None,
+                }));
             }
         };
 
@@ -1576,6 +1656,8 @@ impl StateService for StateServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to retrieve object data: {}", e)))?;
 
         Ok(Response::new(GetObjectResponse {
+            success: true,
+            message: "Object found".to_string(),
             object: Some(Object {
                 object_id: object.object_id,
                 version: object.version as u64,
@@ -2023,10 +2105,41 @@ impl StateService for StateServiceImpl {
             None
         };
 
-        // Create job
+        // Start transaction with pessimistic locking for gapless sequence generation
+        use sea_orm::{TransactionTrait, DatabaseBackend, Statement};
+        let txn = self.db.connection().begin().await
+            .map_err(|e| Status::internal(format!("Failed to start transaction: {}", e)))?;
+
+        // Get or create sequence counter with FOR UPDATE lock
+        let _insert_result = txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            r#"
+            INSERT INTO job_seq (app_instance_id, next_seq)
+            VALUES (?, 1)
+            ON DUPLICATE KEY UPDATE next_seq = next_seq
+            "#,
+            vec![req.app_instance_id.clone().into()]
+        )).await.map_err(|e| Status::internal(format!("Failed to initialize job sequence: {}", e)))?;
+
+        // Get current sequence with FOR UPDATE lock
+        let seq_result = txn.query_one(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            r#"
+            SELECT next_seq FROM job_seq
+            WHERE app_instance_id = ?
+            FOR UPDATE
+            "#,
+            vec![req.app_instance_id.clone().into()]
+        )).await.map_err(|e| Status::internal(format!("Failed to get job sequence: {}", e)))?
+            .ok_or_else(|| Status::internal("Failed to get job sequence counter"))?;
+
+        let current_seq: i64 = seq_result.try_get("", "next_seq")
+            .map_err(|e| Status::internal(format!("Failed to parse job sequence: {}", e)))?;
+
+        // Create job with assigned sequence
         let job = jobs::ActiveModel {
             app_instance_id: Set(req.app_instance_id.clone()),
-            job_sequence: Set(req.job_sequence as i64),
+            job_sequence: Set(current_seq),
             description: Set(req.description.clone()),
             developer: Set(req.developer.clone()),
             agent: Set(req.agent.clone()),
@@ -2046,9 +2159,26 @@ impl StateService for StateServiceImpl {
             updated_at: Set(now),
         };
 
-        let result = job.insert(self.db.connection()).await.map_err(|e| {
-            Status::internal(format!("Failed to create job: {}", e))
-        })?;
+        let result = job.insert(&txn).await
+            .map_err(|e| Status::internal(format!("Failed to create job: {}", e)))?;
+
+        // Increment counter for next use
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            r#"
+            UPDATE job_seq
+            SET next_seq = next_seq + 1
+            WHERE app_instance_id = ?
+            "#,
+            vec![req.app_instance_id.clone().into()]
+        )).await.map_err(|e| Status::internal(format!("Failed to update job sequence: {}", e)))?;
+
+        // Commit transaction
+        txn.commit().await
+            .map_err(|e| Status::internal(format!("Failed to commit transaction: {}", e)))?;
+
+        info!("Created job {}/{} for {}/{}",
+            req.app_instance_id, current_seq, req.developer, req.agent);
 
         // Convert to proto
         let proto_job = Job {
@@ -2075,7 +2205,8 @@ impl StateService for StateServiceImpl {
 
         Ok(Response::new(CreateJobResponse {
             success: true,
-            message: format!("Job {}/{} created", req.app_instance_id, req.job_sequence),
+            message: "Job created successfully".to_string(),
+            job_sequence: current_seq as u64,
             job: Some(proto_job),
         }))
     }
@@ -2301,8 +2432,19 @@ impl StateService for StateServiceImpl {
             .filter(jobs::Column::JobSequence.eq(req.job_sequence as i64))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::not_found("Job not found"))?;
+            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+
+        // Handle not found case
+        let job = match job {
+            Some(j) => j,
+            None => {
+                return Ok(Response::new(GetJobResponse {
+                    success: false,
+                    message: format!("Job {}/{} not found", req.app_instance_id, req.job_sequence),
+                    job: None,
+                }));
+            }
+        };
 
         // Convert to proto
         let sequences: Vec<u64> = job.sequences.as_ref()
@@ -2346,6 +2488,8 @@ impl StateService for StateServiceImpl {
         };
 
         Ok(Response::new(GetJobResponse {
+            success: true,
+            message: "Job found".to_string(),
             job: Some(proto_job),
         }))
     }
