@@ -261,18 +261,16 @@ message ListAppInstancesResponse {
 message SubmitUserActionRequest {
   JWTAuth auth = 1;
   string app_instance_id = 2;
-  uint64 sequence = 3;
-  string action_type = 4;
-  bytes action_data = 5;
-  optional string action_da = 6;
-  optional google.protobuf.Struct metadata = 7;  // Optional application metadata
+  string action_type = 3;  // Renumbered from 4
+  bytes action_data = 4;   // Renumbered from 5
+  optional string action_da = 5;  // Renumbered from 6
+  optional google.protobuf.Struct metadata = 6;  // Renumbered from 7 - Optional application metadata
 }
 
 message SubmitUserActionResponse {
   bool success = 1;
   string message = 2;
-  UserAction user_action = 3;
-  optional OptimisticState optimistic_state = 4;
+  uint64 action_sequence = 3;  // The server-assigned sequence number
 }
 
 message GetUserActionsRequest {

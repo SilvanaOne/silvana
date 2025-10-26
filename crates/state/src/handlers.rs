@@ -3,7 +3,8 @@
 use anyhow::Result;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, NotSet, PaginatorTrait, QueryFilter, QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, NotSet, PaginatorTrait,
+    QueryFilter, QueryOrder, Set,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -15,8 +16,9 @@ use crate::{
     concurrency::ConcurrencyController,
     database::Database,
     entity::{
-        app_instance_kv_binary, app_instance_kv_string, app_instances, jobs, object_lock_queue,
-        object_versions, objects, optimistic_state, state, user_actions, lock_request_bundle,
+        app_instance_kv_binary, app_instance_kv_string, app_instances, jobs,
+        object_lock_queue, object_versions, objects, optimistic_state, state, user_actions,
+        lock_request_bundle,
     },
     proto::state_service_server::StateService,
     proto::*,
@@ -376,11 +378,43 @@ impl StateService for StateServiceImpl {
         let action_data = inline_data.unwrap_or_default();
         let action_da = s3_key.or(req.action_da);
 
-        // Create user action entity
+        // Start transaction with pessimistic locking for gapless sequence generation
+        use sea_orm::{TransactionTrait, DatabaseBackend, Statement};
+        let txn = self.db.connection().begin().await
+            .map_err(|e| Status::internal(format!("Failed to start transaction: {}", e)))?;
+
+        // Get or create sequence counter with FOR UPDATE lock
+        // First ensure the counter exists, then select it with lock
+        let _insert_result = txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            r#"
+            INSERT INTO action_seq (app_instance_id, next_seq)
+            VALUES (?, 1)
+            ON DUPLICATE KEY UPDATE next_seq = next_seq
+            "#,
+            vec![req.app_instance_id.clone().into()]
+        )).await.map_err(|e| Status::internal(format!("Failed to initialize sequence: {}", e)))?;
+
+        // Now get the current sequence with FOR UPDATE lock
+        let seq_result = txn.query_one(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            r#"
+            SELECT next_seq FROM action_seq
+            WHERE app_instance_id = ?
+            FOR UPDATE
+            "#,
+            vec![req.app_instance_id.clone().into()]
+        )).await.map_err(|e| Status::internal(format!("Failed to get sequence: {}", e)))?
+            .ok_or_else(|| Status::internal("Failed to get sequence counter"))?;
+
+        let current_seq: i64 = seq_result.try_get("", "next_seq")
+            .map_err(|e| Status::internal(format!("Failed to parse sequence: {}", e)))?;
+
+        // Create user action entity with the assigned sequence
         let user_action = user_actions::ActiveModel {
             id: NotSet,
             app_instance_id: Set(req.app_instance_id.clone()),
-            sequence: Set(req.sequence as i64),
+            sequence: Set(current_seq),
             action_type: Set(req.action_type.clone()),
             action_data: Set(action_data),
             action_hash: Set(action_hash.clone()),
@@ -390,40 +424,35 @@ impl StateService for StateServiceImpl {
             created_at: Set(Utc::now()),
         };
 
-        // Insert to database
-        let result = user_action
-            .insert(self.db.connection())
+        // Insert user action with the assigned sequence
+        let _result = user_action
+            .insert(&txn)
             .await
-            .map_err(|e| {
-                if e.to_string().contains("Duplicate") {
-                    Status::already_exists(format!("Action with sequence {} already exists", req.sequence))
-                } else {
-                    warn!("Database error submitting user action: {}", e);
-                    Status::internal("Failed to submit user action")
-                }
-            })?;
+            .map_err(|e| Status::internal(format!("Failed to insert action: {}", e)))?;
+
+        // Increment the counter for next use
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            r#"
+            UPDATE action_seq
+            SET next_seq = next_seq + 1
+            WHERE app_instance_id = ?
+            "#,
+            vec![req.app_instance_id.clone().into()]
+        )).await.map_err(|e| Status::internal(format!("Failed to update sequence: {}", e)))?;
+
+        // Commit transaction
+        txn.commit().await
+            .map_err(|e| Status::internal(format!("Failed to commit transaction: {}", e)))?;
 
         info!("Submitted user action {} for app {} with sequence {}",
-            req.action_type, req.app_instance_id, req.sequence);
+            req.action_type, req.app_instance_id, current_seq);
 
-        // TODO: Trigger optimistic state computation asynchronously
-        // For now, return without optimistic state
-
+        // Return simplified response with just the sequence number
         Ok(Response::new(SubmitUserActionResponse {
             success: true,
             message: "User action submitted successfully".to_string(),
-            user_action: Some(UserAction {
-                app_instance_id: result.app_instance_id,
-                sequence: result.sequence as u64,
-                action_type: result.action_type,
-                action_data: result.action_data,
-                action_hash: result.action_hash,
-                action_da: result.action_da,
-                submitter: result.submitter,
-                created_at: Some(to_timestamp(result.created_at)),
-                metadata: result.metadata.and_then(json_to_prost_struct),
-            }),
-            optimistic_state: None, // TODO: Compute optimistic state
+            action_sequence: current_seq as u64,
         }))
     }
 
