@@ -8,7 +8,7 @@ use sea_orm::{entity::prelude::*, sea_query::StringLen};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub app_instance_id: String,
-    #[sea_orm(primary_key, auto_increment = false, column_type = "VarBinary(StringLen::N(255))")]
+    #[sea_orm(primary_key, auto_increment = false, column_type = "VarBinary(StringLen::N(1024))")]
     pub key: Vec<u8>,
     #[sea_orm(column_type = "Blob")]
     pub value: Vec<u8>,

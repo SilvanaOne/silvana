@@ -20,6 +20,8 @@ pub struct Model {
     pub transition_da: Option<String>,  // S3 key for large transition
     #[sea_orm(column_type = "Binary(32)", nullable)]
     pub commitment: Option<Vec<u8>>,  // State commitment (32 bytes)
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub metadata: Option<Json>,  // Optional application metadata
     pub computed_at: DateTimeUtc,
 }
 

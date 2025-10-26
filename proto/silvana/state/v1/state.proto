@@ -4,6 +4,7 @@ package silvana.state.v1;
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "github.com/SilvanaOne/silvana/proto;state";
 
@@ -77,6 +78,7 @@ message UserAction {
   optional string action_da = 6;            // S3 key for large action data
   string submitter = 7;
   google.protobuf.Timestamp created_at = 8;
+  optional google.protobuf.Struct metadata = 9;  // Optional application metadata
 }
 
 // Optimistic State message
@@ -90,6 +92,7 @@ message OptimisticState {
   optional string transition_da = 7;        // S3 key for large transition
   optional bytes commitment = 8;            // State commitment
   google.protobuf.Timestamp computed_at = 9;
+  optional google.protobuf.Struct metadata = 10;  // Optional application metadata
 }
 
 // State message (proved state)
@@ -104,6 +107,7 @@ message State {
   optional bytes proof_hash = 8;            // Hash of proof
   optional bytes commitment = 9;            // State commitment
   google.protobuf.Timestamp proved_at = 10;
+  optional google.protobuf.Struct metadata = 11;  // Optional application metadata
 }
 
 // Object message
@@ -261,6 +265,7 @@ message SubmitUserActionRequest {
   string action_type = 4;
   bytes action_data = 5;
   optional string action_da = 6;
+  optional google.protobuf.Struct metadata = 7;  // Optional application metadata
 }
 
 message SubmitUserActionResponse {
@@ -292,6 +297,7 @@ message UpdateOptimisticStateRequest {
   optional bytes transition_data = 7;
   optional string transition_da = 8;
   optional bytes commitment = 9;
+  optional google.protobuf.Struct metadata = 10;  // Optional application metadata
 }
 
 message UpdateOptimisticStateResponse {
@@ -322,6 +328,7 @@ message SubmitProvedStateRequest {
   optional string proof_da = 8;
   optional bytes proof_hash = 9;
   optional bytes commitment = 10;
+  optional google.protobuf.Struct metadata = 11;  // Optional application metadata
 }
 
 message SubmitProvedStateResponse {

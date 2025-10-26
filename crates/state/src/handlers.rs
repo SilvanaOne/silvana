@@ -5,6 +5,7 @@ use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, NotSet, PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
@@ -28,6 +29,69 @@ fn to_timestamp(dt: chrono::DateTime<Utc>) -> prost_types::Timestamp {
         seconds: dt.timestamp(),
         nanos: dt.timestamp_subsec_nanos() as i32,
     }
+}
+
+/// Convert prost_types::Struct to serde_json::Value
+fn prost_struct_to_json(s: prost_types::Struct) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (k, v) in s.fields {
+        map.insert(k, prost_value_to_json(v));
+    }
+    serde_json::Value::Object(map)
+}
+
+/// Convert prost_types::Value to serde_json::Value
+fn prost_value_to_json(v: prost_types::Value) -> serde_json::Value {
+    use prost_types::value::Kind;
+    match v.kind {
+        Some(Kind::NullValue(_)) => serde_json::Value::Null,
+        Some(Kind::NumberValue(n)) => serde_json::json!(n),
+        Some(Kind::StringValue(s)) => serde_json::Value::String(s),
+        Some(Kind::BoolValue(b)) => serde_json::Value::Bool(b),
+        Some(Kind::StructValue(s)) => prost_struct_to_json(s),
+        Some(Kind::ListValue(l)) => {
+            serde_json::Value::Array(l.values.into_iter().map(prost_value_to_json).collect())
+        }
+        None => serde_json::Value::Null,
+    }
+}
+
+/// Convert serde_json::Value to prost_types::Struct
+fn json_to_prost_struct(val: serde_json::Value) -> Option<prost_types::Struct> {
+    if let serde_json::Value::Object(map) = val {
+        let mut fields = BTreeMap::new();
+        for (k, v) in map {
+            fields.insert(k, json_to_prost_value(v));
+        }
+        Some(prost_types::Struct { fields })
+    } else {
+        None
+    }
+}
+
+/// Convert serde_json::Value to prost_types::Value
+fn json_to_prost_value(val: serde_json::Value) -> prost_types::Value {
+    use prost_types::value::Kind;
+    let kind = match val {
+        serde_json::Value::Null => Some(Kind::NullValue(0)),
+        serde_json::Value::Bool(b) => Some(Kind::BoolValue(b)),
+        serde_json::Value::Number(n) => {
+            Some(Kind::NumberValue(n.as_f64().unwrap_or(0.0)))
+        }
+        serde_json::Value::String(s) => Some(Kind::StringValue(s)),
+        serde_json::Value::Array(arr) => {
+            let values = arr.into_iter().map(json_to_prost_value).collect();
+            Some(Kind::ListValue(prost_types::ListValue { values }))
+        }
+        serde_json::Value::Object(map) => {
+            let mut fields = BTreeMap::new();
+            for (k, v) in map {
+                fields.insert(k, json_to_prost_value(v));
+            }
+            Some(Kind::StructValue(prost_types::Struct { fields }))
+        }
+    };
+    prost_types::Value { kind }
 }
 
 /// Calculate the next binary prefix for range queries
@@ -322,6 +386,7 @@ impl StateService for StateServiceImpl {
             action_hash: Set(action_hash.clone()),
             action_da: Set(action_da.clone()),
             submitter: Set(auth.public_key.clone()),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
             created_at: Set(Utc::now()),
         };
 
@@ -356,6 +421,7 @@ impl StateService for StateServiceImpl {
                 action_da: result.action_da,
                 submitter: result.submitter,
                 created_at: Some(to_timestamp(result.created_at)),
+                metadata: result.metadata.and_then(json_to_prost_struct),
             }),
             optimistic_state: None, // TODO: Compute optimistic state
         }))
@@ -416,6 +482,7 @@ impl StateService for StateServiceImpl {
                 action_da: action.action_da,
                 submitter: action.submitter,
                 created_at: Some(to_timestamp(action.created_at)),
+                metadata: action.metadata.and_then(json_to_prost_struct),
             });
         }
 
@@ -469,6 +536,7 @@ impl StateService for StateServiceImpl {
             transition_data: Set(transition_data.clone()), // Option<Vec<u8>>
             transition_da: Set(transition_da),
             commitment: Set(req.commitment),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
             computed_at: Set(Utc::now()),
         };
 
@@ -496,6 +564,7 @@ impl StateService for StateServiceImpl {
                 transition_da: result.transition_da,
                 commitment: result.commitment,
                 computed_at: Some(to_timestamp(result.computed_at)),
+                metadata: result.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -547,6 +616,7 @@ impl StateService for StateServiceImpl {
                 transition_da: opt_state.transition_da,
                 commitment: opt_state.commitment,
                 computed_at: Some(to_timestamp(opt_state.computed_at)),
+                metadata: opt_state.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -590,6 +660,7 @@ impl StateService for StateServiceImpl {
             proof_da: Set(proof_da),
             proof_hash: Set(req.proof_hash),
             commitment: Set(req.commitment),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
             proved_at: Set(Utc::now()),
         };
 
@@ -618,6 +689,7 @@ impl StateService for StateServiceImpl {
                 proof_hash: result.proof_hash,
                 commitment: result.commitment,
                 proved_at: Some(to_timestamp(result.proved_at)),
+                metadata: result.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -660,6 +732,7 @@ impl StateService for StateServiceImpl {
                 proof_hash: proved_state.proof_hash,
                 commitment: proved_state.commitment,
                 proved_at: Some(to_timestamp(proved_state.proved_at)),
+                metadata: proved_state.metadata.and_then(json_to_prost_struct),
             })),
         }))
     }
@@ -701,6 +774,7 @@ impl StateService for StateServiceImpl {
                 proof_hash: latest.proof_hash,
                 commitment: latest.commitment,
                 proved_at: Some(to_timestamp(latest.proved_at)),
+                metadata: latest.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -738,6 +812,7 @@ impl StateService for StateServiceImpl {
                 action_da: action.action_da,
                 submitter: action.submitter,
                 created_at: Some(to_timestamp(action.created_at)),
+                metadata: action.metadata.and_then(json_to_prost_struct),
             });
         }
 
@@ -774,6 +849,7 @@ impl StateService for StateServiceImpl {
                 transition_da: opt.transition_da,
                 commitment: opt.commitment,
                 computed_at: Some(to_timestamp(opt.computed_at)),
+                metadata: opt.metadata.and_then(json_to_prost_struct),
             });
         }
 
@@ -814,6 +890,7 @@ impl StateService for StateServiceImpl {
                 proof_hash: s.proof_hash,
                 commitment: s.commitment,
                 proved_at: Some(to_timestamp(s.proved_at)),
+                metadata: s.metadata.and_then(json_to_prost_struct),
             });
         }
 

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS user_actions (
     `action_hash` BINARY(32) NOT NULL,     -- Hash of action data
     `action_da` VARCHAR(255) NULL,         -- S3 key for large action data
     `submitter` VARCHAR(255) NOT NULL,     -- Who submitted the action
+    `metadata` JSON NULL,                  -- Optional application metadata
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_app_sequence (`app_instance_id`, `sequence`),
     INDEX idx_app_instance_id (`app_instance_id`),
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS optimistic_state (
     `transition_data` BLOB NULL,           -- Transition delta
     `transition_da` VARCHAR(255) NULL,     -- S3 key for large transition
     `commitment` BINARY(32) NULL,          -- State commitment
+    `metadata` JSON NULL,                  -- Optional application metadata
     `computed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_app_sequence (`app_instance_id`, `sequence`),
     INDEX idx_app_instance_id (`app_instance_id`),
@@ -75,6 +77,7 @@ CREATE TABLE IF NOT EXISTS state (
     `proof_da` VARCHAR(255) NULL,          -- S3 key for large proof
     `proof_hash` BINARY(32) NULL,          -- Hash of proof
     `commitment` BINARY(32) NULL,          -- State commitment
+    `metadata` JSON NULL,                  -- Optional application metadata
     `proved_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_app_sequence (`app_instance_id`, `sequence`),
     INDEX idx_app_instance_id (`app_instance_id`),
@@ -152,12 +155,12 @@ COMMENT='String key-value storage per app instance';
 -- 8. App Instance KV Binary Table - Binary key-value pairs
 CREATE TABLE IF NOT EXISTS app_instance_kv_binary (
     `app_instance_id` VARCHAR(255) NOT NULL,
-    `key` VARBINARY(255) NOT NULL,
+    `key` VARBINARY(1024) NOT NULL,
     `value` BLOB NOT NULL,
     `value_da` VARCHAR(255) NULL,          -- S3 reference for large values
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`app_instance_id`, `key`(255)),
+    PRIMARY KEY (`app_instance_id`, `key`) CLUSTERED,
     CONSTRAINT fk_kv_binary_app_instance FOREIGN KEY (`app_instance_id`)
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

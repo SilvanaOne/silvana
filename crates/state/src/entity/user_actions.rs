@@ -17,6 +17,8 @@ pub struct Model {
     pub action_hash: Vec<u8>,  // Hash of action data (32 bytes)
     pub action_da: Option<String>,  // S3 key for large action data
     pub submitter: String,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub metadata: Option<Json>,  // Optional application metadata
     pub created_at: DateTimeUtc,
 }
 

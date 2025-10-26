@@ -22,6 +22,8 @@ pub struct Model {
     pub proof_hash: Option<Vec<u8>>,  // Hash of proof (32 bytes)
     #[sea_orm(column_type = "Binary(32)", nullable)]
     pub commitment: Option<Vec<u8>>,  // State commitment (32 bytes)
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub metadata: Option<Json>,  // Optional application metadata
     pub proved_at: DateTimeUtc,
 }
 
