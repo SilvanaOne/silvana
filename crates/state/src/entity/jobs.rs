@@ -30,10 +30,10 @@ pub struct Model {
     pub data: Option<Vec<u8>>,  // vector<u8> as BLOB
     pub data_da: Option<String>,  // S3 reference for large job data
 
-    // Status (matching Move enum)
-    pub status: String,  // PENDING, RUNNING, COMPLETED, FAILED
+    // Status (matching Move enum and SQL ENUM)
+    pub status: String,  // PENDING, RUNNING, COMPLETED, FAILED (maps to SQL ENUM)
     #[sea_orm(column_type = "Text", nullable)]
-    pub error_message: Option<String>,  // For Failed status
+    pub error_message: Option<String>,  // For FAILED status
     pub attempts: i16,
 
     // Periodic scheduling fields (NULL for one-time jobs)

@@ -44,7 +44,8 @@ enum JobStatus {
   JOB_STATUS_UNSPECIFIED = 0;
   JOB_STATUS_PENDING = 1;
   JOB_STATUS_RUNNING = 2;
-  JOB_STATUS_FAILED = 3;
+  JOB_STATUS_COMPLETED = 3;
+  JOB_STATUS_FAILED = 4;
 }
 
 // ============================================================================

@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, TokenData, Validation};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 

@@ -2,12 +2,12 @@
 
 use anyhow::{anyhow, Result};
 use sea_orm::{
-    Database as SeaOrmDatabase, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
+    Database as SeaOrmDatabase, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
     TransactionTrait, ColumnTrait, Set, ActiveModelTrait, PaginatorTrait,
     Condition, ConnectionTrait,
 };
 use std::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::entity::*;
 

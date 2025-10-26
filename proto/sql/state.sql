@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     `data_da` VARCHAR(255) NULL,               -- S3 reference for large job data
 
     -- Status (matching Move enum)
-    `status` ENUM('PENDING', 'RUNNING', 'FAILED') NOT NULL DEFAULT 'PENDING',
+    `status` ENUM('PENDING', 'RUNNING', 'COMPLETED', 'FAILED') NOT NULL DEFAULT 'PENDING',
     `error_message` TEXT NULL,                 -- For Failed status
     `attempts` TINYINT UNSIGNED DEFAULT 0,
 

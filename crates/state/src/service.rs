@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tonic::transport::Server;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::{
     concurrency::ConcurrencyController,
@@ -48,7 +48,7 @@ impl StateServiceRunner {
         // Initialize concurrency controller
         let concurrency = Arc::new(ConcurrencyController::new(db.connection_arc()));
 
-        // Start background cleanup task
+        // Start background cleanup task for locks
         concurrency.clone().start_cleanup_task();
 
         Ok(Self {
@@ -64,11 +64,14 @@ impl StateServiceRunner {
         let addr = self.config.listen_addr;
 
         // Create service implementation
-        let service = StateServiceImpl::new(
+        let service = Arc::new(StateServiceImpl::new(
             self.db.clone(),
             self.storage,
             self.concurrency.clone(),
-        );
+        ));
+
+        // Start background cleanup task for completed jobs
+        service.clone().start_jobs_cleanup_task();
 
         // Build server with conditional reflection
         let server = if self.config.enable_reflection {
@@ -77,10 +80,10 @@ impl StateServiceRunner {
                 .build_v1alpha()?;
             Server::builder()
                 .add_service(reflection)
-                .add_service(StateServiceServer::new(service))
+                .add_service(StateServiceServer::from_arc(service.clone()))
         } else {
             Server::builder()
-                .add_service(StateServiceServer::new(service))
+                .add_service(StateServiceServer::from_arc(service.clone()))
         };
 
         info!("Starting state service on {}", addr);
