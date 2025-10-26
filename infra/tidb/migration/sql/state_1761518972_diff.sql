@@ -1,13 +1,4 @@
--- TiDB State Management Schema
--- This schema implements private state management for Silvana zkRollup system
--- All tables enforce Ed25519 JWT authentication through owner fields and foreign keys
-
--- ============================================================================
--- Core Tables
--- ============================================================================
-
--- 1. App Instances Table - Core authorization table
--- All other tables reference this for ownership verification
+-- dry run --
 CREATE TABLE IF NOT EXISTS app_instances (
     `app_instance_id` VARCHAR(255) PRIMARY KEY,
     `owner` VARCHAR(64) NOT NULL,          -- Ed25519 public key (hex), NOT NULL for security
@@ -19,8 +10,6 @@ CREATE TABLE IF NOT EXISTS app_instances (
     INDEX idx_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='App instances with Ed25519 ownership for JWT authentication';
-
--- 2. User Actions Table - Input actions that trigger state changes
 CREATE TABLE IF NOT EXISTS user_actions (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `app_instance_id` VARCHAR(255) NOT NULL,
@@ -41,8 +30,6 @@ CREATE TABLE IF NOT EXISTS user_actions (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='User actions that trigger state transitions';
-
--- 3. Optimistic State Table - Fast state calculation without proof
 CREATE TABLE IF NOT EXISTS optimistic_state (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `app_instance_id` VARCHAR(255) NOT NULL,
@@ -64,8 +51,6 @@ CREATE TABLE IF NOT EXISTS optimistic_state (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Optimistic state calculations for fast feedback';
-
--- 4. State Table - Final proved state with ZK proof
 CREATE TABLE IF NOT EXISTS state (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `app_instance_id` VARCHAR(255) NOT NULL,
@@ -88,12 +73,6 @@ CREATE TABLE IF NOT EXISTS state (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Final proved states with ZK proofs';
-
--- ============================================================================
--- Object Storage Tables
--- ============================================================================
-
--- 5. Objects Table - Latest version of each object (cache)
 CREATE TABLE IF NOT EXISTS objects (
     `object_id` VARCHAR(64) PRIMARY KEY,   -- Hex string ED25519 address
     `version` BIGINT NOT NULL,              -- Current version (Lamport timestamp)
@@ -113,8 +92,6 @@ CREATE TABLE IF NOT EXISTS objects (
     UNIQUE KEY uk_object_version (`object_id`, `version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Current version of objects with Ed25519 ownership';
-
--- 6. Object Versions Table - Complete version history
 CREATE TABLE IF NOT EXISTS object_versions (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `object_id` VARCHAR(64) NOT NULL,      -- Object identifier
@@ -133,12 +110,6 @@ CREATE TABLE IF NOT EXISTS object_versions (
     INDEX idx_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Complete version history of all objects';
-
--- ============================================================================
--- Key-Value Storage Tables
--- ============================================================================
-
--- 7. App Instance KV String Table - String key-value pairs
 CREATE TABLE IF NOT EXISTS app_instance_kv_string (
     `app_instance_id` VARCHAR(255) NOT NULL,
     `key` VARCHAR(255) NOT NULL,
@@ -151,8 +122,6 @@ CREATE TABLE IF NOT EXISTS app_instance_kv_string (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='String key-value storage per app instance';
-
--- 8. App Instance KV Binary Table - Binary key-value pairs
 CREATE TABLE IF NOT EXISTS app_instance_kv_binary (
     `app_instance_id` VARCHAR(255) NOT NULL,
     `key` VARBINARY(1024) NOT NULL,
@@ -165,12 +134,6 @@ CREATE TABLE IF NOT EXISTS app_instance_kv_binary (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Binary key-value storage per app instance';
-
--- ============================================================================
--- Queue Management Tables
--- ============================================================================
-
--- 9. Object Lock Queue Table - FIFO queue for object locking
 CREATE TABLE IF NOT EXISTS object_lock_queue (
     `object_id` VARCHAR(64) NOT NULL,          -- Object being locked
     `req_id` VARCHAR(64) NOT NULL,             -- Request identifier (UUID)
@@ -189,8 +152,6 @@ CREATE TABLE IF NOT EXISTS object_lock_queue (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='FIFO queue for deadlock-free object locking';
-
--- 10. Lock Request Bundle Table - Bundle metadata for atomic locks
 CREATE TABLE IF NOT EXISTS lock_request_bundle (
     `req_id` VARCHAR(64) PRIMARY KEY,
     `app_instance_id` VARCHAR(255) NOT NULL,
@@ -211,12 +172,6 @@ CREATE TABLE IF NOT EXISTS lock_request_bundle (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Bundle metadata for all-or-nothing lock acquisition';
-
--- ============================================================================
--- Job Management Table
--- ============================================================================
-
--- 11. Jobs Table - Async job management following Move contract structure
 CREATE TABLE IF NOT EXISTS jobs (
     `app_instance_id` VARCHAR(255) NOT NULL,
     `job_sequence` BIGINT NOT NULL,
@@ -261,11 +216,6 @@ CREATE TABLE IF NOT EXISTS jobs (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Job queue for async operations following Move contract structure';
-
--- ============================================================================
--- Sequence Counter Table for gapless action sequences
--- ============================================================================
-
 CREATE TABLE IF NOT EXISTS action_seq (
     `app_instance_id` VARCHAR(255) PRIMARY KEY,
     `next_seq` BIGINT UNSIGNED NOT NULL DEFAULT 1,
@@ -275,11 +225,6 @@ CREATE TABLE IF NOT EXISTS action_seq (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Sequence counter for generating gapless action sequences per app instance';
-
--- ============================================================================
--- Job Sequence Counter Table for gapless job sequences
--- ============================================================================
-
 CREATE TABLE IF NOT EXISTS job_seq (
     `app_instance_id` VARCHAR(255) PRIMARY KEY,
     `next_seq` BIGINT UNSIGNED NOT NULL DEFAULT 1,
@@ -289,40 +234,3 @@ CREATE TABLE IF NOT EXISTS job_seq (
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Sequence counter for generating gapless job sequences per app instance';
-
--- ============================================================================
--- Helper Views (Optional - for common query patterns)
--- ============================================================================
--- NOTE: Views are commented out because mysqldef doesn't support CREATE OR REPLACE VIEW
--- You can create these views manually after applying the schema with:
--- mysql -u <user> -p -h <host> -P <port> <database> < create_views.sql
---
--- -- View for latest state per app instance
--- CREATE OR REPLACE VIEW latest_state AS
--- SELECT s.*
--- FROM state s
--- INNER JOIN (
---     SELECT app_instance_id, MAX(sequence) as max_sequence
---     FROM state
---     GROUP BY app_instance_id
--- ) latest ON s.app_instance_id = latest.app_instance_id
---     AND s.sequence = latest.max_sequence;
---
--- -- View for pending jobs ready to run
--- CREATE OR REPLACE VIEW pending_jobs AS
--- SELECT *
--- FROM jobs
--- WHERE status = 'PENDING'
---   AND (next_scheduled_at IS NULL OR next_scheduled_at <= NOW(6))
--- ORDER BY job_sequence;
---
--- -- View for active locks
--- CREATE OR REPLACE VIEW active_locks AS
--- SELECT *
--- FROM object_lock_queue
--- WHERE status = 'GRANTED'
---   AND lease_until > NOW(6);
-
--- ============================================================================
--- End of Schema
--- ============================================================================

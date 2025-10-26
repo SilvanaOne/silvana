@@ -86,7 +86,7 @@ check-state-database-url:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze
+.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -106,7 +106,7 @@ help: ## Show this help message
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|apply-ddl-state|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🔧 DEVELOPMENT & DEBUGGING:"
-	@grep -E '^(clean-dev|dev-reset|show-tables|show-schema|validate-schema|check-schema):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(clean-dev|dev-reset|show-tables|show-state-tables|show-schema|show-state-schema|validate-schema|check-schema):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🔐 SECRET MANAGEMENT & CONFIG:"
 	@grep -E '^(store-secret|retrieve-secret|write-config|read-config):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -477,13 +477,24 @@ read-config: ## Read configuration from RPC server (requires: CHAIN=[devnet|test
 	eval $$COMMAND
 
 # Utility targets
-show-tables: check-database-url ## Show all tables in the database
+show-tables: check-database-url ## Show all tables in the RPC database
 	@echo "📋 Tables in database:"
 	@DB_URL="$(call load_database_url)"; \
 	cargo run --manifest-path infra/tidb/proto-to-ddl/Cargo.toml --release -- \
 		list-tables --database-url "$$DB_URL"
 
-show-schema: check-database-url ## Show schema for all tables  
+show-state-tables: check-state-database-url ## Show all tables in the state database
+	@echo "📋 Tables in state database:"
+	@STATE_DB_URL=$$(grep "^STATE_DATABASE_URL=" .env | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$$//'); \
+	export STATE_DB_USER=$$(echo "$$STATE_DB_URL" | sed 's|mysql://||' | sed 's|\.root:.*||').root; \
+	export STATE_DB_PASS=$$(echo "$$STATE_DB_URL" | sed 's|.*\.root:||' | sed 's|@.*||'); \
+	export STATE_DB_HOST=$$(echo "$$STATE_DB_URL" | sed 's|.*@||' | sed 's|:.*||'); \
+	export STATE_DB_PORT=$$(echo "$$STATE_DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
+	export STATE_DB_NAME=$$(echo "$$STATE_DB_URL" | sed 's|.*/||'); \
+	mysqldef --user=$$STATE_DB_USER --password=$$STATE_DB_PASS --host=$$STATE_DB_HOST --port=$$STATE_DB_PORT $$STATE_DB_NAME \
+		--export 2>/dev/null | grep "^CREATE TABLE" | sed 's/CREATE TABLE //' | sed 's/ (.*$$//' | sed 's/`//g' || echo "❌ Could not retrieve tables"
+
+show-schema: check-database-url ## Show schema for all tables in RPC database  
 	@echo "📊 Database schema:"
 	@DB_URL="$(call load_database_url)"; \
 	export DB_USER=$$(echo "$$DB_URL" | sed 's|mysql://||' | sed 's|:.*||'); \
@@ -499,6 +510,17 @@ show-schema: check-database-url ## Show schema for all tables
 		mysql --user=$$DB_USER --password=$$DB_PASS --host=$$DB_HOST --port=$$DB_PORT $$DB_NAME \
 			--execute="DESCRIBE $$table;" 2>/dev/null || echo "❌ Could not describe table $$table"; \
 	done || echo "❌ Could not retrieve schema"
+
+show-state-schema: check-state-database-url ## Show schema for all tables in state database
+	@echo "📊 State database schema:"
+	@STATE_DB_URL=$$(grep "^STATE_DATABASE_URL=" .env | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$$//'); \
+	export STATE_DB_USER=$$(echo "$$STATE_DB_URL" | sed 's|mysql://||' | sed 's|\.root:.*||').root; \
+	export STATE_DB_PASS=$$(echo "$$STATE_DB_URL" | sed 's|.*\.root:||' | sed 's|@.*||'); \
+	export STATE_DB_HOST=$$(echo "$$STATE_DB_URL" | sed 's|.*@||' | sed 's|:.*||'); \
+	export STATE_DB_PORT=$$(echo "$$STATE_DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
+	export STATE_DB_NAME=$$(echo "$$STATE_DB_URL" | sed 's|.*/||'); \
+	mysqldef --user=$$STATE_DB_USER --password=$$STATE_DB_PASS --host=$$STATE_DB_HOST --port=$$STATE_DB_PORT $$STATE_DB_NAME \
+		--export 2>/dev/null || echo "❌ Could not retrieve schema"
 
 validate-schema: check-database-url check-tools ## Validate that database schema matches proto definitions
 	@echo "🔍 Validating schema consistency..."
