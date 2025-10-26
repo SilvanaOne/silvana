@@ -15,6 +15,13 @@ define load_database_url
 	fi)
 endef
 
+# Function to load STATE_DATABASE_URL from .env file
+define load_state_database_url
+	$(shell if [ -f .env ] && grep -q "^STATE_DATABASE_URL=" .env; then \
+		grep "^STATE_DATABASE_URL=" .env | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$$//'; \
+	fi)
+endef
+
 # Database configuration check
 check-database-url:
 	@if [ ! -f .env ]; then \
@@ -51,9 +58,35 @@ check-database-url:
 		exit 1; \
 	fi
 
+# State database configuration check
+check-state-database-url:
+	@if [ ! -f .env ]; then \
+		echo "❌ ERROR: .env file not found"; \
+		echo ""; \
+		echo "Please create a .env file with STATE_DATABASE_URL:"; \
+		echo "  echo 'STATE_DATABASE_URL=mysql://user:pass@host:port/database' >> .env"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if ! grep -q "^STATE_DATABASE_URL=" .env; then \
+		echo "❌ ERROR: STATE_DATABASE_URL not found in .env file"; \
+		echo ""; \
+		echo "Please add STATE_DATABASE_URL to your .env file:"; \
+		echo "  echo 'STATE_DATABASE_URL=mysql://469eCuUizFHZ892.root:pass@host:port/test' >> .env"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@STATE_DB_URL="$(call load_state_database_url)"; \
+	if [ -z "$$STATE_DB_URL" ]; then \
+		echo "❌ ERROR: STATE_DATABASE_URL value is empty in .env file"; \
+		echo ""; \
+		echo "Please set a valid STATE_DATABASE_URL value in .env"; \
+		exit 1; \
+	fi
+
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url validate-schema check-schema show-tables show-schema apply-ddl proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze
+.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -70,7 +103,7 @@ help: ## Show this help message
 	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
-	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|apply-ddl-state|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🔧 DEVELOPMENT & DEBUGGING:"
 	@grep -E '^(clean-dev|dev-reset|show-tables|show-schema|validate-schema|check-schema):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -344,6 +377,30 @@ apply-ddl: check-database-url ## Apply generated DDL to database
 	mysqldef --user=$$DB_USER --password=$$DB_PASS --host=$$DB_HOST --port=$$DB_PORT $$DB_NAME \
 		--file $(SQL_DIR)/rpc.sql
 	@echo "✅ Database schema updated"
+
+apply-ddl-state: check-state-database-url ## Apply state.sql schema to STATE_DATABASE_URL from .env
+	@echo "📊 Applying state schema to database..."
+	@STATE_DB_URL=$$(grep "^STATE_DATABASE_URL=" .env | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$$//'); \
+	export STATE_DB_USER=$$(echo "$$STATE_DB_URL" | sed 's|mysql://||' | sed 's|\.root:.*||').root; \
+	export STATE_DB_PASS=$$(echo "$$STATE_DB_URL" | sed 's|.*\.root:||' | sed 's|@.*||'); \
+	export STATE_DB_HOST=$$(echo "$$STATE_DB_URL" | sed 's|.*@||' | sed 's|:.*||'); \
+	export STATE_DB_PORT=$$(echo "$$STATE_DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
+	export STATE_DB_NAME=$$(echo "$$STATE_DB_URL" | sed 's|.*/||'); \
+	echo "🔍 Connecting to: $$STATE_DB_HOST:$$STATE_DB_PORT/$$STATE_DB_NAME as $$STATE_DB_USER"; \
+	mysqldef --user=$$STATE_DB_USER --password=$$STATE_DB_PASS --host=$$STATE_DB_HOST --port=$$STATE_DB_PORT $$STATE_DB_NAME \
+		--file proto/sql/state.sql \
+		--dry-run > $(MIGR_DIR)/state_$$(date +%s)_diff.sql
+	@echo "🔍 Migration diff saved to $(MIGR_DIR)/state_*_diff.sql"
+	@echo "📊 Applying changes to state database..."
+	@STATE_DB_URL=$$(grep "^STATE_DATABASE_URL=" .env | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$$//'); \
+	export STATE_DB_USER=$$(echo "$$STATE_DB_URL" | sed 's|mysql://||' | sed 's|\.root:.*||').root; \
+	export STATE_DB_PASS=$$(echo "$$STATE_DB_URL" | sed 's|.*\.root:||' | sed 's|@.*||'); \
+	export STATE_DB_HOST=$$(echo "$$STATE_DB_URL" | sed 's|.*@||' | sed 's|:.*||'); \
+	export STATE_DB_PORT=$$(echo "$$STATE_DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
+	export STATE_DB_NAME=$$(echo "$$STATE_DB_URL" | sed 's|.*/||'); \
+	mysqldef --user=$$STATE_DB_USER --password=$$STATE_DB_PASS --host=$$STATE_DB_HOST --port=$$STATE_DB_PORT $$STATE_DB_NAME \
+		--file proto/sql/state.sql
+	@echo "✅ State database schema updated"
 
 entities: ## Generate Sea-ORM entities from proto file
 	@echo "🔄 Generating Sea-ORM entities from proto file..."

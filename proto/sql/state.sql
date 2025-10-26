@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS app_instance_kv_binary (
     `value_da` VARCHAR(255) NULL,          -- S3 reference for large values
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`app_instance_id`, `key`) CLUSTERED,
+    PRIMARY KEY (`app_instance_id`, `key`),
     CONSTRAINT fk_kv_binary_app_instance FOREIGN KEY (`app_instance_id`)
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
