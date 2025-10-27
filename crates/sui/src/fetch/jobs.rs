@@ -579,18 +579,17 @@ pub async fn fetch_jobs_batch(
     let mut field_ids_map = HashMap::new(); // job_sequence -> field_id
     let mut page_token = None;
     const PAGE_SIZE: u32 = 100;
-    
+
     loop {
-        let list_request = ListDynamicFieldsRequest {
-            parent: Some(jobs_table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
+        let mut list_request = ListDynamicFieldsRequest::default();
+        list_request.parent = Some(jobs_table_id.to_string());
+        list_request.page_size = Some(PAGE_SIZE);
+        list_request.page_token = page_token.clone();
+        list_request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
 
         let list_response = client
             .state_client()
@@ -658,21 +657,22 @@ pub async fn fetch_jobs_batch(
         // First batch: fetch field wrapper objects
         let field_requests: Vec<GetObjectRequest> = chunk
             .iter()
-            .map(|(_, field_id)| GetObjectRequest {
-                object_id: Some(field_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(_, field_id)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(field_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: field_requests,
-            read_mask: Some(FieldMask::from_paths([
-                "object_id",
-                "json",
-            ])),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = field_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -712,21 +712,22 @@ pub async fn fetch_jobs_batch(
         // Second batch: fetch actual job objects
         let job_requests: Vec<GetObjectRequest> = job_object_ids
             .iter()
-            .map(|(job_id, _)| GetObjectRequest {
-                object_id: Some(job_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(job_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(job_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: job_requests,
-            read_mask: Some(FieldMask::from_paths([
-                "object_id",
-                "json",
-            ])),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = job_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -778,17 +779,16 @@ pub async fn fetch_job_by_id(
     // Loop through pages until we find the job or exhaust all pages
     loop {
         // List dynamic fields to find the specific job
-        let list_request = ListDynamicFieldsRequest {
-            parent: Some(jobs_table_id.to_string()),
-            page_size: Some(100),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
-        
+        let mut list_request = ListDynamicFieldsRequest::default();
+        list_request.parent = Some(jobs_table_id.to_string());
+        list_request.page_size = Some(100);
+        list_request.page_token = page_token.clone();
+        list_request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
+
         let list_response = client
             .state_client()
             .list_dynamic_fields(list_request)
@@ -855,15 +855,14 @@ async fn fetch_job_object_by_field_id(
     //debug!("📄 Fetching job {} from field {}", job_sequence, field_id);
     
     // Fetch the Field wrapper object
-    let field_request = GetObjectRequest {
-        object_id: Some(field_id.to_string()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "object_id",
-            "json",
-        ])),
-    };
-    
+    let mut field_request = GetObjectRequest::default();
+    field_request.object_id = Some(field_id.to_string());
+    field_request.version = None;
+    field_request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "json",
+    ]));
+
     let field_response = client
         .ledger_client()
         .get_object(field_request)
@@ -881,15 +880,14 @@ async fn fetch_job_object_by_field_id(
                     if let Some(prost_types::value::Kind::StringValue(job_object_id)) = &value_field.kind {
                         debug!("📄 Found job object ID: {}", job_object_id);
                         // Fetch the actual job object
-                        let job_request = GetObjectRequest {
-                            object_id: Some(job_object_id.clone()),
-                            version: None,
-                            read_mask: Some(FieldMask::from_paths([
-                                "object_id",
-                                "json",
-                            ])),
-                        };
-                        
+                        let mut job_request = GetObjectRequest::default();
+                        job_request.object_id = Some(job_object_id.clone());
+                        job_request.version = None;
+                        job_request.read_mask = Some(FieldMask::from_paths([
+                            "object_id",
+                            "json",
+                        ]));
+
                         let job_response = client
                             .ledger_client()
                             .get_object(job_request)
@@ -1012,14 +1010,13 @@ pub async fn fetch_all_jobs_from_app_instance(
         // Fetch all jobs from the ObjectTable
         let mut page_token = None;
         loop {
-            let list_request = ListDynamicFieldsRequest {
-                parent: Some(table_id.clone()),
-                page_size: Some(100),
-                page_token: page_token.clone(),
-                read_mask: Some(FieldMask::from_paths([
-                    "field_id",
-                ])),
-            };
+            let mut list_request = ListDynamicFieldsRequest::default();
+            list_request.parent = Some(table_id.clone());
+            list_request.page_size = Some(100);
+            list_request.page_token = page_token.clone();
+            list_request.read_mask = Some(FieldMask::from_paths([
+                "field_id",
+            ]));
 
             let fields_response = client
                 .state_client()

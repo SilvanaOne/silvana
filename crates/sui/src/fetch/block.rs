@@ -112,16 +112,15 @@ async fn fetch_blocks_from_table_range(
     const MAX_PAGES: u32 = 200;
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
 
         let fields_response = client
             .state_client()
@@ -205,20 +204,21 @@ async fn fetch_block_objects_batch(
         // First batch: fetch all field wrapper objects to get the actual block object IDs
         let field_requests: Vec<GetObjectRequest> = chunk
             .iter()
-            .map(|(field_id, _)| GetObjectRequest {
-                object_id: Some(field_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(field_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(field_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
 
-        let batch_request = BatchGetObjectsRequest {
-            requests: field_requests,
-            read_mask: Some(FieldMask::from_paths([
-                "object_id",
-                "json",
-            ])),
-        };
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = field_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
 
         let batch_response = client
             .ledger_client()
@@ -266,20 +266,21 @@ async fn fetch_block_objects_batch(
         // Second batch: fetch all actual block objects
         let block_requests: Vec<GetObjectRequest> = block_object_ids
             .iter()
-            .map(|(block_id, _)| GetObjectRequest {
-                object_id: Some(block_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(block_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(block_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
 
-        let batch_request = BatchGetObjectsRequest {
-            requests: block_requests,
-            read_mask: Some(FieldMask::from_paths([
-                "object_id",
-                "json",
-            ])),
-        };
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = block_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
 
         let batch_response = client
             .ledger_client()
@@ -335,16 +336,15 @@ async fn fetch_block_from_table(
     let mut all_found_blocks = Vec::new(); // Collect all found block numbers for debugging
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
 
         let fields_response = client
             .state_client()
@@ -440,14 +440,13 @@ async fn fetch_block_object_by_field_id(
     );
 
     // Fetch the Field wrapper object
-    let field_request = GetObjectRequest {
-        object_id: Some(field_id.to_string()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "object_id",
-            "json",
-        ])),
-    };
+    let mut field_request = GetObjectRequest::default();
+    field_request.object_id = Some(field_id.to_string());
+    field_request.version = None;
+    field_request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "json",
+    ]));
 
     let field_response = client
         .ledger_client()
@@ -472,14 +471,13 @@ async fn fetch_block_object_by_field_id(
                     {
                         debug!("📄 Found block object ID: {}", block_object_id);
                         // Fetch the actual block object
-                        let block_request = GetObjectRequest {
-                            object_id: Some(block_object_id.clone()),
-                            version: None,
-                            read_mask: Some(FieldMask::from_paths([
-                                "object_id",
-                                "json",
-                            ])),
-                        };
+                        let mut block_request = GetObjectRequest::default();
+                        block_request.object_id = Some(block_object_id.clone());
+                        block_request.version = None;
+                        block_request.read_mask = Some(FieldMask::from_paths([
+                            "object_id",
+                            "json",
+                        ]));
 
                         let block_response = client
                             .ledger_client()

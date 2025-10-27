@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use sui_rpc::field::FieldMaskUtil;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
@@ -120,20 +120,21 @@ pub async fn fetch_coin(
         let mut state = client.state_client();
 
         // List owned objects to find SUI coins
+        let mut request = proto::ListOwnedObjectsRequest::default();
+        request.owner = Some(sender.to_string());
+        request.page_size = Some(100);
+        request.page_token = None;
+        request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "version",
+            "digest",
+            "object_type",
+            "contents",
+        ]));
+        request.object_type = Some("0x2::coin::Coin<0x2::sui::SUI>".to_string());
+
         let resp = state
-            .list_owned_objects(proto::ListOwnedObjectsRequest {
-                owner: Some(sender.to_string()),
-                page_size: Some(100),
-                page_token: None,
-                read_mask: Some(proto::FieldMask::from_paths([
-                    "object_id",
-                    "version",
-                    "digest",
-                    "object_type",
-                    "contents",
-                ])),
-                object_type: Some("0x2::coin::Coin<0x2::sui::SUI>".to_string()),
-            })
+            .list_owned_objects(request)
             .await?
             .into_inner();
 
@@ -239,14 +240,15 @@ async fn get_coin_balance_via_get_object(
 ) -> Result<u64> {
     let mut ledger = client.ledger_client();
 
+    let mut request = proto::GetObjectRequest::default();
+    request.object_id = Some(object_ref.object_id().to_string());
+    request.version = Some(object_ref.version());
+    request.read_mask = Some(FieldMask::from_paths([
+        "contents",
+    ]));
+
     let resp = ledger
-        .get_object(proto::GetObjectRequest {
-            object_id: Some(object_ref.object_id().to_string()),
-            version: Some(object_ref.version()),
-            read_mask: Some(proto::FieldMask::from_paths([
-                "contents",
-            ])),
-        })
+        .get_object(request)
         .await?
         .into_inner();
 
@@ -265,20 +267,21 @@ async fn get_coin_balance_via_get_object(
 pub async fn list_coins(client: &mut GrpcClient, sender: sui::Address) -> Result<Vec<CoinInfo>> {
     let mut state = client.state_client();
 
+    let mut request = proto::ListOwnedObjectsRequest::default();
+    request.owner = Some(sender.to_string());
+    request.page_size = Some(100);
+    request.page_token = None;
+    request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "version",
+        "digest",
+        "object_type",
+        "contents",
+    ]));
+    request.object_type = Some("0x2::coin::Coin<0x2::sui::SUI>".to_string());
+
     let resp = state
-        .list_owned_objects(proto::ListOwnedObjectsRequest {
-            owner: Some(sender.to_string()),
-            page_size: Some(100),
-            page_token: None,
-            read_mask: Some(proto::FieldMask::from_paths([
-                "object_id",
-                "version",
-                "digest",
-                "object_type",
-                "contents",
-            ])),
-            object_type: Some("0x2::coin::Coin<0x2::sui::SUI>".to_string()),
-        })
+        .list_owned_objects(request)
         .await?
         .into_inner();
 

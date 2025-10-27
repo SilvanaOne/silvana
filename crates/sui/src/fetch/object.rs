@@ -22,15 +22,14 @@ pub async fn fetch_object(
     };
     
     // Create request to fetch the object
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "json",
-            "object_id",
-        ])),
-    };
-    
+    let mut request = GetObjectRequest::default();
+    request.object_id = Some(formatted_id.clone());
+    request.version = None;
+    request.read_mask = Some(FieldMask::from_paths([
+        "json",
+        "object_id",
+    ]));
+
     // Fetch the object
     let response = client
         .ledger_client()
@@ -158,17 +157,16 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
     debug!("Fetching dynamic fields for parent: {}", parent_id);
     
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(parent_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
-        
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(parent_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
+
         let response = client
             .state_client()
             .list_dynamic_fields(request)

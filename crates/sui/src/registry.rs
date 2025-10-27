@@ -1,7 +1,8 @@
 use anyhow::Result;
 use std::env;
 use std::str::FromStr;
-use sui_rpc::field::FieldMaskUtil;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
 use sui_sdk_types as sui;
 use tracing::{debug, info, warn};
 
@@ -157,14 +158,13 @@ async fn wait_for_object_availability(object_id: &str) -> Result<()> {
         let mut client = SharedSuiState::get_instance().get_sui_client();
         let mut ledger = client.ledger_client();
 
+        let mut request = GetObjectRequest::default();
+        request.object_id = Some(object_address.to_string());
+        request.version = None;
+        request.read_mask = Some(FieldMask::from_paths(["object_id"]));
+
         let response = ledger
-            .get_object(proto::GetObjectRequest {
-                object_id: Some(object_address.to_string()),
-                version: None,
-                read_mask: Some(FieldMask {
-                    paths: vec!["object_id".to_string()],
-                }),
-            })
+            .get_object(request)
             .await;
 
         match response {
@@ -265,12 +265,12 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
 
     // Fetch transaction with objects
     let mut ledger = client.ledger_client();
-    let req = proto::GetTransactionRequest {
-        digest: Some(digest.to_string()),
-        read_mask: Some(proto::FieldMask::from_paths([
-            "transaction.objects.objects",
-        ])),
-    };
+
+    let mut req = sui_rpc::proto::sui::rpc::v2::GetTransactionRequest::default();
+    req.digest = Some(digest.to_string());
+    req.read_mask = Some(FieldMask::from_paths([
+        "transaction.objects.objects",
+    ]));
 
     let resp = ledger
         .get_transaction(req)

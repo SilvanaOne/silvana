@@ -35,12 +35,11 @@ pub async fn fetch_event_with_contents(
 
     // First, we need to get the transaction digest from the checkpoint
     // We'll fetch all transaction digests and select the one we need
-    let checkpoint_request = GetCheckpointRequest {
-        checkpoint_id: Some(sui_rpc::proto::sui::rpc::v2::get_checkpoint_request::CheckpointId::SequenceNumber(checkpoint_seq)),
-        read_mask: Some(FieldMask::from_paths([
-            "transactions.digest",
-        ])),
-    };
+    let mut checkpoint_request = GetCheckpointRequest::default();
+    checkpoint_request.checkpoint_id = Some(sui_rpc::proto::sui::rpc::v2::get_checkpoint_request::CheckpointId::SequenceNumber(checkpoint_seq));
+    checkpoint_request.read_mask = Some(FieldMask::from_paths([
+        "transactions.digest",
+    ]));
 
     let checkpoint_response = client
         .ledger_client()
@@ -63,16 +62,15 @@ pub async fn fetch_event_with_contents(
 
     // Now fetch just the transaction with event contents
     if let Some(digest) = tx_digest {
-        let tx_request = GetTransactionRequest {
-            digest: Some(digest.clone()),
-            read_mask: Some(FieldMask::from_paths([
-                "events.events.package_id",
-                "events.events.module",
-                "events.events.sender",
-                "events.events.event_type",
-                "events.events.contents",
-            ])),
-        };
+        let mut tx_request = GetTransactionRequest::default();
+        tx_request.digest = Some(digest.clone());
+        tx_request.read_mask = Some(FieldMask::from_paths([
+            "events.events.package_id",
+            "events.events.module",
+            "events.events.sender",
+            "events.events.event_type",
+            "events.events.contents",
+        ]));
 
         let tx_response = client
             .ledger_client()

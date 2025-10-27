@@ -148,16 +148,15 @@ async fn fetch_proof_calculations_from_table_range(
     const MAX_PAGES: u32 = 200;
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
 
         let fields_response = client
             .state_client()
@@ -241,21 +240,22 @@ async fn fetch_proof_objects_batch(
         // First batch: fetch all field wrapper objects to get the actual proof object IDs
         let field_requests: Vec<GetObjectRequest> = chunk
             .iter()
-            .map(|(field_id, _)| GetObjectRequest {
-                object_id: Some(field_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(field_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(field_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: field_requests,
-            read_mask: Some(FieldMask::from_paths([
-                "object_id",
-                "json",
-            ])),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = field_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -295,21 +295,22 @@ async fn fetch_proof_objects_batch(
         // Second batch: fetch all actual proof calculation objects
         let proof_requests: Vec<GetObjectRequest> = proof_object_ids
             .iter()
-            .map(|(proof_id, _)| GetObjectRequest {
-                object_id: Some(proof_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(proof_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(proof_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: proof_requests,
-            read_mask: Some(FieldMask::from_paths([
-                "object_id",
-                "json",
-            ])),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = proof_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -361,16 +362,15 @@ async fn fetch_proof_calculation_from_table(
     const MAX_PAGES: u32 = 200; // Higher limit for proofs as there may be many
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
 
         let fields_response = client
             .state_client()
@@ -498,14 +498,13 @@ async fn fetch_proof_object_by_field_id(
     );
 
     // Fetch the Field wrapper object
-    let field_request = GetObjectRequest {
-        object_id: Some(field_id.to_string()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "object_id",
-            "json",
-        ])),
-    };
+    let mut field_request = GetObjectRequest::default();
+    field_request.object_id = Some(field_id.to_string());
+    field_request.version = None;
+    field_request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "json",
+    ]));
 
     let field_response = client
         .ledger_client()
@@ -530,14 +529,13 @@ async fn fetch_proof_object_by_field_id(
                     {
                         debug!("📄 Found proof object ID: {}", proof_object_id);
                         // Fetch the actual proof calculation object
-                        let proof_request = GetObjectRequest {
-                            object_id: Some(proof_object_id.clone()),
-                            version: None,
-                            read_mask: Some(FieldMask::from_paths([
-                                "object_id",
-                                "json",
-                            ])),
-                        };
+                        let mut proof_request = GetObjectRequest::default();
+                        proof_request.object_id = Some(proof_object_id.clone());
+                        proof_request.version = None;
+                        proof_request.read_mask = Some(FieldMask::from_paths([
+                            "object_id",
+                            "json",
+                        ]));
 
                         let proof_response = client
                             .ledger_client()

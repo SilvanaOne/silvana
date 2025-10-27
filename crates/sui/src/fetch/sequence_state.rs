@@ -50,17 +50,16 @@ pub async fn fetch_sequence_state_by_id(
     // Loop through pages to find the sequence
     loop {
         // List dynamic fields to find the specific sequence state
-        let list_request = ListDynamicFieldsRequest {
-            parent: Some(sequence_states_table_id.to_string()),
-            page_size: Some(500), // Process 500 at a time
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
-        
+        let mut list_request = ListDynamicFieldsRequest::default();
+        list_request.parent = Some(sequence_states_table_id.to_string());
+        list_request.page_size = Some(500); // Process 500 at a time
+        list_request.page_token = page_token.clone();
+        list_request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
+
         let list_response = client
             .state_client()
             .list_dynamic_fields(list_request)
@@ -115,15 +114,14 @@ pub async fn fetch_sequence_state_by_id(
                         if let Some(field_id) = &field.field_id {
                         debug!("📄 Fetching sequence state field object: {}", field_id);
                         // Fetch the sequence state field wrapper
-                        let sequence_state_field_request = GetObjectRequest {
-                            object_id: Some(field_id.clone()),
-                            version: None,
-                            read_mask: Some(FieldMask::from_paths([
-                                "object_id",
-                                "json",
-                            ])),
-                        };
-                        
+                        let mut sequence_state_field_request = GetObjectRequest::default();
+                        sequence_state_field_request.object_id = Some(field_id.clone());
+                        sequence_state_field_request.version = None;
+                        sequence_state_field_request.read_mask = Some(FieldMask::from_paths([
+                            "object_id",
+                            "json",
+                        ]));
+
                         let sequence_state_field_response = client
                             .ledger_client()
                             .get_object(sequence_state_field_request)
@@ -139,15 +137,14 @@ pub async fn fetch_sequence_state_by_id(
                                     if let Some(value_field) = struct_value.fields.get("value") {
                                         if let Some(prost_types::value::Kind::StringValue(sequence_state_object_id)) = &value_field.kind {
                                             // Fetch the actual sequence state object
-                                            let sequence_state_request = GetObjectRequest {
-                                                object_id: Some(sequence_state_object_id.clone()),
-                                                version: None,
-                                                read_mask: Some(FieldMask::from_paths([
-                                                    "object_id",
-                                                    "json",
-                                                ])),
-                                            };
-                                            
+                                            let mut sequence_state_request = GetObjectRequest::default();
+                                            sequence_state_request.object_id = Some(sequence_state_object_id.clone());
+                                            sequence_state_request.version = None;
+                                            sequence_state_request.read_mask = Some(FieldMask::from_paths([
+                                                "object_id",
+                                                "json",
+                                            ]));
+
                                             let sequence_state_response = client
                                                 .ledger_client()
                                                 .get_object(sequence_state_request)

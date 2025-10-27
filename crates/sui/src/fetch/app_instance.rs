@@ -103,14 +103,13 @@ pub async fn fetch_app_instance(instance_id: &str) -> Result<AppInstance> {
     };
 
     // Create request to fetch just the AppInstance object
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "json",
-            "object_id",
-        ])),
-    };
+    let mut request = GetObjectRequest::default();
+    request.object_id = Some(formatted_id.clone());
+    request.version = None;
+    request.read_mask = Some(FieldMask::from_paths([
+        "json",
+        "object_id",
+    ]));
 
     // Fetch the object
     let response = client
@@ -445,16 +444,15 @@ async fn fetch_block_settlement_from_table(
     const MAX_PAGES: u32 = 200;
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(FieldMask::from_paths([
-                "field_id",
-                "name_type",
-                "name_value",
-            ])),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name_type",
+            "name_value",
+        ]));
 
         let fields_response = client
             .state_client()
@@ -518,14 +516,13 @@ async fn fetch_block_settlement_object(
     // First fetch the Field wrapper object to get the actual BlockSettlement object ID
     debug!("Fetching Field wrapper object: {}", field_id);
 
-    let field_request = GetObjectRequest {
-        object_id: Some(field_id.to_string()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "object_id",
-            "json",
-        ])),
-    };
+    let mut field_request = GetObjectRequest::default();
+    field_request.object_id = Some(field_id.to_string());
+    field_request.version = None;
+    field_request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "json",
+    ]));
 
     let field_response = client
         .ledger_client()
@@ -576,13 +573,12 @@ async fn fetch_block_settlement_object(
     // Now fetch the actual BlockSettlement object
     debug!("Fetching BlockSettlement object: {}", block_settlement_id);
 
-    let bs_request = GetObjectRequest {
-        object_id: Some(block_settlement_id.clone()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "json",
-        ])),
-    };
+    let mut bs_request = GetObjectRequest::default();
+    bs_request.object_id = Some(block_settlement_id.clone());
+    bs_request.version = None;
+    bs_request.read_mask = Some(FieldMask::from_paths([
+        "json",
+    ]));
 
     let bs_response = client
         .ledger_client()

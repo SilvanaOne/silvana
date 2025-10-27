@@ -388,14 +388,13 @@ pub async fn fetch_app_instance_bcs(
     debug!("Fetching AppInstance (BCS) with ID: {}", formatted_id);
 
     // Ask only for the fields we need: Move struct contents (BCS) and object_id for convenience
-    let request = GetObjectRequest {
-        object_id: Some(formatted_id.clone()),
-        version: None,
-        read_mask: Some(FieldMask::from_paths([
-            "contents",
-            "object_id",
-        ])),
-    };
+    let mut request = GetObjectRequest::default();
+    request.object_id = Some(formatted_id.clone());
+    request.version = None;
+    request.read_mask = Some(FieldMask::from_paths([
+        "contents",
+        "object_id",
+    ]));
 
     let response = client
         .ledger_client()
