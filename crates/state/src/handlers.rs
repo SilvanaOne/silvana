@@ -9,7 +9,7 @@ use sea_orm::{
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     auth::{verify_jwt, AuthInfo},
@@ -24,6 +24,26 @@ use crate::{
     proto::*,
     storage::HybridStorage,
 };
+
+/// Helper function to log and return internal errors
+fn log_internal_error(context: &str, error: impl std::fmt::Display) -> Status {
+    error!("Internal error - {}: {}", context, error);
+    Status::internal(format!("{}: {}", context, error))
+}
+
+/// Helper function to log and return already_exists errors
+#[allow(dead_code)]
+fn log_already_exists(context: &str) -> Status {
+    warn!("Already exists: {}", context);
+    Status::already_exists(context)
+}
+
+/// Helper function to log and return not_found errors
+#[allow(dead_code)]
+fn log_not_found(context: &str) -> Status {
+    warn!("Not found: {}", context);
+    Status::not_found(context)
+}
 
 /// Convert chrono DateTime to protobuf Timestamp
 fn to_timestamp(dt: chrono::DateTime<Utc>) -> prost_types::Timestamp {
@@ -199,7 +219,7 @@ impl StateServiceImpl {
             .db
             .verify_app_instance_ownership(app_instance_id, &auth.public_key)
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         if !owns {
             return Err(Status::permission_denied(
@@ -424,7 +444,7 @@ impl StateService for StateServiceImpl {
         // Start transaction with pessimistic locking for gapless sequence generation
         use sea_orm::{TransactionTrait, DatabaseBackend, Statement};
         let txn = self.db.connection().begin().await
-            .map_err(|e| Status::internal(format!("Failed to start transaction: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to start transaction", e))?;
 
         // Get or create sequence counter with FOR UPDATE lock
         // First ensure the counter exists, then select it with lock
@@ -436,7 +456,7 @@ impl StateService for StateServiceImpl {
             ON DUPLICATE KEY UPDATE next_seq = next_seq
             "#,
             vec![req.app_instance_id.clone().into()]
-        )).await.map_err(|e| Status::internal(format!("Failed to initialize sequence: {}", e)))?;
+        )).await.map_err(|e| log_internal_error("Failed to initialize sequence", e))?;
 
         // Now get the current sequence with FOR UPDATE lock
         let seq_result = txn.query_one(Statement::from_sql_and_values(
@@ -447,11 +467,14 @@ impl StateService for StateServiceImpl {
             FOR UPDATE
             "#,
             vec![req.app_instance_id.clone().into()]
-        )).await.map_err(|e| Status::internal(format!("Failed to get sequence: {}", e)))?
-            .ok_or_else(|| Status::internal("Failed to get sequence counter"))?;
+        )).await.map_err(|e| log_internal_error("Failed to get sequence", e))?
+            .ok_or_else(|| {
+                error!("Failed to get sequence counter - query returned no rows");
+                Status::internal("Failed to get sequence counter")
+            })?;
 
         let current_seq: u64 = seq_result.try_get("", "next_seq")
-            .map_err(|e| Status::internal(format!("Failed to parse sequence: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to parse sequence", e))?;
 
         // Create user action entity with the assigned sequence
         let user_action = user_actions::ActiveModel {
@@ -471,7 +494,7 @@ impl StateService for StateServiceImpl {
         let _result = user_action
             .insert(&txn)
             .await
-            .map_err(|e| Status::internal(format!("Failed to insert action: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to insert action", e))?;
 
         // Increment the counter for next use
         txn.execute(Statement::from_sql_and_values(
@@ -482,11 +505,11 @@ impl StateService for StateServiceImpl {
             WHERE app_instance_id = ?
             "#,
             vec![req.app_instance_id.clone().into()]
-        )).await.map_err(|e| Status::internal(format!("Failed to update sequence: {}", e)))?;
+        )).await.map_err(|e| log_internal_error("Failed to update sequence", e))?;
 
         // Commit transaction
         txn.commit().await
-            .map_err(|e| Status::internal(format!("Failed to commit transaction: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to commit transaction", e))?;
 
         info!("Submitted user action {} for app {} with sequence {}",
             req.action_type, req.app_instance_id, current_seq);
@@ -592,7 +615,7 @@ impl StateService for StateServiceImpl {
             let (d, k) = self.storage
                 .store(&td, &format!("transitions/{}", req.app_instance_id))
                 .await
-                .map_err(|e| Status::internal(format!("Failed to store transition data: {}", e)))?;
+                .map_err(|e| log_internal_error("Failed to store transition data", e))?;
             (d, k.or(req.transition_da))
         } else {
             (None, req.transition_da)
@@ -660,7 +683,7 @@ impl StateService for StateServiceImpl {
                     .await
                     .map_err(|e| {
                         warn!("Database error: {}", e);
-                        Status::internal(format!("Failed to fetch optimistic state: {}", e))
+                        log_internal_error("Failed to fetch optimistic state", e)
                     })?
             }
             None => {
@@ -672,7 +695,7 @@ impl StateService for StateServiceImpl {
                     .await
                     .map_err(|e| {
                         warn!("Database error: {}", e);
-                        Status::internal(format!("Failed to fetch latest optimistic state: {}", e))
+                        log_internal_error("Failed to fetch latest optimistic state", e)
                     })?
             }
         };
@@ -698,13 +721,13 @@ impl StateService for StateServiceImpl {
         let state_data = self.storage
             .retrieve(&inline_state, &opt_state.state_da)
             .await
-            .map_err(|e| Status::internal(format!("Failed to retrieve state data: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to retrieve state data", e))?;
 
         let transition_data = if opt_state.transition_da.is_some() || opt_state.transition_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
             Some(self.storage
                 .retrieve(&opt_state.transition_data, &opt_state.transition_da)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to retrieve transition data: {}", e)))?)
+                .map_err(|e| log_internal_error("Failed to retrieve transition data", e))?)
         } else {
             None
         };
@@ -739,7 +762,7 @@ impl StateService for StateServiceImpl {
             let (d, k) = self.storage
                 .store(&sd, &format!("state/{}", req.app_instance_id))
                 .await
-                .map_err(|e| Status::internal(format!("Failed to store state: {}", e)))?;
+                .map_err(|e| log_internal_error("Failed to store state", e))?;
             (d, k.or(req.state_da))
         } else {
             (None, req.state_da)
@@ -749,7 +772,7 @@ impl StateService for StateServiceImpl {
             let (d, k) = self.storage
                 .store(&pd, &format!("proofs/{}", req.app_instance_id))
                 .await
-                .map_err(|e| Status::internal(format!("Failed to store proof: {}", e)))?;
+                .map_err(|e| log_internal_error("Failed to store proof", e))?;
             (d, k.or(req.proof_da))
         } else {
             (None, req.proof_da)
@@ -813,14 +836,14 @@ impl StateService for StateServiceImpl {
             .filter(state::Column::Sequence.eq(req.sequence as i64))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Proved state not found"))?;
 
         let state_data = if proved_state.state_da.is_some() || proved_state.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
             Some(self.storage
                 .retrieve(&proved_state.state_data, &proved_state.state_da)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to retrieve state: {}", e)))?)
+                .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
         } else {
             None
         };
@@ -856,7 +879,7 @@ impl StateService for StateServiceImpl {
             .order_by_desc(state::Column::Sequence)
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         // Handle not found case gracefully
         let latest = match latest {
@@ -874,7 +897,7 @@ impl StateService for StateServiceImpl {
             Some(self.storage
                 .retrieve(&latest.state_data, &latest.state_da)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to retrieve state: {}", e)))?)
+                .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
         } else {
             None
         };
@@ -914,13 +937,13 @@ impl StateService for StateServiceImpl {
             .order_by_asc(user_actions::Column::Sequence)
             .all(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         let mut user_actions_result = Vec::new();
         for action in actions {
             let inline_data = if action.action_data.is_empty() { None } else { Some(action.action_data.clone()) };
             let action_data = self.storage.retrieve(&inline_data, &action.action_da).await
-                .map_err(|e| Status::internal(format!("Failed to retrieve action data: {}", e)))?;
+                .map_err(|e| log_internal_error("Failed to retrieve action data", e))?;
 
             user_actions_result.push(UserAction {
                 app_instance_id: action.app_instance_id,
@@ -943,17 +966,17 @@ impl StateService for StateServiceImpl {
             .order_by_asc(optimistic_state::Column::Sequence)
             .all(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         let mut optimistic_states_result = Vec::new();
         for opt in opt_states {
             let inline_state = if opt.state_data.is_empty() { None } else { Some(opt.state_data.clone()) };
             let state_data = self.storage.retrieve(&inline_state, &opt.state_da).await
-                .map_err(|e| Status::internal(format!("Failed to retrieve state: {}", e)))?;
+                .map_err(|e| log_internal_error("Failed to retrieve state", e))?;
 
             let transition_data = if opt.transition_da.is_some() || opt.transition_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
                 Some(self.storage.retrieve(&opt.transition_data, &opt.transition_da).await
-                    .map_err(|e| Status::internal(format!("Failed to retrieve transition: {}", e)))?)
+                    .map_err(|e| log_internal_error("Failed to retrieve transition", e))?)
             } else {
                 None
             };
@@ -980,20 +1003,20 @@ impl StateService for StateServiceImpl {
             .order_by_asc(state::Column::Sequence)
             .all(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         let mut proved_states_result = Vec::new();
         for s in states {
             let state_data = if s.state_da.is_some() || s.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
                 Some(self.storage.retrieve(&s.state_data, &s.state_da).await
-                    .map_err(|e| Status::internal(format!("Failed to retrieve state: {}", e)))?)
+                    .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
             } else {
                 None
             };
 
             let proof_data = if req.include_proofs && (s.proof_da.is_some() || s.proof_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false)) {
                 Some(self.storage.retrieve(&s.proof_data, &s.proof_da).await
-                    .map_err(|e| Status::internal(format!("Failed to retrieve proof: {}", e)))?)
+                    .map_err(|e| log_internal_error("Failed to retrieve proof", e))?)
             } else {
                 None
             };
@@ -1033,7 +1056,7 @@ impl StateService for StateServiceImpl {
             .filter(app_instance_kv_string::Column::Key.eq(&req.key))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         match entry {
             Some(entry) => Ok(Response::new(GetKvStringResponse {
@@ -1086,7 +1109,7 @@ impl StateService for StateServiceImpl {
             )
             .exec(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         Ok(Response::new(SetKvStringResponse {
             success: true,
@@ -1107,7 +1130,7 @@ impl StateService for StateServiceImpl {
             .filter(app_instance_kv_string::Column::Key.eq(&req.key))
             .exec(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         if result.rows_affected == 0 {
             return Err(Status::not_found("Key not found"));
@@ -1143,7 +1166,7 @@ impl StateService for StateServiceImpl {
 
         let entries = paginator.fetch_page(0)
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         let keys: Vec<String> = entries.into_iter().map(|e| e.key).collect();
 
@@ -1191,7 +1214,7 @@ impl StateService for StateServiceImpl {
                 )
                 .exec(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+                .map_err(|e| log_internal_error("Database error", e))?;
 
             sets_processed += 1;
         }
@@ -1206,7 +1229,7 @@ impl StateService for StateServiceImpl {
                 .filter(app_instance_kv_string::Column::Key.eq(&del_req.key))
                 .exec(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+                .map_err(|e| log_internal_error("Database error", e))?;
 
             deletes_processed += 1;
         }
@@ -1232,7 +1255,7 @@ impl StateService for StateServiceImpl {
             .filter(app_instance_kv_binary::Column::Key.eq(req.key.clone()))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         match entry {
             Some(entry) => Ok(Response::new(GetKvBinaryResponse {
@@ -1287,7 +1310,7 @@ impl StateService for StateServiceImpl {
             )
             .exec(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         Ok(Response::new(SetKvBinaryResponse {
             success: true,
@@ -1308,7 +1331,7 @@ impl StateService for StateServiceImpl {
             .filter(app_instance_kv_binary::Column::Key.eq(req.key.clone()))
             .exec(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         if result.rows_affected == 0 {
             return Err(Status::not_found("Key not found"));
@@ -1352,7 +1375,7 @@ impl StateService for StateServiceImpl {
 
         let entries = paginator.fetch_page(0)
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         let keys: Vec<Vec<u8>> = entries.into_iter().map(|e| e.key).collect();
 
@@ -1399,7 +1422,7 @@ impl StateService for StateServiceImpl {
                 )
                 .exec(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+                .map_err(|e| log_internal_error("Database error", e))?;
 
             sets_processed += 1;
         }
@@ -1412,7 +1435,7 @@ impl StateService for StateServiceImpl {
                 .filter(app_instance_kv_binary::Column::Key.eq(del_req.key.clone()))
                 .exec(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+                .map_err(|e| log_internal_error("Database error", e))?;
 
             deletes_processed += 1;
         }
@@ -1561,7 +1584,7 @@ impl StateService for StateServiceImpl {
         let object = objects::Entity::find_by_id(object_id_clone)
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Object not found"))?;
 
         // Verify ownership
@@ -1573,7 +1596,7 @@ impl StateService for StateServiceImpl {
         let (inline_data, s3_key) = self.storage
             .store(&object_data_bytes, &format!("objects/{}", req.object_id))
             .await
-            .map_err(|e| Status::internal(format!("Failed to store object data: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to store object data", e))?;
 
         // Calculate new hash
         use sha2::{Digest, Sha256};
@@ -1593,7 +1616,7 @@ impl StateService for StateServiceImpl {
         active_model.updated_at = Set(Utc::now());
 
         let updated = active_model.update(self.db.connection()).await
-            .map_err(|e| Status::internal(format!("Failed to update object: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to update object", e))?;
 
         // Create version record
         let version_record = object_versions::ActiveModel {
@@ -1611,7 +1634,7 @@ impl StateService for StateServiceImpl {
         };
 
         version_record.insert(self.db.connection()).await
-            .map_err(|e| Status::internal(format!("Failed to create version: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to create version", e))?;
 
         info!("Updated object {} to version {}", updated.object_id, updated.version);
 
@@ -1648,13 +1671,13 @@ impl StateService for StateServiceImpl {
                 .filter(object_versions::Column::Version.eq(version as i64))
                 .one(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+                .map_err(|e| log_internal_error("Database error", e))?
         } else {
             // Get latest from objects table then convert to version format
             let obj = objects::Entity::find_by_id(&req.object_id)
                 .one(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+                .map_err(|e| log_internal_error("Database error", e))?;
 
             obj.map(|obj| {
                 // Check access: owner or shared
@@ -1700,7 +1723,7 @@ impl StateService for StateServiceImpl {
         let object_data = self.storage
             .retrieve(&object.object_data, &object.object_da)
             .await
-            .map_err(|e| Status::internal(format!("Failed to retrieve object data: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to retrieve object data", e))?;
 
         Ok(Response::new(GetObjectResponse {
             success: true,
@@ -1732,7 +1755,7 @@ impl StateService for StateServiceImpl {
         let obj = objects::Entity::find_by_id(&req.object_id)
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Object not found"))?;
 
         if obj.owner != auth.public_key && !obj.shared {
@@ -1748,10 +1771,10 @@ impl StateService for StateServiceImpl {
             .paginate(self.db.connection(), limit);
 
         let total = paginator.num_items().await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))? as i32;
+            .map_err(|e| log_internal_error("Database error", e))? as i32;
 
         let versions_data = paginator.fetch_page(offset / limit).await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         let mut versions = Vec::new();
         for ver in versions_data {
@@ -1786,7 +1809,7 @@ impl StateService for StateServiceImpl {
         let object = objects::Entity::find_by_id(&req.object_id)
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Object not found"))?;
 
         // Verify current owner
@@ -1801,7 +1824,7 @@ impl StateService for StateServiceImpl {
         active_model.updated_at = Set(Utc::now());
 
         let updated = active_model.update(self.db.connection()).await
-            .map_err(|e| Status::internal(format!("Failed to transfer object: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to transfer object", e))?;
 
         // Create version record for transfer
         let version_record = object_versions::ActiveModel {
@@ -1819,7 +1842,7 @@ impl StateService for StateServiceImpl {
         };
 
         version_record.insert(self.db.connection()).await
-            .map_err(|e| Status::internal(format!("Failed to create version: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to create version", e))?;
 
         info!("Transferred object {} to {}", updated.object_id, updated.owner);
 
@@ -1875,7 +1898,7 @@ impl StateService for StateServiceImpl {
             hold_time_ms: NotSet,
         };
         bundle.insert(self.db.connection()).await.map_err(|e| {
-            Status::internal(format!("Failed to create lock bundle: {}", e))
+            log_internal_error("Failed to create lock bundle", e)
         })?;
 
         // Queue lock requests for each object in sorted order
@@ -1900,7 +1923,7 @@ impl StateService for StateServiceImpl {
             &req.req_id,
             req.timeout_seconds,
         ).await.map_err(|e| {
-            Status::internal(format!("Failed to acquire locks: {}", e))
+            log_internal_error("Failed to acquire locks", e)
         })?;
 
         if !acquired {
@@ -1909,7 +1932,7 @@ impl StateService for StateServiceImpl {
                 .filter(object_lock_queue::Column::ReqId.eq(&req.req_id))
                 .exec(self.db.connection())
                 .await
-                .map_err(|e| Status::internal(format!("Failed to clean up queue: {}", e)))?;
+                .map_err(|e| log_internal_error("Failed to clean up queue", e))?;
 
             return Ok(Response::new(RequestLocksResponse {
                 success: false,
@@ -1922,8 +1945,11 @@ impl StateService for StateServiceImpl {
         let updated_bundle = lock_request_bundle::Entity::find_by_id(&req.req_id)
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
-            .ok_or_else(|| Status::internal("Bundle disappeared"))?;
+            .map_err(|e| log_internal_error("Database error", e))?
+            .ok_or_else(|| {
+                error!("Bundle disappeared - req_id: {}", req.req_id);
+                Status::internal("Bundle disappeared")
+            })?;
 
         // Convert bundle to proto response
         let proto_bundle = LockRequestBundle {
@@ -1959,7 +1985,7 @@ impl StateService for StateServiceImpl {
         let bundle = lock_request_bundle::Entity::find_by_id(req.req_id.clone())
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Lock bundle not found"))?;
 
         // Update all locks in the bundle to RELEASED
@@ -1967,13 +1993,13 @@ impl StateService for StateServiceImpl {
             .filter(object_lock_queue::Column::ReqId.eq(&req.req_id))
             .all(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         for lock in lock_entries {
             let mut active: object_lock_queue::ActiveModel = lock.into();
             active.status = Set("RELEASED".to_string());
             active.update(self.db.connection()).await.map_err(|e| {
-                Status::internal(format!("Failed to release lock: {}", e))
+                log_internal_error("Failed to release lock", e)
             })?;
         }
 
@@ -1983,7 +2009,7 @@ impl StateService for StateServiceImpl {
         active_bundle.status = Set("RELEASED".to_string());
         active_bundle.released_at = Set(Some(now));
         active_bundle.update(self.db.connection()).await.map_err(|e| {
-            Status::internal(format!("Failed to update bundle: {}", e))
+            log_internal_error("Failed to update bundle", e)
         })?;
 
         Ok(Response::new(ReleaseLocksResponse {
@@ -2003,7 +2029,7 @@ impl StateService for StateServiceImpl {
         let bundle = lock_request_bundle::Entity::find_by_id(req.req_id.clone())
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Lock bundle not found"))?;
 
         // Get all queue entries for this bundle
@@ -2011,7 +2037,7 @@ impl StateService for StateServiceImpl {
             .filter(object_lock_queue::Column::ReqId.eq(&req.req_id))
             .all(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         // Convert to proto
         let queue_entries: Vec<LockQueueEntry> = lock_entries
@@ -2086,7 +2112,7 @@ impl StateService for StateServiceImpl {
             .order_by_asc(object_lock_queue::Column::QueuedAt)
             .all(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         // Convert to proto
         let queue_entries: Vec<LockQueueEntry> = lock_entries
@@ -2157,7 +2183,7 @@ impl StateService for StateServiceImpl {
         // Start transaction with pessimistic locking for gapless sequence generation
         use sea_orm::{TransactionTrait, DatabaseBackend, Statement};
         let txn = self.db.connection().begin().await
-            .map_err(|e| Status::internal(format!("Failed to start transaction: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to start transaction", e))?;
 
         // Get or create sequence counter with FOR UPDATE lock
         let _insert_result = txn.execute(Statement::from_sql_and_values(
@@ -2168,7 +2194,7 @@ impl StateService for StateServiceImpl {
             ON DUPLICATE KEY UPDATE next_seq = next_seq
             "#,
             vec![req.app_instance_id.clone().into()]
-        )).await.map_err(|e| Status::internal(format!("Failed to initialize job sequence: {}", e)))?;
+        )).await.map_err(|e| log_internal_error("Failed to initialize job sequence", e))?;
 
         // Get current sequence with FOR UPDATE lock
         let seq_result = txn.query_one(Statement::from_sql_and_values(
@@ -2179,11 +2205,14 @@ impl StateService for StateServiceImpl {
             FOR UPDATE
             "#,
             vec![req.app_instance_id.clone().into()]
-        )).await.map_err(|e| Status::internal(format!("Failed to get job sequence: {}", e)))?
-            .ok_or_else(|| Status::internal("Failed to get job sequence counter"))?;
+        )).await.map_err(|e| log_internal_error("Failed to get job sequence", e))?
+            .ok_or_else(|| {
+                error!("Failed to get job sequence counter - query returned no rows");
+                Status::internal("Failed to get job sequence counter")
+            })?;
 
         let current_seq: u64 = seq_result.try_get("", "next_seq")
-            .map_err(|e| Status::internal(format!("Failed to parse job sequence: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to parse job sequence", e))?;
 
         // Create job with assigned sequence
         let job = jobs::ActiveModel {
@@ -2209,7 +2238,7 @@ impl StateService for StateServiceImpl {
         };
 
         let result = job.insert(&txn).await
-            .map_err(|e| Status::internal(format!("Failed to create job: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to create job", e))?;
 
         // Increment counter for next use
         txn.execute(Statement::from_sql_and_values(
@@ -2220,11 +2249,11 @@ impl StateService for StateServiceImpl {
             WHERE app_instance_id = ?
             "#,
             vec![req.app_instance_id.clone().into()]
-        )).await.map_err(|e| Status::internal(format!("Failed to update job sequence: {}", e)))?;
+        )).await.map_err(|e| log_internal_error("Failed to update job sequence", e))?;
 
         // Commit transaction
         txn.commit().await
-            .map_err(|e| Status::internal(format!("Failed to commit transaction: {}", e)))?;
+            .map_err(|e| log_internal_error("Failed to commit transaction", e))?;
 
         info!("Created job {}/{} for {}/{}",
             req.app_instance_id, current_seq, req.developer, req.agent);
@@ -2276,7 +2305,7 @@ impl StateService for StateServiceImpl {
             .filter(jobs::Column::JobSequence.eq(req.job_sequence as i64))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Job not found"))?;
 
         // Update status to RUNNING
@@ -2286,7 +2315,7 @@ impl StateService for StateServiceImpl {
         active.updated_at = Set(Utc::now());
 
         let result = active.update(self.db.connection()).await.map_err(|e| {
-            Status::internal(format!("Failed to update job: {}", e))
+            log_internal_error("Failed to update job", e)
         })?;
 
         // Convert to proto
@@ -2345,7 +2374,7 @@ impl StateService for StateServiceImpl {
             .filter(jobs::Column::JobSequence.eq(req.job_sequence as i64))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Job not found"))?;
 
         let now = Utc::now();
@@ -2361,7 +2390,7 @@ impl StateService for StateServiceImpl {
             active.updated_at = Set(now);
 
             active.update(self.db.connection()).await.map_err(|e| {
-                Status::internal(format!("Failed to reschedule job: {}", e))
+                log_internal_error("Failed to reschedule job", e)
             })?;
 
             Ok(Response::new(CompleteJobResponse {
@@ -2378,7 +2407,7 @@ impl StateService for StateServiceImpl {
             active.updated_at = Set(now);
 
             active.update(self.db.connection()).await.map_err(|e| {
-                Status::internal(format!("Failed to mark job as completed: {}", e))
+                log_internal_error("Failed to mark job as completed", e)
             })?;
 
             Ok(Response::new(CompleteJobResponse {
@@ -2404,7 +2433,7 @@ impl StateService for StateServiceImpl {
             .filter(jobs::Column::JobSequence.eq(req.job_sequence as i64))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?
+            .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Job not found"))?;
 
         // Update status to FAILED
@@ -2414,7 +2443,7 @@ impl StateService for StateServiceImpl {
         active.updated_at = Set(Utc::now());
 
         let result = active.update(self.db.connection()).await.map_err(|e| {
-            Status::internal(format!("Failed to update job: {}", e))
+            log_internal_error("Failed to update job", e)
         })?;
 
         // Convert to proto
@@ -2473,7 +2502,7 @@ impl StateService for StateServiceImpl {
             .filter(jobs::Column::JobSequence.eq(req.job_sequence as i64))
             .one(self.db.connection())
             .await
-            .map_err(|e| Status::internal(format!("Database error: {}", e)))?;
+            .map_err(|e| log_internal_error("Database error", e))?;
 
         // Handle not found case
         let job = match job {
@@ -2565,7 +2594,7 @@ impl StateService for StateServiceImpl {
 
         // Get total count
         let total = query.clone().count(self.db.connection()).await.map_err(|e| {
-            Status::internal(format!("Database error: {}", e))
+            log_internal_error("Database error", e)
         })? as i32;
 
         // Get paginated results
@@ -2575,7 +2604,7 @@ impl StateService for StateServiceImpl {
 
         let page = offset / limit;
         let job_list = paginator.fetch_page(page).await.map_err(|e| {
-            Status::internal(format!("Database error: {}", e))
+            log_internal_error("Database error", e)
         })?;
 
         // Convert to proto
@@ -2671,7 +2700,7 @@ impl StateService for StateServiceImpl {
             .paginate(self.db.connection(), limit);
 
         let job_list = paginator.fetch_page(0).await.map_err(|e| {
-            Status::internal(format!("Database error: {}", e))
+            log_internal_error("Database error", e)
         })?;
 
         // Convert to proto
