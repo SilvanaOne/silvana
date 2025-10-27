@@ -1,0 +1,775 @@
+syntax = "proto3";
+
+package silvana.state.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "silvana/options/v1/options.proto";
+
+option go_package = "github.com/SilvanaOne/silvana/proto;state";
+
+// ============================================================================
+// Enumerations
+// ============================================================================
+
+// State type enumeration for queries
+enum StateType {
+  STATE_TYPE_UNSPECIFIED = 0;
+  STATE_TYPE_ACTION = 1;
+  STATE_TYPE_OPTIMISTIC = 2;
+  STATE_TYPE_PROVED = 3;
+}
+
+// Lock status enumeration
+enum LockStatus {
+  LOCK_STATUS_UNSPECIFIED = 0;
+  LOCK_STATUS_WAITING = 1;
+  LOCK_STATUS_GRANTED = 2;
+  LOCK_STATUS_EXPIRED = 3;
+  LOCK_STATUS_RELEASED = 4;
+}
+
+// Lock bundle status enumeration
+enum BundleStatus {
+  BUNDLE_STATUS_UNSPECIFIED = 0;
+  BUNDLE_STATUS_QUEUED = 1;
+  BUNDLE_STATUS_ACQUIRING = 2;
+  BUNDLE_STATUS_GRANTED = 3;
+  BUNDLE_STATUS_RELEASED = 4;
+  BUNDLE_STATUS_TIMEOUT = 5;
+  BUNDLE_STATUS_FAILED = 6;
+}
+
+// Job status enumeration
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_COMPLETED = 3;
+  JOB_STATUS_FAILED = 4;
+}
+
+// ============================================================================
+// Core Data Messages (matching SQL tables)
+// ============================================================================
+
+// JWT authentication token
+message JWTAuth {
+  string token = 1; // JWT signed with Ed25519 private key
+}
+
+// App Instance message
+message AppInstance {
+  string app_instance_id = 1;
+  string owner = 2;                         // Ed25519 public key (hex), NOT NULL
+  string name = 3;
+  optional string description = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+  optional google.protobuf.Struct metadata = 7;  // Optional metadata
+}
+
+// User Action message
+message UserAction {
+  string app_instance_id = 1;
+  uint64 sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string action_type = 3;
+  bytes action_data = 4;                    // Serialized action parameters
+  bytes action_hash = 5;                    // Hash of action data
+  optional string action_da = 6;            // S3 key for large action data
+  string submitter = 7;
+  google.protobuf.Timestamp created_at = 8;
+  optional google.protobuf.Struct metadata = 9;  // Optional application metadata
+}
+
+// Optimistic State message
+message OptimisticState {
+  string app_instance_id = 1;
+  uint64 sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  bytes state_hash = 3;                     // Hash of state data
+  bytes state_data = 4;                     // State data (if small)
+  optional string state_da = 5;             // S3 key for large state data
+  optional bytes transition_data = 6;       // Transition delta
+  optional string transition_da = 7;        // S3 key for large transition
+  optional bytes commitment = 8;            // State commitment
+  google.protobuf.Timestamp computed_at = 9;
+  optional google.protobuf.Struct metadata = 10;  // Optional application metadata
+}
+
+// State message (proved state)
+message State {
+  string app_instance_id = 1;
+  uint64 sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  bytes state_hash = 3;
+  optional bytes state_data = 4;            // State data (if small)
+  optional string state_da = 5;             // S3 key for large state
+  optional bytes proof_data = 6;            // ZK proof (if small)
+  optional string proof_da = 7;             // S3 key for large proof
+  optional bytes proof_hash = 8;            // Hash of proof
+  optional bytes commitment = 9;            // State commitment
+  google.protobuf.Timestamp proved_at = 10;
+  optional google.protobuf.Struct metadata = 11;  // Optional application metadata
+}
+
+// Object message
+message Object {
+  string object_id = 1;                     // Hex string ED25519 address
+  uint64 version = 2;                      // Current version (Lamport timestamp)
+  string owner = 3;                        // Ed25519 public key or app_instance_id
+  string object_type = 4;
+  bool shared = 5;                         // Whether object can be accessed by multiple owners
+  optional bytes object_data = 6;          // Object data (if small)
+  optional string object_da = 7;           // S3 reference for large objects
+  bytes object_hash = 8;                   // Hash of object data
+  optional string previous_tx = 9;         // Previous transaction that modified this
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  optional google.protobuf.Struct metadata = 12;  // Optional metadata
+}
+
+// Object Version message
+message ObjectVersion {
+  string object_id = 1;
+  uint64 version = 2;                      // Version number (Lamport timestamp)
+  optional bytes object_data = 3;          // Object data (if small)
+  optional string object_da = 4;           // S3 reference for large objects
+  bytes object_hash = 5;                   // Hash of object data
+  string owner = 6;                        // Ed25519 public key or app_instance_id
+  string object_type = 7;
+  bool shared = 8;                         // Whether object was shared at this version
+  optional string previous_tx = 9;         // Transaction that created this version
+  google.protobuf.Timestamp created_at = 10;
+}
+
+// KV String Entry message
+message KVStringEntry {
+  string app_instance_id = 1;
+  string key = 2;
+  string value = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// KV Binary Entry message
+message KVBinaryEntry {
+  string app_instance_id = 1;
+  bytes key = 2;
+  bytes value = 3;
+  optional string value_da = 4;            // S3 reference for large values
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// Lock Queue Entry message
+message LockQueueEntry {
+  string object_id = 1;
+  string req_id = 2;
+  string app_instance_id = 3;
+  int32 retry_count = 4;
+  google.protobuf.Timestamp queued_at = 5;
+  optional google.protobuf.Timestamp lease_until = 6;
+  optional google.protobuf.Timestamp lease_granted_at = 7;
+  LockStatus status = 8;
+}
+
+// Lock Request Bundle message
+message LockRequestBundle {
+  string req_id = 1;
+  string app_instance_id = 2;
+  repeated string object_ids = 3;          // Array of object IDs
+  int32 object_count = 4;
+  optional string transaction_type = 5;
+  google.protobuf.Timestamp created_at = 6;
+  optional google.protobuf.Timestamp started_at = 7;
+  optional google.protobuf.Timestamp granted_at = 8;
+  optional google.protobuf.Timestamp released_at = 9;
+  BundleStatus status = 10;
+  optional int64 wait_time_ms = 11;
+  optional int64 hold_time_ms = 12;
+}
+
+// Job message
+message Job {
+  string app_instance_id = 1;
+  uint64 job_sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional string description = 3;
+
+  // Metadata of the agent method to call
+  string developer = 4;
+  string agent = 5;
+  string agent_method = 6;
+
+  // Job data
+  optional uint64 block_number = 7;
+  repeated uint64 sequences = 8;           // vector<u64> as repeated field
+  repeated uint64 sequences1 = 9;          // vector<u64> as repeated field
+  repeated uint64 sequences2 = 10;         // vector<u64> as repeated field
+  optional bytes data = 11;                // vector<u8> as bytes
+  optional string data_da = 12;            // S3 reference for large job data
+
+  // Status
+  JobStatus status = 13;
+  optional string error_message = 14;      // For Failed status
+  uint32 attempts = 15;
+
+  // Periodic scheduling fields
+  optional uint64 interval_ms = 16;         // NULL for one-time jobs
+  optional google.protobuf.Timestamp next_scheduled_at = 17;
+
+  // Metadata timestamps
+  google.protobuf.Timestamp created_at = 18;
+  google.protobuf.Timestamp updated_at = 19;
+  optional google.protobuf.Struct metadata = 20;  // Optional metadata
+}
+
+// ============================================================================
+// Service Request/Response Messages
+// ============================================================================
+
+// App Instance operations
+message CreateAppInstanceRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string name = 3;
+  optional string description = 4;
+  optional google.protobuf.Struct metadata = 5;  // Optional metadata
+}
+
+message CreateAppInstanceResponse {
+  bool success = 1;
+  string message = 2;
+  AppInstance app_instance = 3;
+}
+
+message GetAppInstanceRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message GetAppInstanceResponse {
+  AppInstance app_instance = 1;
+}
+
+message ListAppInstancesRequest {
+  JWTAuth auth = 1;
+  optional int32 limit = 2;
+  optional int32 offset = 3;
+}
+
+message ListAppInstancesResponse {
+  repeated AppInstance app_instances = 1;
+  int32 total = 2;
+}
+
+// User Action operations
+message SubmitUserActionRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string action_type = 3;  // Renumbered from 4
+  bytes action_data = 4;   // Renumbered from 5
+  optional string action_da = 5;  // Renumbered from 6
+  optional google.protobuf.Struct metadata = 6;  // Renumbered from 7 - Optional application metadata
+}
+
+message SubmitUserActionResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 action_sequence = 3;  // The server-assigned sequence number
+}
+
+message GetUserActionsRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 from_sequence = 3;
+  uint64 to_sequence = 4;
+}
+
+message GetUserActionsResponse {
+  repeated UserAction user_actions = 1;
+}
+
+// Optimistic State operations
+message UpdateOptimisticStateRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 sequence = 3;
+  bytes state_hash = 4;
+  bytes state_data = 5;
+  optional string state_da = 6;
+  optional bytes transition_data = 7;
+  optional string transition_da = 8;
+  optional bytes commitment = 9;
+  optional google.protobuf.Struct metadata = 10;  // Optional application metadata
+}
+
+message UpdateOptimisticStateResponse {
+  bool success = 1;
+  string message = 2;
+  OptimisticState optimistic_state = 3;
+}
+
+message GetOptimisticStateRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional uint64 sequence = 3;  // If not specified, returns latest
+}
+
+message GetOptimisticStateResponse {
+  bool success = 1;
+  string message = 2;
+  optional OptimisticState optimistic_state = 3;
+}
+
+// Proved State operations
+message SubmitProvedStateRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 sequence = 3;
+  bytes state_hash = 4;
+  optional bytes state_data = 5;
+  optional string state_da = 6;
+  optional bytes proof_data = 7;
+  optional string proof_da = 8;
+  optional bytes proof_hash = 9;
+  optional bytes commitment = 10;
+  optional google.protobuf.Struct metadata = 11;  // Optional application metadata
+}
+
+message SubmitProvedStateResponse {
+  bool success = 1;
+  string message = 2;
+  State state = 3;
+}
+
+message GetStateRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 sequence = 3;
+  StateType state_type = 4;
+}
+
+message GetStateResponse {
+  oneof state {
+    UserAction user_action = 1;
+    OptimisticState optimistic_state = 2;
+    State proved_state = 3;
+  }
+}
+
+message GetLatestStateRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message GetLatestStateResponse {
+  bool success = 1;
+  string message = 2;
+  optional State state = 3;
+}
+
+message GetStateRangeRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 from_sequence = 3;
+  uint64 to_sequence = 4;
+  bool include_proofs = 5;
+}
+
+message GetStateRangeResponse {
+  repeated UserAction user_actions = 1;
+  repeated OptimisticState optimistic_states = 2;
+  repeated State proved_states = 3;
+}
+
+// KV String operations
+message GetKVStringRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string key = 3;
+}
+
+message GetKVStringResponse {
+  bool success = 1;
+  string message = 2;
+  optional KVStringEntry entry = 3;
+}
+
+message SetKVStringRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string key = 3;
+  string value = 4;
+}
+
+message SetKVStringResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteKVStringRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string key = 3;
+}
+
+message DeleteKVStringResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ListKVStringKeysRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional string prefix = 3;
+  optional int32 limit = 4;
+}
+
+message ListKVStringKeysResponse {
+  repeated string keys = 1;
+}
+
+message BatchKVStringRequest {
+  JWTAuth auth = 1;
+  repeated SetKVStringRequest sets = 2;
+  repeated DeleteKVStringRequest deletes = 3;
+}
+
+message BatchKVStringResponse {
+  bool success = 1;
+  string message = 2;
+  int32 sets_processed = 3;
+  int32 deletes_processed = 4;
+}
+
+// KV Binary operations
+message GetKVBinaryRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  bytes key = 3;
+}
+
+message GetKVBinaryResponse {
+  bool success = 1;
+  string message = 2;
+  optional KVBinaryEntry entry = 3;
+}
+
+message SetKVBinaryRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  bytes key = 3;
+  bytes value = 4;
+  optional string value_da = 5;
+}
+
+message SetKVBinaryResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteKVBinaryRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  bytes key = 3;
+}
+
+message DeleteKVBinaryResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ListKVBinaryKeysRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional bytes prefix = 3;
+  optional int32 limit = 4;
+}
+
+message ListKVBinaryKeysResponse {
+  repeated bytes keys = 1;
+}
+
+message BatchKVBinaryRequest {
+  JWTAuth auth = 1;
+  repeated SetKVBinaryRequest sets = 2;
+  repeated DeleteKVBinaryRequest deletes = 3;
+}
+
+message BatchKVBinaryResponse {
+  bool success = 1;
+  string message = 2;
+  int32 sets_processed = 3;
+  int32 deletes_processed = 4;
+}
+
+// Object operations
+message CreateObjectRequest {
+  JWTAuth auth = 1;
+  string object_id = 2;                    // Ed25519 address
+  string object_type = 3;
+  optional bytes object_data = 4;
+  optional string object_da = 5;
+  bool shared = 6;
+  optional google.protobuf.Struct metadata = 7;  // Optional metadata
+}
+
+message CreateObjectResponse {
+  bool success = 1;
+  string message = 2;
+  Object object = 3;
+}
+
+message UpdateObjectRequest {
+  JWTAuth auth = 1;
+  string object_id = 2;
+  optional bytes object_data = 3;
+  optional string object_da = 4;
+  uint64 expected_version = 5;             // For optimistic locking
+}
+
+message UpdateObjectResponse {
+  bool success = 1;
+  string message = 2;
+  Object object = 3;
+}
+
+message GetObjectRequest {
+  JWTAuth auth = 1;
+  string object_id = 2;
+  optional uint64 version = 3;             // If not specified, returns latest
+}
+
+message GetObjectResponse {
+  bool success = 1;
+  string message = 2;
+  optional Object object = 3;
+}
+
+message GetObjectVersionsRequest {
+  JWTAuth auth = 1;
+  string object_id = 2;
+  optional int32 limit = 3;
+  optional int32 offset = 4;
+}
+
+message GetObjectVersionsResponse {
+  repeated ObjectVersion versions = 1;
+  int32 total = 2;
+}
+
+message TransferObjectRequest {
+  JWTAuth auth = 1;
+  string object_id = 2;
+  string new_owner = 3;                    // Ed25519 public key or app_instance_id
+}
+
+message TransferObjectResponse {
+  bool success = 1;
+  string message = 2;
+  Object object = 3;
+}
+
+// Lock Queue operations
+message RequestLocksRequest {
+  JWTAuth auth = 1;
+  string req_id = 2;                       // Request ID (UUID)
+  repeated string object_ids = 3;
+  optional string transaction_type = 4;
+  uint32 timeout_seconds = 5;              // Max time to wait for locks
+}
+
+message RequestLocksResponse {
+  bool success = 1;
+  string message = 2;
+  LockRequestBundle bundle = 3;
+}
+
+message ReleaseLocksRequest {
+  JWTAuth auth = 1;
+  string req_id = 2;
+}
+
+message ReleaseLocksResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetLockStatusRequest {
+  JWTAuth auth = 1;
+  string req_id = 2;
+}
+
+message GetLockStatusResponse {
+  LockRequestBundle bundle = 1;
+  repeated LockQueueEntry queue_entries = 2;
+}
+
+message GetLockQueueRequest {
+  JWTAuth auth = 1;
+  string object_id = 2;
+}
+
+message GetLockQueueResponse {
+  repeated LockQueueEntry queue_entries = 1;
+}
+
+// Job operations
+message CreateJobRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional string description = 3;  // Renumbered from 4
+  string developer = 4;              // Renumbered from 5
+  string agent = 5;                  // Renumbered from 6
+  string agent_method = 6;           // Renumbered from 7
+  optional uint64 block_number = 7;  // Renumbered from 8
+  repeated uint64 sequences = 8;     // Renumbered from 9
+  repeated uint64 sequences1 = 9;    // Renumbered from 10
+  repeated uint64 sequences2 = 10;   // Renumbered from 11
+  optional bytes data = 11;          // Renumbered from 12
+  optional string data_da = 12;      // Renumbered from 13
+  optional uint64 interval_ms = 13;   // Renumbered from 14 - For periodic jobs
+  optional google.protobuf.Struct metadata = 14;  // Optional metadata
+}
+
+message CreateJobResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 job_sequence = 3;  // The server-assigned sequence
+  Job job = 4;              // Renumbered from 3
+}
+
+message StartJobRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 job_sequence = 3;
+}
+
+message StartJobResponse {
+  bool success = 1;
+  string message = 2;
+  Job job = 3;
+}
+
+message CompleteJobRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 job_sequence = 3;
+}
+
+message CompleteJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message FailJobRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 job_sequence = 3;
+  string error_message = 4;
+}
+
+message FailJobResponse {
+  bool success = 1;
+  string message = 2;
+  Job job = 3;
+}
+
+message GetJobRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 job_sequence = 3;
+}
+
+message GetJobResponse {
+  bool success = 1;
+  string message = 2;
+  optional Job job = 3;
+}
+
+message ListJobsRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional JobStatus status = 3;           // Filter by status
+  optional int32 limit = 4;
+  optional int32 offset = 5;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+  int32 total = 2;
+}
+
+message GetPendingJobsRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional string developer = 3;
+  optional string agent = 4;
+  optional string agent_method = 5;
+  int32 limit = 6;
+}
+
+message GetPendingJobsResponse {
+  repeated Job jobs = 1;
+}
+
+// ============================================================================
+// Service Definition
+// ============================================================================
+
+service StateService {
+  // App Instance Management
+  rpc CreateAppInstance(CreateAppInstanceRequest) returns (CreateAppInstanceResponse);
+  rpc GetAppInstance(GetAppInstanceRequest) returns (GetAppInstanceResponse);
+  rpc ListAppInstances(ListAppInstancesRequest) returns (ListAppInstancesResponse);
+
+  // User Actions
+  rpc SubmitUserAction(SubmitUserActionRequest) returns (SubmitUserActionResponse);
+  rpc GetUserActions(GetUserActionsRequest) returns (GetUserActionsResponse);
+
+  // Optimistic State
+  rpc UpdateOptimisticState(UpdateOptimisticStateRequest) returns (UpdateOptimisticStateResponse);
+  rpc GetOptimisticState(GetOptimisticStateRequest) returns (GetOptimisticStateResponse);
+
+  // Proved State
+  rpc SubmitProvedState(SubmitProvedStateRequest) returns (SubmitProvedStateResponse);
+  rpc GetState(GetStateRequest) returns (GetStateResponse);
+  rpc GetLatestState(GetLatestStateRequest) returns (GetLatestStateResponse);
+  rpc GetStateRange(GetStateRangeRequest) returns (GetStateRangeResponse);
+
+  // KV String Storage
+  rpc GetKVString(GetKVStringRequest) returns (GetKVStringResponse);
+  rpc SetKVString(SetKVStringRequest) returns (SetKVStringResponse);
+  rpc DeleteKVString(DeleteKVStringRequest) returns (DeleteKVStringResponse);
+  rpc ListKVStringKeys(ListKVStringKeysRequest) returns (ListKVStringKeysResponse);
+  rpc BatchKVString(BatchKVStringRequest) returns (BatchKVStringResponse);
+
+  // KV Binary Storage
+  rpc GetKVBinary(GetKVBinaryRequest) returns (GetKVBinaryResponse);
+  rpc SetKVBinary(SetKVBinaryRequest) returns (SetKVBinaryResponse);
+  rpc DeleteKVBinary(DeleteKVBinaryRequest) returns (DeleteKVBinaryResponse);
+  rpc ListKVBinaryKeys(ListKVBinaryKeysRequest) returns (ListKVBinaryKeysResponse);
+  rpc BatchKVBinary(BatchKVBinaryRequest) returns (BatchKVBinaryResponse);
+
+  // Object Management
+  rpc CreateObject(CreateObjectRequest) returns (CreateObjectResponse);
+  rpc UpdateObject(UpdateObjectRequest) returns (UpdateObjectResponse);
+  rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
+  rpc GetObjectVersions(GetObjectVersionsRequest) returns (GetObjectVersionsResponse);
+  rpc TransferObject(TransferObjectRequest) returns (TransferObjectResponse);
+
+  // Lock Queue Management
+  rpc RequestLocks(RequestLocksRequest) returns (RequestLocksResponse);
+  rpc ReleaseLocks(ReleaseLocksRequest) returns (ReleaseLocksResponse);
+  rpc GetLockStatus(GetLockStatusRequest) returns (GetLockStatusResponse);
+  rpc GetLockQueue(GetLockQueueRequest) returns (GetLockQueueResponse);
+
+  // Job Management
+  rpc CreateJob(CreateJobRequest) returns (CreateJobResponse);
+  rpc StartJob(StartJobRequest) returns (StartJobResponse);
+  rpc CompleteJob(CompleteJobRequest) returns (CompleteJobResponse);
+  rpc FailJob(FailJobRequest) returns (FailJobResponse);
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc GetPendingJobs(GetPendingJobsRequest) returns (GetPendingJobsResponse);
+}

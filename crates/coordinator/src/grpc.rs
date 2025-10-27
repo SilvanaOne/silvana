@@ -16,25 +16,26 @@ pub mod coordinator {
 }
 
 use coordinator::{
-    AddMetadataRequest, AddMetadataResponse, AgentMessageRequest, AgentMessageResponse, Block,
-    BlockSettlement, CompleteJobRequest, CompleteJobResponse, CreateAppJobRequest,
-    CreateAppJobResponse, DeleteKvRequest, DeleteKvResponse, FailJobRequest, FailJobResponse,
-    GetBlockProofRequest, GetBlockProofResponse, GetBlockRequest, GetBlockResponse,
-    GetBlockSettlementRequest, GetBlockSettlementResponse, GetJobRequest, GetJobResponse,
-    GetKvRequest, GetKvResponse, GetMetadataRequest, GetMetadataResponse, GetProofRequest,
-    GetProofResponse, GetSequenceStatesRequest, GetSequenceStatesResponse,
-    GetSettlementProofRequest, GetSettlementProofResponse, Job, LogLevel, Metadata,
-    ProofEventRequest, ProofEventResponse, ProofEventType, ReadDataAvailabilityRequest,
-    ReadDataAvailabilityResponse, RejectProofRequest, RejectProofResponse, RetrieveSecretRequest,
-    RetrieveSecretResponse, SequenceState, SetKvRequest, SetKvResponse,
-    SubmitProofRequest, SubmitProofResponse, SubmitSettlementProofRequest,
-    SubmitSettlementProofResponse, SubmitStateRequest, SubmitStateResponse, TerminateJobRequest,
-    TerminateJobResponse, TryCreateBlockRequest, TryCreateBlockResponse,
-    UpdateBlockProofDataAvailabilityRequest, UpdateBlockProofDataAvailabilityResponse,
-    UpdateBlockSettlementRequest, UpdateBlockSettlementResponse,
-    UpdateBlockSettlementTxHashRequest, UpdateBlockSettlementTxHashResponse,
-    UpdateBlockSettlementTxIncludedInBlockRequest, UpdateBlockSettlementTxIncludedInBlockResponse,
-    UpdateBlockStateDataAvailabilityRequest, UpdateBlockStateDataAvailabilityResponse,
+    AddMetadataRequest, AddMetadataResponse, AgentMessageRequest, AgentMessageResponse,
+    AppInstanceData, AppMethod, Block, BlockSettlement, CompleteJobRequest, CompleteJobResponse,
+    CreateAppJobRequest, CreateAppJobResponse, DeleteKvRequest, DeleteKvResponse, FailJobRequest,
+    FailJobResponse, GetAppInstanceRequest, GetAppInstanceResponse, GetBlockProofRequest,
+    GetBlockProofResponse, GetBlockRequest, GetBlockResponse, GetBlockSettlementRequest,
+    GetBlockSettlementResponse, GetJobRequest, GetJobResponse, GetKvRequest, GetKvResponse,
+    GetMetadataRequest, GetMetadataResponse, GetProofRequest, GetProofResponse,
+    GetSequenceStatesRequest, GetSequenceStatesResponse, GetSettlementProofRequest,
+    GetSettlementProofResponse, Job, LogLevel, Metadata, ProofEventRequest, ProofEventResponse,
+    ProofEventType, ReadDataAvailabilityRequest, ReadDataAvailabilityResponse,
+    RejectProofRequest, RejectProofResponse, RetrieveSecretRequest, RetrieveSecretResponse,
+    SequenceState, SettlementInfo, SetKvRequest, SetKvResponse, SubmitProofRequest,
+    SubmitProofResponse, SubmitSettlementProofRequest, SubmitSettlementProofResponse,
+    SubmitStateRequest, SubmitStateResponse, TerminateJobRequest, TerminateJobResponse,
+    TryCreateBlockRequest, TryCreateBlockResponse, UpdateBlockProofDataAvailabilityRequest,
+    UpdateBlockProofDataAvailabilityResponse, UpdateBlockSettlementRequest,
+    UpdateBlockSettlementResponse, UpdateBlockSettlementTxHashRequest,
+    UpdateBlockSettlementTxHashResponse, UpdateBlockSettlementTxIncludedInBlockRequest,
+    UpdateBlockSettlementTxIncludedInBlockResponse, UpdateBlockStateDataAvailabilityRequest,
+    UpdateBlockStateDataAvailabilityResponse,
     coordinator_service_server::{CoordinatorService, CoordinatorServiceServer},
 };
 
@@ -4535,6 +4536,119 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 req.block_number, req.chain
             ),
             tx_hash: String::new(), // Placeholder for now
+        }))
+    }
+
+    async fn get_app_instance(
+        &self,
+        request: Request<GetAppInstanceRequest>,
+    ) -> Result<Response<GetAppInstanceResponse>, Status> {
+        let req = request.into_inner();
+        info!(
+            job_id = %req.job_id,
+            session_id = %req.session_id,
+            "Received GetAppInstance request"
+        );
+
+        // Get agent job to find app_instance
+        let agent_job = match self
+            .state
+            .get_agent_job_db()
+            .get_job_by_id(&req.job_id)
+            .await
+        {
+            Some(job) => job,
+            None => {
+                return Ok(Response::new(GetAppInstanceResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    app_instance: None,
+                }));
+            }
+        };
+
+        // Fetch app instance from blockchain
+        let app_instance = match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+            Ok(ai) => ai,
+            Err(e) => {
+                return Ok(Response::new(GetAppInstanceResponse {
+                    success: false,
+                    message: format!("Failed to fetch app instance: {}", e),
+                    app_instance: None,
+                }));
+            }
+        };
+
+        // Convert methods HashMap<String, serde_json::Value> to HashMap<String, AppMethod>
+        let mut methods = std::collections::HashMap::new();
+        for (key, value) in app_instance.methods {
+            // Try to extract AppMethod fields from the JSON value
+            let description = value.get("description")
+                .and_then(|d| d.as_str())
+                .map(|s| s.to_string());
+            let developer = value.get("developer")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .to_string();
+            let agent = value.get("agent")
+                .and_then(|a| a.as_str())
+                .unwrap_or("")
+                .to_string();
+            let agent_method = value.get("agent_method")
+                .and_then(|am| am.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let method = AppMethod {
+                description,
+                developer,
+                agent,
+                agent_method,
+            };
+            methods.insert(key, method);
+        }
+
+        // Convert settlements HashMap<String, Settlement> to HashMap<String, SettlementInfo>
+        let mut settlements = std::collections::HashMap::new();
+        for (chain, settlement) in app_instance.settlements {
+            settlements.insert(chain.clone(), SettlementInfo {
+                chain: settlement.chain,
+                last_settled_block_number: settlement.last_settled_block_number,
+                settlement_address: settlement.settlement_address,
+                settlement_job: settlement.settlement_job,
+            });
+        }
+
+        // Build AppInstanceData
+        let app_instance_data = AppInstanceData {
+            id: app_instance.id,
+            silvana_app_name: app_instance.silvana_app_name,
+            description: app_instance.description,
+            metadata: app_instance.metadata,
+            kv: app_instance.kv,
+            methods,
+            sequence: app_instance.sequence,
+            admin: app_instance.admin,
+            block_number: app_instance.block_number,
+            previous_block_timestamp: app_instance.previous_block_timestamp,
+            previous_block_last_sequence: app_instance.previous_block_last_sequence,
+            last_proved_block_number: app_instance.last_proved_block_number,
+            last_settled_block_number: app_instance.last_settled_block_number,
+            last_settled_sequence: app_instance.last_settled_sequence,
+            last_purged_sequence: app_instance.last_purged_sequence,
+            settlements,
+            is_paused: app_instance.is_paused,
+            min_time_between_blocks: app_instance.min_time_between_blocks,
+            created_at: app_instance.created_at,
+            updated_at: app_instance.updated_at,
+        };
+
+        info!("✅ GetAppInstance successful for app instance {}", app_instance_data.id);
+
+        Ok(Response::new(GetAppInstanceResponse {
+            success: true,
+            message: format!("App instance {} retrieved successfully", app_instance_data.id),
+            app_instance: Some(app_instance_data),
         }))
     }
 

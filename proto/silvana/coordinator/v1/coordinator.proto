@@ -580,6 +580,51 @@ message UpdateBlockSettlementResponse {
   string tx_hash = 3;
 }
 
+// App method definition
+message AppMethod {
+  optional string description = 1;
+  string developer = 2;
+  string agent = 3;
+  string agent_method = 4;
+}
+
+// App instance data structure
+message AppInstanceData {
+  string id = 1;
+  string silvana_app_name = 2;
+  optional string description = 3;
+  map<string, string> metadata = 4;
+  map<string, string> kv = 5;
+  map<string, AppMethod> methods = 6;
+  uint64 sequence = 7;
+  string admin = 8;
+  uint64 block_number = 9;
+  uint64 previous_block_timestamp = 10;
+  uint64 previous_block_last_sequence = 11;
+  uint64 last_proved_block_number = 12;
+  uint64 last_settled_block_number = 13;
+  uint64 last_settled_sequence = 14;
+  uint64 last_purged_sequence = 15;
+  map<string, SettlementInfo> settlements = 16;
+  bool is_paused = 17;
+  uint64 min_time_between_blocks = 18;
+  uint64 created_at = 19;
+  uint64 updated_at = 20;
+}
+
+// Request message for getting app instance data
+message GetAppInstanceRequest {
+  string job_id = 1;
+  string session_id = 2;
+}
+
+// Response message for getting app instance data
+message GetAppInstanceResponse {
+  bool success = 1;
+  string message = 2;
+  optional AppInstanceData app_instance = 3;
+}
+
 // gRPC service definition
 service CoordinatorService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
@@ -613,4 +658,6 @@ service CoordinatorService {
   // New BlockSettlement RPCs for multi-chain support
   rpc GetBlockSettlement(GetBlockSettlementRequest) returns (GetBlockSettlementResponse);
   rpc UpdateBlockSettlement(UpdateBlockSettlementRequest) returns (UpdateBlockSettlementResponse);
+  // App instance data retrieval
+  rpc GetAppInstance(GetAppInstanceRequest) returns (GetAppInstanceResponse);
 }

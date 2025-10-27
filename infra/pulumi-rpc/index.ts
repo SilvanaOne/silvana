@@ -211,12 +211,85 @@ export = async () => {
     },
   });
 
-  // Update S3 policy to include proofs-cache bucket
+  // -------------------------
+  // S3 Bucket for Private Data Availability (DA) - Long-term Storage
+  // -------------------------
+  const privateDaBucket = new aws.s3.BucketV2(`silvana-private-da-${stack}`, {
+    bucket: `silvana-private-da-${stack}`,
+    tags: {
+      Name: `silvana-private-da-${stack}`,
+      Purpose: "Private data availability storage with permanent retention",
+      Project: "silvana-rpc",
+    },
+  }, {
+    protect: true, // Prevents Pulumi from deleting this bucket
+    retainOnDelete: true, // Additional safety - bucket is retained even if removed from code
+  });
+
+  // Enable versioning to keep all object versions
+  const privateDaVersioning = new aws.s3.BucketVersioningV2(`silvana-private-da-${stack}-versioning`, {
+    bucket: privateDaBucket.bucket,
+    versioningConfiguration: {
+      status: "Enabled",
+      mfaDelete: "Disabled", // Can be enabled later for extra protection
+    },
+  });
+
+  // Block all public access
+  const privateDaPublicAccessBlock = new aws.s3.BucketPublicAccessBlock(`silvana-private-da-${stack}-pab`, {
+    bucket: privateDaBucket.bucket,
+    blockPublicAcls: true,
+    blockPublicPolicy: true,
+    ignorePublicAcls: true,
+    restrictPublicBuckets: true,
+  });
+
+  // Configure Object Lock for immutability (COMPLIANCE mode prevents deletion)
+  const privateDaObjectLock = new aws.s3.BucketObjectLockConfigurationV2(`silvana-private-da-${stack}-lock`, {
+    bucket: privateDaBucket.bucket,
+    objectLockEnabled: "Enabled",
+    rule: {
+      defaultRetention: {
+        mode: "COMPLIANCE", // Objects cannot be deleted or overwritten
+        years: 10, // 10-year retention by default
+      },
+    },
+  }, {
+    dependsOn: [privateDaVersioning],
+  });
+
+  // Configure lifecycle transitions to cheaper storage
+  const privateDaLifecycle = new aws.s3.BucketLifecycleConfigurationV2(`silvana-private-da-${stack}-lifecycle`, {
+    bucket: privateDaBucket.bucket,
+    rules: [{
+      id: "transition-to-cheaper-storage",
+      status: "Enabled",
+      transitions: [
+        {
+          days: 30, // After 30 days (AWS minimum for STANDARD_IA)
+          storageClass: "STANDARD_IA", // Infrequent Access (cheaper)
+        },
+        {
+          days: 60, // After 2 months
+          storageClass: "GLACIER_IR", // Glacier Instant Retrieval (cheaper, instant access)
+        },
+        {
+          days: 365, // After 1 year
+          storageClass: "DEEP_ARCHIVE", // Cheapest storage, 12-48 hour retrieval
+        },
+      ],
+      // No expiration - data stored forever
+    }],
+  }, {
+    dependsOn: [privateDaVersioning],
+  });
+
+  // Update S3 policy to include proofs-cache bucket and private DA bucket
   const s3PolicyWithProofsCache = new aws.iam.Policy(
     "silvana-rpc-s3-policy-with-proofs",
     {
       description:
-        "Policy for accessing S3 buckets for SSL certificates and proofs cache",
+        "Policy for accessing S3 buckets for SSL certificates, proofs cache, and private DA storage",
       policy: pulumi.interpolate`{
       "Version": "2012-10-17",
       "Statement": [
@@ -243,6 +316,26 @@ export = async () => {
             "s3:GetBucketLocation"
           ],
           "Resource": "${proofsCacheBucket.arn}"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:GetObjectVersion",
+            "s3:PutObject",
+            "s3:PutObjectRetention",
+            "s3:GetObjectRetention"
+          ],
+          "Resource": "${privateDaBucket.arn}/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:ListBucket",
+            "s3:GetBucketLocation",
+            "s3:ListBucketVersions"
+          ],
+          "Resource": "${privateDaBucket.arn}"
         },
         {
           "Effect": "Allow",
@@ -521,5 +614,8 @@ export = async () => {
     // Proofs cache bucket
     proofsCacheBucketName: proofsCacheBucket.bucket,
     proofsCacheBucketArn: proofsCacheBucket.arn,
+    // Private DA bucket
+    privateDaBucketName: privateDaBucket.bucket,
+    privateDaBucketArn: privateDaBucket.arn,
   };
 };

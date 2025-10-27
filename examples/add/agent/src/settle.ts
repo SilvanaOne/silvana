@@ -27,6 +27,7 @@ import {
   ProofEventType,
   getSettlementProof,
   submitSettlementProof,
+  getAppInstance,
   agent,
 } from "@silvana-one/agent";
 
@@ -156,8 +157,135 @@ export async function settle(params: SettleParams): Promise<void> {
 
   // Get the last settled block number from contract
   const lastSettledBlock = contract.blockNumber.get().toBigInt();
-  console.log(`📊 Last settled block: ${lastSettledBlock}`);
+  console.log(`📊 Last settled block on-chain: ${lastSettledBlock}`);
 
+  // Get app instance data to check for forks
+  console.log("🔍 Fetching app instance data to check for forks...");
+  const appInstanceResponse = await getAppInstance();
+  if (!appInstanceResponse.success || !appInstanceResponse.appInstance) {
+    throw new Error(
+      `Failed to fetch app instance: ${appInstanceResponse.message}`
+    );
+  }
+
+  const appInstance = appInstanceResponse.appInstance;
+  const settlementInfo = appInstance.settlements?.[settlementChain];
+  if (!settlementInfo) {
+    throw new Error(`No settlement info found for chain ${settlementChain}`);
+  }
+
+  const lastSettledBlockInAppInstance =
+    settlementInfo.lastSettledBlockNumber || 0n;
+  console.log(
+    `📊 Last settled block in app instance: ${lastSettledBlockInAppInstance}`
+  );
+
+  // Fork detection: if on-chain block is less than app instance's last settled
+  if (lastSettledBlock < lastSettledBlockInAppInstance) {
+    console.error("🚨 FORK DETECTED!");
+    console.error(`  On-chain last settled block: ${lastSettledBlock}`);
+    console.error(
+      `  App instance last settled block: ${lastSettledBlockInAppInstance}`
+    );
+
+    await agent.error(
+      `Fork detected on ${settlementChain}: on-chain block ${lastSettledBlock} < app instance block ${lastSettledBlockInAppInstance}`
+    );
+
+    // Resend transactions for blocks that were rolled back
+    console.log(
+      "🔄 Starting fork recovery - resending rolled back transactions..."
+    );
+
+    for (
+      let blockNum = lastSettledBlock + 1n;
+      blockNum <= lastSettledBlockInAppInstance;
+      blockNum++
+    ) {
+      console.log(`\n📦 Recovering block ${blockNum}...`);
+
+      // Get the settlement proof that was previously submitted
+      const settlementProofResponse = await getSettlementProof({
+        blockNumber: blockNum,
+        settlementChain,
+      });
+
+      if (!settlementProofResponse.success || !settlementProofResponse.proof) {
+        console.error(
+          `❌ No settlement proof found for block ${blockNum}, cannot recover`
+        );
+        await agent.error(
+          `Fork recovery failed: No settlement proof found for block ${blockNum} on ${settlementChain}`
+        );
+        continue;
+      }
+
+      console.log(`✅ Found settlement proof for block ${blockNum}`);
+
+      try {
+        // Parse the saved transaction
+        const signedTxJson = settlementProofResponse.proof;
+        const signedTx = Mina.Transaction.fromJSON(signedTxJson);
+
+        // Resend the transaction
+        console.log(`📤 Resending transaction for block ${blockNum}...`);
+        const sentTx = await sendTx({
+          tx: signedTx,
+          description: `Fork recovery: Silvana AddContract settle block ${blockNum}`,
+          wait: false,
+          verbose: true,
+          retry: 3,
+        });
+
+        if (
+          !sentTx ||
+          !sentTx.status ||
+          sentTx.status !== "pending" ||
+          !sentTx.hash
+        ) {
+          console.error(
+            `❌ Failed to resend transaction for block ${blockNum}:`,
+            sentTx
+          );
+          await agent.error(
+            `Fork recovery failed: Could not resend transaction for block ${blockNum}`
+          );
+          continue;
+        }
+
+        const txHash = sentTx.hash;
+        console.log(
+          `✅ Transaction resent successfully for block ${blockNum}!`
+        );
+        console.log(`  Transaction Hash: ${txHash}`);
+
+        // Update the settlement tx hash for this chain
+        const updateResult = await updateBlockSettlementTxHash({
+          blockNumber: blockNum,
+          settlementTxHash: txHash,
+          settlementChain,
+        });
+
+        if (updateResult.success) {
+          console.log(`  Settlement tx hash updated for block ${blockNum}`);
+        }
+      } catch (error: any) {
+        console.error(`❌ Error recovering block ${blockNum}:`, error);
+        await agent.error(
+          `Fork recovery error for block ${blockNum}: ${error.message}`
+        );
+      }
+    }
+
+    console.log("✅ Fork recovery completed");
+    await agent.info(
+      `Fork recovery completed: Resent transactions for blocks ${
+        lastSettledBlock + 1n
+      } to ${lastSettledBlockInAppInstance}`
+    );
+  }
+
+  // Continue with the normal tx inclusion recording logic
   console.log("🔄 Started recording tx inclusion for blocks...");
 
   for (let i = lastSettledBlockForChain; i <= lastSettledBlock; i++) {
@@ -633,9 +761,16 @@ export async function settle(params: SettleParams): Promise<void> {
         agent.error(
           `Failed to submit settlement proof for block ${currentBlockNumber}: ${submitSettlementProofResponse.message}`
         );
+        console.error(
+          `Failed to submit settlement proof for block ${currentBlockNumber}: ${submitSettlementProofResponse.message}`
+        );
       }
       agent.info(
         `✅ Settlement proof submitted successfully for block ${currentBlockNumber}`
+      );
+      console.log(
+        `✅ Settlement proof submitted successfully for block ${currentBlockNumber}`,
+        submitSettlementProofResponse
       );
 
       // Sign and send the transaction
