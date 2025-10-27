@@ -86,7 +86,7 @@ check-state-database-url:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze
+.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -106,7 +106,7 @@ help: ## Show this help message
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|apply-ddl-state|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🔧 DEVELOPMENT & DEBUGGING:"
-	@grep -E '^(clean-dev|dev-reset|show-tables|show-state-tables|show-schema|show-state-schema|validate-schema|check-schema):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(clean-dev|dev-reset|show-tables|show-state-tables|show-schema|show-state-schema|validate-schema|check-schema|run-state):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🔐 SECRET MANAGEMENT & CONFIG:"
 	@grep -E '^(store-secret|retrieve-secret|write-config|read-config):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -540,3 +540,16 @@ analyze: ## Analyze Sui proof events and compare merge algorithms
 example-archive: ## Prepare archive with example project (examples/add)
 	@echo "📦 Packing examples/add folder to S3..."
 	@cargo x example-archive
+
+run-state: check-state-database-url ## Run state service locally (reads STATE_DATABASE_URL and STATE_S3_BUCKET from .env)
+	@echo "🚀 Starting state service..."
+	@if ! grep -q "^STATE_S3_BUCKET=" .env; then \
+		echo "⚠️  Warning: STATE_S3_BUCKET not set in .env"; \
+		echo "   Large objects (>1MB) will be stored in database instead of S3"; \
+		echo ""; \
+	fi
+	@echo "📝 The service will load configuration from .env file"
+	@echo "🔗 gRPC endpoint: 0.0.0.0:50052"
+	@echo "🔍 gRPC reflection: enabled"
+	@echo ""
+	cargo run --release --features binary -p state -- --enable-reflection

@@ -254,6 +254,8 @@ export = async () => {
         years: 10, // 10-year retention by default
       },
     },
+  }, {
+    dependsOn: [privateDaVersioning],
   });
 
   // Configure lifecycle transitions to cheaper storage
@@ -264,7 +266,7 @@ export = async () => {
       status: "Enabled",
       transitions: [
         {
-          days: 7, // After 1 week
+          days: 30, // After 30 days (AWS minimum for STANDARD_IA)
           storageClass: "STANDARD_IA", // Infrequent Access (cheaper)
         },
         {
@@ -278,6 +280,8 @@ export = async () => {
       ],
       // No expiration - data stored forever
     }],
+  }, {
+    dependsOn: [privateDaVersioning],
   });
 
   // Update S3 policy to include proofs-cache bucket and private DA bucket
