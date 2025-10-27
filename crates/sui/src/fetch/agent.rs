@@ -3,6 +3,7 @@ use crate::state::SharedSuiState;
 use serde::Deserialize;
 use std::env;
 use sui_rpc::Client;
+use sui_rpc::field::FieldMaskUtil;
 use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
 
 #[derive(Debug, Deserialize)]
@@ -34,15 +35,13 @@ pub async fn fetch_agent_method(
     let registry_request = GetObjectRequest {
         object_id: Some(registry_id.clone()),
         version: None, // Get latest version
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "object_id".to_string(),
-                "version".to_string(),
-                "object_type".to_string(),
-                "owner".to_string(),
-                "json".to_string(),  // Request JSON representation
-            ],
-        }),
+        read_mask: Some(sui_rpc::proto::sui::rpc::v2::FieldMask::from_paths([
+            "object_id",
+            "version",
+            "object_type",
+            "owner",
+            "json",  // Request JSON representation
+        ])),
     };
 
     let registry_response = client
@@ -104,18 +103,16 @@ async fn fetch_developer_and_agent(
             parent: Some(developers_table_id.to_string()),
             page_size: Some(100),
             page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                    "object.object_id".to_string(),
-                ],
-            }),
+            read_mask: Some(sui_rpc::proto::sui::rpc::v2::FieldMask::from_paths([
+                "field_id",
+                "name_type",
+                "name_value",
+                "object.object_id",
+            ])),
         };
         
         let list_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(list_request)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list developers: {}", e)))?;
@@ -124,9 +121,10 @@ async fn fetch_developer_and_agent(
         
         // Find the developer by name in this page
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // The name_value is BCS-encoded String
-                if let Ok(name) = bcs::from_bytes::<String>(name_value) {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // The name_value is BCS-encoded String
+                    if let Ok(name) = bcs::from_bytes::<String>(name_value) {
                 if name == developer_name {
                     
                     // Get the developer field object ID
@@ -135,13 +133,11 @@ async fn fetch_developer_and_agent(
                         let dev_request = GetObjectRequest {
                             object_id: Some(field_id.clone()),
                             version: None,
-                            read_mask: Some(prost_types::FieldMask {
-                                paths: vec![
-                                    "object_id".to_string(),
-                                    "object_type".to_string(),
-                                    "json".to_string(),
-                                ],
-                            }),
+                            read_mask: Some(sui_rpc::proto::sui::rpc::v2::FieldMask::from_paths([
+                                "object_id",
+                                "object_type",
+                                "json",
+                            ])),
                         };
                         
                         let dev_response = client
@@ -162,13 +158,11 @@ async fn fetch_developer_and_agent(
                                             let actual_dev_request = GetObjectRequest {
                                                 object_id: Some(developer_object_id.clone()),
                                                 version: None,
-                                                read_mask: Some(prost_types::FieldMask {
-                                                    paths: vec![
-                                                        "object_id".to_string(),
-                                                        "object_type".to_string(),
-                                                        "json".to_string(),
-                                                    ],
-                                                }),
+                                                read_mask: Some(sui_rpc::proto::sui::rpc::v2::FieldMask::from_paths([
+                                                    "object_id",
+                                                    "object_type",
+                                                    "json",
+                                                ])),
                                             };
                                             
                                             let actual_dev_response = client
@@ -208,10 +202,11 @@ async fn fetch_developer_and_agent(
                         }
                         }
                     }
+                    }
                 }
             }
         }
-        
+
         // Check if there are more pages
         if let Some(next_token) = response.next_page_token {
             if !next_token.is_empty() {
@@ -224,7 +219,7 @@ async fn fetch_developer_and_agent(
             break;
         }
     }
-    
+
     Err(SilvanaSuiInterfaceError::ParseError(format!(
         "Developer {} not found in registry",
         developer_name
@@ -249,18 +244,16 @@ async fn fetch_agent_and_method(
             parent: Some(agents_table_id.to_string()),
             page_size: Some(100),
             page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                    "object.object_id".to_string(),
-                ],
-            }),
+            read_mask: Some(sui_rpc::proto::sui::rpc::v2::FieldMask::from_paths([
+                "field_id",
+                "name_type",
+                "name_value",
+                "object.object_id",
+            ])),
         };
         
         let list_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(list_request)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(format!("Failed to list agents: {}", e)))?;
@@ -269,9 +262,10 @@ async fn fetch_agent_and_method(
         
         // Find the agent by name in this page
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // The name_value is BCS-encoded String
-                if let Ok(name) = bcs::from_bytes::<String>(name_value) {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // The name_value is BCS-encoded String
+                    if let Ok(name) = bcs::from_bytes::<String>(name_value) {
                     if name == agent_name {
                         
                         // Get the agent object ID
@@ -280,13 +274,11 @@ async fn fetch_agent_and_method(
                         let agent_request = GetObjectRequest {
                             object_id: Some(field_id.clone()),
                             version: None,
-                            read_mask: Some(prost_types::FieldMask {
-                                paths: vec![
-                                    "object_id".to_string(),
-                                    "object_type".to_string(),
-                                    "json".to_string(),
-                                ],
-                            }),
+                            read_mask: Some(sui_rpc::proto::sui::rpc::v2::FieldMask::from_paths([
+                                "object_id",
+                                "object_type",
+                                "json",
+                            ])),
                         };
                         
                         let agent_response = client
@@ -307,13 +299,11 @@ async fn fetch_agent_and_method(
                                             let actual_agent_request = GetObjectRequest {
                                                 object_id: Some(agent_object_id.clone()),
                                                 version: None,
-                                                read_mask: Some(prost_types::FieldMask {
-                                                    paths: vec![
-                                                        "object_id".to_string(),
-                                                        "object_type".to_string(),
-                                                        "json".to_string(),
-                                                    ],
-                                                }),
+                                                read_mask: Some(sui_rpc::proto::sui::rpc::v2::FieldMask::from_paths([
+                                                    "object_id",
+                                                    "object_type",
+                                                    "json",
+                                                ])),
                                             };
                                             
                                             let actual_agent_response = client
@@ -335,10 +325,11 @@ async fn fetch_agent_and_method(
                         }
                         }
                     }
+                    }
                 }
             }
         }
-        
+
         // Check if there are more pages
         if let Some(next_token) = response.next_page_token {
             if !next_token.is_empty() {
@@ -351,7 +342,7 @@ async fn fetch_agent_and_method(
             break;
         }
     }
-    
+
     Err(SilvanaSuiInterfaceError::ParseError(format!(
         "Agent {} not found in developer's agents",
         agent_name

@@ -1,5 +1,5 @@
 use anyhow::{Result, Context};
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use tracing::{debug, warn};
 use crate::state::SharedSuiState;
 use std::env;

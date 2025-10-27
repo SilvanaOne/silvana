@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use std::str::FromStr;
 use sui_crypto::SuiSigner;
-use sui_rpc::field::FieldMask;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_rpc::proto::sui::rpc::v2::{SimulateTransactionRequest, simulate_transaction_request};
 use sui_sdk_types as sui;
@@ -100,19 +100,6 @@ fn check_transaction_effects(
                 }
             }
         }
-    }
-
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        error!(
-            "{} transaction did not achieve finality (tx: {})",
-            operation, tx_digest
-        );
-        return Err(SilvanaSuiInterfaceError::TransactionError {
-            message: format!("{} transaction did not achieve finality", operation),
-            tx_digest: Some(tx_digest),
-        }
-        .into());
     }
 
     // Check for transaction success in effects
@@ -219,14 +206,12 @@ async fn get_object_details(
         .get_object(proto::GetObjectRequest {
             object_id: Some(object_id.to_string()),
             version: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "object_id".to_string(),
-                    "version".to_string(),
-                    "digest".to_string(),
-                    "owner".to_string(),
-                ],
-            }),
+            read_mask: Some(FieldMask::from_paths([
+                "object_id",
+                "version",
+                "digest",
+                "owner",
+            ])),
         })
         .await
         .context("Failed to get object")?
@@ -609,7 +594,7 @@ where
             );
 
             // Try gas estimation once - no retries
-            let mut live_data = client.live_data_client();
+            let mut execution = client.execution_client();
             let simulate_req = SimulateTransactionRequest {
                 transaction: Some(temp_tx.clone().into()),
                 read_mask: Some(FieldMask {
@@ -622,7 +607,7 @@ where
                 do_gas_selection: Some(false), // We're managing gas ourselves
             };
 
-            match live_data.simulate_transaction(simulate_req).await {
+            match execution.simulate_transaction(simulate_req).await {
                 Ok(sim_resp) => {
                     let sim_result = sim_resp.into_inner();
 
@@ -904,9 +889,9 @@ where
         let req = proto::ExecuteTransactionRequest {
             transaction: Some(tx.into()),
             signatures: vec![sig.into()],
-            read_mask: Some(FieldMask {
-                paths: vec!["finality".into(), "transaction".into()],
-            }),
+            read_mask: Some(FieldMask::from_paths([
+                "transaction",
+            ])),
         };
 
         let functions_str = function_names.join(", ");

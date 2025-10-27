@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use sui_rpc::field::FieldMaskUtil;
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
@@ -116,23 +117,21 @@ pub async fn fetch_coin(
     let lock_manager = get_coin_lock_manager();
 
     for attempt in 1..=MAX_RETRIES {
-        let mut live = client.live_data_client();
+        let mut state = client.state_client();
 
         // List owned objects to find SUI coins
-        let resp = live
+        let resp = state
             .list_owned_objects(proto::ListOwnedObjectsRequest {
                 owner: Some(sender.to_string()),
                 page_size: Some(100),
                 page_token: None,
-                read_mask: Some(prost_types::FieldMask {
-                    paths: vec![
-                        "object_id".into(),
-                        "version".into(),
-                        "digest".into(),
-                        "object_type".into(),
-                        "contents".into(),
-                    ],
-                }),
+                read_mask: Some(proto::FieldMask::from_paths([
+                    "object_id",
+                    "version",
+                    "digest",
+                    "object_type",
+                    "contents",
+                ])),
                 object_type: Some("0x2::coin::Coin<0x2::sui::SUI>".to_string()),
             })
             .await?
@@ -244,9 +243,9 @@ async fn get_coin_balance_via_get_object(
         .get_object(proto::GetObjectRequest {
             object_id: Some(object_ref.object_id().to_string()),
             version: Some(object_ref.version()),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["contents".into()],
-            }),
+            read_mask: Some(proto::FieldMask::from_paths([
+                "contents",
+            ])),
         })
         .await?
         .into_inner();
@@ -264,22 +263,20 @@ async fn get_coin_balance_via_get_object(
 
 /// Lists all available coins for a sender with their balances
 pub async fn list_coins(client: &mut GrpcClient, sender: sui::Address) -> Result<Vec<CoinInfo>> {
-    let mut live = client.live_data_client();
+    let mut state = client.state_client();
 
-    let resp = live
+    let resp = state
         .list_owned_objects(proto::ListOwnedObjectsRequest {
             owner: Some(sender.to_string()),
             page_size: Some(100),
             page_token: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "object_id".into(),
-                    "version".into(),
-                    "digest".into(),
-                    "object_type".into(),
-                    "contents".into(),
-                ],
-            }),
+            read_mask: Some(proto::FieldMask::from_paths([
+                "object_id",
+                "version",
+                "digest",
+                "object_type",
+                "contents",
+            ])),
             object_type: Some("0x2::coin::Coin<0x2::sui::SUI>".to_string()),
         })
         .await?

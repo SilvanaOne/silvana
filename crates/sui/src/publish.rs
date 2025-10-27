@@ -173,9 +173,8 @@ pub struct PublishResult {
 
 /// Extract the package ID from a publish transaction
 async fn extract_package_id_from_digest(digest: &str) -> Result<String> {
-    use prost_types::FieldMask;
     use sui_rpc::field::FieldMaskUtil;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+    use sui_rpc::proto::sui::rpc::v2 as proto;
 
     debug!("Extracting package ID from transaction digest: {}", digest);
 

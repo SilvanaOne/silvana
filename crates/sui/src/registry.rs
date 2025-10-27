@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::env;
 use std::str::FromStr;
+use sui_rpc::field::FieldMaskUtil;
 use sui_sdk_types as sui;
 use tracing::{debug, info, warn};
 
@@ -139,9 +140,9 @@ pub(crate) async fn create_registry(
 /// This is useful after creating new objects that need to be used immediately
 async fn wait_for_object_availability(object_id: &str) -> Result<()> {
     use crate::state::SharedSuiState;
-    use prost_types::FieldMask;
     use std::time::Duration;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+    use sui_rpc::field::FieldMaskUtil;
+    use sui_rpc::proto::sui::rpc::v2 as proto;
     use tokio::time::sleep;
 
     debug!("Waiting for object {} to be available", object_id);
@@ -252,8 +253,8 @@ async fn fetch_created_object_from_transaction(tx_digest: &str) -> Result<String
 /// Fallback method to fetch created object from output_objects
 async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<String> {
     use crate::state::SharedSuiState;
-    use prost_types::FieldMask;
-    use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+    use sui_rpc::field::FieldMaskUtil;
+    use sui_rpc::proto::sui::rpc::v2 as proto;
 
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
@@ -262,13 +263,13 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
     let digest = sui_sdk_types::Digest::from_str(tx_digest)
         .map_err(|e| anyhow::anyhow!("Failed to parse transaction digest: {}", e))?;
 
-    // Fetch transaction with output_objects
+    // Fetch transaction with objects
     let mut ledger = client.ledger_client();
     let req = proto::GetTransactionRequest {
         digest: Some(digest.to_string()),
-        read_mask: Some(FieldMask {
-            paths: vec!["transaction.output_objects".into()],
-        }),
+        read_mask: Some(proto::FieldMask::from_paths([
+            "transaction.objects.objects",
+        ])),
     };
 
     let resp = ledger
@@ -279,8 +280,9 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
     let response = resp.into_inner();
 
     if let Some(ref executed_tx) = response.transaction {
-        if !executed_tx.output_objects.is_empty() {
-            for output_object in &executed_tx.output_objects {
+        if let Some(ref objects_response) = executed_tx.objects {
+            if !objects_response.objects.is_empty() {
+                for output_object in &objects_response.objects {
                 // Check if this is a registry object by looking at the type
                 if let Some(ref object_type) = output_object.object_type {
                     if object_type.contains("::registry::SilvanaRegistry")
@@ -290,6 +292,7 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
                             return Ok(object_id.clone());
                         }
                     }
+                }
                 }
             }
         }

@@ -1,5 +1,6 @@
 use anyhow::Result;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::debug;
 use crate::error::SilvanaSuiInterfaceError;
 use crate::parse::proto_to_json;
@@ -24,9 +25,10 @@ pub async fn fetch_object(
     let request = GetObjectRequest {
         object_id: Some(formatted_id.clone()),
         version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string(), "object_id".to_string()],
-        }),
+        read_mask: Some(FieldMask::from_paths([
+            "json",
+            "object_id",
+        ])),
     };
     
     // Fetch the object
@@ -160,17 +162,15 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
             parent: Some(parent_id.to_string()),
             page_size: Some(PAGE_SIZE),
             page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
+            read_mask: Some(FieldMask::from_paths([
+                "field_id",
+                "name_type",
+                "name_value",
+            ])),
         };
         
         let response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(request)
             .await
             .map_err(|e| {
@@ -198,21 +198,25 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
                 field_map.insert("field_id".to_string(), Value::String(field_id));
             }
             
-            // Add name_type
-            if let Some(name_type) = field.name_type {
-                field_map.insert("name_type".to_string(), Value::String(name_type));
+            // Add name_type from Bcs.name if available
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_type) = &name_bcs.name {
+                    field_map.insert("name_type".to_string(), Value::String(name_type.clone()));
+                }
             }
             
             // Try to decode name_value
-            if let Some(name_value) = field.name_value {
-                // Try to decode as various types
-                if let Ok(u64_val) = bcs::from_bytes::<u64>(&name_value) {
-                    field_map.insert("name".to_string(), Value::String(u64_val.to_string()));
-                } else if let Ok(string_val) = bcs::from_bytes::<String>(&name_value) {
-                    field_map.insert("name".to_string(), Value::String(string_val));
-                } else {
-                    // If we can't decode, store as hex
-                    field_map.insert("name_raw".to_string(), Value::String(hex::encode(&name_value)));
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // Try to decode as various types
+                    if let Ok(u64_val) = bcs::from_bytes::<u64>(name_value) {
+                        field_map.insert("name".to_string(), Value::String(u64_val.to_string()));
+                    } else if let Ok(string_val) = bcs::from_bytes::<String>(name_value) {
+                        field_map.insert("name".to_string(), Value::String(string_val));
+                    } else {
+                        // If we can't decode, store as hex
+                        field_map.insert("name_raw".to_string(), Value::String(hex::encode(name_value)));
+                    }
                 }
             }
             

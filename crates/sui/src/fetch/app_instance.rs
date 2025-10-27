@@ -8,6 +8,7 @@ use crate::state::SharedSuiState;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, error, warn};
 
@@ -105,9 +106,10 @@ pub async fn fetch_app_instance(instance_id: &str) -> Result<AppInstance> {
     let request = GetObjectRequest {
         object_id: Some(formatted_id.clone()),
         version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string(), "object_id".to_string()],
-        }),
+        read_mask: Some(FieldMask::from_paths([
+            "json",
+            "object_id",
+        ])),
     };
 
     // Fetch the object
@@ -447,17 +449,15 @@ async fn fetch_block_settlement_from_table(
             parent: Some(table_id.to_string()),
             page_size: Some(PAGE_SIZE),
             page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
+            read_mask: Some(FieldMask::from_paths([
+                "field_id",
+                "name_type",
+                "name_value",
+            ])),
         };
 
         let fields_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(request)
             .await
             .map_err(|e| {
@@ -472,9 +472,10 @@ async fn fetch_block_settlement_from_table(
 
         // Look for our block number in the dynamic fields
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // Try to decode the key as u64 (block number)
-                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // Try to decode the key as u64 (block number)
+                    if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
                     if field_block_number == block_number {
                         // Found our block! Now fetch the BlockSettlement object
                         if let Some(field_id) = &field.field_id {
@@ -484,6 +485,7 @@ async fn fetch_block_settlement_from_table(
                             );
                             return fetch_block_settlement_object(client, field_id).await;
                         }
+                    }
                     }
                 }
             }
@@ -519,9 +521,10 @@ async fn fetch_block_settlement_object(
     let field_request = GetObjectRequest {
         object_id: Some(field_id.to_string()),
         version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["object_id".to_string(), "json".to_string()],
-        }),
+        read_mask: Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ])),
     };
 
     let field_response = client
@@ -576,9 +579,9 @@ async fn fetch_block_settlement_object(
     let bs_request = GetObjectRequest {
         object_id: Some(block_settlement_id.clone()),
         version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["json".to_string()],
-        }),
+        read_mask: Some(FieldMask::from_paths([
+            "json",
+        ])),
     };
 
     let bs_response = client

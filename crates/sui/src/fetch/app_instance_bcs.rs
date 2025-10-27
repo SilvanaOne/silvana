@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
-use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
 use tracing::debug;
 
 use crate::error::SilvanaSuiInterfaceError;
@@ -390,9 +391,10 @@ pub async fn fetch_app_instance_bcs(
     let request = GetObjectRequest {
         object_id: Some(formatted_id.clone()),
         version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["contents".to_string(), "object_id".to_string()],
-        }),
+        read_mask: Some(FieldMask::from_paths([
+            "contents",
+            "object_id",
+        ])),
     };
 
     let response = client

@@ -2,7 +2,8 @@ use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_u64, get_bytes, get_option_bytes, get_option_string};
 use crate::state::SharedSuiState;
 use super::AppInstance;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, error};
 
 /// Represents a sequence state from the Move SequenceState struct
@@ -53,17 +54,15 @@ pub async fn fetch_sequence_state_by_id(
             parent: Some(sequence_states_table_id.to_string()),
             page_size: Some(500), // Process 500 at a time
             page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
+            read_mask: Some(FieldMask::from_paths([
+                "field_id",
+                "name_type",
+                "name_value",
+            ])),
         };
         
         let list_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(list_request)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
@@ -80,9 +79,11 @@ pub async fn fetch_sequence_state_by_id(
         if page_token.is_none() || current_page_size > 0 {
             let mut found_sequences: Vec<u64> = Vec::new();
             for field in &response.dynamic_fields {
-                if let Some(name_value) = &field.name_value {
-                    if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
-                        found_sequences.push(field_sequence);
+                if let Some(name_bcs) = &field.name {
+                    if let Some(name_value) = &name_bcs.value {
+                        if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
+                            found_sequences.push(field_sequence);
+                        }
                     }
                 }
             }
@@ -105,10 +106,11 @@ pub async fn fetch_sequence_state_by_id(
         
         // Find the specific sequence state entry
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // The name_value is BCS-encoded u64 (sequence)
-                if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
-                    if field_sequence == sequence {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // The name_value is BCS-encoded u64 (sequence)
+                    if let Ok(field_sequence) = bcs::from_bytes::<u64>(name_value) {
+                        if field_sequence == sequence {
                         debug!("🎯 Found matching sequence {} in dynamic fields", sequence);
                         if let Some(field_id) = &field.field_id {
                         debug!("📄 Fetching sequence state field object: {}", field_id);
@@ -116,12 +118,10 @@ pub async fn fetch_sequence_state_by_id(
                         let sequence_state_field_request = GetObjectRequest {
                             object_id: Some(field_id.clone()),
                             version: None,
-                            read_mask: Some(prost_types::FieldMask {
-                                paths: vec![
-                                    "object_id".to_string(),
-                                    "json".to_string(),
-                                ],
-                            }),
+                            read_mask: Some(FieldMask::from_paths([
+                                "object_id",
+                                "json",
+                            ])),
                         };
                         
                         let sequence_state_field_response = client
@@ -142,12 +142,10 @@ pub async fn fetch_sequence_state_by_id(
                                             let sequence_state_request = GetObjectRequest {
                                                 object_id: Some(sequence_state_object_id.clone()),
                                                 version: None,
-                                                read_mask: Some(prost_types::FieldMask {
-                                                    paths: vec![
-                                                        "object_id".to_string(),
-                                                        "json".to_string(),
-                                                    ],
-                                                }),
+                                                read_mask: Some(FieldMask::from_paths([
+                                                    "object_id",
+                                                    "json",
+                                                ])),
                                             };
                                             
                                             let sequence_state_response = client
@@ -180,6 +178,7 @@ pub async fn fetch_sequence_state_by_id(
                             }
                         }
                     }
+                        }
                     }
                 }
             }
