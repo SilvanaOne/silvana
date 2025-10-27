@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_rpc::Client as GrpcClient;
 use sui_sdk_types as sui;
 use tracing::debug;

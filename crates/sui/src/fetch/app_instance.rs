@@ -8,7 +8,7 @@ use crate::state::SharedSuiState;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
 use tracing::{debug, error, warn};
 
 /// Rust representation of the Move BlockSettlement struct

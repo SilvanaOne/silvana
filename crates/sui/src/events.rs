@@ -1,5 +1,5 @@
 use crate::state::SharedSuiState;
-use sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsResponse;
+use sui_rpc::proto::sui::rpc::v2::SubscribeCheckpointsResponse;
 use tonic::Streaming;
 use tracing::info;
 
@@ -10,7 +10,7 @@ pub async fn create_checkpoint_stream() -> anyhow::Result<Streaming<SubscribeChe
     let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut subscription_client = client.subscription_client();
 
-    let request = sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsRequest {
+    let request = sui_rpc::proto::sui::rpc::v2::SubscribeCheckpointsRequest {
         read_mask: Some(prost_types::FieldMask {
             paths: vec![
                 // "summary.timestamp".to_string(),

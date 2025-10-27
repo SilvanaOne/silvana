@@ -3,7 +3,7 @@ use crate::state::SharedSuiState;
 use serde::Deserialize;
 use std::env;
 use sui_rpc::Client;
-use sui_rpc::proto::sui::rpc::v2beta2::GetObjectRequest;
+use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
 
 #[derive(Debug, Deserialize)]
 pub struct AgentMethod {
@@ -93,7 +93,7 @@ async fn fetch_developer_and_agent(
     agent_name: &str,
     method_name: &str,
 ) -> Result<AgentMethod> {
-    use sui_rpc::proto::sui::rpc::v2beta2::ListDynamicFieldsRequest;
+    use sui_rpc::proto::sui::rpc::v2::ListDynamicFieldsRequest;
     
     let mut page_token: Option<tonic::codegen::Bytes> = None;
     
@@ -238,7 +238,7 @@ async fn fetch_agent_and_method(
     agent_name: &str,
     method_name: &str,
 ) -> Result<AgentMethod> {
-    use sui_rpc::proto::sui::rpc::v2beta2::ListDynamicFieldsRequest;
+    use sui_rpc::proto::sui::rpc::v2::ListDynamicFieldsRequest;
     
     let mut page_token: Option<tonic::codegen::Bytes> = None;
     

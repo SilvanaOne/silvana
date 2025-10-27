@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use sui_crypto::SuiSigner;
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Argument};
 use sui_transaction_builder::{Serialized, TransactionBuilder};
 use tracing::{debug, error, info, warn};

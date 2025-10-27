@@ -3,7 +3,7 @@ use prost_types;
 use std::env;
 use std::str::FromStr;
 use sui_rpc::Client as GrpcClient;
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types as sui;
 use tracing::debug;
 
