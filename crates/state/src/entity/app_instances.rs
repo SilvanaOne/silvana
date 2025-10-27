@@ -13,6 +13,8 @@ pub struct Model {
     pub description: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub metadata: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

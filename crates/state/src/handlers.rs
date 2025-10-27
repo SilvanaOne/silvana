@@ -286,6 +286,7 @@ impl StateService for StateServiceImpl {
             description: Set(req.description),
             created_at: Set(Utc::now()),
             updated_at: Set(Utc::now()),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
         };
 
         // Insert to database
@@ -314,6 +315,7 @@ impl StateService for StateServiceImpl {
                 description: result.description,
                 created_at: Some(to_timestamp(result.created_at)),
                 updated_at: Some(to_timestamp(result.updated_at)),
+                metadata: result.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -351,6 +353,7 @@ impl StateService for StateServiceImpl {
                 description: app_instance.description,
                 created_at: Some(to_timestamp(app_instance.created_at)),
                 updated_at: Some(to_timestamp(app_instance.updated_at)),
+                metadata: app_instance.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -402,6 +405,7 @@ impl StateService for StateServiceImpl {
                 description: instance.description,
                 created_at: Some(to_timestamp(instance.created_at)),
                 updated_at: Some(to_timestamp(instance.updated_at)),
+                metadata: instance.metadata.and_then(json_to_prost_struct),
             })
             .collect();
 
@@ -1491,6 +1495,7 @@ impl StateService for StateServiceImpl {
             previous_tx: Set(Option::<String>::None),  // No previous transaction for new object
             created_at: Set(Utc::now()),
             updated_at: Set(Utc::now()),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
         };
 
         // Insert to database
@@ -1546,6 +1551,7 @@ impl StateService for StateServiceImpl {
                 previous_tx: result.previous_tx,
                 created_at: Some(to_timestamp(result.created_at)),
                 updated_at: Some(to_timestamp(result.updated_at)),
+                metadata: result.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -1653,6 +1659,7 @@ impl StateService for StateServiceImpl {
                 previous_tx: updated.previous_tx,
                 created_at: Some(to_timestamp(updated.created_at)),
                 updated_at: Some(to_timestamp(updated.updated_at)),
+                metadata: updated.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -1740,6 +1747,7 @@ impl StateService for StateServiceImpl {
                 previous_tx: object.previous_tx,
                 created_at: Some(to_timestamp(object.created_at)),
                 updated_at: None, // Versions don't track updated_at
+                metadata: None, // Object versions don't have metadata, only current objects do
             }),
         }))
     }
@@ -1861,6 +1869,7 @@ impl StateService for StateServiceImpl {
                 previous_tx: updated.previous_tx,
                 created_at: Some(to_timestamp(updated.created_at)),
                 updated_at: Some(to_timestamp(updated.updated_at)),
+                metadata: updated.metadata.and_then(json_to_prost_struct),
             }),
         }))
     }
@@ -2158,7 +2167,7 @@ impl StateService for StateServiceImpl {
 
         // Calculate next_scheduled_at for periodic jobs
         let next_scheduled_at = if let Some(interval_ms) = req.interval_ms {
-            Some(now + chrono::Duration::milliseconds(interval_ms))
+            Some(now + chrono::Duration::milliseconds(interval_ms as i64))
         } else {
             None
         };
@@ -2222,7 +2231,7 @@ impl StateService for StateServiceImpl {
             developer: Set(req.developer.clone()),
             agent: Set(req.agent.clone()),
             agent_method: Set(req.agent_method.clone()),
-            block_number: Set(req.block_number.map(|b| b as i64)),
+            block_number: Set(req.block_number),
             sequences: Set(sequences_json.clone()),
             sequences1: Set(sequences1_json.clone()),
             sequences2: Set(sequences2_json.clone()),
@@ -2235,6 +2244,7 @@ impl StateService for StateServiceImpl {
             next_scheduled_at: Set(next_scheduled_at),
             created_at: Set(now),
             updated_at: Set(now),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
         };
 
         let result = job.insert(&txn).await
@@ -2266,7 +2276,7 @@ impl StateService for StateServiceImpl {
             developer: result.developer,
             agent: result.agent,
             agent_method: result.agent_method,
-            block_number: result.block_number.map(|b| b as u64),
+            block_number: result.block_number,
             sequences: req.sequences,
             sequences1: req.sequences1,
             sequences2: req.sequences2,
@@ -2279,6 +2289,7 @@ impl StateService for StateServiceImpl {
             next_scheduled_at: result.next_scheduled_at.map(to_timestamp),
             created_at: Some(to_timestamp(result.created_at)),
             updated_at: Some(to_timestamp(result.updated_at)),
+            metadata: result.metadata.and_then(json_to_prost_struct),
         };
 
         Ok(Response::new(CreateJobResponse {
@@ -2336,7 +2347,7 @@ impl StateService for StateServiceImpl {
             developer: result.developer,
             agent: result.agent,
             agent_method: result.agent_method,
-            block_number: result.block_number.map(|b| b as u64),
+            block_number: result.block_number,
             sequences,
             sequences1,
             sequences2,
@@ -2349,6 +2360,7 @@ impl StateService for StateServiceImpl {
             next_scheduled_at: result.next_scheduled_at.map(to_timestamp),
             created_at: Some(to_timestamp(result.created_at)),
             updated_at: Some(to_timestamp(result.updated_at)),
+            metadata: result.metadata.and_then(json_to_prost_struct),
         };
 
         Ok(Response::new(StartJobResponse {
@@ -2382,7 +2394,7 @@ impl StateService for StateServiceImpl {
         // For periodic jobs, reschedule. For one-time jobs, mark as COMPLETED
         if let Some(interval_ms) = job.interval_ms {
             // Periodic job - reset to PENDING and update next_scheduled_at
-            let next_scheduled_at = now + chrono::Duration::milliseconds(interval_ms);
+            let next_scheduled_at = now + chrono::Duration::milliseconds(interval_ms as i64);
 
             let mut active: jobs::ActiveModel = job.into();
             active.status = Set("PENDING".to_string());
@@ -2464,7 +2476,7 @@ impl StateService for StateServiceImpl {
             developer: result.developer,
             agent: result.agent,
             agent_method: result.agent_method,
-            block_number: result.block_number.map(|b| b as u64),
+            block_number: result.block_number,
             sequences,
             sequences1,
             sequences2,
@@ -2477,6 +2489,7 @@ impl StateService for StateServiceImpl {
             next_scheduled_at: result.next_scheduled_at.map(to_timestamp),
             created_at: Some(to_timestamp(result.created_at)),
             updated_at: Some(to_timestamp(result.updated_at)),
+            metadata: result.metadata.and_then(json_to_prost_struct),
         };
 
         Ok(Response::new(FailJobResponse {
@@ -2542,7 +2555,7 @@ impl StateService for StateServiceImpl {
             developer: job.developer,
             agent: job.agent,
             agent_method: job.agent_method,
-            block_number: job.block_number.map(|b| b as u64),
+            block_number: job.block_number,
             sequences,
             sequences1,
             sequences2,
@@ -2555,6 +2568,7 @@ impl StateService for StateServiceImpl {
             next_scheduled_at: job.next_scheduled_at.map(to_timestamp),
             created_at: Some(to_timestamp(job.created_at)),
             updated_at: Some(to_timestamp(job.updated_at)),
+            metadata: job.metadata.and_then(json_to_prost_struct),
         };
 
         Ok(Response::new(GetJobResponse {
@@ -2636,7 +2650,7 @@ impl StateService for StateServiceImpl {
                     developer: job.developer,
                     agent: job.agent,
                     agent_method: job.agent_method,
-                    block_number: job.block_number.map(|b| b as u64),
+                    block_number: job.block_number,
                     sequences,
                     sequences1,
                     sequences2,
@@ -2649,6 +2663,7 @@ impl StateService for StateServiceImpl {
                     next_scheduled_at: job.next_scheduled_at.map(to_timestamp),
                     created_at: Some(to_timestamp(job.created_at)),
                     updated_at: Some(to_timestamp(job.updated_at)),
+                    metadata: job.metadata.and_then(json_to_prost_struct),
                 }
             })
             .collect();
@@ -2724,7 +2739,7 @@ impl StateService for StateServiceImpl {
                     developer: job.developer,
                     agent: job.agent,
                     agent_method: job.agent_method,
-                    block_number: job.block_number.map(|b| b as u64),
+                    block_number: job.block_number,
                     sequences,
                     sequences1,
                     sequences2,
@@ -2737,6 +2752,7 @@ impl StateService for StateServiceImpl {
                     next_scheduled_at: job.next_scheduled_at.map(to_timestamp),
                     created_at: Some(to_timestamp(job.created_at)),
                     updated_at: Some(to_timestamp(job.updated_at)),
+                    metadata: job.metadata.and_then(json_to_prost_struct),
                 }
             })
             .collect();

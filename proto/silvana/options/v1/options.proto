@@ -11,4 +11,5 @@ extend google.protobuf.FieldOptions {
   bool sequences = 55550;
   bool search = 55551;
   string composite_index = 55552; // Comma-separated list of fields for composite index
+  string sql_type = 55553; // Custom SQL type for database schema generation
 } 

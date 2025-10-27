@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS app_instances (
     `description` TEXT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `metadata` JSON NULL,                  -- Optional metadata
     INDEX idx_owner (`owner`),
     INDEX idx_created_at (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS objects (
     `previous_tx` VARCHAR(64) NULL,        -- Previous transaction that modified this
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `metadata` JSON NULL,                  -- Optional metadata
     INDEX idx_owner (`owner`),
     INDEX idx_version (`version`),
     INDEX idx_object_type (`object_type`),
@@ -247,6 +249,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- Metadata timestamps
     `created_at` TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6),
     `updated_at` TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    `metadata` JSON NULL,                  -- Optional metadata
 
     -- Composite primary key matching Move structure (no auto-increment ID)
     PRIMARY KEY (`app_instance_id`, `job_sequence`),

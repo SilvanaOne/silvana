@@ -19,7 +19,7 @@ pub struct Model {
     pub agent_method: String,
 
     // Job data
-    pub block_number: Option<i64>,
+    pub block_number: Option<u64>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub sequences: Option<Json>,  // vector<u64> as JSON array
     #[sea_orm(column_type = "JsonBinary", nullable)]
@@ -37,7 +37,7 @@ pub struct Model {
     pub attempts: i16,
 
     // Periodic scheduling fields (NULL for one-time jobs)
-    pub interval_ms: Option<i64>,  // NULL for one-time jobs
+    pub interval_ms: Option<u64>,  // NULL for one-time jobs
     #[sea_orm(column_type = "Timestamp", nullable)]
     pub next_scheduled_at: Option<DateTimeUtc>,  // Absolute timestamp for next run
 
@@ -46,6 +46,8 @@ pub struct Model {
     pub created_at: DateTimeUtc,
     #[sea_orm(column_type = "Timestamp")]
     pub updated_at: DateTimeUtc,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub metadata: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

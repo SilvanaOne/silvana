@@ -5,6 +5,7 @@ package silvana.state.v1;
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/struct.proto";
+import "silvana/options/v1/options.proto";
 
 option go_package = "github.com/SilvanaOne/silvana/proto;state";
 
@@ -213,7 +214,7 @@ message Job {
   uint32 attempts = 15;
 
   // Periodic scheduling fields
-  optional int64 interval_ms = 16;         // NULL for one-time jobs
+  optional uint64 interval_ms = 16;         // NULL for one-time jobs
   optional google.protobuf.Timestamp next_scheduled_at = 17;
 
   // Metadata timestamps
@@ -627,7 +628,7 @@ message CreateJobRequest {
   repeated uint64 sequences2 = 10;   // Renumbered from 11
   optional bytes data = 11;          // Renumbered from 12
   optional string data_da = 12;      // Renumbered from 13
-  optional int64 interval_ms = 13;   // Renumbered from 14 - For periodic jobs
+  optional uint64 interval_ms = 13;   // Renumbered from 14 - For periodic jobs
   optional google.protobuf.Struct metadata = 14;  // Optional metadata
 }
 

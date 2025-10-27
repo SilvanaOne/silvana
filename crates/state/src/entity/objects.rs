@@ -20,6 +20,8 @@ pub struct Model {
     pub previous_tx: Option<String>,  // Previous transaction that modified this
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub metadata: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
