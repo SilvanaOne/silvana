@@ -86,7 +86,7 @@ check-state-database-url:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state
+.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -426,6 +426,16 @@ clean-dev: ## Drop all tables for fast development iteration
 	@echo "✅ All tables dropped"
 	@echo ""
 	@echo "💡 Run 'make regen' to recreate schema from proto files"
+
+clean-dev-state: check-state-database-url ## Drop all tables in state database for fast development iteration
+	@echo "⚠️  State database cleanup: Dropping all tables..."
+	@echo "🗑️  This will completely wipe the state database!"
+	@read -p "Are you sure? (y/N): " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo "🔄 Dropping all state tables..."
+	cargo run --manifest-path infra/tidb/drop_state_tables/Cargo.toml --release
+	@echo "✅ All state tables dropped"
+	@echo ""
+	@echo "💡 Run 'make apply-ddl-state' to recreate state schema from proto/sql/state.sql"
 
 # Development targets
 dev-reset: clean-dev regen ## Full development reset: drop all tables + regenerate from proto

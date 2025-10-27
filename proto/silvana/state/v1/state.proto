@@ -66,12 +66,13 @@ message AppInstance {
   optional string description = 4;
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp updated_at = 6;
+  optional google.protobuf.Struct metadata = 7;  // Optional metadata
 }
 
 // User Action message
 message UserAction {
   string app_instance_id = 1;
-  uint64 sequence = 2;
+  uint64 sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
   string action_type = 3;
   bytes action_data = 4;                    // Serialized action parameters
   bytes action_hash = 5;                    // Hash of action data
@@ -84,7 +85,7 @@ message UserAction {
 // Optimistic State message
 message OptimisticState {
   string app_instance_id = 1;
-  uint64 sequence = 2;
+  uint64 sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
   bytes state_hash = 3;                     // Hash of state data
   bytes state_data = 4;                     // State data (if small)
   optional string state_da = 5;             // S3 key for large state data
@@ -98,7 +99,7 @@ message OptimisticState {
 // State message (proved state)
 message State {
   string app_instance_id = 1;
-  uint64 sequence = 2;
+  uint64 sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
   bytes state_hash = 3;
   optional bytes state_data = 4;            // State data (if small)
   optional string state_da = 5;             // S3 key for large state
@@ -123,6 +124,7 @@ message Object {
   optional string previous_tx = 9;         // Previous transaction that modified this
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  optional google.protobuf.Struct metadata = 12;  // Optional metadata
 }
 
 // Object Version message
@@ -189,7 +191,7 @@ message LockRequestBundle {
 // Job message
 message Job {
   string app_instance_id = 1;
-  uint64 job_sequence = 2;
+  uint64 job_sequence = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
   optional string description = 3;
 
   // Metadata of the agent method to call
@@ -217,6 +219,7 @@ message Job {
   // Metadata timestamps
   google.protobuf.Timestamp created_at = 18;
   google.protobuf.Timestamp updated_at = 19;
+  optional google.protobuf.Struct metadata = 20;  // Optional metadata
 }
 
 // ============================================================================
@@ -229,6 +232,7 @@ message CreateAppInstanceRequest {
   string app_instance_id = 2;
   string name = 3;
   optional string description = 4;
+  optional google.protobuf.Struct metadata = 5;  // Optional metadata
 }
 
 message CreateAppInstanceResponse {
@@ -506,6 +510,7 @@ message CreateObjectRequest {
   optional bytes object_data = 4;
   optional string object_da = 5;
   bool shared = 6;
+  optional google.protobuf.Struct metadata = 7;  // Optional metadata
 }
 
 message CreateObjectResponse {
@@ -623,6 +628,7 @@ message CreateJobRequest {
   optional bytes data = 11;          // Renumbered from 12
   optional string data_da = 12;      // Renumbered from 13
   optional int64 interval_ms = 13;   // Renumbered from 14 - For periodic jobs
+  optional google.protobuf.Struct metadata = 14;  // Optional metadata
 }
 
 message CreateJobResponse {
