@@ -8,7 +8,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub app_instance_id: String,
-    pub next_seq: i64,  // BIGINT UNSIGNED in MySQL, i64 in Rust
+    pub next_seq: u64,  // BIGINT UNSIGNED in MySQL, u64 in Rust
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

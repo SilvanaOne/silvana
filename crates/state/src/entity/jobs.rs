@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub app_instance_id: String,
     #[sea_orm(primary_key, auto_increment = false)]
-    pub job_sequence: i64,
+    pub job_sequence: u64,
     #[sea_orm(column_type = "Text", nullable)]
     pub description: Option<String>,
 

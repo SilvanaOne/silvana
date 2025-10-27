@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub app_instance_id: String,
-    pub sequence: i64,
+    pub sequence: u64,
     pub action_type: String,
     #[sea_orm(column_type = "Blob")]
     pub action_data: Vec<u8>,  // Action parameters (serialized)

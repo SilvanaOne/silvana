@@ -117,7 +117,7 @@ impl Database {
     pub async fn get_latest_sequence(
         &self,
         app_instance_id: &str,
-    ) -> Result<i64> {
+    ) -> Result<u64> {
         // Check user_actions for the highest sequence
         let latest = user_actions::Entity::find()
             .filter(user_actions::Column::AppInstanceId.eq(app_instance_id))

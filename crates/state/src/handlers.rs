@@ -450,7 +450,7 @@ impl StateService for StateServiceImpl {
         )).await.map_err(|e| Status::internal(format!("Failed to get sequence: {}", e)))?
             .ok_or_else(|| Status::internal("Failed to get sequence counter"))?;
 
-        let current_seq: i64 = seq_result.try_get("", "next_seq")
+        let current_seq: u64 = seq_result.try_get("", "next_seq")
             .map_err(|e| Status::internal(format!("Failed to parse sequence: {}", e)))?;
 
         // Create user action entity with the assigned sequence
@@ -601,7 +601,7 @@ impl StateService for StateServiceImpl {
         let opt_state = optimistic_state::ActiveModel {
             id: NotSet,
             app_instance_id: Set(req.app_instance_id.clone()),
-            sequence: Set(req.sequence as i64),
+            sequence: Set(req.sequence),
             state_hash: Set(req.state_hash.clone()),
             state_data: Set(state_data.clone().unwrap_or_default()), // Vec<u8>
             state_da: Set(state_da.or(req.state_da)),
@@ -758,7 +758,7 @@ impl StateService for StateServiceImpl {
         let proved_state = state::ActiveModel {
             id: NotSet,
             app_instance_id: Set(req.app_instance_id.clone()),
-            sequence: Set(req.sequence as i64),
+            sequence: Set(req.sequence),
             state_hash: Set(req.state_hash.clone()),
             state_data: Set(state_data.clone()), // Option<Vec<u8>>
             state_da: Set(state_da),
@@ -2182,7 +2182,7 @@ impl StateService for StateServiceImpl {
         )).await.map_err(|e| Status::internal(format!("Failed to get job sequence: {}", e)))?
             .ok_or_else(|| Status::internal("Failed to get job sequence counter"))?;
 
-        let current_seq: i64 = seq_result.try_get("", "next_seq")
+        let current_seq: u64 = seq_result.try_get("", "next_seq")
             .map_err(|e| Status::internal(format!("Failed to parse job sequence: {}", e)))?;
 
         // Create job with assigned sequence

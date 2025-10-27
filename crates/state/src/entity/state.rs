@@ -9,7 +9,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
     pub app_instance_id: String,
-    pub sequence: i64,
+    pub sequence: u64,
     #[sea_orm(column_type = "Binary(32)")]
     pub state_hash: Vec<u8>,  // Hash of state data (32 bytes)
     #[sea_orm(column_type = "Blob", nullable)]
