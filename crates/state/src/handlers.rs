@@ -140,10 +140,57 @@ impl StateServiceImpl {
     /// Extract auth from request body
     fn extract_auth_from_body(&self, auth: &Option<JwtAuth>) -> Result<AuthInfo, Status> {
         let jwt_auth = auth.as_ref()
-            .ok_or_else(|| Status::unauthenticated("Missing auth field"))?;
+            .ok_or_else(|| {
+                warn!("Authentication failed: Missing auth field");
+                Status::unauthenticated("Missing auth field")
+            })?;
 
         verify_jwt(&jwt_auth.token)
-            .map_err(|e| Status::unauthenticated(format!("Invalid JWT: {}", e)))
+            .map_err(|e| {
+                warn!("JWT verification failed: {}", e);
+                Status::unauthenticated(format!("Invalid JWT: {}", e))
+            })
+    }
+
+    /// Check app instance permission and log detailed error if missing
+    fn require_app_instance_permission(&self, auth: &AuthInfo, app_instance_id: &str) -> Result<(), Status> {
+        if !auth.has_app_instance_permission(app_instance_id) {
+            let app_instances: Vec<String> = auth.scope_permissions.iter()
+                .filter_map(|p| match p {
+                    crate::auth::ScopePermission::AppInstance(id) => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            warn!(
+                "Permission denied: JWT scope missing permission for app_instance '{}'. Available app_instances in scope: {:?}",
+                app_instance_id, app_instances
+            );
+            return Err(Status::permission_denied(
+                format!("JWT scope missing permission for app_instance {}", app_instance_id),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Check object permission and log detailed error if missing
+    #[allow(dead_code)]
+    fn require_object_permission(&self, auth: &AuthInfo, object_id: &str) -> Result<(), Status> {
+        if !auth.has_object_permission(object_id) {
+            let objects: Vec<String> = auth.scope_permissions.iter()
+                .filter_map(|p| match p {
+                    crate::auth::ScopePermission::Object(id) => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            warn!(
+                "Permission denied: JWT scope missing permission for object '{}'. Available objects in scope: {:?}",
+                object_id, objects
+            );
+            return Err(Status::permission_denied(
+                format!("JWT scope missing permission for object {}", object_id),
+            ));
+        }
+        Ok(())
     }
 
     /// Verify ownership of app instance
@@ -208,12 +255,8 @@ impl StateService for StateServiceImpl {
         // Validate authentication
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify the app_instance_id matches the one in the JWT
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied(
-                "App instance ID mismatch with JWT",
-            ));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         // Create entity
         let app_instance = app_instances::ActiveModel {
@@ -1491,12 +1534,16 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
+        // Get primary app instance from scope for concurrency control
+        let app_instance_id = auth.get_primary_app_instance()
+            .ok_or_else(|| Status::permission_denied("No app_instance permission in scope"))?;
+
         let object_data_bytes = req.object_data.unwrap_or_default();
         let object_id_clone = req.object_id.clone();
 
         // Use optimistic concurrency control
         let result = self.concurrency.optimistic_update(
-            &auth.app_instance_id,
+            &app_instance_id,
             &req.object_id,
             req.expected_version,
             |_txn| {
@@ -1802,6 +1849,10 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
+        // Get primary app instance from scope
+        let app_instance_id = auth.get_primary_app_instance()
+            .ok_or_else(|| Status::permission_denied("No app_instance permission in scope"))?;
+
         // Sort object IDs for canonical ordering (deadlock prevention)
         let mut object_ids = req.object_ids.clone();
         object_ids.sort();
@@ -1811,7 +1862,7 @@ impl StateService for StateServiceImpl {
         // Create bundle record
         let bundle = lock_request_bundle::ActiveModel {
             req_id: Set(req.req_id.clone()),
-            app_instance_id: Set(auth.app_instance_id.clone()),
+            app_instance_id: Set(app_instance_id.clone()),
             object_ids: Set(serde_json::to_value(&object_ids).unwrap()),
             object_count: Set(object_ids.len() as i32),
             transaction_type: Set(req.transaction_type.clone()),
@@ -1832,7 +1883,7 @@ impl StateService for StateServiceImpl {
             let lock_entry = object_lock_queue::ActiveModel {
                 object_id: Set(object_id.clone()),
                 req_id: Set(req.req_id.clone()),
-                app_instance_id: Set(auth.app_instance_id.clone()),
+                app_instance_id: Set(app_instance_id.clone()),
                 retry_count: Set(0),
                 queued_at: Set(now),
                 lease_until: NotSet,  // Will be set when granted
@@ -2074,10 +2125,8 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify ownership
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied("App instance ID mismatch"));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         let now = Utc::now();
 
@@ -2218,10 +2267,8 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify ownership
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied("App instance ID mismatch"));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         // Find the job
         let job = jobs::Entity::find()
@@ -2289,10 +2336,8 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify ownership
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied("App instance ID mismatch"));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         // Find the job
         let job = jobs::Entity::find()
@@ -2350,10 +2395,8 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify ownership
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied("App instance ID mismatch"));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         // Find the job
         let job = jobs::Entity::find()
@@ -2421,10 +2464,8 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify ownership
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied("App instance ID mismatch"));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         // Find the job
         let job = jobs::Entity::find()
@@ -2501,10 +2542,8 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify ownership
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied("App instance ID mismatch"));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         let limit = req.limit.unwrap_or(100) as u64;
         let offset = req.offset.unwrap_or(0) as u64;
@@ -2598,10 +2637,8 @@ impl StateService for StateServiceImpl {
         let req = request.into_inner();
         let auth = self.extract_auth_from_body(&req.auth)?;
 
-        // Verify ownership
-        if auth.app_instance_id != req.app_instance_id {
-            return Err(Status::permission_denied("App instance ID mismatch"));
-        }
+        // Verify scope contains permission for this app instance
+        self.require_app_instance_permission(&auth, &req.app_instance_id)?;
 
         let now = Utc::now();
         let limit = req.limit as u64;
