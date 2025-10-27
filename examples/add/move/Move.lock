@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "87A77AF2EEA77BCD24AED4A2FF85CFB6321BDE584D62FDF0E2144688ED5AFD76"
+manifest_digest = "52E4A561877B0A3ECAA28C65FAEDC61052F6B5FEA9AA98938D993C0718A69175"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "0fab52ea1170489237d0cbe039fd34cc277ceb22", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "6eea5e52a59485d4ea9de99854487d3ef556a88a", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "0fab52ea1170489237d0cbe039fd34cc277ceb22", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "6eea5e52a59485d4ea9de99854487d3ef556a88a", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "0fab52ea1170489237d0cbe039fd34cc277ceb22", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "6eea5e52a59485d4ea9de99854487d3ef556a88a", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -88,9 +88,9 @@ flavor = "sui"
 [env]
 
 [env.devnet]
-chain-id = "9ada86bf"
-original-published-id = "0xf8532781dd770e30bf41762a6e9a084fd5da34daff1dd955c67469944a08b1f2"
-latest-published-id = "0xf8532781dd770e30bf41762a6e9a084fd5da34daff1dd955c67469944a08b1f2"
+chain-id = "4e8248fb"
+original-published-id = "0x958d9cdf65995e163c166cfaaa6cede7ecf65082d2460a2f7aa0e531a2897c37"
+latest-published-id = "0x958d9cdf65995e163c166cfaaa6cede7ecf65082d2460a2f7aa0e531a2897c37"
 published-version = "1"
 
 [env.testnet]
