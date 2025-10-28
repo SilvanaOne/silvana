@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS object_lock_queue (
     INDEX idx_status (`status`),
     INDEX idx_lease_until (`lease_until`),
     INDEX idx_queue_order (`object_id`, `queued_at`),  -- Pure FIFO ordering
+    INDEX idx_cleanup (`status`, `lease_until`),       -- Optimized for cleanup query
     CONSTRAINT fk_lock_queue_app_instance FOREIGN KEY (`app_instance_id`)
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -260,6 +261,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     INDEX idx_developer_agent_method (`developer`, `agent`, `agent_method`),
     INDEX idx_next_scheduled (`next_scheduled_at`),
     INDEX idx_block_number (`block_number`),
+    INDEX idx_job_cleanup (`status`, `updated_at`),         -- Optimized for cleanup query
     CONSTRAINT fk_jobs_app_instance FOREIGN KEY (`app_instance_id`)
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

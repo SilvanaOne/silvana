@@ -142,27 +142,50 @@ impl ConcurrencyController {
         Ok(())
     }
 
-    /// Clean up expired locks from both database and memory
+    /// Clean up expired locks from both database and memory using batch processing
+    /// to avoid holding connections for too long
     async fn cleanup_expired_locks(&self) -> Result<()> {
+        const BATCH_SIZE: u64 = 100;
         let now = Utc::now();
+        let mut total_cleaned = 0;
 
-        // Clean up database
-        let expired = object_lock_queue::Entity::find()
-            .filter(object_lock_queue::Column::LeaseUntil.lt(now))
-            .filter(object_lock_queue::Column::Status.eq("GRANTED"))
-            .all(self.db.as_ref())
-            .await?;
+        loop {
+            // Process locks in batches to release connections between iterations
+            // This prevents connection pool exhaustion during cleanup
+            let expired = object_lock_queue::Entity::find()
+                .filter(object_lock_queue::Column::LeaseUntil.lt(now))
+                .filter(object_lock_queue::Column::Status.eq("GRANTED"))
+                .limit(BATCH_SIZE)
+                .all(self.db.as_ref())
+                .await?;
 
-        for lock in expired {
-            // Update the lock status to expired
-            let mut active: object_lock_queue::ActiveModel = lock.clone().into();
-            active.status = Set("EXPIRED".to_string());
-            active.update(self.db.as_ref()).await?;
+            if expired.is_empty() {
+                break; // No more expired locks
+            }
 
-            debug!(
-                "Cleaned up expired lock for object {} request {}",
-                lock.object_id, lock.req_id
-            );
+            let batch_count = expired.len();
+
+            // Update batch
+            for lock in expired {
+                // Update the lock status to expired
+                let mut active: object_lock_queue::ActiveModel = lock.clone().into();
+                active.status = Set("EXPIRED".to_string());
+                active.update(self.db.as_ref()).await?;
+
+                debug!(
+                    "Cleaned up expired lock for object {} request {}",
+                    lock.object_id, lock.req_id
+                );
+            }
+
+            total_cleaned += batch_count;
+            debug!("Cleaned up batch of {} expired locks", batch_count);
+
+            // Connection released here before next iteration, allowing other tasks to acquire
+        }
+
+        if total_cleaned > 0 {
+            info!("Cleanup completed: {} expired locks processed", total_cleaned);
         }
 
         // Clean up memory
