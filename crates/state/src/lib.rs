@@ -23,7 +23,7 @@ pub use concurrency::ConcurrencyController;
 pub use database::Database;
 pub use handlers::StateServiceImpl;
 pub use service::{ServiceConfig, StateServiceRunner};
-pub use storage::{HybridStorage, StateStorage};
+pub use storage::PrivateStateStorage;
 
 // Re-export proto types
 pub mod proto {

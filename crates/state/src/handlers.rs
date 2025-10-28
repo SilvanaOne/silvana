@@ -22,7 +22,7 @@ use crate::{
     },
     proto::state_service_server::StateService,
     proto::*,
-    storage::HybridStorage,
+    storage::PrivateStateStorage,
 };
 
 /// Helper function to log and return internal errors
@@ -144,12 +144,12 @@ fn next_binary_prefix(prefix: &[u8]) -> Option<Vec<u8>> {
 /// StateService implementation
 pub struct StateServiceImpl {
     db: Arc<Database>,
-    storage: HybridStorage,
+    storage: Option<PrivateStateStorage>,
     concurrency: Arc<ConcurrencyController>,
 }
 
 impl StateServiceImpl {
-    pub fn new(db: Arc<Database>, storage: HybridStorage, concurrency: Arc<ConcurrencyController>) -> Self {
+    pub fn new(db: Arc<Database>, storage: Option<PrivateStateStorage>, concurrency: Arc<ConcurrencyController>) -> Self {
         Self {
             db,
             storage,
@@ -222,6 +222,10 @@ impl StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?;
 
         if !owns {
+            warn!(
+                "Authorization failed: user {} is not owner of app_instance {}",
+                auth.public_key, app_instance_id
+            );
             return Err(Status::permission_denied(
                 "Not authorized for this app instance",
             ));
@@ -340,7 +344,10 @@ impl StateService for StateServiceImpl {
                 warn!("Database error fetching app instance: {}", e);
                 Status::internal("Failed to fetch app instance")
             })?
-            .ok_or_else(|| Status::not_found("App instance not found"))?;
+            .ok_or_else(|| {
+                debug!("App instance not found: app_instance_id={}", req.app_instance_id);
+                Status::not_found("App instance not found")
+            })?;
 
         debug!("Retrieved app instance {}", app_instance.app_instance_id);
 
@@ -433,17 +440,9 @@ impl StateService for StateServiceImpl {
         hasher.update(&req.action_data);
         let action_hash = hasher.finalize().to_vec();
 
-        // Check if action data needs S3 storage
-        let (inline_data, s3_key) = self.storage
-            .store(&req.action_data, &format!("actions/{}", req.app_instance_id))
-            .await
-            .map_err(|e| {
-                warn!("Failed to store action data: {}", e);
-                Status::internal("Failed to store action data")
-            })?;
-
-        let action_data = inline_data.unwrap_or_default();
-        let action_da = s3_key.or(req.action_da);
+        // Store action data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let action_data = req.action_data.clone();
+        let action_da = req.action_da;
 
         // Start transaction with pessimistic locking for gapless sequence generation
         use sea_orm::{TransactionTrait, DatabaseBackend, Statement};
@@ -558,19 +557,8 @@ impl StateService for StateServiceImpl {
         let mut user_actions = Vec::new();
         for action in actions {
             // Retrieve data from inline or S3
-            let inline_data = if action.action_data.is_empty() {
-                None
-            } else {
-                Some(action.action_data.clone())
-            };
-
-            let action_data = self.storage
-                .retrieve(&inline_data, &action.action_da)
-                .await
-                .map_err(|e| {
-                    warn!("Failed to retrieve action data: {}", e);
-                    Status::internal("Failed to retrieve action data")
-                })?;
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let action_data = action.action_data.clone();
 
             user_actions.push(UserAction {
                 app_instance_id: action.app_instance_id,
@@ -604,23 +592,22 @@ impl StateService for StateServiceImpl {
         let computed_hash = hasher.finalize().to_vec();
 
         if req.state_hash != computed_hash {
+            warn!(
+                "State hash mismatch for app_instance_id={}, sequence={}: client_hash={}, computed_hash={}",
+                req.app_instance_id,
+                req.sequence,
+                hex::encode(&req.state_hash),
+                hex::encode(&computed_hash)
+            );
             return Err(Status::invalid_argument("State hash mismatch"));
         }
 
-        let (state_data, state_da) = self.storage
-            .store(&req.state_data, &format!("optimistic/{}", req.app_instance_id))
-            .await
-            .map_err(|e| {
-                warn!("Failed to store optimistic state: {}", e);
-                Status::internal("Failed to store optimistic state")
-            })?;
+        // Store data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = req.state_data.clone();
+        let state_da = req.state_da;
 
         let (transition_data, transition_da) = if let Some(td) = req.transition_data {
-            let (d, k) = self.storage
-                .store(&td, &format!("transitions/{}", req.app_instance_id))
-                .await
-                .map_err(|e| log_internal_error("Failed to store transition data", e))?;
-            (d, k.or(req.transition_da))
+            (Some(td), req.transition_da)
         } else {
             (None, req.transition_da)
         };
@@ -630,8 +617,8 @@ impl StateService for StateServiceImpl {
             app_instance_id: Set(req.app_instance_id.clone()),
             sequence: Set(req.sequence),
             state_hash: Set(req.state_hash.clone()),
-            state_data: Set(state_data.clone().unwrap_or_default()), // Vec<u8>
-            state_da: Set(state_da.or(req.state_da)),
+            state_data: Set(state_data.clone()), // Vec<u8>
+            state_da: Set(state_da),
             transition_data: Set(transition_data.clone()), // Option<Vec<u8>>
             transition_da: Set(transition_da),
             commitment: Set(req.commitment),
@@ -657,7 +644,7 @@ impl StateService for StateServiceImpl {
                 app_instance_id: result.app_instance_id,
                 sequence: result.sequence as u64,
                 state_hash: result.state_hash,
-                state_data: state_data.unwrap_or_default(),
+                state_data: state_data.clone(),
                 state_da: result.state_da,
                 transition_data,
                 transition_da: result.transition_da,
@@ -721,20 +708,9 @@ impl StateService for StateServiceImpl {
             }
         };
 
-        let inline_state = if opt_state.state_data.is_empty() { None } else { Some(opt_state.state_data.clone()) };
-        let state_data = self.storage
-            .retrieve(&inline_state, &opt_state.state_da)
-            .await
-            .map_err(|e| log_internal_error("Failed to retrieve state data", e))?;
-
-        let transition_data = if opt_state.transition_da.is_some() || opt_state.transition_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-            Some(self.storage
-                .retrieve(&opt_state.transition_data, &opt_state.transition_da)
-                .await
-                .map_err(|e| log_internal_error("Failed to retrieve transition data", e))?)
-        } else {
-            None
-        };
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = opt_state.state_data.clone();
+        let transition_data = opt_state.transition_data.clone();
 
         Ok(Response::new(GetOptimisticStateResponse {
             success: true,
@@ -762,22 +738,15 @@ impl StateService for StateServiceImpl {
         let auth = self.extract_auth_from_body(&req.auth)?;
         self.verify_ownership(&req.app_instance_id, &auth).await?;
 
+        // Store data inline (S3 offloading removed - use explicit blob storage API if needed)
         let (state_data, state_da) = if let Some(sd) = req.state_data {
-            let (d, k) = self.storage
-                .store(&sd, &format!("state/{}", req.app_instance_id))
-                .await
-                .map_err(|e| log_internal_error("Failed to store state", e))?;
-            (d, k.or(req.state_da))
+            (Some(sd), req.state_da)
         } else {
             (None, req.state_da)
         };
 
         let (proof_data, proof_da) = if let Some(pd) = req.proof_data {
-            let (d, k) = self.storage
-                .store(&pd, &format!("proofs/{}", req.app_instance_id))
-                .await
-                .map_err(|e| log_internal_error("Failed to store proof", e))?;
-            (d, k.or(req.proof_da))
+            (Some(pd), req.proof_da)
         } else {
             (None, req.proof_da)
         };
@@ -843,14 +812,8 @@ impl StateService for StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Proved state not found"))?;
 
-        let state_data = if proved_state.state_da.is_some() || proved_state.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-            Some(self.storage
-                .retrieve(&proved_state.state_data, &proved_state.state_da)
-                .await
-                .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
-        } else {
-            None
-        };
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = proved_state.state_data.clone();
 
         use crate::proto::get_state_response;
         Ok(Response::new(GetStateResponse {
@@ -897,14 +860,8 @@ impl StateService for StateServiceImpl {
             }
         };
 
-        let state_data = if latest.state_da.is_some() || latest.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-            Some(self.storage
-                .retrieve(&latest.state_data, &latest.state_da)
-                .await
-                .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
-        } else {
-            None
-        };
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = latest.state_data.clone();
 
         Ok(Response::new(GetLatestStateResponse {
             success: true,
@@ -945,9 +902,8 @@ impl StateService for StateServiceImpl {
 
         let mut user_actions_result = Vec::new();
         for action in actions {
-            let inline_data = if action.action_data.is_empty() { None } else { Some(action.action_data.clone()) };
-            let action_data = self.storage.retrieve(&inline_data, &action.action_da).await
-                .map_err(|e| log_internal_error("Failed to retrieve action data", e))?;
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let action_data = action.action_data.clone();
 
             user_actions_result.push(UserAction {
                 app_instance_id: action.app_instance_id,
@@ -974,16 +930,9 @@ impl StateService for StateServiceImpl {
 
         let mut optimistic_states_result = Vec::new();
         for opt in opt_states {
-            let inline_state = if opt.state_data.is_empty() { None } else { Some(opt.state_data.clone()) };
-            let state_data = self.storage.retrieve(&inline_state, &opt.state_da).await
-                .map_err(|e| log_internal_error("Failed to retrieve state", e))?;
-
-            let transition_data = if opt.transition_da.is_some() || opt.transition_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-                Some(self.storage.retrieve(&opt.transition_data, &opt.transition_da).await
-                    .map_err(|e| log_internal_error("Failed to retrieve transition", e))?)
-            } else {
-                None
-            };
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let state_data = opt.state_data.clone();
+            let transition_data = opt.transition_data.clone();
 
             optimistic_states_result.push(OptimisticState {
                 app_instance_id: opt.app_instance_id,
@@ -1011,16 +960,10 @@ impl StateService for StateServiceImpl {
 
         let mut proved_states_result = Vec::new();
         for s in states {
-            let state_data = if s.state_da.is_some() || s.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-                Some(self.storage.retrieve(&s.state_data, &s.state_da).await
-                    .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
-            } else {
-                None
-            };
-
-            let proof_data = if req.include_proofs && (s.proof_da.is_some() || s.proof_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false)) {
-                Some(self.storage.retrieve(&s.proof_data, &s.proof_da).await
-                    .map_err(|e| log_internal_error("Failed to retrieve proof", e))?)
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let state_data = s.state_data.clone();
+            let proof_data = if req.include_proofs {
+                s.proof_data.clone()
             } else {
                 None
             };
@@ -1137,6 +1080,10 @@ impl StateService for StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?;
 
         if result.rows_affected == 0 {
+            debug!(
+                "KV string key not found for deletion: app_instance_id={}, key={}",
+                req.app_instance_id, req.key
+            );
             return Err(Status::not_found("Key not found"));
         }
 
@@ -1338,6 +1285,10 @@ impl StateService for StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?;
 
         if result.rows_affected == 0 {
+            debug!(
+                "KV binary key not found for deletion: app_instance_id={}, key={}",
+                req.app_instance_id, hex::encode(&req.key)
+            );
             return Err(Status::not_found("Key not found"));
         }
 
@@ -1470,17 +1421,9 @@ impl StateService for StateServiceImpl {
         hasher.update(&object_data_bytes);
         let object_hash = hasher.finalize().to_vec();
 
-        // Store object data using hybrid storage
-        let (inline_data, s3_key) = self.storage
-            .store(&object_data_bytes, &format!("objects/{}", req.object_id))
-            .await
-            .map_err(|e| {
-                warn!("Failed to store object data: {}", e);
-                Status::internal("Failed to store object data")
-            })?;
-
-        let object_data = inline_data;
-        let object_da = s3_key.or(req.object_da);
+        // Store object data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let object_data = Some(object_data_bytes.clone());
+        let object_da = req.object_da;
 
         // Create object entity with initial version 1
         let object = objects::ActiveModel {
@@ -1565,7 +1508,13 @@ impl StateService for StateServiceImpl {
 
         // Get primary app instance from scope for concurrency control
         let app_instance_id = auth.get_primary_app_instance()
-            .ok_or_else(|| Status::permission_denied("No app_instance permission in scope"))?;
+            .ok_or_else(|| {
+                warn!(
+                    "No app_instance permission in JWT scope for update_object (requester: {})",
+                    auth.public_key
+                );
+                Status::permission_denied("No app_instance permission in scope")
+            })?;
 
         let object_data_bytes = req.object_data.unwrap_or_default();
         let object_id_clone = req.object_id.clone();
@@ -1595,14 +1544,12 @@ impl StateService for StateServiceImpl {
 
         // Verify ownership
         if object.owner != auth.public_key {
+            warn!(
+                "Object ownership check failed: object_id={}, owner={}, requester={}",
+                object.object_id, object.owner, auth.public_key
+            );
             return Err(Status::permission_denied("Not the object owner"));
         }
-
-        // Store new object data
-        let (inline_data, s3_key) = self.storage
-            .store(&object_data_bytes, &format!("objects/{}", req.object_id))
-            .await
-            .map_err(|e| log_internal_error("Failed to store object data", e))?;
 
         // Calculate new hash
         use sha2::{Digest, Sha256};
@@ -1610,8 +1557,9 @@ impl StateService for StateServiceImpl {
         hasher.update(&object_data_bytes);
         let object_hash = hasher.finalize().to_vec();
 
-        // Store combined s3_key/object_da for reuse
-        let final_object_da = s3_key.clone().or(req.object_da);
+        // Store object data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let inline_data = Some(object_data_bytes.clone());
+        let final_object_da = req.object_da;
 
         // Update object
         let mut active_model: objects::ActiveModel = object.clone().into();
@@ -1726,11 +1674,8 @@ impl StateService for StateServiceImpl {
             }
         };
 
-        // Retrieve data from hybrid storage
-        let object_data = self.storage
-            .retrieve(&object.object_data, &object.object_da)
-            .await
-            .map_err(|e| log_internal_error("Failed to retrieve object data", e))?;
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let object_data = object.object_data.clone();
 
         Ok(Response::new(GetObjectResponse {
             success: true,
@@ -1741,7 +1686,7 @@ impl StateService for StateServiceImpl {
                 owner: object.owner,
                 object_type: object.object_type,
                 shared: object.shared,
-                object_data: Some(object_data),
+                object_data,
                 object_da: object.object_da,
                 object_hash: object.object_hash,
                 previous_tx: object.previous_tx,
@@ -1767,6 +1712,10 @@ impl StateService for StateServiceImpl {
             .ok_or_else(|| Status::not_found("Object not found"))?;
 
         if obj.owner != auth.public_key && !obj.shared {
+            warn!(
+                "Access denied to object versions: object_id={}, owner={}, requester={}, shared={}",
+                obj.object_id, obj.owner, auth.public_key, obj.shared
+            );
             return Err(Status::permission_denied("Access denied"));
         }
 
@@ -1822,6 +1771,10 @@ impl StateService for StateServiceImpl {
 
         // Verify current owner
         if object.owner != auth.public_key {
+            warn!(
+                "Transfer object failed: object_id={}, owner={}, requester={}",
+                object.object_id, object.owner, auth.public_key
+            );
             return Err(Status::permission_denied("Only the owner can transfer this object"));
         }
 
@@ -1883,7 +1836,13 @@ impl StateService for StateServiceImpl {
 
         // Get primary app instance from scope
         let app_instance_id = auth.get_primary_app_instance()
-            .ok_or_else(|| Status::permission_denied("No app_instance permission in scope"))?;
+            .ok_or_else(|| {
+                warn!(
+                    "No app_instance permission in JWT scope for request_locks (requester: {})",
+                    auth.public_key
+                );
+                Status::permission_denied("No app_instance permission in scope")
+            })?;
 
         // Sort object IDs for canonical ordering (deadlock prevention)
         let mut object_ids = req.object_ids.clone();
@@ -2601,7 +2560,10 @@ impl StateService for StateServiceImpl {
                 Ok(JobStatus::Running) => "RUNNING",
                 Ok(JobStatus::Completed) => "COMPLETED",
                 Ok(JobStatus::Failed) => "FAILED",
-                _ => return Err(Status::invalid_argument("Invalid job status")),
+                _ => {
+                    warn!("Invalid job status value provided: {}", status);
+                    return Err(Status::invalid_argument("Invalid job status"));
+                }
             };
             query = query.filter(jobs::Column::Status.eq(status_str));
         }
@@ -2759,6 +2721,148 @@ impl StateService for StateServiceImpl {
 
         Ok(Response::new(GetPendingJobsResponse {
             jobs,
+        }))
+    }
+
+    async fn store_private_blob(
+        &self,
+        request: Request<StorePrivateBlobRequest>,
+    ) -> Result<Response<StorePrivateBlobResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Check if S3 storage is configured
+        let storage = self.storage.as_ref()
+            .ok_or_else(|| Status::unavailable("Blob storage is not configured"))?;
+
+        // Verify scope permission for the resource
+        match req.resource_type.as_str() {
+            "app_instance" => {
+                self.require_app_instance_permission(&auth, &req.resource_id)?;
+            }
+            "object" => {
+                if !auth.has_object_permission(&req.resource_id) {
+                    return Err(Status::permission_denied(
+                        format!("Missing object permission for {}", req.resource_id)
+                    ));
+                }
+            }
+            _ => {
+                warn!(
+                    "Invalid resource_type for blob storage: provided='{}', expected='app_instance' or 'object'",
+                    req.resource_type
+                );
+                return Err(Status::invalid_argument(
+                    "resource_type must be 'app_instance' or 'object'"
+                ));
+            }
+        }
+
+        // Store blob with owner metadata - key format: resource_type/resource_id/hash
+        let key = storage
+            .store(
+                &req.data,
+                &auth.public_key,
+                &req.resource_type,
+                &req.resource_id,
+            )
+            .await
+            .map_err(|e| log_internal_error("Failed to store blob", e))?;
+
+        // Calculate hash for response
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(&req.data);
+        let content_hash = hex::encode(hash);
+
+        info!(
+            "Stored private blob: {} ({} bytes, owner: {})",
+            key,
+            req.data.len(),
+            auth.public_key
+        );
+
+        Ok(Response::new(StorePrivateBlobResponse {
+            success: true,
+            message: "Blob stored successfully".to_string(),
+            key,
+            size_bytes: req.data.len() as u64,
+            content_hash,
+        }))
+    }
+
+    async fn retrieve_private_blob(
+        &self,
+        request: Request<RetrievePrivateBlobRequest>,
+    ) -> Result<Response<RetrievePrivateBlobResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Check if S3 storage is configured
+        let storage = self.storage.as_ref()
+            .ok_or_else(|| Status::unavailable("Blob storage is not configured"))?;
+
+        // Retrieve blob with authentication
+        let data = storage
+            .retrieve(
+                &req.key,
+                &auth.public_key,
+                &auth.scope_permissions,
+            )
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("Access denied") {
+                    Status::permission_denied(e.to_string())
+                } else {
+                    log_internal_error("Failed to retrieve blob", e)
+                }
+            })?;
+
+        info!(
+            "Retrieved private blob: {} ({} bytes, requester: {})",
+            req.key,
+            data.len(),
+            auth.public_key
+        );
+
+        Ok(Response::new(RetrievePrivateBlobResponse {
+            success: true,
+            message: "Blob retrieved successfully".to_string(),
+            data,
+        }))
+    }
+
+    async fn delete_private_blob(
+        &self,
+        request: Request<DeletePrivateBlobRequest>,
+    ) -> Result<Response<DeletePrivateBlobResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Check if S3 storage is configured
+        let storage = self.storage.as_ref()
+            .ok_or_else(|| Status::unavailable("Blob storage is not configured"))?;
+
+        // Delete blob (owner only)
+        storage
+            .delete(&req.key, &auth.public_key)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("Access denied") {
+                    Status::permission_denied(e.to_string())
+                } else {
+                    log_internal_error("Failed to delete blob", e)
+                }
+            })?;
+
+        info!(
+            "Deleted private blob: {} (requester: {})",
+            req.key,
+            auth.public_key
+        );
+
+        Ok(Response::new(DeletePrivateBlobResponse {
+            success: true,
+            message: "Blob deleted successfully".to_string(),
         }))
     }
 }

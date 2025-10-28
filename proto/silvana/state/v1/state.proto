@@ -713,6 +713,43 @@ message GetPendingJobsResponse {
   repeated Job jobs = 1;
 }
 
+// Private Blob Storage operations
+message StorePrivateBlobRequest {
+  JWTAuth auth = 1;
+  bytes data = 2;
+  string resource_type = 3;                 // "app_instance" or "object" for scope checking
+  string resource_id = 4;                   // app_instance_id or object_id
+}
+
+message StorePrivateBlobResponse {
+  bool success = 1;
+  string message = 2;
+  string key = 3;                           // Storage key: resource_type/resource_id/hash
+  uint64 size_bytes = 4;
+  string content_hash = 5;                  // SHA256 hash
+}
+
+message RetrievePrivateBlobRequest {
+  JWTAuth auth = 1;
+  string key = 2;                           // Storage key
+}
+
+message RetrievePrivateBlobResponse {
+  bool success = 1;
+  string message = 2;
+  bytes data = 3;
+}
+
+message DeletePrivateBlobRequest {
+  JWTAuth auth = 1;
+  string key = 2;                           // Storage key
+}
+
+message DeletePrivateBlobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // ============================================================================
 // Service Definition
 // ============================================================================
@@ -772,4 +809,9 @@ service StateService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   rpc GetPendingJobs(GetPendingJobsRequest) returns (GetPendingJobsResponse);
+
+  // Private Blob Storage (S3 only, no database)
+  rpc StorePrivateBlob(StorePrivateBlobRequest) returns (StorePrivateBlobResponse);
+  rpc RetrievePrivateBlob(RetrievePrivateBlobRequest) returns (RetrievePrivateBlobResponse);
+  rpc DeletePrivateBlob(DeletePrivateBlobRequest) returns (DeletePrivateBlobResponse);
 }
