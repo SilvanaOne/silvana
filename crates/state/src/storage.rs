@@ -3,7 +3,6 @@
 use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use storage::S3Client;
 use tracing::{debug, error, info, warn};
 
@@ -49,18 +48,8 @@ impl PrivateStateStorage {
             return Ok(storage_key);
         }
 
-        // Set expiration to 10 years from now (effectively permanent for state data)
-        let expires_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_millis() as u64 + (10 * 365 * 24 * 60 * 60 * 1000);
-
-        // Convert binary data to base64 for storage
-        use base64::{Engine as _, engine::general_purpose};
-        let data_base64 = general_purpose::STANDARD.encode(data);
-
         // Store metadata including owner and access control info
         let metadata = vec![
-            ("content-type".to_string(), "application/octet-stream".to_string()),
             ("content-hash".to_string(), hash_hex.clone()),
             ("content-length".to_string(), data.len().to_string()),
             ("owner".to_string(), owner.to_string()),
@@ -68,9 +57,15 @@ impl PrivateStateStorage {
             ("resource_id".to_string(), resource_id.to_string()),
         ];
 
-        // Upload to S3
+        // Upload to S3 using write_binary (stores binary data directly, no base64)
         self.client
-            .write(&storage_key, data_base64, Some(metadata), expires_at)
+            .write_binary(
+                data.to_vec(),
+                &storage_key,
+                "application/octet-stream",
+                Some(metadata),
+                Some(hash_hex.clone()),
+            )
             .await
             .map_err(|e| anyhow!("Failed to store data in S3: {}", e))?;
 
@@ -87,23 +82,24 @@ impl PrivateStateStorage {
     ) -> Result<Vec<u8>> {
         debug!("Retrieving from S3: {} (requester: {})", s3_key, requester_pubkey);
 
-        let (data_base64, metadata) = self.client
-            .read(s3_key)
+        // First, read only metadata to check authentication WITHOUT downloading the binary
+        // This is much more efficient for large files
+        let metadata = self.client
+            .read_metadata(s3_key)
             .await
-            .map_err(|e| anyhow!("Failed to retrieve from S3: {}", e))?;
+            .map_err(|e| anyhow!("Failed to read blob metadata: {}", e))?;
 
         // Check access control
-        let owner = metadata.iter()
-            .find(|(k, _)| k.as_str() == "owner")
-            .map(|(_, v)| v.as_str())
+        let owner = metadata.get("owner")
+            .map(|v| v.as_str())
             .ok_or_else(|| anyhow!("Blob has no owner metadata"))?;
 
         // Allow if requester is owner
         let is_owner = owner == requester_pubkey;
 
         // Or if requester has scope permission for the resource
-        let has_scope_permission = if let Some((_, resource_type)) = metadata.iter().find(|(k, _)| k.as_str() == "resource_type") {
-            if let Some((_, resource_id)) = metadata.iter().find(|(k, _)| k.as_str() == "resource_id") {
+        let has_scope_permission = if let Some(resource_type) = metadata.get("resource_type") {
+            if let Some(resource_id) = metadata.get("resource_id") {
                 match resource_type.as_str() {
                     "app_instance" => scope_permissions.iter().any(|p| {
                         matches!(p, ScopePermission::AppInstance(id) if id == resource_id)
@@ -128,18 +124,20 @@ impl PrivateStateStorage {
             return Err(anyhow!("Access denied: you are not authorized to access this blob"));
         }
 
-        // Decode from base64
-        use base64::{Engine as _, engine::general_purpose};
-        let data = general_purpose::STANDARD.decode(&data_base64)
-            .map_err(|e| anyhow!("Failed to decode S3 data: {}", e))?;
+        // Auth passed - now download the actual binary data
+        debug!("Auth passed, downloading binary data from S3: {}", s3_key);
+        let result = self.client
+            .read_binary(s3_key)
+            .await
+            .map_err(|e| anyhow!("Failed to retrieve from S3: {}", e))?;
 
-        debug!("Retrieved {} bytes from S3", data.len());
+        debug!("Retrieved {} bytes from S3", result.data.len());
 
         // Verify hash matches the key (for content-addressed storage)
         if s3_key.contains('/') {
             let parts: Vec<&str> = s3_key.split('/').collect();
             if let Some(expected_hash) = parts.last() {
-                let actual_hash = hex::encode(Sha256::digest(&data));
+                let actual_hash = hex::encode(Sha256::digest(&result.data));
                 if actual_hash != *expected_hash {
                     error!(
                         "S3 data integrity check failed for {}: expected {}, got {}",
@@ -150,23 +148,22 @@ impl PrivateStateStorage {
             }
         }
 
-        info!("Successfully retrieved {} bytes from S3: {} (requester: {})", data.len(), s3_key, requester_pubkey);
-        Ok(data)
+        info!("Successfully retrieved {} bytes from S3: {} (requester: {})", result.data.len(), s3_key, requester_pubkey);
+        Ok(result.data)
     }
 
     /// Delete blob (owner only)
     pub async fn delete(&self, s3_key: &str, requester_pubkey: &str) -> Result<()> {
         debug!("Deleting from S3: {} (requester: {})", s3_key, requester_pubkey);
 
-        // Read metadata to check ownership
-        let (_data, metadata) = self.client
-            .read(s3_key)
+        // Read only metadata to check ownership WITHOUT downloading the binary
+        let metadata = self.client
+            .read_metadata(s3_key)
             .await
             .map_err(|e| anyhow!("Failed to read blob metadata: {}", e))?;
 
-        let owner = metadata.iter()
-            .find(|(k, _)| k.as_str() == "owner")
-            .map(|(_, v)| v.as_str())
+        let owner = metadata.get("owner")
+            .map(|v| v.as_str())
             .ok_or_else(|| anyhow!("Blob has no owner metadata"))?;
 
         // Only owner can delete

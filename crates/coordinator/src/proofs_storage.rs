@@ -682,7 +682,7 @@ impl ProofStorageBackend for S3Storage {
 
         // Try proof path first
         let client = self.get_client().await?;
-        let (content, tags) = match client.read(&proof_key).await {
+        let result = match client.read(&proof_key).await {
             Ok(result) => result,
             Err(_) => {
                 // Try quilt path (remove the network prefix for key)
@@ -693,6 +693,8 @@ impl ProofStorageBackend for S3Storage {
                     .map_err(|e| anyhow!("Failed to retrieve from S3: {}", e))?
             }
         };
+        let content = result.data;
+        let tags = result.metadata;
 
         // Convert tags to metadata
         let mut metadata = ProofMetadata::default();

@@ -56,7 +56,7 @@ impl S3Storage {
 
         // Call the S3 client's write_binary method
         let sha256 = client
-            .write_binary(data, file_name, mime_type, expected_sha256)
+            .write_binary(data, file_name, mime_type, None, expected_sha256)
             .await?;
 
         // Construct S3 URL
@@ -83,16 +83,16 @@ impl S3Storage {
         debug!("Reading binary from S3: file_name={}", file_name);
 
         // Call the S3 client's read_binary method
-        let (data, sha256) = client.read_binary(file_name).await?;
+        let result = client.read_binary(file_name).await?;
 
         info!(
             "Successfully read binary from S3: file_name={}, size={} bytes, sha256={}",
             file_name,
-            data.len(),
-            sha256
+            result.data.len(),
+            result.sha256
         );
 
-        Ok((data, sha256))
+        Ok((result.data, result.sha256))
     }
 
     /// Delete a binary file from S3
