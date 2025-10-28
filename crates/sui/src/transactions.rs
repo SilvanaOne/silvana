@@ -597,8 +597,8 @@ where
             let mut simulate_req = SimulateTransactionRequest::default();
             simulate_req.transaction = Some(temp_tx.clone().into());
             simulate_req.read_mask = Some(FieldMask::from_paths([
-                "transaction.effects.status",
-                "transaction.effects.gas_used",
+                "effects.status",
+                "effects.gas_used",
             ]));
             simulate_req.checks = Some(simulate_transaction_request::TransactionChecks::Enabled as i32);
             simulate_req.do_gas_selection = Some(false); // We're managing gas ourselves

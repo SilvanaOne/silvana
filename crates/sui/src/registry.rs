@@ -264,7 +264,7 @@ async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<Str
     let mut req = sui_rpc::proto::sui::rpc::v2::GetTransactionRequest::default();
     req.digest = Some(digest.to_string());
     req.read_mask = Some(FieldMask::from_paths([
-        "transaction.objects.objects",
+        "objects.objects",
     ]));
 
     let resp = ledger

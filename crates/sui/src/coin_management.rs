@@ -180,10 +180,8 @@ pub async fn split_gas_coins(
     req.transaction = Some(tx.into());
     req.signatures = vec![signature.into()];
     req.read_mask = Some(FieldMask::from_paths([
-        "transaction",
-        "transaction.digest",
-        "transaction.effects",
-        "transaction.effects.status",
+        "digest",
+        "effects.status",
     ]));
 
     debug!("Executing split transaction...");
@@ -453,10 +451,8 @@ pub async fn merge_gas_coins(coins_to_merge: Vec<CoinInfo>) -> Result<String> {
     req.transaction = Some(tx.into());
     req.signatures = vec![signature.into()];
     req.read_mask = Some(FieldMask::from_paths([
-        "transaction",
-        "transaction.digest",
-        "transaction.effects",
-        "transaction.effects.status",
+        "digest",
+        "effects.status",
     ]));
 
     debug!("Executing merge transaction...");
