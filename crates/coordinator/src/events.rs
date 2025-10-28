@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sui_rpc::proto::sui::rpc::v2beta2::{Checkpoint, Event};
+use sui_rpc::proto::sui::rpc::v2::{Checkpoint, Event};
 use tracing::{debug, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

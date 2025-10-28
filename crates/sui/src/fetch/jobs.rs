@@ -2,7 +2,8 @@ use crate::error::{SilvanaSuiInterfaceError, Result};
 use crate::parse::{get_string, get_u64, get_u8, get_option_u64, get_vec_u64, get_bytes};
 use crate::state::SharedSuiState;
 use super::AppInstance;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
 use tracing::{debug, warn, info};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, BTreeMap};
@@ -578,23 +579,19 @@ pub async fn fetch_jobs_batch(
     let mut field_ids_map = HashMap::new(); // job_sequence -> field_id
     let mut page_token = None;
     const PAGE_SIZE: u32 = 100;
-    
+
     loop {
-        let list_request = ListDynamicFieldsRequest {
-            parent: Some(jobs_table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
-        };
-        
+        let mut list_request = ListDynamicFieldsRequest::default();
+        list_request.parent = Some(jobs_table_id.to_string());
+        list_request.page_size = Some(PAGE_SIZE);
+        list_request.page_token = page_token.clone();
+        list_request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name",
+        ]));
+
         let list_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(list_request)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
@@ -605,8 +602,9 @@ pub async fn fetch_jobs_batch(
         
         // Check each field to see if it's one of our requested jobs
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                if let Ok(field_job_seq) = bcs::from_bytes::<u64>(name_value) {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    if let Ok(field_job_seq) = bcs::from_bytes::<u64>(name_value) {
                     if job_sequences.contains(&field_job_seq) {
                         if let Some(field_id) = &field.field_id {
                             field_ids_map.insert(field_job_seq, field_id.clone());
@@ -617,10 +615,11 @@ pub async fn fetch_jobs_batch(
                             }
                         }
                     }
+                    }
                 }
             }
         }
-        
+
         // Check if we should continue pagination
         if field_ids_map.len() == job_sequences.len() {
             break; // Found all requested jobs
@@ -657,20 +656,22 @@ pub async fn fetch_jobs_batch(
         // First batch: fetch field wrapper objects
         let field_requests: Vec<GetObjectRequest> = chunk
             .iter()
-            .map(|(_, field_id)| GetObjectRequest {
-                object_id: Some(field_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(_, field_id)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(field_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: field_requests,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["object_id".to_string(), "json".to_string()],
-            }),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = field_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -687,7 +688,7 @@ pub async fn fetch_jobs_batch(
         // Extract job object IDs from field wrappers
         let mut job_object_ids = Vec::new(); // (job_object_id, job_sequence)
         for (i, get_result) in field_results.iter().enumerate() {
-            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(field_object)) = &get_result.result {
+            if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(field_object)) = &get_result.result {
                 if let Some(field_json) = &field_object.json {
                     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &field_json.kind {
                         if let Some(value_field) = struct_value.fields.get("value") {
@@ -710,20 +711,22 @@ pub async fn fetch_jobs_batch(
         // Second batch: fetch actual job objects
         let job_requests: Vec<GetObjectRequest> = job_object_ids
             .iter()
-            .map(|(job_id, _)| GetObjectRequest {
-                object_id: Some(job_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(job_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(job_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: job_requests,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["object_id".to_string(), "json".to_string()],
-            }),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = job_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -739,7 +742,7 @@ pub async fn fetch_jobs_batch(
         
         // Extract Job data from results
         for (i, get_result) in job_results.iter().enumerate() {
-            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(job_object)) = &get_result.result {
+            if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(job_object)) = &get_result.result {
                 if let Some(job_json) = &job_object.json {
                     match extract_job_from_json(job_json) {
                         Ok(mut job) => {
@@ -775,21 +778,17 @@ pub async fn fetch_job_by_id(
     // Loop through pages until we find the job or exhaust all pages
     loop {
         // List dynamic fields to find the specific job
-        let list_request = ListDynamicFieldsRequest {
-            parent: Some(jobs_table_id.to_string()),
-            page_size: Some(100),
-            page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
-        };
-        
+        let mut list_request = ListDynamicFieldsRequest::default();
+        list_request.parent = Some(jobs_table_id.to_string());
+        list_request.page_size = Some(100);
+        list_request.page_token = page_token.clone();
+        list_request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name",
+        ]));
+
         let list_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(list_request)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
@@ -804,9 +803,10 @@ pub async fn fetch_job_by_id(
         
         // Find the specific job entry in this page
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // The name_value is BCS-encoded u64 (job_sequence)
-                match bcs::from_bytes::<u64>(name_value) {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // The name_value is BCS-encoded u64 (job_sequence)
+                    match bcs::from_bytes::<u64>(name_value) {
                     Ok(field_job_sequence) => {
                         if field_job_sequence == job_sequence {
                             if let Some(field_id) = &field.field_id {
@@ -819,10 +819,11 @@ pub async fn fetch_job_by_id(
                     Err(e) => {
                         warn!("Failed to decode BCS for field name_value: {:?}, error: {}", name_value, e);
                     }
+                    }
                 }
             }
         }
-        
+
         total_fields_checked += response.dynamic_fields.len();
         
         // Check if there are more pages
@@ -852,17 +853,14 @@ async fn fetch_job_object_by_field_id(
     //debug!("📄 Fetching job {} from field {}", job_sequence, field_id);
     
     // Fetch the Field wrapper object
-    let field_request = GetObjectRequest {
-        object_id: Some(field_id.to_string()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                "object_id".to_string(),
-                "json".to_string(),
-            ],
-        }),
-    };
-    
+    let mut field_request = GetObjectRequest::default();
+    field_request.object_id = Some(field_id.to_string());
+    field_request.version = None;
+    field_request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "json",
+    ]));
+
     let field_response = client
         .ledger_client()
         .get_object(field_request)
@@ -880,17 +878,14 @@ async fn fetch_job_object_by_field_id(
                     if let Some(prost_types::value::Kind::StringValue(job_object_id)) = &value_field.kind {
                         debug!("📄 Found job object ID: {}", job_object_id);
                         // Fetch the actual job object
-                        let job_request = GetObjectRequest {
-                            object_id: Some(job_object_id.clone()),
-                            version: None,
-                            read_mask: Some(prost_types::FieldMask {
-                                paths: vec![
-                                    "object_id".to_string(),
-                                    "json".to_string(),
-                                ],
-                            }),
-                        };
-                        
+                        let mut job_request = GetObjectRequest::default();
+                        job_request.object_id = Some(job_object_id.clone());
+                        job_request.version = None;
+                        job_request.read_mask = Some(FieldMask::from_paths([
+                            "object_id",
+                            "json",
+                        ]));
+
                         let job_response = client
                             .ledger_client()
                             .get_object(job_request)
@@ -1013,17 +1008,16 @@ pub async fn fetch_all_jobs_from_app_instance(
         // Fetch all jobs from the ObjectTable
         let mut page_token = None;
         loop {
-            let list_request = ListDynamicFieldsRequest {
-                parent: Some(table_id.clone()),
-                page_size: Some(100),
-                page_token: page_token.clone(),
-                read_mask: Some(prost_types::FieldMask {
-                    paths: vec!["field_id".to_string()],
-                }),
-            };
+            let mut list_request = ListDynamicFieldsRequest::default();
+            list_request.parent = Some(table_id.clone());
+            list_request.page_size = Some(100);
+            list_request.page_token = page_token.clone();
+            list_request.read_mask = Some(FieldMask::from_paths([
+                "field_id",
+            ]));
 
             let fields_response = client
-                .live_data_client()
+                .state_client()
                 .list_dynamic_fields(list_request)
                 .await
                 .map_err(|e| SilvanaSuiInterfaceError::RpcConnectionError(
@@ -1036,7 +1030,8 @@ pub async fn fetch_all_jobs_from_app_instance(
             for field in &response.dynamic_fields {
                 if let Some(field_id) = &field.field_id {
                     // Extract job_sequence from name_value for debugging
-                    let job_sequence = field.name_value.as_ref()
+                    let job_sequence = field.name.as_ref()
+                        .and_then(|name_bcs| name_bcs.value.as_ref())
                         .and_then(|nv| bcs::from_bytes::<u64>(nv).ok())
                         .unwrap_or(0);
                     

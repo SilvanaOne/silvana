@@ -32,12 +32,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .configure(&mut config, &proto_files, &proto_includes)
         .expect("Failed to configure reflection for protos");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .protoc_arg("--experimental_allow_proto3_optional")
         .build_server(true)
         .build_client(true)
         .file_descriptor_set_path(&events_descriptor_path) // write the .bin set
-        .compile_protos_with_config(config, &proto_files, &proto_includes)?;
+        .compile_with_config(config, &proto_files, &proto_includes)?;
 
     // tonic_build::configure()
     //     .protoc_arg("--experimental_allow_proto3_optional")

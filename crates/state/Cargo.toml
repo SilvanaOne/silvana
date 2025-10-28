@@ -18,7 +18,8 @@ prost.workspace = true
 prost-types.workspace = true
 prost-reflect.workspace = true
 tonic = { workspace = true, features = ["tls-webpki-roots"] }
-tonic-web = "0.13"
+tonic-prost.workspace = true
+tonic-web = "0.14"
 tonic-reflection.workspace = true
 
 # Storage for S3 operations
@@ -69,7 +70,8 @@ url = { version = "2", optional = true }
 
 [build-dependencies]
 tonic-build.workspace = true
-prost-build = "0.13"
+tonic-prost-build.workspace = true
+prost-build.workspace = true
 prost-reflect-build.workspace = true
 once_cell.workspace = true
 

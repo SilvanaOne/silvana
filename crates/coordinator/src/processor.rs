@@ -8,7 +8,7 @@ use crate::metrics::CoordinatorMetrics;
 use crate::state::SharedState;
 use std::collections::HashMap;
 use std::time::Duration;
-use sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsResponse;
+use sui_rpc::proto::sui::rpc::v2::SubscribeCheckpointsResponse;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tracing::{error, info, warn};
@@ -333,7 +333,7 @@ impl EventProcessor {
         checkpoint_seq: u64,
         tx_index: usize,
         event_index: usize,
-    ) -> Result<Option<sui_rpc::proto::sui::rpc::v2beta2::Event>> {
+    ) -> Result<Option<sui_rpc::proto::sui::rpc::v2::Event>> {
         // Use the helper function from the sui crate's checkpoint module
         sui::fetch::checkpoint::fetch_event_with_contents(checkpoint_seq, tx_index, event_index)
             .await

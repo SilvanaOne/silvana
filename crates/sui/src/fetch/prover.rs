@@ -7,7 +7,8 @@ use crate::state::SharedSuiState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use sui_rpc::Client;
-use sui_rpc::proto::sui::rpc::v2beta2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest, BatchGetObjectsRequest};
 use tracing::{debug, info, warn};
 
 // Constants matching Move definitions
@@ -147,21 +148,17 @@ async fn fetch_proof_calculations_from_table_range(
     const MAX_PAGES: u32 = 200;
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name",
+        ]));
 
         let fields_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(request)
             .await
             .map_err(|e| {
@@ -181,12 +178,14 @@ async fn fetch_proof_calculations_from_table_range(
 
         // Collect field IDs for blocks in our range
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
-                    // Check if this block is in our desired range
-                    if block_number >= start_block && block_number <= end_block {
-                        if let Some(field_id) = &field.field_id {
-                            field_ids_to_fetch.push((field_id.clone(), block_number));
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
+                        // Check if this block is in our desired range
+                        if block_number >= start_block && block_number <= end_block {
+                            if let Some(field_id) = &field.field_id {
+                                field_ids_to_fetch.push((field_id.clone(), block_number));
+                            }
                         }
                     }
                 }
@@ -240,20 +239,22 @@ async fn fetch_proof_objects_batch(
         // First batch: fetch all field wrapper objects to get the actual proof object IDs
         let field_requests: Vec<GetObjectRequest> = chunk
             .iter()
-            .map(|(field_id, _)| GetObjectRequest {
-                object_id: Some(field_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(field_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(field_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: field_requests,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["object_id".to_string(), "json".to_string()],
-            }),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = field_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -270,7 +271,7 @@ async fn fetch_proof_objects_batch(
         // Extract proof object IDs from field wrappers
         let mut proof_object_ids = Vec::new(); // (proof_object_id, block_number)
         for (i, get_result) in field_results.iter().enumerate() {
-            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(field_object)) = &get_result.result {
+            if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(field_object)) = &get_result.result {
                 if let Some(field_json) = &field_object.json {
                     if let Some(prost_types::value::Kind::StructValue(struct_value)) = &field_json.kind {
                         if let Some(value_field) = struct_value.fields.get("value") {
@@ -293,20 +294,22 @@ async fn fetch_proof_objects_batch(
         // Second batch: fetch all actual proof calculation objects
         let proof_requests: Vec<GetObjectRequest> = proof_object_ids
             .iter()
-            .map(|(proof_id, _)| GetObjectRequest {
-                object_id: Some(proof_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(proof_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(proof_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
-        
-        let batch_request = BatchGetObjectsRequest {
-            requests: proof_requests,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["object_id".to_string(), "json".to_string()],
-            }),
-        };
-        
+
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = proof_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
+
         let batch_response = client
             .ledger_client()
             .batch_get_objects(batch_request)
@@ -322,7 +325,7 @@ async fn fetch_proof_objects_batch(
         
         // Extract ProofCalculation data from results
         for (i, get_result) in proof_results.iter().enumerate() {
-            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(proof_object)) = &get_result.result {
+            if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(proof_object)) = &get_result.result {
                 if let Some(proof_json) = &proof_object.json {
                     if let Some(proof_info) = extract_proof_calculation_from_json(proof_json) {
                         let (_, block_number) = proof_object_ids[i];
@@ -358,21 +361,17 @@ async fn fetch_proof_calculation_from_table(
     const MAX_PAGES: u32 = 200; // Higher limit for proofs as there may be many
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name",
+        ]));
 
         let fields_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(request)
             .await
             .map_err(|e| {
@@ -393,47 +392,58 @@ async fn fetch_proof_calculation_from_table(
         // Search in current page for proof calculations matching our target block
         for field in &response.dynamic_fields {
             // The name_value contains the block number as BCS-encoded u64
-            if let Some(name_value) = &field.name_value {
-                // Decode the block number from BCS bytes
-                if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
-                    debug!(
-                        "🔍 Dynamic field - Block: {}, Field: {:?}",
-                        block_number, field
-                    );
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // Decode the block number from BCS bytes
+                    if let Ok(block_number) = bcs::from_bytes::<u64>(name_value) {
+                        debug!(
+                            "🔍 Dynamic field - Block: {}, Field: {:?}",
+                            block_number, field
+                        );
 
-                    // Only fetch if this is our target block
-                    if block_number == target_block_number {
-                        if let Some(field_id) = &field.field_id {
-                            debug!(
-                                "✅ Found matching block {}! Fetching proof calculation from field ID: {}",
-                                block_number, field_id
-                            );
-
-                            // Fetch the proof calculation for this specific block
-                            if let Ok(Some(proof_calculation)) = fetch_proof_object_by_field_id(
-                                client,
-                                field_id,
-                                target_block_number,
-                            )
-                            .await
-                            {
+                        // Only fetch if this is our target block
+                        if block_number == target_block_number {
+                            if let Some(field_id) = &field.field_id {
                                 debug!(
-                                    "✅ Successfully fetched proof for block {}. Full ProofCalculation: {:?}",
-                                    target_block_number, proof_calculation
+                                    "✅ Found matching block {}! Fetching proof calculation from field ID: {}",
+                                    block_number, field_id
                                 );
-                                return Ok(Some(proof_calculation));
+
+                                // Fetch the proof calculation for this specific block
+                                if let Ok(Some(proof_calculation)) = fetch_proof_object_by_field_id(
+                                    client,
+                                    field_id,
+                                    target_block_number,
+                                )
+                                .await
+                                {
+                                    debug!(
+                                        "✅ Successfully fetched proof for block {}. Full ProofCalculation: {:?}",
+                                        target_block_number, proof_calculation
+                                    );
+                                    return Ok(Some(proof_calculation));
+                                }
                             }
+                        } else {
+                            debug!(
+                                "⏩ Skipping block {} (looking for block {})",
+                                block_number, target_block_number
+                            );
                         }
                     } else {
-                        debug!(
-                            "⏩ Skipping block {} (looking for block {})",
-                            block_number, target_block_number
+                        warn!(
+                            "❌ Failed to deserialize block number from name_value: {:?}",
+                            name_value
                         );
                     }
                 } else {
-                    warn!(
-                        "❌ Failed to deserialize block number from name_value: {:?}",
-                        name_value
+                    info!(
+                        "❌ No name_value found in dynamic field. Table ID: {}, Target block: {}, Field: {:?}",
+                        table_id, target_block_number, field
+                    );
+                    info!(
+                        "Field details - field_id: {:?}, name: {:?}, value_type: {:?}",
+                        field.field_id, field.name.as_ref().and_then(|n| n.name.as_ref()), field.value_type
                     );
                 }
             } else {
@@ -442,8 +452,8 @@ async fn fetch_proof_calculation_from_table(
                     table_id, target_block_number, field
                 );
                 info!(
-                    "Field details - field_id: {:?}, name_type: {:?}, value_type: {:?}",
-                    field.field_id, field.name_type, field.value_type
+                    "Field details - field_id: {:?}, name: {:?}, value_type: {:?}",
+                    field.field_id, field.name.as_ref().and_then(|n| n.name.as_ref()), field.value_type
                 );
             }
         }
@@ -486,13 +496,13 @@ async fn fetch_proof_object_by_field_id(
     );
 
     // Fetch the Field wrapper object
-    let field_request = GetObjectRequest {
-        object_id: Some(field_id.to_string()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["object_id".to_string(), "json".to_string()],
-        }),
-    };
+    let mut field_request = GetObjectRequest::default();
+    field_request.object_id = Some(field_id.to_string());
+    field_request.version = None;
+    field_request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "json",
+    ]));
 
     let field_response = client
         .ledger_client()
@@ -517,13 +527,13 @@ async fn fetch_proof_object_by_field_id(
                     {
                         debug!("📄 Found proof object ID: {}", proof_object_id);
                         // Fetch the actual proof calculation object
-                        let proof_request = GetObjectRequest {
-                            object_id: Some(proof_object_id.clone()),
-                            version: None,
-                            read_mask: Some(prost_types::FieldMask {
-                                paths: vec!["object_id".to_string(), "json".to_string()],
-                            }),
-                        };
+                        let mut proof_request = GetObjectRequest::default();
+                        proof_request.object_id = Some(proof_object_id.clone());
+                        proof_request.version = None;
+                        proof_request.read_mask = Some(FieldMask::from_paths([
+                            "object_id",
+                            "json",
+                        ]));
 
                         let proof_response = client
                             .ledger_client()

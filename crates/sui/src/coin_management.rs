@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use sui_crypto::SuiSigner;
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Argument};
 use sui_transaction_builder::{Serialized, TransactionBuilder};
 use tracing::{debug, error, info, warn};
@@ -174,18 +175,14 @@ pub async fn split_gas_coins(
 
     // Execute the transaction
     let mut exec_client = client.execution_client();
-    let req = proto::ExecuteTransactionRequest {
-        transaction: Some(tx.into()),
-        signatures: vec![signature.into()],
-        read_mask: Some(sui_rpc::field::FieldMask {
-            paths: vec![
-                "transaction".into(),
-                "transaction.digest".into(),
-                "transaction.effects".into(),
-                "transaction.effects.status".into(),
-            ],
-        }),
-    };
+
+    let mut req = proto::ExecuteTransactionRequest::default();
+    req.transaction = Some(tx.into());
+    req.signatures = vec![signature.into()];
+    req.read_mask = Some(FieldMask::from_paths([
+        "digest",
+        "effects.status",
+    ]));
 
     debug!("Executing split transaction...");
     let resp = exec_client.execute_transaction(req).await.map_err(|e| {
@@ -233,12 +230,9 @@ async fn wait_for_split_transaction(digest: &str) -> Result<()> {
 
     let max_retries = 20; // More retries for split transactions
     for i in 0..max_retries {
-        let req = proto::GetTransactionRequest {
-            digest: Some(digest.to_string()),
-            read_mask: Some(sui_rpc::field::FieldMask {
-                paths: vec!["transaction".into()],
-            }),
-        };
+        let mut req = proto::GetTransactionRequest::default();
+        req.digest = Some(digest.to_string());
+        req.read_mask = Some(FieldMask::from_paths(["transaction"]));
 
         match ledger.get_transaction(req).await {
             Ok(resp) => {
@@ -452,18 +446,14 @@ pub async fn merge_gas_coins(coins_to_merge: Vec<CoinInfo>) -> Result<String> {
 
     // Execute the transaction
     let mut exec_client = client.execution_client();
-    let req = proto::ExecuteTransactionRequest {
-        transaction: Some(tx.into()),
-        signatures: vec![signature.into()],
-        read_mask: Some(sui_rpc::field::FieldMask {
-            paths: vec![
-                "transaction".into(),
-                "transaction.digest".into(),
-                "transaction.effects".into(),
-                "transaction.effects.status".into(),
-            ],
-        }),
-    };
+
+    let mut req = proto::ExecuteTransactionRequest::default();
+    req.transaction = Some(tx.into());
+    req.signatures = vec![signature.into()];
+    req.read_mask = Some(FieldMask::from_paths([
+        "digest",
+        "effects.status",
+    ]));
 
     debug!("Executing merge transaction...");
     let resp = exec_client.execute_transaction(req).await.map_err(|e| {
@@ -510,12 +500,9 @@ async fn wait_for_merge_transaction(digest: &str) -> Result<()> {
 
     let max_retries = 10;
     for i in 0..max_retries {
-        let req = proto::GetTransactionRequest {
-            digest: Some(digest.to_string()),
-            read_mask: Some(sui_rpc::field::FieldMask {
-                paths: vec!["transaction".into()],
-            }),
-        };
+        let mut req = proto::GetTransactionRequest::default();
+        req.digest = Some(digest.to_string());
+        req.read_mask = Some(FieldMask::from_paths(["transaction"]));
 
         match ledger.get_transaction(req).await {
             Ok(resp) => {

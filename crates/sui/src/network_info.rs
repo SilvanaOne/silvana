@@ -1,5 +1,6 @@
 use anyhow::{Result, Context};
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2 as proto;
 use tracing::{debug, warn};
 use crate::state::SharedSuiState;
 use std::env;
@@ -55,9 +56,9 @@ pub async fn get_service_info_full() -> Result<ServiceInfo> {
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
     let mut ledger = client.ledger_client();
-    
-    let req = proto::GetServiceInfoRequest {};
-    
+
+    let req = proto::GetServiceInfoRequest::default();
+
     debug!("Fetching service info from gRPC...");
     let resp = ledger.get_service_info(req).await
         .context("Failed to get service info")?;
@@ -112,28 +113,25 @@ pub async fn get_network_info() -> Result<NetworkInfo> {
     let (chain_name, chain_id) = get_service_info().await.unwrap_or((None, None));
     
     // Request current epoch info with system state
-    let req = proto::GetEpochRequest {
-        epoch: None, // None means current epoch
-        read_mask: Some(sui_rpc::field::FieldMask {
-            paths: vec![
-                "epoch".into(),
-                "system_state".into(),
-                "system_state.epoch".into(),
-                "system_state.protocol_version".into(),
-                "system_state.reference_gas_price".into(),
-                "system_state.epoch_start_timestamp_ms".into(),
-                "system_state.safe_mode".into(),
-                "system_state.validators".into(),
-                "system_state.parameters".into(),
-                "system_state.parameters.epoch_duration_ms".into(),
-                "system_state.parameters.stake_subsidy_start_epoch".into(),
-                "system_state.parameters.min_validator_count".into(),
-                "system_state.parameters.max_validator_count".into(),
-                "system_state.stake_subsidy".into(),
-            ],
-        }),
-    };
-    
+    let mut req = proto::GetEpochRequest::default();
+    req.epoch = None; // None means current epoch
+    req.read_mask = Some(FieldMask::from_paths([
+        "epoch",
+        "system_state",
+        "system_state.epoch",
+        "system_state.protocol_version",
+        "system_state.reference_gas_price",
+        "system_state.epoch_start_timestamp_ms",
+        "system_state.safe_mode",
+        "system_state.validators",
+        "system_state.parameters",
+        "system_state.parameters.epoch_duration_ms",
+        "system_state.parameters.stake_subsidy_start_epoch",
+        "system_state.parameters.min_validator_count",
+        "system_state.parameters.max_validator_count",
+        "system_state.stake_subsidy",
+    ]));
+
     debug!("Fetching network info from gRPC...");
     let resp = ledger.get_epoch(req).await
         .context("Failed to get epoch info")?;

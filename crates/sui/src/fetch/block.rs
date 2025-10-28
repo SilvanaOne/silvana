@@ -6,7 +6,8 @@ use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
 use std::fmt;
 use sui_rpc::Client;
-use sui_rpc::proto::sui::rpc::v2beta2::{
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::{
     BatchGetObjectsRequest, GetObjectRequest, ListDynamicFieldsRequest,
 };
 use tracing::{debug, info, warn};
@@ -111,21 +112,17 @@ async fn fetch_blocks_from_table_range(
     const MAX_PAGES: u32 = 200;
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name",
+        ]));
 
         let fields_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(request)
             .await
             .map_err(|e| {
@@ -145,13 +142,15 @@ async fn fetch_blocks_from_table_range(
 
         // Collect field IDs for blocks in our range
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
                     // Check if this block is in our desired range
                     if field_block_number >= start_block && field_block_number <= end_block {
                         if let Some(field_id) = &field.field_id {
                             field_ids_to_fetch.push((field_id.clone(), field_block_number));
                         }
+                    }
                     }
                 }
             }
@@ -204,19 +203,21 @@ async fn fetch_block_objects_batch(
         // First batch: fetch all field wrapper objects to get the actual block object IDs
         let field_requests: Vec<GetObjectRequest> = chunk
             .iter()
-            .map(|(field_id, _)| GetObjectRequest {
-                object_id: Some(field_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(field_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(field_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
 
-        let batch_request = BatchGetObjectsRequest {
-            requests: field_requests,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["object_id".to_string(), "json".to_string()],
-            }),
-        };
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = field_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
 
         let batch_response = client
             .ledger_client()
@@ -234,7 +235,7 @@ async fn fetch_block_objects_batch(
         // Extract block object IDs from field wrappers
         let mut block_object_ids = Vec::new(); // (block_object_id, block_number)
         for (i, get_result) in field_results.iter().enumerate() {
-            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(
+            if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(
                 field_object,
             )) = &get_result.result
             {
@@ -264,19 +265,21 @@ async fn fetch_block_objects_batch(
         // Second batch: fetch all actual block objects
         let block_requests: Vec<GetObjectRequest> = block_object_ids
             .iter()
-            .map(|(block_id, _)| GetObjectRequest {
-                object_id: Some(block_id.clone()),
-                version: None,
-                read_mask: None, // Use batch-level mask instead
+            .map(|(block_id, _)| {
+                let mut req = GetObjectRequest::default();
+                req.object_id = Some(block_id.clone());
+                req.version = None;
+                req.read_mask = None; // Use batch-level mask instead
+                req
             })
             .collect();
 
-        let batch_request = BatchGetObjectsRequest {
-            requests: block_requests,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec!["object_id".to_string(), "json".to_string()],
-            }),
-        };
+        let mut batch_request = BatchGetObjectsRequest::default();
+        batch_request.requests = block_requests;
+        batch_request.read_mask = Some(FieldMask::from_paths([
+            "object_id",
+            "json",
+        ]));
 
         let batch_response = client
             .ledger_client()
@@ -293,7 +296,7 @@ async fn fetch_block_objects_batch(
 
         // Extract Block data from results
         for (i, get_result) in block_results.iter().enumerate() {
-            if let Some(sui_rpc::proto::sui::rpc::v2beta2::get_object_result::Result::Object(
+            if let Some(sui_rpc::proto::sui::rpc::v2::get_object_result::Result::Object(
                 block_object,
             )) = &get_result.result
             {
@@ -332,21 +335,17 @@ async fn fetch_block_from_table(
     let mut all_found_blocks = Vec::new(); // Collect all found block numbers for debugging
 
     loop {
-        let request = ListDynamicFieldsRequest {
-            parent: Some(table_id.to_string()),
-            page_size: Some(PAGE_SIZE),
-            page_token: page_token.clone(),
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "field_id".to_string(),
-                    "name_type".to_string(),
-                    "name_value".to_string(),
-                ],
-            }),
-        };
+        let mut request = ListDynamicFieldsRequest::default();
+        request.parent = Some(table_id.to_string());
+        request.page_size = Some(PAGE_SIZE);
+        request.page_token = page_token.clone();
+        request.read_mask = Some(FieldMask::from_paths([
+            "field_id",
+            "name",
+        ]));
 
         let fields_response = client
-            .live_data_client()
+            .state_client()
             .list_dynamic_fields(request)
             .await
             .map_err(|e| {
@@ -366,9 +365,10 @@ async fn fetch_block_from_table(
 
         // Search in current page for our target block
         for field in &response.dynamic_fields {
-            if let Some(name_value) = &field.name_value {
-                // The name_value is BCS-encoded u64 (block_number)
-                if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
+            if let Some(name_bcs) = &field.name {
+                if let Some(name_value) = &name_bcs.value {
+                    // The name_value is BCS-encoded u64 (block_number)
+                    if let Ok(field_block_number) = bcs::from_bytes::<u64>(name_value) {
                     all_found_blocks.push(field_block_number);
                     //debug!("🔢 Found block {} in dynamic fields", field_block_number);
                     if field_block_number == block_number {
@@ -388,6 +388,7 @@ async fn fetch_block_from_table(
                         "⚠️ Failed to decode block number from bytes: {:?}",
                         name_value
                     );
+                }
                 }
             }
         }
@@ -437,13 +438,13 @@ async fn fetch_block_object_by_field_id(
     );
 
     // Fetch the Field wrapper object
-    let field_request = GetObjectRequest {
-        object_id: Some(field_id.to_string()),
-        version: None,
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec!["object_id".to_string(), "json".to_string()],
-        }),
-    };
+    let mut field_request = GetObjectRequest::default();
+    field_request.object_id = Some(field_id.to_string());
+    field_request.version = None;
+    field_request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "json",
+    ]));
 
     let field_response = client
         .ledger_client()
@@ -468,13 +469,13 @@ async fn fetch_block_object_by_field_id(
                     {
                         debug!("📄 Found block object ID: {}", block_object_id);
                         // Fetch the actual block object
-                        let block_request = GetObjectRequest {
-                            object_id: Some(block_object_id.clone()),
-                            version: None,
-                            read_mask: Some(prost_types::FieldMask {
-                                paths: vec!["object_id".to_string(), "json".to_string()],
-                            }),
-                        };
+                        let mut block_request = GetObjectRequest::default();
+                        block_request.object_id = Some(block_object_id.clone());
+                        block_request.version = None;
+                        block_request.read_mask = Some(FieldMask::from_paths([
+                            "object_id",
+                            "json",
+                        ]));
 
                         let block_response = client
                             .ledger_client()

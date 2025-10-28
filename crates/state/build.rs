@@ -30,12 +30,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .configure(&mut config, &proto_files, &proto_includes)
         .expect("Failed to configure reflection for state proto");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .protoc_arg("--experimental_allow_proto3_optional")
         .build_server(true)
         .build_client(true)
         .file_descriptor_set_path(&state_descriptor_path)
-        .compile_protos_with_config(config, &proto_files, &proto_includes)?;
+        .compile_with_config(config, &proto_files, &proto_includes)?;
 
     // Tell cargo to recompile if any .proto files change
     if std::path::Path::new("./proto/").exists() {

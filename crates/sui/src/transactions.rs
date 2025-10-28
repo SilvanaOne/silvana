@@ -1,9 +1,9 @@
 use anyhow::{Context, Result, anyhow};
 use std::str::FromStr;
 use sui_crypto::SuiSigner;
-use sui_rpc::field::FieldMask;
-use sui_rpc::proto::sui::rpc::v2beta2 as proto;
-use sui_rpc::proto::sui::rpc::v2beta2::{SimulateTransactionRequest, simulate_transaction_request};
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2 as proto;
+use sui_rpc::proto::sui::rpc::v2::{SimulateTransactionRequest, simulate_transaction_request};
 use sui_sdk_types as sui;
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
@@ -102,26 +102,13 @@ fn check_transaction_effects(
         }
     }
 
-    // Check transaction was successful
-    if tx_resp.finality.is_none() {
-        error!(
-            "{} transaction did not achieve finality (tx: {})",
-            operation, tx_digest
-        );
-        return Err(SilvanaSuiInterfaceError::TransactionError {
-            message: format!("{} transaction did not achieve finality", operation),
-            tx_digest: Some(tx_digest),
-        }
-        .into());
-    }
-
     // Check for transaction success in effects
     let tx_successful = tx_resp
         .transaction
         .as_ref()
         .and_then(|t| t.effects.as_ref())
         .and_then(|e| e.status.as_ref())
-        .map(|s| s.error.is_none())
+        .map(|s| s.success.unwrap_or(false))
         .unwrap_or(false);
 
     if !tx_successful {
@@ -164,12 +151,9 @@ async fn wait_for_transaction(
         }
 
         // Try to get the transaction - just check if it exists
-        let req = proto::GetTransactionRequest {
-            digest: Some(tx_digest.to_string()),
-            read_mask: Some(FieldMask {
-                paths: vec!["digest".into()], // Just request minimal data to check existence
-            }),
-        };
+        let mut req = proto::GetTransactionRequest::default();
+        req.digest = Some(tx_digest.to_string());
+        req.read_mask = Some(FieldMask::from_paths(["digest"])); // Just request minimal data to check existence
 
         match ledger.get_transaction(req).await {
             Ok(_) => {
@@ -215,19 +199,18 @@ async fn get_object_details(
     let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut ledger = client.ledger_client();
 
+    let mut request = proto::GetObjectRequest::default();
+    request.object_id = Some(object_id.to_string());
+    request.version = None;
+    request.read_mask = Some(FieldMask::from_paths([
+        "object_id",
+        "version",
+        "digest",
+        "owner",
+    ]));
+
     let response = ledger
-        .get_object(proto::GetObjectRequest {
-            object_id: Some(object_id.to_string()),
-            version: None,
-            read_mask: Some(prost_types::FieldMask {
-                paths: vec![
-                    "object_id".to_string(),
-                    "version".to_string(),
-                    "digest".to_string(),
-                    "owner".to_string(),
-                ],
-            }),
-        })
+        .get_object(request)
         .await
         .context("Failed to get object")?
         .into_inner();
@@ -609,20 +592,18 @@ where
             );
 
             // Try gas estimation once - no retries
-            let mut live_data = client.live_data_client();
-            let simulate_req = SimulateTransactionRequest {
-                transaction: Some(temp_tx.clone().into()),
-                read_mask: Some(FieldMask {
-                    paths: vec![
-                        "transaction.effects.status".into(),
-                        "transaction.effects.gas_used".into(),
-                    ],
-                }),
-                checks: Some(simulate_transaction_request::TransactionChecks::Enabled as i32),
-                do_gas_selection: Some(false), // We're managing gas ourselves
-            };
+            let mut execution = client.execution_client();
 
-            match live_data.simulate_transaction(simulate_req).await {
+            let mut simulate_req = SimulateTransactionRequest::default();
+            simulate_req.transaction = Some(temp_tx.clone().into());
+            simulate_req.read_mask = Some(FieldMask::from_paths([
+                "effects.status",
+                "effects.gas_used",
+            ]));
+            simulate_req.checks = Some(simulate_transaction_request::TransactionChecks::Enabled as i32);
+            simulate_req.do_gas_selection = Some(false); // We're managing gas ourselves
+
+            match execution.simulate_transaction(simulate_req).await {
                 Ok(sim_resp) => {
                     let sim_result = sim_resp.into_inner();
 
@@ -630,7 +611,7 @@ where
                     if let Some(ref transaction) = sim_result.transaction {
                         if let Some(ref effects) = transaction.effects {
                             if let Some(ref status) = effects.status {
-                                if status.error.is_none() {
+                                if status.success.unwrap_or(false) {
                                     // Simulation succeeded, extract gas usage
                                     if let Some(ref gas_summary) = effects.gas_used {
                                         let computation_cost =
@@ -901,13 +882,14 @@ where
 
         // Execute transaction via gRPC
         let mut exec = client.execution_client();
-        let req = proto::ExecuteTransactionRequest {
-            transaction: Some(tx.into()),
-            signatures: vec![sig.into()],
-            read_mask: Some(FieldMask {
-                paths: vec!["finality".into(), "transaction".into()],
-            }),
-        };
+
+        let mut req = proto::ExecuteTransactionRequest::default();
+        req.transaction = Some(tx.into());
+        req.signatures = vec![sig.into()];
+        req.read_mask = Some(FieldMask::from_paths([
+            "digest",
+            "effects.status",
+        ]));
 
         let functions_str = function_names.join(", ");
         debug!(
@@ -1149,12 +1131,10 @@ pub async fn fetch_transaction_events(tx_digest: &str) -> Result<Vec<String>> {
 
     // Fetch transaction with events
     let mut ledger = client.ledger_client();
-    let req = proto::GetTransactionRequest {
-        digest: Some(digest.to_string()),
-        read_mask: Some(FieldMask {
-            paths: vec!["events".into()],
-        }),
-    };
+
+    let mut req = proto::GetTransactionRequest::default();
+    req.digest = Some(digest.to_string());
+    req.read_mask = Some(FieldMask::from_paths(["events"]));
 
     let resp = ledger
         .get_transaction(req)
@@ -1203,12 +1183,10 @@ pub async fn fetch_transaction_events_as_json(tx_digest: &str) -> Result<serde_j
 
     // Fetch transaction with events
     let mut ledger = client.ledger_client();
-    let req = proto::GetTransactionRequest {
-        digest: Some(digest.to_string()),
-        read_mask: Some(FieldMask {
-            paths: vec!["events".into()],
-        }),
-    };
+
+    let mut req = proto::GetTransactionRequest::default();
+    req.digest = Some(digest.to_string());
+    req.read_mask = Some(FieldMask::from_paths(["events"]));
 
     let resp = ledger
         .get_transaction(req)
