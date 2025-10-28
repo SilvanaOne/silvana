@@ -887,7 +887,8 @@ where
         req.transaction = Some(tx.into());
         req.signatures = vec![sig.into()];
         req.read_mask = Some(FieldMask::from_paths([
-            "transaction",
+            "digest",
+            "effects.status",
         ]));
 
         let functions_str = function_names.join(", ");
