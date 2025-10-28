@@ -164,8 +164,8 @@ impl Database {
 pub async fn check_and_update_version<C>(
     txn: &C,
     object_id: &str,
-    expected_version: i64,
-    new_version: i64,
+    expected_version: u64,
+    new_version: u64,
     update_fn: impl FnOnce() -> objects::ActiveModel,
 ) -> Result<bool>
 where

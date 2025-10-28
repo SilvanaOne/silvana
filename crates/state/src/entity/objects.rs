@@ -8,7 +8,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub object_id: String,  // Hex string ED25519 address
-    pub version: i64,  // Current version (Lamport timestamp)
+    pub version: u64,  // Current version (Lamport timestamp)
     pub owner: String,  // Ed25519 public key or app_instance_id, NOT NULL for security
     pub object_type: String,
     pub shared: bool,  // Whether object can be accessed by multiple owners

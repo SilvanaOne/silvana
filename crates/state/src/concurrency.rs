@@ -204,7 +204,7 @@ impl ConcurrencyController {
                 debug!("Object owner check: expected {}, found {}", app_instance_id, current.owner);
             }
 
-            if current.version != expected_version as i64 {
+            if current.version != expected_version {
                 // Version mismatch - retry or fail
                 txn.rollback().await?;
 
