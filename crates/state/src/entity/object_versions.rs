@@ -7,9 +7,9 @@ use sea_orm::entity::prelude::*;
 #[sea_orm(table_name = "object_versions")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i64,
+    pub id: u64,
     pub object_id: String,  // Object identifier
-    pub version: i64,  // Version number (Lamport timestamp)
+    pub version: u64,  // Version number (Lamport timestamp)
     #[sea_orm(column_type = "Blob", nullable)]
     pub object_data: Option<Vec<u8>>,  // Object data (if small)
     pub object_da: Option<String>,  // S3 reference for large objects

@@ -388,7 +388,7 @@ apply-ddl-state: check-state-database-url ## Apply state.sql schema to STATE_DAT
 	export STATE_DB_NAME=$$(echo "$$STATE_DB_URL" | sed 's|.*/||'); \
 	echo "🔍 Connecting to: $$STATE_DB_HOST:$$STATE_DB_PORT/$$STATE_DB_NAME as $$STATE_DB_USER"; \
 	mysqldef --user=$$STATE_DB_USER --password=$$STATE_DB_PASS --host=$$STATE_DB_HOST --port=$$STATE_DB_PORT $$STATE_DB_NAME \
-		--file proto/sql/state.sql \
+		--file state/state.sql \
 		--dry-run > $(MIGR_DIR)/state_$$(date +%s)_diff.sql
 	@echo "🔍 Migration diff saved to $(MIGR_DIR)/state_*_diff.sql"
 	@echo "📊 Applying changes to state database..."
@@ -399,7 +399,7 @@ apply-ddl-state: check-state-database-url ## Apply state.sql schema to STATE_DAT
 	export STATE_DB_PORT=$$(echo "$$STATE_DB_URL" | sed 's|.*:||' | sed 's|/.*||'); \
 	export STATE_DB_NAME=$$(echo "$$STATE_DB_URL" | sed 's|.*/||'); \
 	mysqldef --user=$$STATE_DB_USER --password=$$STATE_DB_PASS --host=$$STATE_DB_HOST --port=$$STATE_DB_PORT $$STATE_DB_NAME \
-		--file proto/sql/state.sql
+		--file state/state.sql
 	@echo "✅ State database schema updated"
 
 entities: ## Generate Sea-ORM entities from proto file
@@ -435,7 +435,7 @@ clean-dev-state: check-state-database-url ## Drop all tables in state database f
 	cargo run --manifest-path infra/tidb/drop_state_tables/Cargo.toml --release
 	@echo "✅ All state tables dropped"
 	@echo ""
-	@echo "💡 Run 'make apply-ddl-state' to recreate state schema from proto/sql/state.sql"
+	@echo "💡 Run 'make apply-ddl-state' to recreate state schema from state/state.sql"
 
 # Development targets
 dev-reset: clean-dev regen ## Full development reset: drop all tables + regenerate from proto
