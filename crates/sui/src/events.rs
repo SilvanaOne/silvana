@@ -1,5 +1,6 @@
 use crate::state::SharedSuiState;
-use sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsResponse;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::SubscribeCheckpointsResponse;
 use tonic::Streaming;
 use tracing::info;
 
@@ -10,17 +11,14 @@ pub async fn create_checkpoint_stream() -> anyhow::Result<Streaming<SubscribeChe
     let mut client = SharedSuiState::get_instance().get_sui_client();
     let mut subscription_client = client.subscription_client();
 
-    let request = sui_rpc::proto::sui::rpc::v2beta2::SubscribeCheckpointsRequest {
-        read_mask: Some(prost_types::FieldMask {
-            paths: vec![
-                // "summary.timestamp".to_string(),
-                // "transactions.events.events.package_id".to_string(),
-                // "transactions.events.events.module".to_string(),
-                // "transactions.events.events.sender".to_string(),
-                "transactions.events.events.event_type".to_string(),
-            ],
-        }),
-    };
+    let mut request = sui_rpc::proto::sui::rpc::v2::SubscribeCheckpointsRequest::default();
+    request.read_mask = Some(FieldMask::from_paths([
+        // "summary.timestamp",
+        // "transactions.events.events.package_id",
+        // "transactions.events.events.module",
+        // "transactions.events.events.sender",
+        "transactions.events.events.event_type",
+    ]));
 
     let stream = subscription_client
         .subscribe_checkpoints(request)
