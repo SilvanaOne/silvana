@@ -118,8 +118,7 @@ async fn fetch_blocks_from_table_range(
         request.page_token = page_token.clone();
         request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
         ]));
 
         let fields_response = client
@@ -342,8 +341,7 @@ async fn fetch_block_from_table(
         request.page_token = page_token.clone();
         request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
         ]));
 
         let fields_response = client

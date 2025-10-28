@@ -102,8 +102,7 @@ async fn fetch_developer_and_agent(
         list_request.page_token = page_token.clone();
         list_request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
             "object.object_id",
         ]));
 
@@ -238,8 +237,7 @@ async fn fetch_agent_and_method(
         list_request.page_token = page_token.clone();
         list_request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
             "object.object_id",
         ]));
 

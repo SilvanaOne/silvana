@@ -154,8 +154,7 @@ async fn fetch_proof_calculations_from_table_range(
         request.page_token = page_token.clone();
         request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
         ]));
 
         let fields_response = client
@@ -368,8 +367,7 @@ async fn fetch_proof_calculation_from_table(
         request.page_token = page_token.clone();
         request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
         ]));
 
         let fields_response = client

@@ -56,8 +56,7 @@ pub async fn fetch_sequence_state_by_id(
         list_request.page_token = page_token.clone();
         list_request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
         ]));
 
         let list_response = client

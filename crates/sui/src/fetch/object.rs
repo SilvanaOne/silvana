@@ -163,8 +163,7 @@ async fn fetch_dynamic_fields(parent_id: &str) -> Result<Value> {
         request.page_token = page_token.clone();
         request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
         ]));
 
         let response = client

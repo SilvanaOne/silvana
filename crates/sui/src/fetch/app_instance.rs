@@ -450,8 +450,7 @@ async fn fetch_block_settlement_from_table(
         request.page_token = page_token.clone();
         request.read_mask = Some(FieldMask::from_paths([
             "field_id",
-            "name_type",
-            "name_value",
+            "name",
         ]));
 
         let fields_response = client
