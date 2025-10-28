@@ -91,8 +91,6 @@ async fn fetch_developer_and_agent(
     agent_name: &str,
     method_name: &str,
 ) -> Result<AgentMethod> {
-    use sui_rpc::proto::sui::rpc::v2::ListDynamicFieldsRequest;
-    
     let mut page_token: Option<tonic::codegen::Bytes> = None;
     
     // Loop through pages to find the developer
@@ -229,8 +227,6 @@ async fn fetch_agent_and_method(
     agent_name: &str,
     method_name: &str,
 ) -> Result<AgentMethod> {
-    use sui_rpc::proto::sui::rpc::v2::ListDynamicFieldsRequest;
-    
     let mut page_token: Option<tonic::codegen::Bytes> = None;
     
     // Loop through pages to find the agent

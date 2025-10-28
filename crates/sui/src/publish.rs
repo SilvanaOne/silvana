@@ -5,7 +5,7 @@ use crate::transactions::{PublishOptions, execute_transaction_block};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::field::FieldMask;
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use tracing::{debug, info};
 

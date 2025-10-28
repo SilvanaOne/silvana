@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 tonic = { workspace = true, features = ["tls-webpki-roots"] }
 tonic-reflection.workspace = true
+tonic-prost.workspace = true
 prost.workspace = true
 prost-types.workspace = true
 prost-reflect.workspace = true
@@ -19,7 +20,8 @@ buffer = { path = "../buffer" }
 [build-dependencies]
 tonic-reflection.workspace = true
 tonic-build.workspace = true
-prost-build = "0.13"
+tonic-prost-build.workspace = true
+prost-build.workspace = true
 prost-reflect.workspace = true
 prost-reflect-build.workspace = true
 once_cell.workspace = true

@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::env;
 use std::str::FromStr;
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
-use sui_rpc::proto::sui::rpc::v2::{GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
 use sui_sdk_types as sui;
 use tracing::{debug, info, warn};
 
@@ -142,8 +142,6 @@ pub(crate) async fn create_registry(
 async fn wait_for_object_availability(object_id: &str) -> Result<()> {
     use crate::state::SharedSuiState;
     use std::time::Duration;
-    use sui_rpc::field::FieldMaskUtil;
-    use sui_rpc::proto::sui::rpc::v2 as proto;
     use tokio::time::sleep;
 
     debug!("Waiting for object {} to be available", object_id);
@@ -253,9 +251,6 @@ async fn fetch_created_object_from_transaction(tx_digest: &str) -> Result<String
 /// Fallback method to fetch created object from output_objects
 async fn fetch_created_object_from_output_objects(tx_digest: &str) -> Result<String> {
     use crate::state::SharedSuiState;
-    use sui_rpc::field::FieldMaskUtil;
-    use sui_rpc::proto::sui::rpc::v2 as proto;
-
     let shared_state = SharedSuiState::get_instance();
     let mut client = shared_state.get_sui_client();
 

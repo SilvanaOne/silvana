@@ -1,5 +1,4 @@
 use anyhow::{Result, anyhow};
-use prost_types;
 use std::env;
 use std::str::FromStr;
 use sui_rpc::Client as GrpcClient;

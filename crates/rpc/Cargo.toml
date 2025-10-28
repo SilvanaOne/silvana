@@ -25,7 +25,7 @@ kms = { path = "../kms" }
 storage = { path = "../storage" }
 
 tonic = { workspace = true, features = [ "tls-webpki-roots"] }
-tonic-web = "0.13"
+tonic-web = "0.14"
 tonic-reflection.workspace = true
 prost.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
