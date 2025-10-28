@@ -103,7 +103,7 @@ async fn fetch_developer_and_agent(
         list_request.read_mask = Some(FieldMask::from_paths([
             "field_id",
             "name",
-            "object.object_id",
+            "field_object.object_id",
         ]));
 
         let list_response = client
@@ -238,7 +238,7 @@ async fn fetch_agent_and_method(
         list_request.read_mask = Some(FieldMask::from_paths([
             "field_id",
             "name",
-            "object.object_id",
+            "field_object.object_id",
         ]));
 
         let list_response = client

@@ -108,7 +108,7 @@ fn check_transaction_effects(
         .as_ref()
         .and_then(|t| t.effects.as_ref())
         .and_then(|e| e.status.as_ref())
-        .map(|s| s.error.is_none())
+        .map(|s| s.success.unwrap_or(false))
         .unwrap_or(false);
 
     if !tx_successful {
@@ -611,7 +611,7 @@ where
                     if let Some(ref transaction) = sim_result.transaction {
                         if let Some(ref effects) = transaction.effects {
                             if let Some(ref status) = effects.status {
-                                if status.error.is_none() {
+                                if status.success.unwrap_or(false) {
                                     // Simulation succeeded, extract gas usage
                                     if let Some(ref gas_summary) = effects.gas_used {
                                         let computation_cost =
