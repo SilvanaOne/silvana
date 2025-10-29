@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS user_actions (
     `action_type` VARCHAR(255) NOT NULL,
     `action_data` BLOB NOT NULL,           -- Action parameters (serialized)
     `action_hash` BINARY(32) NOT NULL,     -- Hash of action data
-    `action_da` VARCHAR(255) NULL,         -- S3 key for large action data
+    `action_da` VARCHAR(255) NULL,         -- Data Availability key for large action data
     `submitter` VARCHAR(255) NOT NULL,     -- Who submitted the action
     `metadata` JSON NULL,                  -- Optional application metadata
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -50,9 +50,9 @@ CREATE TABLE IF NOT EXISTS optimistic_state (
     `sequence` BIGINT UNSIGNED NOT NULL,
     `state_hash` BINARY(32) NOT NULL,      -- Hash of state data
     `state_data` BLOB NOT NULL,            -- State data (if small)
-    `state_da` VARCHAR(255) NULL,          -- S3 key for large state data
+    `state_da` VARCHAR(255) NULL,          -- Data Availability key for large state data
     `transition_data` BLOB NULL,           -- Transition delta
-    `transition_da` VARCHAR(255) NULL,     -- S3 key for large transition
+    `transition_da` VARCHAR(255) NULL,     -- Data Availability key for large transition
     `commitment` BINARY(32) NULL,          -- State commitment
     `metadata` JSON NULL,                  -- Optional application metadata
     `computed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -73,9 +73,9 @@ CREATE TABLE IF NOT EXISTS state (
     `sequence` BIGINT UNSIGNED NOT NULL,
     `state_hash` BINARY(32) NOT NULL,
     `state_data` BLOB NULL,                -- State data (if small)
-    `state_da` VARCHAR(255) NULL,          -- S3 key for large state
+    `state_da` VARCHAR(255) NULL,          -- Data Availability key for large state
     `proof_data` BLOB NULL,                -- ZK proof (if small)
-    `proof_da` VARCHAR(255) NULL,          -- S3 key for large proof
+    `proof_da` VARCHAR(255) NULL,          -- Data Availability key for large proof
     `proof_hash` BINARY(32) NULL,          -- Hash of proof
     `commitment` BINARY(32) NULL,          -- State commitment
     `metadata` JSON NULL,                  -- Optional application metadata
@@ -90,6 +90,31 @@ CREATE TABLE IF NOT EXISTS state (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='Final proved states with ZK proofs';
 
+-- 5. Proofs Table - ZK proofs without sequence or commitment
+CREATE TABLE IF NOT EXISTS proofs (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `app_instance_id` VARCHAR(255) NOT NULL,
+    `proof_type` VARCHAR(255) NOT NULL,    -- Type/category of proof
+    `claim_json` JSON NOT NULL,            -- JSON representation of the claim
+    `claim_hash` BINARY(32) NULL,
+    `claim_data` BLOB NULL,                -- Claim data (if small)
+    `claim_da` VARCHAR(255) NULL,          -- Data Availability key for large claim
+    `proof_data` BLOB NULL,                -- ZK proof (if small)
+    `proof_da` VARCHAR(255) NULL,          -- Data Availability key for large proof
+    `proof_hash` BINARY(32) NULL,          -- Hash of proof
+    `proof_time` TIMESTAMP NULL,           -- Timestamp at which proof is valid
+    `metadata` JSON NULL,                  -- Optional application metadata
+    `proved_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_app_instance_id (`app_instance_id`),
+    INDEX idx_proof_type (`proof_type`),
+    INDEX idx_claim_hash (`claim_hash`),
+    INDEX idx_proof_time (`proof_time`),
+    INDEX idx_proved_at (`proved_at`),
+    CONSTRAINT fk_proofs_app_instance FOREIGN KEY (`app_instance_id`)
+        REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+COMMENT='ZK proofs with type and validity time';
+
 -- ============================================================================
 -- Object Storage Tables
 -- ============================================================================
@@ -102,7 +127,7 @@ CREATE TABLE IF NOT EXISTS objects (
     `object_type` VARCHAR(255) NOT NULL,   -- Type of the object
     `shared` BOOLEAN DEFAULT FALSE,        -- Whether object can be accessed by multiple owners
     `object_data` BLOB NULL,               -- Object data (if small)
-    `object_da` VARCHAR(255) NULL,         -- S3 reference for large objects
+    `object_da` VARCHAR(255) NULL,         -- Data Availability key for large objects
     `object_hash` BINARY(32) NOT NULL,     -- Hash of object data
     `previous_tx` VARCHAR(64) NULL,        -- Previous transaction that modified this
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -122,7 +147,7 @@ CREATE TABLE IF NOT EXISTS object_versions (
     `object_id` VARCHAR(64) NOT NULL,      -- Object identifier
     `version` BIGINT UNSIGNED NOT NULL,             -- Version number (Lamport timestamp)
     `object_data` BLOB NULL,               -- Object data (if small)
-    `object_da` VARCHAR(255) NULL,         -- S3 reference for large objects
+    `object_da` VARCHAR(255) NULL,         -- Data Availability key for large objects
     `object_hash` BINARY(32) NOT NULL,     -- Hash of object data
     `owner` VARCHAR(255) NOT NULL,         -- Ed25519 public key or app_instance_id, NOT NULL for security
     `object_type` VARCHAR(255) NOT NULL,   -- Type of the object
@@ -159,7 +184,7 @@ CREATE TABLE IF NOT EXISTS app_instance_kv_binary (
     `app_instance_id` VARCHAR(255) NOT NULL,
     `key` VARBINARY(1024) NOT NULL,
     `value` BLOB NOT NULL,
-    `value_da` VARCHAR(255) NULL,          -- S3 reference for large values
+    `value_da` VARCHAR(255) NULL,          -- Data Availability key for large values
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`app_instance_id`, `key`),
@@ -236,7 +261,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     `sequences1` JSON NULL,                    -- vector<u64> as JSON array
     `sequences2` JSON NULL,                    -- vector<u64> as JSON array
     `data` BLOB NULL,                          -- vector<u8> as BLOB
-    `data_da` VARCHAR(255) NULL,               -- S3 reference for large job data
+    `data_da` VARCHAR(255) NULL,               -- Data Availability key for large job data
 
     -- Status (matching Move enum)
     `status` ENUM('PENDING', 'RUNNING', 'COMPLETED', 'FAILED') NOT NULL DEFAULT 'PENDING',
