@@ -112,6 +112,23 @@ message State {
   optional google.protobuf.Struct metadata = 11;  // Optional application metadata
 }
 
+// Proof message (ZK proof with claim data)
+message Proof {
+  uint64 id = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string app_instance_id = 2;
+  string proof_type = 3;                      // Type/category of proof
+  google.protobuf.Struct claim_json = 4;      // JSON representation of the claim
+  optional bytes claim_hash = 5;
+  optional bytes claim_data = 6;              // Claim data (if small)
+  optional string claim_da = 7;               // S3 key for large claim
+  optional bytes proof_data = 8;              // ZK proof (if small)
+  optional string proof_da = 9;               // S3 key for large proof
+  optional bytes proof_hash = 10;             // Hash of proof
+  optional google.protobuf.Timestamp proof_time = 11;  // Timestamp at which proof is valid
+  google.protobuf.Timestamp proved_at = 12;
+  optional google.protobuf.Struct metadata = 13;  // Optional application metadata
+}
+
 // Object message
 message Object {
   string object_id = 1;                     // Hex string ED25519 address
@@ -750,6 +767,55 @@ message DeletePrivateBlobResponse {
   string message = 2;
 }
 
+// Proof operations
+message SubmitProofRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string proof_type = 3;
+  google.protobuf.Struct claim_json = 4;      // JSON representation of the claim
+  optional bytes claim_hash = 5;
+  optional bytes claim_data = 6;
+  optional string claim_da = 7;
+  optional bytes proof_data = 8;
+  optional string proof_da = 9;
+  optional bytes proof_hash = 10;
+  optional google.protobuf.Timestamp proof_time = 11;
+  optional google.protobuf.Struct metadata = 12;
+}
+
+message SubmitProofResponse {
+  bool success = 1;
+  string message = 2;
+  Proof proof = 3;
+}
+
+message GetProofRequest {
+  JWTAuth auth = 1;
+  uint64 proof_id = 2;
+}
+
+message GetProofResponse {
+  bool success = 1;
+  string message = 2;
+  optional Proof proof = 3;
+}
+
+// Keyset pagination for reliable pagination with concurrent inserts
+message ListProofsRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional string proof_type = 3;                       // Filter by proof type
+  optional google.protobuf.Timestamp last_proved_at = 4; // Resume from last row (keyset)
+  optional string last_app_instance_id = 5;             // Part of composite key
+  optional uint64 last_id = 6;                          // Part of composite key
+  optional int32 limit = 7;                             // Default 100, max ~1000 without blobs
+}
+
+message ListProofsResponse {
+  repeated Proof proofs = 1;
+  bool has_more = 2;                                    // True if more pages available
+}
+
 // ============================================================================
 // Service Definition
 // ============================================================================
@@ -814,4 +880,9 @@ service StateService {
   rpc StorePrivateBlob(StorePrivateBlobRequest) returns (StorePrivateBlobResponse);
   rpc RetrievePrivateBlob(RetrievePrivateBlobRequest) returns (RetrievePrivateBlobResponse);
   rpc DeletePrivateBlob(DeletePrivateBlobRequest) returns (DeletePrivateBlobResponse);
+
+  // Proof Management
+  rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  rpc ListProofs(ListProofsRequest) returns (ListProofsResponse);
 }

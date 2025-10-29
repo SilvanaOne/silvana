@@ -98,9 +98,9 @@ CREATE TABLE IF NOT EXISTS proofs (
     `claim_json` JSON NOT NULL,            -- JSON representation of the claim
     `claim_hash` BINARY(32) NULL,
     `claim_data` BLOB NULL,                -- Claim data (if small)
-    `claim_da` VARCHAR(255) NULL,          -- Data Availability key for large claim
+    `claim_da` VARCHAR(255) NULL,          -- S3 key for large claim
     `proof_data` BLOB NULL,                -- ZK proof (if small)
-    `proof_da` VARCHAR(255) NULL,          -- Data Availability key for large proof
+    `proof_da` VARCHAR(255) NULL,          -- S3 key for large proof
     `proof_hash` BINARY(32) NULL,          -- Hash of proof
     `proof_time` TIMESTAMP NULL,           -- Timestamp at which proof is valid
     `metadata` JSON NULL,                  -- Optional application metadata
@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS proofs (
     INDEX idx_claim_hash (`claim_hash`),
     INDEX idx_proof_time (`proof_time`),
     INDEX idx_proved_at (`proved_at`),
+    INDEX idx_proofs_paging (`app_instance_id`, `proof_type`, `proved_at`, `id`),  -- Keyset pagination
     CONSTRAINT fk_proofs_app_instance FOREIGN KEY (`app_instance_id`)
         REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
