@@ -1,0 +1,18 @@
+[package]
+name = "silvana-coordination-trait"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = "1.0"
+anyhow = { workspace = true }
+hex = { workspace = true }
+
+[features]
+default = []
