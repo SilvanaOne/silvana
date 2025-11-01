@@ -46,16 +46,16 @@ pub trait Coordination: Send + Sync {
     // Read operations
 
     /// Fetch all pending jobs for an app instance
-    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error>;
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>, Self::Error>;
 
     /// Fetch all failed jobs for an app instance
-    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error>;
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>, Self::Error>;
 
     /// Get the count of failed jobs
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
 
     /// Fetch a specific job by its ID
-    async fn fetch_job_by_id(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Option<Job>, Self::Error>;
+    async fn fetch_job_by_id(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Option<Job<Self::JobId>>, Self::Error>;
 
     // Write operations
 
