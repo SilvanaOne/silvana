@@ -285,6 +285,7 @@ impl JobSearcher {
                                     job.app_instance_method.clone(),
                                     job.block_number,
                                     job.sequences.clone(),
+                                    self.layer_id.clone().expect("JobSearcher must have layer_id"),
                                 )
                                 .await;
 

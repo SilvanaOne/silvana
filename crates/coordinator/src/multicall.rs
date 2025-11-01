@@ -209,6 +209,7 @@ impl MulticallProcessor {
                                 start_req.job_type,
                                 start_req.block_number,
                                 start_req.sequences,
+                                start_req.layer_id.clone(),
                             ));
                         }
 
@@ -282,7 +283,7 @@ impl MulticallProcessor {
                     // Filter started jobs to only include successful ones
                     let successful_started_jobs: Vec<StartedJob> = current_batch_started_jobs
                         .into_iter()
-                        .filter(|(_, sequence, _, _, _, _)| {
+                        .filter(|(_, sequence, _, _, _, _, _)| {
                             successful_start_sequences.contains(sequence)
                         })
                         .map(
@@ -293,6 +294,7 @@ impl MulticallProcessor {
                                 job_type,
                                 block_number,
                                 sequences,
+                                layer_id,
                             )| StartedJob {
                                 app_instance,
                                 job_sequence: sequence,
@@ -300,6 +302,7 @@ impl MulticallProcessor {
                                 job_type,
                                 block_number,
                                 sequences,
+                                layer_id,
                             },
                         )
                         .collect();

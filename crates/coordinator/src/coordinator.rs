@@ -668,11 +668,13 @@ pub async fn start_coordinator(
     // 8. Start docker buffer processor in a separate thread (processes started jobs buffer and launches containers)
     let docker_state = state.clone();
     let docker_metrics = metrics.clone();
+    let docker_coordination_manager = coordination_manager.clone();
     let docker_handle = task::spawn(async move {
         let mut docker_processor = match crate::docker::DockerBufferProcessor::new(
             docker_state,
             use_tee,
             container_timeout,
+            docker_coordination_manager,
         ) {
             Ok(processor) => processor,
             Err(e) => {

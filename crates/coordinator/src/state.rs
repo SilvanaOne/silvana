@@ -40,6 +40,8 @@ pub struct StartedJob {
     pub block_number: Option<u64>,
     /// Sequences array (helpful for debugging and prioritization)
     pub sequences: Option<Vec<u64>>,
+    /// Coordination layer ID this job belongs to
+    pub layer_id: String,
 }
 
 /// Request to create a new job
@@ -71,6 +73,7 @@ pub struct StartJobRequest {
     pub job_type: String,
     pub block_number: Option<u64>,
     pub sequences: Option<Vec<u64>>,
+    pub layer_id: String,
     pub _timestamp: Instant,
 }
 
@@ -624,6 +627,7 @@ impl SharedState {
         job_type: String,
         block_number: Option<u64>,
         sequences: Option<Vec<u64>>,
+        layer_id: String,
     ) {
         let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
@@ -658,6 +662,7 @@ impl SharedState {
                 job_type,
                 block_number,
                 sequences,
+                layer_id: layer_id.clone(),
                 _timestamp: Instant::now(),
             };
         } else {
@@ -667,6 +672,7 @@ impl SharedState {
                 job_type,
                 block_number,
                 sequences,
+                layer_id,
                 _timestamp: Instant::now(),
             });
         }
@@ -1389,6 +1395,7 @@ impl SharedState {
                 job_type: String::new(), // Lost metadata
                 block_number: None,      // Lost metadata
                 sequences: None,         // Lost metadata
+                layer_id: String::from("unknown"), // Lost metadata - will be recovered on retry
                 _timestamp: Instant::now(),
             });
         }

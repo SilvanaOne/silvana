@@ -1,7 +1,9 @@
 use crate::agent::AgentJob;
 use crate::constants::{JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS};
+use crate::coordination_manager::CoordinationManager;
 use crate::error::Result;
 use crate::job_lock::JobLockGuard;
+use crate::layer_config::LayerType;
 use crate::metrics::CoordinatorMetrics;
 use crate::session::{calculate_cost, generate_docker_session};
 use crate::state::SharedState;
@@ -14,6 +16,51 @@ use std::time::Instant;
 use sui::fetch::{AgentMethod, Job};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
+
+/// Add layer-specific environment variables to the container configuration
+/// Only adds non-sensitive identification information, not connection details
+fn add_layer_environment_variables(
+    env_vars: &mut HashMap<String, String>,
+    layer_id: &str,
+    coordination_manager: &Arc<CoordinationManager>,
+) {
+    // Get layer information
+    if let Some(layer_info) = coordination_manager.get_layer_info(layer_id) {
+        // Add layer identification (non-sensitive)
+        env_vars.insert(
+            "COORDINATION_LAYER_ID".to_string(),
+            layer_id.to_string(),
+        );
+
+        // Add layer type
+        let layer_type_str = match layer_info.layer_type {
+            LayerType::Sui => "sui",
+            LayerType::Private => "private",
+            LayerType::Ethereum => "ethereum",
+        };
+        env_vars.insert(
+            "COORDINATION_LAYER_TYPE".to_string(),
+            layer_type_str.to_string(),
+        );
+
+        // Add operation mode (affects agent behavior)
+        let operation_mode = match layer_info.operation_mode {
+            crate::layer_config::OperationMode::Multicall => "multicall",
+            crate::layer_config::OperationMode::Direct => "direct",
+        };
+        env_vars.insert(
+            "OPERATION_MODE".to_string(),
+            operation_mode.to_string(),
+        );
+
+        debug!(
+            "Added layer environment variables: layer_id={}, type={}, mode={}",
+            layer_id, layer_type_str, operation_mode
+        );
+    } else {
+        warn!("Layer {} not found in coordination manager", layer_id);
+    }
+}
 
 /// Guard that ensures AgentSessionFinishedEvent is sent when dropped
 struct SessionFinishedGuard {
@@ -252,6 +299,8 @@ pub async fn run_docker_container_task(
     mut secrets_client: Option<SecretsClient>,
     job_lock: JobLockGuard, // Hold the lock for the duration of the task
     metrics: Option<Arc<CoordinatorMetrics>>,
+    layer_id: String,
+    coordination_manager: Arc<CoordinationManager>,
 ) {
     let job_start = Instant::now();
     let session_start_time = std::time::SystemTime::now();
@@ -638,6 +687,9 @@ pub async fn run_docker_container_task(
         }
     }
 
+    // Add layer-specific environment variables (identification only, no sensitive config)
+    add_layer_environment_variables(&mut env_vars, &layer_id, &coordination_manager);
+
     let config = ContainerConfig {
         image_name: agent_method.docker_image.clone(),
         image_source: agent_method.docker_image.clone(),
@@ -932,10 +984,16 @@ pub struct DockerBufferProcessor {
     container_timeout_secs: u64,
     secrets_client: Option<SecretsClient>,
     metrics: Option<Arc<CoordinatorMetrics>>,
+    coordination_manager: Arc<CoordinationManager>,
 }
 
 impl DockerBufferProcessor {
-    pub fn new(state: SharedState, use_tee: bool, container_timeout_secs: u64) -> Result<Self> {
+    pub fn new(
+        state: SharedState,
+        use_tee: bool,
+        container_timeout_secs: u64,
+        coordination_manager: Arc<CoordinationManager>,
+    ) -> Result<Self> {
         let docker_manager = DockerManager::new(use_tee)
             .map_err(|e| crate::error::CoordinatorError::DockerError(e))?;
 
@@ -945,6 +1003,7 @@ impl DockerBufferProcessor {
             container_timeout_secs,
             secrets_client: None,
             metrics: None,
+            coordination_manager,
         })
     }
     
@@ -1238,6 +1297,8 @@ impl DockerBufferProcessor {
                     let container_timeout_secs = self.container_timeout_secs;
                     let secrets_client_clone = self.secrets_client.clone();
                     let metrics_clone = self.metrics.clone();
+                    let layer_id = started_job.layer_id.clone();
+                    let coordination_manager_clone = self.coordination_manager.clone();
 
                     // Spawn task to run Docker container
                     tokio::spawn(async move {
@@ -1250,6 +1311,8 @@ impl DockerBufferProcessor {
                             secrets_client_clone,
                             job_lock,
                             metrics_clone,
+                            layer_id,
+                            coordination_manager_clone,
                         )
                         .await;
                     });
