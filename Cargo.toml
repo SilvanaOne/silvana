@@ -5,6 +5,7 @@ members = [
     "crates/rpc-client",
     "crates/coordinator",
     "crates/coordination-trait",
+    "crates/coordination-private",
     "crates/docker",
     "crates/tidb",
     "crates/monitoring",
@@ -25,7 +26,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["DFST"]
 license = "Apache-2.0"

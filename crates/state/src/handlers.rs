@@ -291,6 +291,16 @@ impl StateService for StateServiceImpl {
             created_at: Set(Utc::now()),
             updated_at: Set(Utc::now()),
             metadata: Set(req.metadata.map(prost_struct_to_json)),
+            // Coordination layer support fields - default values
+            admin: Set(None),
+            is_paused: Set(false),
+            min_time_between_blocks: Set(60),
+            block_number: Set(0),
+            sequence: Set(0),
+            last_proved_block_number: Set(0),
+            last_settled_block_number: Set(0),
+            last_settled_sequence: Set(0),
+            last_purged_sequence: Set(0),
         };
 
         // Insert to database
@@ -1931,7 +1941,7 @@ impl StateService for StateServiceImpl {
             granted_at: updated_bundle.granted_at.map(to_timestamp),
             released_at: None,
             status: BundleStatus::Granted.into(),
-            wait_time_ms: updated_bundle.wait_time_ms.map(|ms| ms as i64),
+            wait_time_ms: updated_bundle.wait_time_ms,
             hold_time_ms: None,
         };
 

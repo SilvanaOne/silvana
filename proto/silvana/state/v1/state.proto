@@ -202,8 +202,8 @@ message LockRequestBundle {
   optional google.protobuf.Timestamp granted_at = 8;
   optional google.protobuf.Timestamp released_at = 9;
   BundleStatus status = 10;
-  optional int64 wait_time_ms = 11;
-  optional int64 hold_time_ms = 12;
+  optional uint64 wait_time_ms = 11 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional uint64 hold_time_ms = 12 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
 }
 
 // Job message

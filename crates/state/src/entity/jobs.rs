@@ -38,13 +38,13 @@ pub struct Model {
 
     // Periodic scheduling fields (NULL for one-time jobs)
     pub interval_ms: Option<u64>,  // NULL for one-time jobs
-    #[sea_orm(column_type = "Timestamp", nullable)]
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
     pub next_scheduled_at: Option<DateTimeUtc>,  // Absolute timestamp for next run
 
     // Metadata timestamps
-    #[sea_orm(column_type = "Timestamp")]
+    #[sea_orm(column_type = "TimestampWithTimeZone")]
     pub created_at: DateTimeUtc,
-    #[sea_orm(column_type = "Timestamp")]
+    #[sea_orm(column_type = "TimestampWithTimeZone")]
     pub updated_at: DateTimeUtc,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub metadata: Option<Json>,

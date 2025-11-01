@@ -16,8 +16,21 @@ CREATE TABLE IF NOT EXISTS app_instances (
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `metadata` JSON NULL,                  -- Optional metadata
+    -- Coordination layer support fields
+    `admin` VARCHAR(64) NULL,                          -- Administrator public key
+    `is_paused` BOOLEAN DEFAULT FALSE,                 -- Pause functionality
+    `min_time_between_blocks` BIGINT UNSIGNED DEFAULT 60,  -- Block timing in seconds
+    `block_number` BIGINT UNSIGNED DEFAULT 0,          -- Current block number
+    `sequence` BIGINT UNSIGNED DEFAULT 0,              -- Current sequence number
+    `last_proved_block_number` BIGINT UNSIGNED DEFAULT 0,  -- Last proved block
+    `last_settled_block_number` BIGINT UNSIGNED DEFAULT 0, -- Last settled block
+    `last_settled_sequence` BIGINT UNSIGNED DEFAULT 0,     -- Last settled sequence
+    `last_purged_sequence` BIGINT UNSIGNED DEFAULT 0,      -- Last purged sequence
     INDEX idx_owner (`owner`),
-    INDEX idx_created_at (`created_at`)
+    INDEX idx_created_at (`created_at`),
+    INDEX idx_is_paused (`is_paused`),
+    INDEX idx_block_number (`block_number`),
+    INDEX idx_sequence (`sequence`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='App instances with Ed25519 ownership for JWT authentication';
 
@@ -353,6 +366,105 @@ COMMENT='Sequence counter for generating gapless job sequences per app instance'
 -- FROM object_lock_queue
 -- WHERE status = 'GRANTED'
 --   AND lease_until > NOW(6);
+
+-- ============================================================================
+-- Coordination Layer Support Tables
+-- ============================================================================
+
+-- 12. Blocks Table - Required for block management
+CREATE TABLE IF NOT EXISTS blocks (
+    `app_instance_id` VARCHAR(255) NOT NULL,
+    `block_number` BIGINT UNSIGNED NOT NULL,
+    `start_sequence` BIGINT UNSIGNED NOT NULL,
+    `end_sequence` BIGINT UNSIGNED NOT NULL,
+    `actions_commitment` BINARY(32) NULL,
+    `state_commitment` BINARY(32) NULL,
+    `time_since_last_block` BIGINT UNSIGNED NULL,
+    `number_of_transactions` BIGINT UNSIGNED DEFAULT 0,
+    `start_actions_commitment` BINARY(32) NULL,
+    `end_actions_commitment` BINARY(32) NULL,
+    `state_data_availability` VARCHAR(255) NULL,
+    `proof_data_availability` VARCHAR(255) NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `state_calculated_at` TIMESTAMP NULL,
+    `proved_at` TIMESTAMP NULL,
+    PRIMARY KEY (`app_instance_id`, `block_number`),
+    INDEX idx_block_number (`block_number`),
+    INDEX idx_sequences (`start_sequence`, `end_sequence`),
+    INDEX idx_created_at (`created_at`),
+    CONSTRAINT fk_blocks_app_instance FOREIGN KEY (`app_instance_id`)
+        REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+COMMENT='Block management for coordination layers';
+
+-- 13. Proof Calculations Table - Required for proof management
+CREATE TABLE IF NOT EXISTS proof_calculations (
+    `app_instance_id` VARCHAR(255) NOT NULL,
+    `id` VARCHAR(64) NOT NULL,
+    `block_number` BIGINT UNSIGNED NOT NULL,
+    `start_sequence` BIGINT UNSIGNED NOT NULL,
+    `end_sequence` BIGINT UNSIGNED NULL,
+    `proofs` JSON NULL,  -- Array of proof objects
+    `block_proof` TEXT NULL,
+    `block_proof_submitted` BOOLEAN DEFAULT FALSE,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`app_instance_id`, `id`),
+    INDEX idx_block_number (`block_number`),
+    INDEX idx_sequences (`start_sequence`, `end_sequence`),
+    CONSTRAINT fk_proof_calc_app_instance FOREIGN KEY (`app_instance_id`)
+        REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+COMMENT='Proof calculation tracking for blocks';
+
+-- 14. Settlements Table - Required for settlement operations
+CREATE TABLE IF NOT EXISTS settlements (
+    `app_instance_id` VARCHAR(255) NOT NULL,
+    `chain` VARCHAR(50) NOT NULL,
+    `last_settled_block_number` BIGINT UNSIGNED DEFAULT 0,
+    `settlement_address` VARCHAR(255) NULL,
+    `settlement_job` BIGINT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`app_instance_id`, `chain`),
+    INDEX idx_chain (`chain`),
+    CONSTRAINT fk_settlements_app_instance FOREIGN KEY (`app_instance_id`)
+        REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+COMMENT='Settlement configuration per chain';
+
+-- 15. Block Settlements Table - Required for settlement tracking
+CREATE TABLE IF NOT EXISTS block_settlements (
+    `app_instance_id` VARCHAR(255) NOT NULL,
+    `block_number` BIGINT UNSIGNED NOT NULL,
+    `chain` VARCHAR(50) NOT NULL,
+    `settlement_tx_hash` VARCHAR(255) NULL,
+    `settlement_tx_included_in_block` BIGINT UNSIGNED NULL,
+    `sent_to_settlement_at` TIMESTAMP NULL,
+    `settled_at` TIMESTAMP NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`app_instance_id`, `block_number`, `chain`),
+    INDEX idx_chain (`chain`),
+    INDEX idx_settled_at (`settled_at`),
+    CONSTRAINT fk_block_settlements_app_instance FOREIGN KEY (`app_instance_id`)
+        REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+COMMENT='Block settlement status tracking';
+
+-- 16. App Instance Metadata Table - Required for metadata operations
+CREATE TABLE IF NOT EXISTS app_instance_metadata (
+    `app_instance_id` VARCHAR(255) NOT NULL,
+    `key` VARCHAR(255) NOT NULL,
+    `value` TEXT NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`app_instance_id`, `key`),
+    INDEX idx_key (`key`),
+    CONSTRAINT fk_metadata_app_instance FOREIGN KEY (`app_instance_id`)
+        REFERENCES app_instances (`app_instance_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+COMMENT='Key-value metadata storage for app instances';
 
 -- ============================================================================
 -- End of Schema
