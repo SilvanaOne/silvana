@@ -22,6 +22,13 @@ define load_state_database_url
 	fi)
 endef
 
+# Function to load ETHEREUM_COORDINATION_URL from .env file
+define load_ethereum_url
+	$(shell if [ -f .env ] && grep -q "^ETHEREUM_COORDINATION_URL=" .env; then \
+		grep "^ETHEREUM_COORDINATION_URL=" .env | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$$//'; \
+	fi)
+endef
+
 # Database configuration check
 check-database-url:
 	@if [ ! -f .env ]; then \
@@ -84,9 +91,46 @@ check-state-database-url:
 		exit 1; \
 	fi
 
+# Ethereum deployment configuration check
+check-ethereum-url:
+	@if [ ! -f .env ]; then \
+		echo "❌ ERROR: .env file not found"; \
+		echo ""; \
+		echo "Please create a .env file with ETHEREUM_COORDINATION_URL:"; \
+		echo "  echo 'ETHEREUM_COORDINATION_URL=https://rpc-amoy.polygon.technology' > .env"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if ! grep -q "^ETHEREUM_COORDINATION_URL=" .env; then \
+		echo "❌ ERROR: ETHEREUM_COORDINATION_URL not found in .env file"; \
+		echo ""; \
+		echo "Please add ETHEREUM_COORDINATION_URL to your .env file:"; \
+		echo "  echo 'ETHEREUM_COORDINATION_URL=https://rpc-amoy.polygon.technology' >> .env"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@ETH_URL="$(call load_ethereum_url)"; \
+	if [ -z "$$ETH_URL" ]; then \
+		echo "❌ ERROR: ETHEREUM_COORDINATION_URL value is empty in .env file"; \
+		echo ""; \
+		echo "Please set a valid ETHEREUM_COORDINATION_URL value in .env"; \
+		exit 1; \
+	fi
+
+check-ethereum-private-key:
+	@if ! grep -q "^ETHEREUM_PRIVATE_KEY=" .env; then \
+		echo "❌ ERROR: ETHEREUM_PRIVATE_KEY not found in .env file"; \
+		echo ""; \
+		echo "Deployment requires a private key for signing transactions."; \
+		echo "Add to .env:"; \
+		echo "  echo 'ETHEREUM_PRIVATE_KEY=0x...' >> .env"; \
+		echo ""; \
+		exit 1; \
+	fi
+
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state
+.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -100,7 +144,7 @@ help: ## Show this help message
 	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🏗️  BUILD & DEPLOYMENT:"
-	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release|deploy-ethereum|deploy-ethereum-dry):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|apply-ddl-state|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -252,6 +296,72 @@ build-mac: ## Build coordinator for macOS Apple Silicon (M1/M2/M3) natively
 	@cp target/release/silvana docker/coordinator/release/mac/silvana
 	@echo "✅ Silvana built successfully for macOS Apple Silicon"
 	@echo "📦 Binary location: docker/coordinator/release/mac/silvana"
+
+deploy-ethereum: check-ethereum-url check-ethereum-private-key ## Deploy Ethereum coordination contracts to configured network
+	@echo "🚀 Deploying Ethereum Coordination Layer..."
+	@echo ""
+	@ETH_URL="$(call load_ethereum_url)"; \
+	echo "📡 Network: $$ETH_URL"; \
+	echo "📝 Creating deployment log..."; \
+	mkdir -p build; \
+	LOG_FILE="build/ethereum-deploy-$$(date +%Y%m%d-%H%M%S).log"; \
+	VERIFY_FLAG=""; \
+	ETHERSCAN_KEY="$$(grep "^ETHERSCAN_API_KEY=" .env 2>/dev/null | cut -d'=' -f2- || echo '')"; \
+	if [ -n "$$ETHERSCAN_KEY" ] && [ "$$ETHERSCAN_KEY" != "none" ]; then \
+		echo "🔍 ETHERSCAN_API_KEY found - contract verification enabled"; \
+		VERIFY_FLAG="--verify"; \
+	else \
+		echo "⚠️  No ETHERSCAN_API_KEY in .env - contract verification disabled"; \
+	fi; \
+	echo ""; \
+	export ETHERSCAN_API_KEY="$$ETHERSCAN_KEY"; \
+	export POLYGONSCAN_API_KEY="$$ETHERSCAN_KEY"; \
+	export BASESCAN_API_KEY="$$ETHERSCAN_KEY"; \
+	cd solidity/coordination && \
+	if forge script script/Deploy.s.sol:DeployCoordination \
+		--rpc-url "$$ETH_URL" \
+		--private-key "$$(grep "^ETHEREUM_PRIVATE_KEY=" ../../.env | cut -d'=' -f2- | sed 's/^["'"'"']//;s/["'"'"']$$//')" \
+		--broadcast \
+		$$VERIFY_FLAG \
+		-vvv \
+		2>&1 | tee "../../$$LOG_FILE"; then \
+		if grep -q "Error:" "../../$$LOG_FILE" || grep -q "error code" "../../$$LOG_FILE"; then \
+			echo ""; \
+			echo "❌ Deployment failed! Check log for errors."; \
+			echo "📄 Full log: $$LOG_FILE"; \
+			exit 1; \
+		else \
+			echo ""; \
+			echo "✅ Deployment complete!"; \
+			echo "📄 Full log saved to: $$LOG_FILE"; \
+			echo ""; \
+			echo "📋 Deployment Summary:"; \
+			grep "deployed at:" "../../$$LOG_FILE" || echo "⚠️  Could not extract contract addresses from log"; \
+		fi; \
+	else \
+		echo ""; \
+		echo "❌ Deployment command failed!"; \
+		echo "📄 Full log: $$LOG_FILE"; \
+		exit 1; \
+	fi
+
+deploy-ethereum-dry: check-ethereum-url ## Simulate Ethereum contract deployment (no broadcast)
+	@echo "🔍 Simulating Ethereum Coordination Layer deployment..."
+	@echo ""
+	@ETH_URL="$(call load_ethereum_url)"; \
+	echo "📡 Network: $$ETH_URL"; \
+	echo "⚠️  DRY RUN - No transactions will be broadcast"; \
+	echo ""; \
+	ETHERSCAN_KEY="$$(grep "^ETHERSCAN_API_KEY=" .env 2>/dev/null | cut -d'=' -f2- || echo 'none')"; \
+	export ETHERSCAN_API_KEY="$$ETHERSCAN_KEY"; \
+	export POLYGONSCAN_API_KEY="$$ETHERSCAN_KEY"; \
+	export BASESCAN_API_KEY="$$ETHERSCAN_KEY"; \
+	cd solidity/coordination && \
+	forge script script/Deploy.s.sol:DeployCoordination \
+		--rpc-url "$$ETH_URL" \
+		-vvv
+	@echo ""
+	@echo "✅ Simulation complete!"
 
 build-all: build-arm build-x86 build-mac ## Build coordinator for all platforms (Linux ARM64, x86_64, macOS Silicon)
 	@echo "✅ Built Silvana for all platforms"

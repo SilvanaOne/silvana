@@ -1,0 +1,74 @@
+# Silvana Coordinator Configuration - Sui Devnet Only
+#
+# This configuration uses only the Sui devnet coordination layer
+# for development and testing purposes.
+
+# General coordinator settings
+[coordinator]
+# Enable only Sui devnet layer
+enable_layers = ["sui-devnet"]
+
+# Maximum number of parallel jobs
+max_parallel_jobs = 10
+
+# Reconciliation interval in seconds (for stuck job detection)
+reconciliation_interval = 30
+
+# Enable metrics reporting
+enable_metrics = true
+
+# Metrics reporting interval in seconds
+metrics_interval = 60
+
+# =============================================================================
+# Sui Coordination Layer (Devnet)
+# =============================================================================
+[sui]
+# Unique identifier for this layer
+layer_id = "sui-devnet"
+
+# Sui Devnet RPC endpoint
+rpc_url = "https://rpc-devnet-grpc.suiscan.xyz:443"
+
+
+# Silvana coordination package ID on Sui Devnet
+package_id = "0x550610f218c477130ca135659977de4c6f884d0a44e86949cf15d296c92374ce"
+
+# Silvana registry package ID on Sui Devnet
+registry_id = "0xdf768747cb016e015ac9d60dd6420e9d9e6640876d17b3e1e9d61ab5e057262a"
+
+# Operation mode for Sui (multicall for gas optimization)
+operation_mode = "multicall"
+
+# Optional: Filter to only process specific app instances
+# Uncomment and set if you want to filter by app instance
+# app_instance_filter = "0xabcd"
+
+# =============================================================================
+# Private Coordination Layers (empty - not used)
+# =============================================================================
+# No private layers configured for devnet-only setup
+
+# =============================================================================
+# Ethereum Coordination Layers (empty - not used)
+# =============================================================================
+# No Ethereum layers configured for devnet-only setup
+
+# =============================================================================
+# Usage Notes
+# =============================================================================
+#
+# This configuration runs the coordinator in single-layer mode using only
+# Sui devnet for coordination. This is suitable for:
+# - Local development
+# - Testing coordinator functionality
+# - Running on Sui devnet
+#
+# The coordinator will use credentials from environment variables:
+# - SUI_ADDRESS (from .env)
+# - SUI_SECRET_KEY (from .env)
+#
+# To use this configuration:
+# 1. Ensure .env file exists with SUI credentials
+# 2. Run: silvana start --config coordinator.toml
+# OR just: silvana start (auto-detects coordinator.toml)
