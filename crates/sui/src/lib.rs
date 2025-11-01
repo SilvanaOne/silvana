@@ -33,6 +33,7 @@ pub mod chain;
 pub mod coin;
 pub mod coin_management;
 pub mod constants;
+pub mod coordination;
 pub mod error;
 pub mod events;
 pub mod faucet;
@@ -50,6 +51,7 @@ pub mod types;
 
 // Re-export commonly used types
 pub use app_instance::{add_metadata_tx, delete_kv_tx, set_kv_tx};
+pub use coordination::SuiCoordination;
 pub use balance::{
     BalanceInfo, get_balance_in_sui, get_balance_info, get_current_address, get_network_name,
     get_total_balance_sui, print_balance_info,

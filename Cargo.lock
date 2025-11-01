@@ -7184,6 +7184,7 @@ name = "sui"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "base64ct",
  "bcs",
@@ -7201,6 +7202,7 @@ dependencies = [
  "rustls 0.23.34",
  "serde",
  "serde_json",
+ "silvana-coordination-trait",
  "sui-crypto",
  "sui-rpc",
  "sui-sdk-types",
