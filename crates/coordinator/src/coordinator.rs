@@ -5,17 +5,65 @@ use crate::constants::{
     PROOF_ANALYSIS_INTERVAL_SECS, RECONCILIATION_INTERVAL_SECS, SHUTDOWN_CLEANUP_DELAY_MS,
     SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
 };
+use crate::coordination_manager::CoordinationManager;
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
+use crate::layer_config::{CoordinatorConfig, GeneralConfig, SuiConfig};
 use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
 use crate::metrics::{CoordinatorMetrics, start_metrics_reporter};
 use crate::processor::EventProcessor;
 use crate::state::SharedState;
 // use crate::stuck_jobs::StuckJobMonitor; // Removed - reconciliation handles stuck jobs
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::task;
 use tracing::{debug, error, info, warn};
+
+/// Try to load coordinator configuration from file or environment
+async fn try_load_coordinator_config(config_path: Option<&str>) -> Result<Option<CoordinatorConfig>> {
+    // If explicit path provided, use it
+    if let Some(path) = config_path {
+        info!("Loading configuration from: {}", path);
+        return Ok(Some(CoordinatorConfig::from_file(path)?));
+    }
+
+    // Check for default config file
+    if Path::new("coordinator.toml").exists() {
+        info!("Found coordinator.toml, loading multi-layer configuration");
+        return Ok(Some(CoordinatorConfig::from_file("coordinator.toml")?));
+    }
+
+    // No config file found
+    debug!("No configuration file found, will use default single-layer Sui configuration");
+    Ok(None)
+}
+
+/// Create default configuration for single Sui layer
+fn create_default_sui_config(rpc_url: String, package_id: String) -> Result<CoordinatorConfig> {
+    Ok(CoordinatorConfig {
+        coordinator: GeneralConfig {
+            enable_layers: vec!["sui".to_string()],
+            max_parallel_jobs: 10,
+            reconciliation_interval: 30,
+            enable_metrics: true,
+            metrics_interval: 60,
+        },
+        sui: SuiConfig {
+            layer_id: "sui".to_string(),
+            rpc_url,
+            package_id: package_id.clone(),
+            registry_id: package_id, // Use same for registry
+            operation_mode: "multicall".to_string(),
+            multicall_interval_secs: 3,
+            multicall_max_operations: 100,
+            app_instance_filter: None,
+        },
+        private: vec![],
+        ethereum: vec![],
+    })
+}
 
 pub async fn start_coordinator(
     rpc_url: String,
@@ -25,10 +73,30 @@ pub async fn start_coordinator(
     grpc_socket_path: String,
     app_instance_filter: Option<String>,
     settle_only: bool,
+    config_path: Option<String>,
 ) -> Result<()> {
     info!("--------------------------------");
     info!("🚀 Starting Silvana Coordinator");
     info!("--------------------------------");
+
+    // ALWAYS load or create configuration for CoordinationManager
+    let coordinator_config = if let Some(config) = try_load_coordinator_config(config_path.as_deref()).await? {
+        info!("📊 Multi-layer mode: {} layer(s) configured", config.coordinator.enable_layers.len());
+        config
+    } else {
+        info!("📊 Single-layer mode: Using default Sui configuration");
+        create_default_sui_config(rpc_url.clone(), package_id.clone())?
+    };
+
+    // Validate configuration
+    coordinator_config.validate()?;
+
+    // ALWAYS initialize CoordinationManager (even for single Sui layer)
+    let coordination_manager = Arc::new(CoordinationManager::from_config(coordinator_config.clone()).await?);
+    info!("✅ Initialized coordination manager with {} layer(s)", coordination_manager.get_layer_ids().len());
+
+    // For now, continue with existing single-layer logic
+    // TODO: In Phase 2, we'll integrate the CoordinationManager into the actual job processing
     info!("🔗 Sui RPC URL: {}", rpc_url);
     info!("📦 Monitoring package: {}", package_id);
 

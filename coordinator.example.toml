@@ -1,0 +1,198 @@
+# Silvana Coordinator Configuration Example
+#
+# This file demonstrates how to configure the coordinator to work with multiple
+# coordination layers simultaneously, including multiple Private layers (TiDB)
+# and multiple Ethereum layers (mainnet, testnets, private networks).
+
+# General coordinator settings
+[coordinator]
+# List of layer IDs to enable (must match layer IDs defined below)
+enable_layers = ["sui-mainnet", "private-prod", "private-dev"]
+
+# Maximum number of parallel jobs across all layers
+max_parallel_jobs = 10
+
+# Reconciliation interval in seconds (for stuck job detection)
+reconciliation_interval = 30
+
+# Enable metrics reporting
+enable_metrics = true
+
+# Metrics reporting interval in seconds
+metrics_interval = 60
+
+# =============================================================================
+# Sui Coordination Layer (always required for registry)
+# =============================================================================
+[sui]
+# Unique identifier for this layer
+layer_id = "sui-mainnet"
+
+# Sui RPC endpoint
+rpc_url = "https://fullnode.mainnet.sui.io"
+
+# Silvana coordination package ID on Sui
+package_id = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+
+# Silvana registry package ID on Sui
+registry_id = "0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"
+
+# Operation mode for Sui (should be "multicall" for gas optimization)
+operation_mode = "multicall"
+
+# Interval for batching multicall operations (seconds)
+multicall_interval_secs = 3
+
+# Maximum operations per multicall batch
+multicall_max_operations = 100
+
+# Optional: Filter to only process specific app instances
+# app_instance_filter = "0xabcd"
+
+# =============================================================================
+# Private Coordination Layers (TiDB-backed)
+# =============================================================================
+
+# Production Private layer
+[[private]]
+layer_id = "private-prod"
+database_url = "mysql://silvana_prod:password@tidb-prod.example.com:4000/silvana_prod"
+jwt_secret = "production-jwt-secret-change-me"
+max_connections = 50
+operation_mode = "direct"  # No batching needed for private layers
+connection_timeout = 30
+enable_pooling = true
+# Optional: Filter to only process app instances containing this string
+# app_instance_filter = "prod-"
+
+# Development Private layer
+[[private]]
+layer_id = "private-dev"
+database_url = "mysql://silvana_dev:password@tidb-dev.example.com:4000/silvana_dev"
+jwt_secret = "development-jwt-secret-change-me"
+max_connections = 25
+operation_mode = "direct"
+connection_timeout = 30
+enable_pooling = true
+# Process only development app instances
+app_instance_filter = "dev-"
+
+# Staging Private layer
+[[private]]
+layer_id = "private-staging"
+database_url = "mysql://silvana_staging:password@tidb-staging.example.com:4000/silvana_staging"
+jwt_secret = "staging-jwt-secret-change-me"
+max_connections = 30
+operation_mode = "direct"
+connection_timeout = 30
+enable_pooling = true
+app_instance_filter = "staging-"
+
+# =============================================================================
+# Ethereum Coordination Layers (future implementation)
+# =============================================================================
+
+# Ethereum Mainnet
+[[ethereum]]
+layer_id = "ethereum-mainnet"
+rpc_url = "https://mainnet.infura.io/v3/YOUR-PROJECT-ID"
+contract_address = "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+# Private key stored in environment variable
+private_key_env = "ETH_MAINNET_PRIVATE_KEY"
+operation_mode = "multicall"  # Batch operations to save gas
+gas_price_multiplier = 1.1  # Add 10% to estimated gas price
+max_gas = 10000000
+chain_id = 1  # Ethereum mainnet
+multicall_interval_secs = 5  # Longer interval for mainnet
+multicall_max_operations = 50  # Smaller batches for mainnet
+
+# Goerli Testnet
+[[ethereum]]
+layer_id = "ethereum-goerli"
+rpc_url = "https://goerli.infura.io/v3/YOUR-PROJECT-ID"
+contract_address = "0x123d35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+private_key_env = "ETH_GOERLI_PRIVATE_KEY"
+operation_mode = "multicall"
+gas_price_multiplier = 1.0
+max_gas = 10000000
+chain_id = 5  # Goerli
+multicall_interval_secs = 3
+multicall_max_operations = 100
+
+# Sepolia Testnet
+[[ethereum]]
+layer_id = "ethereum-sepolia"
+rpc_url = "https://sepolia.infura.io/v3/YOUR-PROJECT-ID"
+contract_address = "0x456d35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+private_key_env = "ETH_SEPOLIA_PRIVATE_KEY"
+operation_mode = "multicall"
+gas_price_multiplier = 1.0
+max_gas = 10000000
+chain_id = 11155111  # Sepolia
+multicall_interval_secs = 3
+multicall_max_operations = 100
+
+# Private Ethereum Network (e.g., company's private chain)
+[[ethereum]]
+layer_id = "ethereum-private"
+rpc_url = "http://10.0.1.100:8545"  # Internal network
+contract_address = "0x789d35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+private_key_env = "ETH_PRIVATE_KEY"
+operation_mode = "direct"  # No need to batch on private network
+gas_price_multiplier = 1.0
+max_gas = 50000000  # Higher gas limit on private network
+# chain_id = 1337  # Custom chain ID for private network
+app_instance_filter = "private-"
+
+# Polygon Mainnet
+[[ethereum]]
+layer_id = "polygon-mainnet"
+rpc_url = "https://polygon-rpc.com"
+contract_address = "0xabc35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+private_key_env = "POLYGON_PRIVATE_KEY"
+operation_mode = "multicall"
+gas_price_multiplier = 1.2  # Polygon can have gas spikes
+max_gas = 10000000
+chain_id = 137  # Polygon mainnet
+multicall_interval_secs = 2  # Faster on Polygon
+multicall_max_operations = 150  # Can handle more operations
+
+# Base L2
+[[ethereum]]
+layer_id = "base-mainnet"
+rpc_url = "https://mainnet.base.org"
+contract_address = "0xdef35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+private_key_env = "BASE_PRIVATE_KEY"
+operation_mode = "multicall"
+gas_price_multiplier = 1.05
+max_gas = 10000000
+chain_id = 8453  # Base mainnet
+multicall_interval_secs = 2
+multicall_max_operations = 100
+
+# =============================================================================
+# Usage Notes
+# =============================================================================
+#
+# 1. Layer IDs must be unique across all coordination layers
+# 2. The 'enable_layers' list determines which layers are active
+# 3. Sui layer is always required as it hosts the agent registry
+# 4. Private layers use "direct" mode - operations execute immediately
+# 5. Blockchain layers use "multicall" mode - operations are batched
+# 6. app_instance_filter allows routing specific app instances to specific layers
+# 7. Store sensitive data (JWT secrets, private keys) in environment variables
+# 8. Database URLs should use connection pooling for production
+#
+# Environment Variables Required:
+# - ETH_MAINNET_PRIVATE_KEY
+# - ETH_GOERLI_PRIVATE_KEY
+# - ETH_SEPOLIA_PRIVATE_KEY
+# - ETH_PRIVATE_KEY
+# - POLYGON_PRIVATE_KEY
+# - BASE_PRIVATE_KEY
+#
+# To use this configuration:
+# 1. Copy to 'coordinator.toml'
+# 2. Update with your actual values
+# 3. Set required environment variables
+# 4. Run: silvana start --config coordinator.toml

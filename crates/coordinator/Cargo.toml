@@ -12,6 +12,10 @@ docker = { path = "../docker" }
 # Sui utilities
 sui = { path = "../sui" }
 
+# Coordination trait and implementations
+silvana-coordination-trait = { path = "../coordination-trait" }
+silvana-coordination-private = { path = "../coordination-private" }
+
 # Mina utilities
 mina = { path = "../mina" }
 
@@ -56,6 +60,7 @@ monitoring = { path = "../monitoring" }
 serde.workspace = true
 serde_json.workspace = true
 bcs.workspace = true
+toml = "0.8"
 
 # Utilities
 chrono.workspace = true

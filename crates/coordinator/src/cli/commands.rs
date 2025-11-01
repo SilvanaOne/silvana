@@ -47,6 +47,10 @@ pub enum Commands {
         /// Run as a dedicated settlement node (only process settlement jobs)
         #[arg(long, env = "SETTLE_ONLY", default_value = "false")]
         settle: bool,
+
+        /// Path to coordinator configuration file (TOML)
+        #[arg(short, long, env = "COORDINATOR_CONFIG")]
+        config: Option<String>,
     },
 
     /// Create a new Silvana project from template

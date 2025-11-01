@@ -3,8 +3,11 @@ mod block;
 mod cli;
 mod config;
 mod constants;
+mod coordination_manager;
+mod coordination_wrapper;
 mod coordinator;
 mod docker;
+mod layer_config;
 mod error;
 mod events;
 mod example;
@@ -171,6 +174,7 @@ async fn main() -> Result<()> {
             grpc_socket_path,
             instance,
             settle,
+            config,
         } => {
             cli::start::handle_start_command(
                 rpc_url,
@@ -180,6 +184,7 @@ async fn main() -> Result<()> {
                 grpc_socket_path,
                 instance,
                 settle,
+                config,
                 &chain,
                 chain_override.clone(),
             )
