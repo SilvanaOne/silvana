@@ -1,4 +1,5 @@
 use crate::agent::AgentJobDatabase;
+use crate::coordination_manager::CoordinationManager;
 use crate::jobs::JobsTracker;
 use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
 use std::collections::{HashMap, VecDeque};
@@ -178,6 +179,9 @@ pub struct SharedState {
     multicall_requests: Arc<Mutex<HashMap<String, MulticallRequests>>>, // Batched job operation requests per app instance
     started_jobs_buffer: Arc<Mutex<VecDeque<StartedJob>>>, // Buffer of jobs started on blockchain
     last_multicall_timestamp: Arc<Mutex<Instant>>,         // Timestamp of last multicall execution
+
+    // Optional coordination manager for multi-layer support
+    coordination_manager: Option<Arc<CoordinationManager>>,
 }
 
 impl SharedState {
@@ -211,7 +215,48 @@ impl SharedState {
             multicall_requests: Arc::new(Mutex::new(HashMap::new())),
             started_jobs_buffer: Arc::new(Mutex::new(VecDeque::new())),
             last_multicall_timestamp: Arc::new(Mutex::new(Instant::now())),
+            coordination_manager: None,
         }
+    }
+
+    /// Create new SharedState with CoordinationManager for multi-layer support
+    pub fn new_with_manager(manager: Arc<CoordinationManager>) -> Self {
+        // Initialize the Silvana RPC client asynchronously using shared client
+        let rpc_client = Arc::new(RwLock::new(None));
+        let rpc_client_clone = rpc_client.clone();
+        tokio::spawn(async move {
+            match rpc_client::shared::get_shared_client().await {
+                Ok(client) => {
+                    let mut lock = rpc_client_clone.write().await;
+                    *lock = Some(client);
+                    info!("Silvana RPC client initialized successfully using shared connection");
+                }
+                Err(e) => {
+                    error!("Failed to initialize Silvana RPC client: {}", e);
+                }
+            }
+        });
+
+        Self {
+            current_agents: Arc::new(RwLock::new(HashMap::new())),
+            jobs_tracker: JobsTracker::new(),
+            agent_job_db: AgentJobDatabase::new(),
+            has_pending_jobs: Arc::new(AtomicBool::new(false)),
+            rpc_client,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            force_shutdown_flag: Arc::new(AtomicBool::new(false)),
+            app_instance_filter: Arc::new(RwLock::new(None)),
+            settle_only: Arc::new(AtomicBool::new(false)),
+            multicall_requests: Arc::new(Mutex::new(HashMap::new())),
+            started_jobs_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            last_multicall_timestamp: Arc::new(Mutex::new(Instant::now())),
+            coordination_manager: Some(manager),
+        }
+    }
+
+    /// Get the coordination manager if available
+    pub fn get_coordination_manager(&self) -> Option<Arc<CoordinationManager>> {
+        self.coordination_manager.clone()
     }
 
     /// Get the coordinator ID (returns None if not available for read-only operations)
