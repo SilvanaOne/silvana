@@ -152,7 +152,6 @@ async fn start_multi_layer_reconciliation(
     manager: Arc<CoordinationManager>,
     state: SharedState,
 ) -> Result<()> {
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     info!(
         "🔄 Starting multi-layer reconciliation task (runs every {} minutes)...",
@@ -377,8 +376,8 @@ pub async fn start_coordinator(
     state.set_settle_only(settle_only);
 
     // Set the app instance filter if provided
-    if let Some(instance) = app_instance_filter {
-        state.set_app_instance_filter(Some(instance)).await;
+    if let Some(ref instance) = app_instance_filter {
+        state.set_app_instance_filter(Some(instance.clone())).await;
     }
 
     // Setup signal handlers for graceful shutdown (Ctrl-C and SIGTERM for system reboot)
@@ -594,31 +593,59 @@ pub async fn start_coordinator(
     });
     info!("💰 Started periodic balance check task (runs every 30 minutes)");
 
-    // 6. Start job searcher in a separate thread (only collects jobs and adds to multicall queue)
-    let job_searcher_state = state.clone();
-    let job_searcher_metrics = metrics.clone();
-    let job_searcher_handle = task::spawn(async move {
-        let mut job_searcher = match JobSearcher::new(job_searcher_state) {
-            Ok(searcher) => searcher,
-            Err(e) => {
-                error!("Failed to create job searcher: {}", e);
-                return;
+    // 6. Start job searchers - one per coordination layer
+    let layer_ids = coordination_manager.get_layer_ids();
+    info!("🔍 Starting {} job searcher(s)...", layer_ids.len());
+
+    let mut job_searcher_handles = Vec::new();
+    for layer_id in layer_ids {
+        // Apply app_instance_filter if provided
+        if let Some(ref filter) = app_instance_filter {
+            // Check if this layer should be filtered
+            if let Some(layer_info) = coordination_manager.get_layer_info(&layer_id) {
+                if let Some(ref layer_filter) = layer_info.app_instance_filter {
+                    if !filter.contains(layer_filter) {
+                        info!("Skipping job searcher for layer {} due to app_instance_filter", layer_id);
+                        continue;
+                    }
+                }
             }
-        };
-
-        // Set metrics reference
-        job_searcher.set_metrics(job_searcher_metrics);
-
-        // Delay job searcher startup by 10 seconds to allow system initialization
-        info!("Job searcher waiting 10 seconds before starting...");
-        tokio::time::sleep(Duration::from_secs(10)).await;
-        info!("Job searcher starting now");
-
-        if let Err(e) = job_searcher.run().await {
-            error!("Job searcher error: {}", e);
         }
-    });
-    info!("🔍 Started job searcher thread");
+
+        let searcher_state = state.clone();
+        let searcher_metrics = metrics.clone();
+        let searcher_manager = coordination_manager.clone();
+        let searcher_layer_id = layer_id.clone();
+
+        let handle = task::spawn(async move {
+            let mut job_searcher = match JobSearcher::new_with_layer(
+                searcher_layer_id.clone(),
+                searcher_manager,
+                searcher_state,
+            ) {
+                Ok(searcher) => searcher,
+                Err(e) => {
+                    error!("Failed to create job searcher for layer {}: {}", searcher_layer_id, e);
+                    return;
+                }
+            };
+
+            // Set metrics reference
+            job_searcher.set_metrics(searcher_metrics);
+
+            // Delay job searcher startup by 10 seconds to allow system initialization
+            info!("Job searcher for layer {} waiting 10 seconds before starting...", searcher_layer_id);
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            info!("Job searcher for layer {} starting now", searcher_layer_id);
+
+            if let Err(e) = job_searcher.run().await {
+                error!("Job searcher error for layer {}: {}", searcher_layer_id, e);
+            }
+        });
+
+        job_searcher_handles.push(handle);
+        info!("🔍 Started job searcher thread for layer {}", layer_id);
+    }
 
     // 7. Start multicall processor in a separate thread (processes multicall queue and executes batches)
     let multicall_state = state.clone();
@@ -874,16 +901,18 @@ pub async fn start_coordinator(
     // 3. Multicall processor continues until docker is done, then processes final operations
     // 4. gRPC server stays running until Docker containers complete
 
-    // Job searcher should stop immediately
-    if !job_searcher_handle.is_finished() {
-        info!("  ⏳ Waiting for job searcher to stop...");
-        let _ = tokio::time::timeout(
-            Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
-            job_searcher_handle,
-        )
-        .await;
-        info!("  ✅ Job searcher stopped (no new jobs will be searched)");
+    // Job searchers should stop immediately
+    info!("  ⏳ Waiting for {} job searcher(s) to stop...", job_searcher_handles.len());
+    for handle in job_searcher_handles {
+        if !handle.is_finished() {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
+                handle,
+            )
+            .await;
+        }
     }
+    info!("  ✅ All job searchers stopped (no new jobs will be searched)");
 
     // Docker and Multicall processors work together
     // Docker processes buffered jobs and waits for containers

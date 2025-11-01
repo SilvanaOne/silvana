@@ -1,4 +1,6 @@
 use crate::constants::{JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE};
+use crate::coordination_manager::CoordinationManager;
+use crate::coordination_wrapper::CoordinationWrapper;
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_total_memory_gb};
 use crate::job_lock::get_job_lock_manager;
@@ -17,14 +19,46 @@ use tracing::{debug, error, info, warn};
 
 /// Job searcher that monitors for pending jobs and adds them to the multicall queue
 pub struct JobSearcher {
+    /// Coordination layer ID (e.g., "sui-mainnet", "private-1")
+    layer_id: Option<String>,
+    /// Coordination layer wrapper for this searcher
+    layer: Option<Arc<Box<dyn CoordinationWrapper>>>,
+    /// Coordination manager reference
+    manager: Option<Arc<CoordinationManager>>,
+    /// Shared state
     state: SharedState,
+    /// Cache for failed jobs to avoid retrying
     jobs_cache: JobsCache,
+    /// Metrics reporter
     metrics: Option<Arc<CoordinatorMetrics>>,
 }
 
 impl JobSearcher {
+    /// Create a new job searcher (backward compatibility - no layer support)
     pub fn new(state: SharedState) -> Result<Self> {
         Ok(Self {
+            layer_id: None,
+            layer: None,
+            manager: None,
+            state,
+            jobs_cache: JobsCache::new(),
+            metrics: None,
+        })
+    }
+
+    /// Create a new job searcher for a specific coordination layer
+    pub fn new_with_layer(
+        layer_id: String,
+        manager: Arc<CoordinationManager>,
+        state: SharedState,
+    ) -> Result<Self> {
+        let layer = manager.get_layer(&layer_id)
+            .ok_or_else(|| CoordinatorError::Other(anyhow::anyhow!("Layer {} not found", layer_id)))?;
+
+        Ok(Self {
+            layer_id: Some(layer_id),
+            layer: Some(layer),
+            manager: Some(manager),
             state,
             jobs_cache: JobsCache::new(),
             metrics: None,
@@ -38,16 +72,21 @@ impl JobSearcher {
 
     /// Main loop for the job searcher
     pub async fn run(&mut self) -> Result<()> {
-        info!("🔍 Job searcher started");
+        let layer_info = if let Some(ref layer_id) = self.layer_id {
+            format!(" for layer {}", layer_id)
+        } else {
+            String::new()
+        };
+        info!("🔍 Job searcher started{}", layer_info);
 
         loop {
             // Check for shutdown request
             if self.state.is_shutting_down() {
-                info!("🛑 Job searcher received shutdown signal");
+                info!("🛑 Job searcher{} received shutdown signal", layer_info);
                 return Ok(());
             }
 
-            debug!("Starting job searcher cycle");
+            debug!("Starting job searcher{} cycle", layer_info);
 
             // Analyze proof completion for all app instances
             let app_instances = self.state.get_app_instances().await;
