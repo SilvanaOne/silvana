@@ -17,7 +17,7 @@ use crate::{
     database::Database,
     entity::{
         app_instance_kv_binary, app_instance_kv_string, app_instances, jobs,
-        object_lock_queue, object_versions, objects, optimistic_state, state, user_actions,
+        object_lock_queue, object_versions, objects, optimistic_state, proofs, state, user_actions,
         lock_request_bundle,
     },
     proto::state_service_server::StateService,
@@ -2863,6 +2863,211 @@ impl StateService for StateServiceImpl {
         Ok(Response::new(DeletePrivateBlobResponse {
             success: true,
             message: "Blob deleted successfully".to_string(),
+        }))
+    }
+
+    // =========================================================================
+    // Proof Management
+    // =========================================================================
+
+    async fn submit_proof(
+        &self,
+        request: Request<SubmitProofRequest>,
+    ) -> Result<Response<SubmitProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Store data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let (claim_data, claim_da) = if let Some(cd) = req.claim_data {
+            (Some(cd), req.claim_da)
+        } else {
+            (None, req.claim_da)
+        };
+
+        let (proof_data, proof_da) = if let Some(pd) = req.proof_data {
+            (Some(pd), req.proof_da)
+        } else {
+            (None, req.proof_da)
+        };
+
+        let proof = proofs::ActiveModel {
+            id: NotSet,
+            app_instance_id: Set(req.app_instance_id.clone()),
+            proof_type: Set(req.proof_type.clone()),
+            claim_json: Set(prost_struct_to_json(req.claim_json.unwrap_or_default())),
+            claim_hash: Set(req.claim_hash),
+            claim_data: Set(claim_data.clone()),
+            claim_da: Set(claim_da.clone()),
+            proof_data: Set(proof_data.clone()),
+            proof_da: Set(proof_da.clone()),
+            proof_hash: Set(req.proof_hash),
+            proof_time: Set(req.proof_time.map(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap())),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
+            proved_at: Set(Utc::now()),
+        };
+
+        let result = proof.insert(self.db.connection()).await.map_err(|e| {
+            warn!("Database error inserting proof: {}", e);
+            log_internal_error("Failed to insert proof", e)
+        })?;
+
+        info!(
+            "Submitted proof: id={}, app_instance={}, type={}",
+            result.id, result.app_instance_id, result.proof_type
+        );
+
+        Ok(Response::new(SubmitProofResponse {
+            success: true,
+            message: "Proof submitted successfully".to_string(),
+            proof: Some(Proof {
+                id: result.id,
+                app_instance_id: result.app_instance_id,
+                proof_type: result.proof_type,
+                claim_json: Some(json_to_prost_struct(result.claim_json).unwrap_or_default()),
+                claim_hash: result.claim_hash,
+                claim_data: result.claim_data,
+                claim_da: result.claim_da,
+                proof_data: result.proof_data,
+                proof_da: result.proof_da,
+                proof_hash: result.proof_hash,
+                proof_time: result.proof_time.map(to_timestamp),
+                proved_at: Some(to_timestamp(result.proved_at)),
+                metadata: result.metadata.and_then(json_to_prost_struct),
+            }),
+        }))
+    }
+
+    async fn get_proof(
+        &self,
+        request: Request<GetProofRequest>,
+    ) -> Result<Response<GetProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Find the proof
+        let proof = proofs::Entity::find_by_id(req.proof_id)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to query proof", e))?
+            .ok_or_else(|| Status::not_found(format!("Proof {} not found", req.proof_id)))?;
+
+        // Verify ownership via app_instance
+        self.verify_ownership(&proof.app_instance_id, &auth).await?;
+
+        Ok(Response::new(GetProofResponse {
+            success: true,
+            message: "Proof retrieved successfully".to_string(),
+            proof: Some(Proof {
+                id: proof.id,
+                app_instance_id: proof.app_instance_id,
+                proof_type: proof.proof_type,
+                claim_json: Some(json_to_prost_struct(proof.claim_json).unwrap_or_default()),
+                claim_hash: proof.claim_hash,
+                claim_data: proof.claim_data,
+                claim_da: proof.claim_da,
+                proof_data: proof.proof_data,
+                proof_da: proof.proof_da,
+                proof_hash: proof.proof_hash,
+                proof_time: proof.proof_time.map(to_timestamp),
+                proved_at: Some(to_timestamp(proof.proved_at)),
+                metadata: proof.metadata.and_then(json_to_prost_struct),
+            }),
+        }))
+    }
+
+    async fn list_proofs(
+        &self,
+        request: Request<ListProofsRequest>,
+    ) -> Result<Response<ListProofsResponse>, Status> {
+        use sea_orm::Condition;
+
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app_instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        let limit = req.limit.unwrap_or(100).min(1000) as u64;
+
+        // Build keyset pagination condition
+        let mut condition = Condition::all()
+            .add(proofs::Column::AppInstanceId.eq(&req.app_instance_id));
+
+        // Add proof_type filter if specified
+        if let Some(proof_type) = &req.proof_type {
+            condition = condition.add(proofs::Column::ProofType.eq(proof_type));
+        }
+
+        // Add keyset pagination (proved_at, app_instance_id, id) > (last_proved_at, last_app_instance_id, last_id)
+        if let (Some(last_proved_at), Some(last_app_instance_id), Some(last_id)) =
+            (req.last_proved_at, req.last_app_instance_id, req.last_id) {
+
+            let last_ts = chrono::DateTime::from_timestamp(last_proved_at.seconds, last_proved_at.nanos as u32)
+                .ok_or_else(|| Status::invalid_argument("Invalid last_proved_at timestamp"))?;
+
+            // Keyset pagination: (proved_at, app_instance_id, id) > (last_proved_at, last_app_instance_id, last_id)
+            condition = condition.add(
+                Condition::any()
+                    .add(proofs::Column::ProvedAt.gt(last_ts))
+                    .add(
+                        Condition::all()
+                            .add(proofs::Column::ProvedAt.eq(last_ts))
+                            .add(proofs::Column::AppInstanceId.gt(last_app_instance_id.clone()))
+                    )
+                    .add(
+                        Condition::all()
+                            .add(proofs::Column::ProvedAt.eq(last_ts))
+                            .add(proofs::Column::AppInstanceId.eq(last_app_instance_id))
+                            .add(proofs::Column::Id.gt(last_id))
+                    )
+            );
+        }
+
+        // Query with limit + 1 to check if there are more pages
+        let paginator = proofs::Entity::find()
+            .filter(condition)
+            .order_by_asc(proofs::Column::ProvedAt)
+            .order_by_asc(proofs::Column::AppInstanceId)
+            .order_by_asc(proofs::Column::Id)
+            .paginate(self.db.connection(), limit + 1);
+
+        let proofs = paginator
+            .fetch_page(0)
+            .await
+            .map_err(|e| log_internal_error("Failed to list proofs", e))?;
+
+        // Check if there are more pages
+        let has_more = proofs.len() > limit as usize;
+        let proofs = if has_more {
+            &proofs[..limit as usize]
+        } else {
+            &proofs[..]
+        };
+
+        // Convert to proto messages
+        let proto_proofs = proofs
+            .iter()
+            .map(|proof| Proof {
+                id: proof.id,
+                app_instance_id: proof.app_instance_id.clone(),
+                proof_type: proof.proof_type.clone(),
+                claim_json: Some(json_to_prost_struct(proof.claim_json.clone()).unwrap_or_default()),
+                claim_hash: proof.claim_hash.clone(),
+                claim_data: proof.claim_data.clone(),
+                claim_da: proof.claim_da.clone(),
+                proof_data: proof.proof_data.clone(),
+                proof_da: proof.proof_da.clone(),
+                proof_hash: proof.proof_hash.clone(),
+                proof_time: proof.proof_time.map(to_timestamp),
+                proved_at: Some(to_timestamp(proof.proved_at)),
+                metadata: proof.metadata.as_ref().and_then(|m| json_to_prost_struct(m.clone())),
+            })
+            .collect();
+
+        Ok(Response::new(ListProofsResponse {
+            proofs: proto_proofs,
+            has_more,
         }))
     }
 }
