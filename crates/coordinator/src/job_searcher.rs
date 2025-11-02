@@ -127,7 +127,13 @@ impl JobSearcher {
             self.jobs_cache.cleanup_expired().await;
 
             // Check for pending jobs and clean up app_instances without jobs
-            let jobs = self.check_and_clean_pending_jobs().await?;
+            // Get app instances for this layer (or all if no layer)
+            let app_instances = if let Some(ref layer_id) = self.layer_id {
+                self.state.get_app_instances_for_layer(layer_id).await
+            } else {
+                self.state.get_app_instances().await
+            };
+            let jobs = self.check_and_clean_pending_jobs(app_instances).await?;
 
             if !jobs.is_empty() {
                 // Calculate available memory for new jobs
@@ -371,14 +377,7 @@ impl JobSearcher {
     /// Check for pending jobs and clean up app_instances without jobs
     /// This combines job searching with cleanup that reconciliation would do
     /// Collects all viable jobs for batching instead of selecting one randomly
-    async fn check_and_clean_pending_jobs(&self) -> Result<Vec<Job>> {
-        // Get app instances for this layer (or all if no layer)
-        let app_instances = if let Some(ref layer_id) = self.layer_id {
-            self.state.get_app_instances_for_layer(layer_id).await
-        } else {
-            self.state.get_app_instances().await
-        };
-
+    async fn check_and_clean_pending_jobs(&self, app_instances: Vec<String>) -> Result<Vec<Job>> {
         if app_instances.is_empty() {
             return Ok(Vec::new());
         }
