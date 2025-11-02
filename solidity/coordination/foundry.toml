@@ -41,8 +41,12 @@ mainnet = "${ETHEREUM_RPC_URL}"
 polygon = "${POLYGON_RPC_URL}"
 base = "${BASE_RPC_URL}"
 localhost = "http://localhost:8545"
+anvil = "http://localhost:8545"
 
 [etherscan]
 mainnet = { key = "${ETHERSCAN_API_KEY}", url = "https://api.etherscan.io/api" }
 polygon = { key = "${ETHERSCAN_API_KEY}", url = "https://api-amoy.polygonscan.com/api" }
 base = { key = "${ETHERSCAN_API_KEY}", url = "https://api.basescan.org/api" }
+localhost = { key = "none", url = "http://localhost:8545/api" }
+anvil = { key = "none", url = "http://localhost:8545/api" }
+"anvil-hardhat" = { key = "none", url = "http://localhost:8545/api" }

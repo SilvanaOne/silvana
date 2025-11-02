@@ -6,6 +6,7 @@ members = [
     "crates/coordinator",
     "crates/coordination-trait",
     "crates/coordination-private",
+    "crates/coordination-ethereum",
     "crates/docker",
     "crates/tidb",
     "crates/monitoring",

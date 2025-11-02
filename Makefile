@@ -130,7 +130,7 @@ check-ethereum-private-key:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry
+.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry deploy-ethereum-local test-ethereum-coordination
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -144,7 +144,7 @@ help: ## Show this help message
 	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🏗️  BUILD & DEPLOYMENT:"
-	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release|deploy-ethereum|deploy-ethereum-dry):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release|deploy-ethereum|deploy-ethereum-dry|deploy-ethereum-local|test-ethereum-coordination):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|apply-ddl-state|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -352,16 +352,151 @@ deploy-ethereum-dry: check-ethereum-url ## Simulate Ethereum contract deployment
 	echo "📡 Network: $$ETH_URL"; \
 	echo "⚠️  DRY RUN - No transactions will be broadcast"; \
 	echo ""; \
-	ETHERSCAN_KEY="$$(grep "^ETHERSCAN_API_KEY=" .env 2>/dev/null | cut -d'=' -f2- || echo 'none')"; \
-	export ETHERSCAN_API_KEY="$$ETHERSCAN_KEY"; \
-	export POLYGONSCAN_API_KEY="$$ETHERSCAN_KEY"; \
-	export BASESCAN_API_KEY="$$ETHERSCAN_KEY"; \
+	VERIFY_FLAG=""; \
+	if echo "$$ETH_URL" | grep -qE "(localhost|127\.0\.0\.1)"; then \
+		echo "🏠 Local network detected - verification disabled"; \
+	else \
+		ETHERSCAN_KEY="$$(grep "^ETHERSCAN_API_KEY=" .env 2>/dev/null | cut -d'=' -f2- || echo '')"; \
+		if [ -n "$$ETHERSCAN_KEY" ] && [ "$$ETHERSCAN_KEY" != "none" ]; then \
+			echo "🔍 Etherscan verification will be enabled on broadcast"; \
+			VERIFY_FLAG="--verify"; \
+			export ETHERSCAN_API_KEY="$$ETHERSCAN_KEY"; \
+			export POLYGONSCAN_API_KEY="$$ETHERSCAN_KEY"; \
+			export BASESCAN_API_KEY="$$ETHERSCAN_KEY"; \
+		else \
+			echo "ℹ️  No ETHERSCAN_API_KEY - verification disabled"; \
+		fi; \
+	fi; \
 	cd solidity/coordination && \
 	forge script script/Deploy.s.sol:DeployCoordination \
 		--rpc-url "$$ETH_URL" \
+		$$VERIFY_FLAG \
 		-vvv
 	@echo ""
 	@echo "✅ Simulation complete!"
+
+deploy-ethereum-local: ## Deploy to local Anvil testnet (no verification)
+	@echo "🏠 Deploying Ethereum Coordination Layer to local Anvil..."
+	@echo ""
+	@if ! nc -z 127.0.0.1 8545 2>/dev/null; then \
+		echo "❌ ERROR: Anvil not running on port 8545"; \
+		echo ""; \
+		echo "Please start Anvil first:"; \
+		echo "  anvil"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"; \
+	ADMIN="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"; \
+	COORD1="0x70997970C51812dc3A010C7d01b50e0d17dc79C8"; \
+	COORD2="0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"; \
+	OPERATOR="0x90F79bf6EB2c4f870365E785982E1f101E93b906"; \
+	echo "📡 Network: http://127.0.0.1:8545"; \
+	echo "🔑 Using private key: $${PRIVATE_KEY:0:10}..."; \
+	echo ""; \
+	echo "📦 Deploying contracts..."; \
+	mkdir -p build; \
+	DEPLOY_FILE="build/ethereum-local-$$(date +%Y%m%d-%H%M%S).json"; \
+	cd solidity/coordination && \
+	echo "  1/6 JobManager..."; \
+	JOB_OUTPUT=$$(forge create src/JobManager.sol:JobManager --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy --broadcast 2>&1); \
+	JOB_ADDR=$$(echo "$$JOB_OUTPUT" | grep "Deployed to:" | awk '{print $$3}'); \
+	echo "  2/6 AppInstanceManager..."; \
+	APP_OUTPUT=$$(forge create src/AppInstanceManager.sol:AppInstanceManager --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy --broadcast 2>&1); \
+	APP_ADDR=$$(echo "$$APP_OUTPUT" | grep "Deployed to:" | awk '{print $$3}'); \
+	echo "  3/6 ProofManager..."; \
+	PROOF_OUTPUT=$$(forge create src/ProofManager.sol:ProofManager --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy --broadcast 2>&1); \
+	PROOF_ADDR=$$(echo "$$PROOF_OUTPUT" | grep "Deployed to:" | awk '{print $$3}'); \
+	echo "  4/6 SettlementManager..."; \
+	SETTLE_OUTPUT=$$(forge create src/SettlementManager.sol:SettlementManager --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy --broadcast 2>&1); \
+	SETTLE_ADDR=$$(echo "$$SETTLE_OUTPUT" | grep "Deployed to:" | awk '{print $$3}'); \
+	echo "  5/6 StorageManager..."; \
+	STORAGE_OUTPUT=$$(forge create src/StorageManager.sol:StorageManager --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy --broadcast 2>&1); \
+	STORAGE_ADDR=$$(echo "$$STORAGE_OUTPUT" | grep "Deployed to:" | awk '{print $$3}'); \
+	echo "  6/6 SilvanaCoordination..."; \
+	COORD_OUTPUT=$$(forge create src/SilvanaCoordination.sol:SilvanaCoordination --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy --broadcast 2>&1); \
+	COORD_ADDR=$$(echo "$$COORD_OUTPUT" | grep "Deployed to:" | awk '{print $$3}'); \
+	echo ""; \
+	echo "💰 Funding local accounts..."; \
+	cast send 0xD99b88cd8c784D9efd42646b4C1E27358D2179E6 --value 100ether --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send 0xbc356b91e24e0f3809fd1E455fc974995eF124dF --value 100ether --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	echo ""; \
+	echo "⚙️  Initializing contracts..."; \
+	cast send "$$COORD_ADDR" "initialize(address,address,address,address,address,address)" "$$ADMIN" "$$JOB_ADDR" "$$APP_ADDR" "$$PROOF_ADDR" "$$SETTLE_ADDR" "$$STORAGE_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$APP_ADDR" "setProofManager(address)" "$$PROOF_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	echo ""; \
+	echo "🔐 Granting roles..."; \
+	COORD_ROLE=$$(cast call "$$JOB_ADDR" "COORDINATOR_ROLE()(bytes32)" --rpc-url localhost 2>/dev/null); \
+	OPERATOR_ROLE=$$(cast call "$$JOB_ADDR" "OPERATOR_ROLE()(bytes32)" --rpc-url localhost 2>/dev/null); \
+	PAUSER_ROLE=$$(cast call "$$COORD_ADDR" "PAUSER_ROLE()(bytes32)" --rpc-url localhost 2>/dev/null); \
+	cast send "$$JOB_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$APP_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$PROOF_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$SETTLE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$STORAGE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$PROOF_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$APP_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$COORD_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD1" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$COORD_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD2" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$COORD_ADDR" "grantRole(bytes32,address)" "$$OPERATOR_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$COORD_ADDR" "grantRole(bytes32,address)" "$$PAUSER_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$JOB_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD1" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$JOB_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD2" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$JOB_ADDR" "grantRole(bytes32,address)" "$$OPERATOR_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$APP_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD1" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$APP_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD2" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$APP_ADDR" "grantRole(bytes32,address)" "$$OPERATOR_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$PROOF_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD1" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$PROOF_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD2" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$PROOF_ADDR" "grantRole(bytes32,address)" "$$OPERATOR_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$SETTLE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD1" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$SETTLE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD2" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$SETTLE_ADDR" "grantRole(bytes32,address)" "$$OPERATOR_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$STORAGE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD1" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$STORAGE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD2" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send "$$STORAGE_ADDR" "grantRole(bytes32,address)" "$$OPERATOR_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	printf '{\n  "timestamp": "%s",\n  "network": "anvil-local",\n  "chainId": 31337,\n  "admin": "%s",\n  "coordinator1": "%s",\n  "coordinator2": "%s",\n  "operator": "%s",\n  "contracts": {\n    "SilvanaCoordination": "%s",\n    "JobManager": "%s",\n    "AppInstanceManager": "%s",\n    "ProofManager": "%s",\n    "SettlementManager": "%s",\n    "StorageManager": "%s"\n  }\n}\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$ADMIN" "$$COORD1" "$$COORD2" "$$OPERATOR" "$$COORD_ADDR" "$$JOB_ADDR" "$$APP_ADDR" "$$PROOF_ADDR" "$$SETTLE_ADDR" "$$STORAGE_ADDR" > "../../$$DEPLOY_FILE"; \
+	echo ""; \
+	echo "✅ Local deployment complete!"; \
+	echo ""; \
+	echo "📋 Deployment Summary:"; \
+	echo ""; \
+	echo "  Admin:          $$ADMIN"; \
+	echo "  Coordinator 1:  $$COORD1"; \
+	echo "  Coordinator 2:  $$COORD2"; \
+	echo "  Operator:       $$OPERATOR"; \
+	echo ""; \
+	echo "  Contracts:"; \
+	echo "    SilvanaCoordination: $$COORD_ADDR"; \
+	echo "    JobManager:          $$JOB_ADDR"; \
+	echo "    AppInstanceManager:  $$APP_ADDR"; \
+	echo "    ProofManager:        $$PROOF_ADDR"; \
+	echo "    SettlementManager:   $$SETTLE_ADDR"; \
+	echo "    StorageManager:      $$STORAGE_ADDR"; \
+	echo ""; \
+	echo "📄 Deployment info saved to: $$DEPLOY_FILE"; \
+	echo ""
+
+test-ethereum-coordination: ## Run Ethereum coordination layer integration tests
+	@echo "🧪 Running Ethereum coordination integration tests..."
+	@echo ""
+	@if ! nc -z 127.0.0.1 8545 2>/dev/null; then \
+		echo "❌ ERROR: Anvil not running on port 8545"; \
+		echo ""; \
+		echo "Please start Anvil first:"; \
+		echo "  anvil"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if [ ! -d build ] || [ -z "$$(ls -A build/ethereum-local-*.json 2>/dev/null)" ]; then \
+		echo "⚠️  No deployment found. Running deployment first..."; \
+		echo ""; \
+		$(MAKE) deploy-ethereum-local; \
+		echo ""; \
+	fi
+	@echo "Running tests (sequential to avoid nonce conflicts)..."
+	@cargo test --package silvana-coordination-ethereum --test integration_test -- --test-threads=1
+	@echo ""
+	@echo "✅ Integration tests complete!"
 
 build-all: build-arm build-x86 build-mac ## Build coordinator for all platforms (Linux ARM64, x86_64, macOS Silicon)
 	@echo "✅ Built Silvana for all platforms"

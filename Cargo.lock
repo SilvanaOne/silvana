@@ -6752,6 +6752,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "silvana-coordination-ethereum"
+version = "0.3.0"
+dependencies = [
+ "alloy",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "ethereum",
+ "hex",
+ "serde",
+ "serde_json",
+ "silvana-coordination-trait",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "toml",
+ "tracing",
+]
+
+[[package]]
 name = "silvana-coordination-private"
 version = "0.1.0"
 dependencies = [
