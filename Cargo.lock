@@ -2400,6 +2400,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "silvana-coordination-ethereum",
  "silvana-coordination-private",
  "silvana-coordination-trait",
  "storage",

@@ -1,13 +1,13 @@
 //! Multi-coordination layer manager using wrapper trait
 
-use crate::coordination_wrapper::{CoordinationWrapper, PrivateCoordinationWrapper, SuiCoordinationWrapper};
+use crate::coordination_wrapper::{CoordinationWrapper, EthereumCoordinationWrapper, PrivateCoordinationWrapper, SuiCoordinationWrapper};
 use crate::error::Result;
 use crate::layer_config::{CoordinatorConfig, LayerInfo, LayerType, OperationMode};
 use anyhow::anyhow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Manages multiple coordination layers using the wrapper trait
 pub struct CoordinationManager {
@@ -103,12 +103,33 @@ impl CoordinationManager {
             }
         }
 
-        // Initialize all Ethereum layers (placeholder for future implementation)
+        // Initialize all Ethereum layers
         for ethereum_config in &config.ethereum {
             if config.is_layer_enabled(&ethereum_config.layer_id) {
-                warn!(
-                    "Ethereum layer '{}' configured but not yet implemented",
-                    ethereum_config.layer_id
+                info!("Initializing Ethereum layer: {}", ethereum_config.layer_id);
+
+                // Resolve private key from environment variable
+                let private_key = std::env::var(&ethereum_config.private_key_env)
+                    .ok(); // Optional - for read-only operations
+
+                let ethereum = EthereumCoordinationWrapper::new(
+                    ethereum_config.layer_id.clone(),
+                    silvana_coordination_ethereum::EthereumCoordinationConfig {
+                        rpc_url: ethereum_config.rpc_url.clone(),
+                        chain_id: ethereum_config.chain_id.unwrap_or(31337),
+                        contract_address: ethereum_config.contract_address.clone(),
+                        private_key,
+                        multicall_enabled: false, // Not supported yet
+                        multicall_interval_secs: ethereum_config.multicall_interval_secs,
+                        gas_limit_multiplier: ethereum_config.gas_price_multiplier,
+                        max_gas_price_gwei: Some(ethereum_config.max_gas as f64 / 1_000_000_000.0),
+                        confirmation_blocks: 1,
+                    },
+                )?;
+
+                layers.insert(
+                    ethereum_config.layer_id.clone(),
+                    Arc::new(Box::new(ethereum) as Box<dyn CoordinationWrapper>),
                 );
 
                 layer_info.insert(
@@ -120,6 +141,8 @@ impl CoordinationManager {
                         app_instance_filter: ethereum_config.app_instance_filter.clone(),
                     },
                 );
+
+                info!("✅ Ethereum layer initialized: {}", ethereum_config.layer_id);
             }
         }
 

@@ -15,6 +15,7 @@ sui = { path = "../sui" }
 # Coordination trait and implementations
 silvana-coordination-trait = { path = "../coordination-trait" }
 silvana-coordination-private = { path = "../coordination-private" }
+silvana-coordination-ethereum = { path = "../coordination-ethereum" }
 
 # Mina utilities
 mina = { path = "../mina" }

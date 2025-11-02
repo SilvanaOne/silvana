@@ -371,3 +371,126 @@ impl CoordinationWrapper for PrivateCoordinationWrapper {
             .map_err(|e| anyhow!("Private error: {}", e))
     }
 }
+
+/// Wrapper for EthereumCoordination
+pub struct EthereumCoordinationWrapper {
+    inner: silvana_coordination_ethereum::EthereumCoordination,
+    layer_id: String,
+}
+
+impl EthereumCoordinationWrapper {
+    pub fn new(layer_id: String, config: silvana_coordination_ethereum::EthereumCoordinationConfig) -> Result<Self> {
+        let inner = silvana_coordination_ethereum::EthereumCoordination::new(config)
+            .map_err(|e| anyhow!("Failed to create EthereumCoordination: {}", e))?;
+        Ok(Self { inner, layer_id })
+    }
+}
+
+#[async_trait]
+impl CoordinationWrapper for EthereumCoordinationWrapper {
+    fn layer_id(&self) -> &str {
+        &self.layer_id
+    }
+
+    fn chain_id(&self) -> String {
+        use silvana_coordination_trait::Coordination;
+        self.inner.chain_id()
+    }
+
+    fn supports_multicall(&self) -> bool {
+        use silvana_coordination_trait::Coordination;
+        self.inner.supports_multicall()
+    }
+
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.fetch_pending_jobs(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.fetch_failed_jobs(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.get_failed_jobs_count(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn fetch_job_by_id(&self, app_instance: &str, job_id: &str) -> Result<Option<Job<String>>> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.fetch_job_by_id(app_instance, &job_id.to_string()).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn start_job(&self, app_instance: &str, job_id: &str) -> Result<bool> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.start_job(app_instance, &job_id.to_string()).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn complete_job(&self, app_instance: &str, job_id: &str) -> Result<String> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.complete_job(app_instance, &job_id.to_string()).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn fail_job(&self, app_instance: &str, job_id: &str, error: &str) -> Result<String> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.fail_job(app_instance, &job_id.to_string(), error).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn fetch_sequence_state(&self, app_instance: &str, sequence: u64) -> Result<Option<SequenceState>> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.fetch_sequence_state(app_instance, sequence).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn get_current_sequence(&self, app_instance: &str) -> Result<u64> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.get_current_sequence(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn fetch_block(&self, app_instance: &str, block_number: u64) -> Result<Option<Block>> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.fetch_block(app_instance, block_number).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn try_create_block(&self, app_instance: &str) -> Result<Option<String>> {
+        use silvana_coordination_trait::Coordination;
+        let block_id = self.inner.try_create_block(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))?;
+
+        Ok(block_id.map(|id| id.to_string()))
+    }
+
+    async fn fetch_app_instance(&self, app_instance: &str) -> Result<AppInstance> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.fetch_app_instance(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn is_app_paused(&self, app_instance: &str) -> Result<bool> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.is_app_paused(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn get_kv_string(&self, app_instance: &str, key: &str) -> Result<Option<String>> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.get_kv_string(app_instance, key).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+
+    async fn set_kv_string(&self, app_instance: &str, key: String, value: String) -> Result<String> {
+        use silvana_coordination_trait::Coordination;
+        self.inner.set_kv_string(app_instance, key, value).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))
+    }
+}
