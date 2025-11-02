@@ -1,0 +1,22 @@
+[package]
+name = "coordinator-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+log = "0.4"
+
+[build-dependencies]
+tonic-build = "0.12"

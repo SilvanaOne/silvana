@@ -25,6 +25,9 @@ members = [
     "crates/state",
     "xtask",
 ]
+exclude = [
+    "examples/add-ethereum/agent",
+]
 
 [workspace.package]
 version = "0.3.0"

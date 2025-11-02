@@ -1,0 +1,30 @@
+# Add Ethereum Agent Configuration
+
+# Coordinator gRPC URL
+# Default: Docker host (for running agent in Docker container)
+# For local development: "http://localhost:50051"
+coordinator_url = "http://host.docker.internal:50051"
+
+# Session ID for this agent instance
+# Each agent instance should have a unique session ID
+session_id = "add-ethereum-session-1"
+
+# Developer identifier
+# This identifies who owns/operates the agent
+developer = "silvana"
+
+# Agent identifier
+# This identifies the agent type/implementation
+agent = "add-ethereum-agent"
+
+# Agent method name
+# The specific method this agent handles
+agent_method = "process"
+
+# Polling interval in seconds
+# How often to check for new jobs from the coordinator
+poll_interval_secs = 5
+
+# Maximum runtime in seconds (0 = run forever)
+# Useful for testing, set to 0 for production
+max_runtime_secs = 0
