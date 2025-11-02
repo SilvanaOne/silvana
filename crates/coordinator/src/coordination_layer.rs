@@ -224,6 +224,68 @@ impl Coordination for CoordinationLayer {
         }
     }
 
+    async fn get_pending_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.get_pending_jobs_count(app_instance).await.map_err(Into::into),
+            Self::Private(private) => private.get_pending_jobs_count(app_instance).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.get_pending_jobs_count(app_instance).await.map_err(Into::into),
+        }
+    }
+
+    async fn get_total_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.get_total_jobs_count(app_instance).await.map_err(Into::into),
+            Self::Private(private) => private.get_total_jobs_count(app_instance).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.get_total_jobs_count(app_instance).await.map_err(Into::into),
+        }
+    }
+
+    async fn get_settlement_job_ids(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.get_settlement_job_ids(app_instance).await.map_err(Into::into),
+            Self::Private(private) => private.get_settlement_job_ids(app_instance).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.get_settlement_job_ids(app_instance).await.map_err(Into::into),
+        }
+    }
+
+    async fn get_jobs_info(&self, app_instance: &str) -> Result<Option<(String, String)>, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.get_jobs_info(app_instance).await.map_err(Into::into),
+            Self::Private(private) => private.get_jobs_info(app_instance).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.get_jobs_info(app_instance).await.map_err(Into::into),
+        }
+    }
+
+    async fn fetch_jobs_batch(&self, app_instance: &str, job_ids: &[u64]) -> Result<Vec<Job>, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.fetch_jobs_batch(app_instance, job_ids).await.map_err(Into::into),
+            Self::Private(private) => private.fetch_jobs_batch(app_instance, job_ids).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.fetch_jobs_batch(app_instance, job_ids).await.map_err(Into::into),
+        }
+    }
+
+    async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.fetch_pending_job_sequences(app_instance).await.map_err(Into::into),
+            Self::Private(private) => private.fetch_pending_job_sequences(app_instance).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.fetch_pending_job_sequences(app_instance).await.map_err(Into::into),
+        }
+    }
+
+    async fn fetch_pending_job_sequences_by_method(
+        &self,
+        app_instance: &str,
+        developer: &str,
+        agent: &str,
+        agent_method: &str,
+    ) -> Result<Vec<u64>, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.fetch_pending_job_sequences_by_method(app_instance, developer, agent, agent_method).await.map_err(Into::into),
+            Self::Private(private) => private.fetch_pending_job_sequences_by_method(app_instance, developer, agent, agent_method).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.fetch_pending_job_sequences_by_method(app_instance, developer, agent, agent_method).await.map_err(Into::into),
+        }
+    }
+
     async fn start_job(
         &self,
         app_instance: &str,

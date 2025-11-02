@@ -52,6 +52,34 @@ pub trait Coordination: Send + Sync {
     /// Fetch a specific job by its sequence number
     async fn fetch_job_by_id(&self, app_instance: &str, job_sequence: u64) -> Result<Option<Job>, Self::Error>;
 
+    /// Get the count of pending jobs for an app instance
+    async fn get_pending_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
+
+    /// Get the count of all jobs for an app instance
+    async fn get_total_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
+
+    /// Get settlement job IDs for an app instance (maps chain name to job ID)
+    async fn get_settlement_job_ids(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error>;
+
+    /// Get jobs table info (returns app_instance_id and jobs_table_id)
+    /// This is layer-specific metadata needed for batch job operations
+    async fn get_jobs_info(&self, app_instance: &str) -> Result<Option<(String, String)>, Self::Error>;
+
+    /// Fetch multiple jobs by their IDs in a batch
+    async fn fetch_jobs_batch(&self, app_instance: &str, job_ids: &[u64]) -> Result<Vec<Job>, Self::Error>;
+
+    /// Fetch pending job sequences for an app instance
+    async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>, Self::Error>;
+
+    /// Fetch pending job sequences filtered by developer, agent, and agent method
+    async fn fetch_pending_job_sequences_by_method(
+        &self,
+        app_instance: &str,
+        developer: &str,
+        agent: &str,
+        agent_method: &str,
+    ) -> Result<Vec<u64>, Self::Error>;
+
     // Write operations
 
     /// Start a job (returns true if successfully started)

@@ -385,6 +385,60 @@ impl Coordination for SuiCoordination {
         }
     }
 
+    async fn get_pending_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error> {
+        let app = fetch_app_instance(app_instance).await?;
+        Ok(app.jobs.as_ref().map(|j| j.pending_jobs_count).unwrap_or(0))
+    }
+
+    async fn get_total_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error> {
+        let app = fetch_app_instance(app_instance).await?;
+        Ok(app.jobs.as_ref().map(|j| j.total_jobs_count).unwrap_or(0))
+    }
+
+    async fn get_settlement_job_ids(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error> {
+        let app = fetch_app_instance(app_instance).await?;
+        sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))
+    }
+
+    async fn get_jobs_info(&self, app_instance: &str) -> Result<Option<(String, String)>, Self::Error> {
+        let app = fetch_app_instance(app_instance).await?;
+        sui::fetch::get_jobs_info_from_app_instance(&app)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))
+    }
+
+    async fn fetch_jobs_batch(&self, app_instance: &str, job_ids: &[u64]) -> Result<Vec<Job>, Self::Error> {
+        let app = fetch_app_instance(app_instance).await?;
+        let jobs_table_id = app.jobs.as_ref().map(|j| j.jobs_table_id.clone())
+            .ok_or_else(|| SilvanaSuiInterfaceError::Other(anyhow!("Jobs table not found")))?;
+        let jobs_map = sui::fetch::fetch_jobs_batch(&jobs_table_id, job_ids)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))?;
+        // Convert HashMap<u64, Job> to Vec<Job>
+        Ok(jobs_map.into_values().map(|j| self.convert_job(j)).collect())
+    }
+
+    async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>, Self::Error> {
+        // Fetch all pending jobs and extract their sequences
+        let pending_jobs = self.fetch_pending_jobs(app_instance).await?;
+        Ok(pending_jobs.into_iter().map(|j| j.job_sequence).collect())
+    }
+
+    async fn fetch_pending_job_sequences_by_method(
+        &self,
+        app_instance: &str,
+        developer: &str,
+        agent: &str,
+        agent_method: &str,
+    ) -> Result<Vec<u64>, Self::Error> {
+        let app = fetch_app_instance(app_instance).await?;
+        sui::fetch::fetch_pending_job_sequences_from_app_instance(&app, developer, agent, agent_method)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))
+    }
+
     async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool, Self::Error> {
         // Use the existing interface method which returns bool
         let mut interface = SilvanaSuiInterface::new();

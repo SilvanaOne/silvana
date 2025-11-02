@@ -10,10 +10,10 @@ use crate::proof::analyze_proof_completion;
 use crate::settlement::{can_remove_app_instance, fetch_all_pending_jobs};
 use crate::state::SharedState;
 use futures::future;
+use silvana_coordination_trait::{Coordination, Job};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use sui::fetch::Job;
-use sui::fetch_agent_method;
+use sui::fetch_agent_method; // Keep this - registry is always on Sui
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 
@@ -91,6 +91,7 @@ impl JobSearcher {
             // Analyze proof completion for all app instances
             let app_instances = self.state.get_app_instances().await;
             for app_instance_id in app_instances {
+                // TODO: Update analyze_proof_completion to work with trait types, for now use Sui directly
                 match sui::fetch::fetch_app_instance(&app_instance_id).await {
                     Ok(app_instance) => {
                         if let Err(analysis_err) =
@@ -378,11 +379,13 @@ impl JobSearcher {
 
         // Check which app_instances can be removed (completely caught up with no work)
         let mut instances_to_remove = Vec::new();
+        let coordination = self.layer.as_ref().expect("JobSearcher requires coordination layer");
         for app_instance_id in &app_instances {
             // Fetch the full AppInstance object to check removal conditions
+            // TODO: Update can_remove_app_instance to work with trait types, for now use Sui directly
             match sui::fetch::fetch_app_instance(app_instance_id).await {
                 Ok(app_instance) => {
-                    if can_remove_app_instance(&app_instance) {
+                    if can_remove_app_instance(coordination, &app_instance).await.unwrap_or(false) {
                         info!(
                             "App instance {} is fully caught up and can be removed",
                             app_instance_id
@@ -417,7 +420,7 @@ impl JobSearcher {
             remaining_instances.len()
         );
 
-        match fetch_all_pending_jobs(&remaining_instances, false, self.state.is_settle_only()).await
+        match fetch_all_pending_jobs(coordination, &remaining_instances, false, self.state.is_settle_only()).await
         {
             Ok(pending_jobs) => {
                 if pending_jobs.is_empty() {

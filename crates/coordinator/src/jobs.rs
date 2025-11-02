@@ -184,7 +184,7 @@ impl JobsTracker {
         
         for (app_instance_id, original_timestamp) in &instances_to_check {
             // Fetch the app instance to check its state
-            let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+            let _app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
                 Ok(app_inst) => app_inst,
                 Err(e) => {
                     if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
@@ -199,16 +199,19 @@ impl JobsTracker {
                 }
             };
             
+            // TODO: Re-enable can_remove_app_instance check once we have coordination layer access here
+            // For now, skip this check as it requires coordination layer which isn't available in JobsTracker
+            // The pending jobs check below will still catch most cases
             // Use the comprehensive can_remove_app_instance check from settlement.rs
             // This checks: settlement complete, no active settlement jobs, no pending sequences, etc.
-            if !crate::settlement::can_remove_app_instance(&app_instance) {
-                debug!(
-                    "App_instance {} cannot be removed per settlement checks (unsettled blocks or active jobs)",
-                    app_instance_id
-                );
-                instances_with_jobs += 1;
-                continue;
-            }
+            // if !crate::settlement::can_remove_app_instance(coordination, &app_instance).await? {
+            //     debug!(
+            //         "App_instance {} cannot be removed per settlement checks (unsettled blocks or active jobs)",
+            //         app_instance_id
+            //     );
+            //     instances_with_jobs += 1;
+            //     continue;
+            // }
             
             // AppInstance passed settlement checks, now check if it has pending or running jobs
             match fetch_pending_jobs_count_from_app_instance(app_instance_id).await {

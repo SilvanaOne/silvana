@@ -1,10 +1,46 @@
 use crate::constants::{MAX_JOBS_PER_INSTANCE_BATCH, PERIODIC_JOB_EXECUTION_BUFFER_MS};
-use sui::fetch::{AppInstance, Job, get_jobs_info_from_app_instance, fetch_job_by_id, fetch_jobs_batch, fetch_pending_job_sequences_from_app_instance, fetch_block_info, fetch_blocks_range, fetch_block_settlement};
-use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
+use crate::coordination_layer::CoordinationLayer;
+use silvana_coordination_trait::Coordination;
 use anyhow::Result;
+use std::sync::Arc;
 use tracing::{debug, warn, error, info};
 use crate::state::{SharedState, CreateAppJobRequest};
 use tokio::time::Instant;
+// Temporary: Keep Sui types for functions not yet refactored to use coordination trait
+use sui::fetch::{AppInstance, Settlement};
+use sui::fetch::{fetch_block_info, fetch_block_settlement, fetch_blocks_range};
+use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
+use sui::fetch::{fetch_job_by_id, fetch_jobs_batch, get_jobs_info_from_app_instance, fetch_pending_job_sequences_from_app_instance};
+use silvana_coordination_trait::{Job, JobStatus};
+
+/// Helper function to convert Sui Job to trait Job
+fn convert_sui_job_to_trait(sui_job: sui::fetch::Job) -> Job {
+    Job {
+        job_sequence: sui_job.job_sequence,
+        description: sui_job.description,
+        developer: sui_job.developer,
+        agent: sui_job.agent,
+        agent_method: sui_job.agent_method,
+        app: sui_job.app,
+        app_instance: sui_job.app_instance,
+        app_instance_method: sui_job.app_instance_method,
+        block_number: sui_job.block_number,
+        sequences: sui_job.sequences,
+        sequences1: sui_job.sequences1,
+        sequences2: sui_job.sequences2,
+        data: sui_job.data,
+        status: match sui_job.status {
+            sui::fetch::JobStatus::Pending => JobStatus::Pending,
+            sui::fetch::JobStatus::Running => JobStatus::Running,
+            sui::fetch::JobStatus::Failed(err) => JobStatus::Failed(err),
+        },
+        attempts: sui_job.attempts,
+        interval_ms: sui_job.interval_ms,
+        next_scheduled_at: sui_job.next_scheduled_at,
+        created_at: sui_job.created_at,
+        updated_at: sui_job.updated_at,
+    }
+}
 
 /// Check if an app_instance can be safely removed from tracking
 /// An app_instance can only be removed when:
@@ -13,28 +49,25 @@ use tokio::time::Instant;
 /// 3. No sequences processed in current block (previous_block_last_sequence + 1 == current_sequence)
 /// 4. No pending or running jobs
 /// 5. No active settlement jobs
-pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
+pub async fn can_remove_app_instance(
+    coordination: &Arc<CoordinationLayer>,
+    app_instance: &AppInstance,
+) -> Result<bool> {
     // Check if all conditions are met
     // Use the AppInstance's last_settled_block_number which is already the minimum across all chains
     let last_settled_block_number = app_instance.last_settled_block_number;
     let all_blocks_settled = last_settled_block_number == app_instance.last_proved_block_number;
     let at_block_start = app_instance.last_proved_block_number + 1 == app_instance.block_number;
     let no_sequences_in_current = app_instance.previous_block_last_sequence + 1 == app_instance.sequence;
-    
-    // Check for pending jobs
-    let pending_jobs_count = app_instance.jobs.as_ref()
-        .map(|jobs| jobs.pending_jobs_count)
-        .unwrap_or(0);
+
+    // Check for pending jobs using coordination layer
+    let pending_jobs_count = coordination.get_pending_jobs_count(&app_instance.id).await.unwrap_or(0);
     let no_pending_jobs = pending_jobs_count == 0;
-    
+
     // Check for running jobs by comparing total jobs with accounted jobs
-    let total_jobs = app_instance.jobs.as_ref()
-        .map(|jobs| jobs.total_jobs_count)
-        .unwrap_or(0);
-    let failed_jobs = app_instance.jobs.as_ref()
-        .map(|jobs| jobs.failed_jobs_count)
-        .unwrap_or(0);
-    
+    let total_jobs = coordination.get_total_jobs_count(&app_instance.id).await.unwrap_or(0);
+    let failed_jobs = coordination.get_failed_jobs_count(&app_instance.id).await.unwrap_or(0);
+
     // Running jobs = total jobs - pending jobs - failed jobs
     // If there are more total jobs than we can account for, they must be running
     let running_jobs_count = total_jobs.saturating_sub(pending_jobs_count + failed_jobs);
@@ -73,7 +106,7 @@ pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
             app_instance.id,
             last_settled_block_number
         );
-        true
+        Ok(true)
     } else {
         debug!(
             "App instance {} cannot be removed: settled={} (need {}), at_start={}, no_seq={}, no_pending={}, no_running={}, no_settlement_jobs={}",
@@ -86,7 +119,7 @@ pub fn can_remove_app_instance(app_instance: &AppInstance) -> bool {
             no_running_jobs,
             no_active_settlement_jobs
         );
-        false
+        Ok(false)
     }
 }
 
@@ -501,6 +534,7 @@ pub async fn fetch_pending_job_from_instances(
     
     // Fetch the specific job by ID
     fetch_job_by_id(jobs_table_id, *lowest_job_sequence).await
+        .map(|opt| opt.map(convert_sui_job_to_trait))
         .map_err(|e| anyhow::anyhow!("Failed to fetch job: {}", e))
 }
 
@@ -510,6 +544,7 @@ pub async fn fetch_pending_job_from_instances(
 /// Also checks next_scheduled_at to ensure jobs are ready to run
 /// Returns a vector of jobs to allow the caller to skip failed ones
 pub async fn fetch_all_pending_jobs(
+    coordination: &Arc<CoordinationLayer>,
     app_instance_ids: &[String],
     only_check: bool,
     is_settle_only: bool,
@@ -534,14 +569,13 @@ pub async fn fetch_all_pending_jobs(
         app_instance_ids.len(), only_check);
     
     for app_instance_id in app_instance_ids {
-        // First fetch the AppInstance object
-        let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+        // First fetch the AppInstance object (for logging only)
+        let _app_instance = match coordination.fetch_app_instance(app_instance_id).await {
             Ok(app_inst) => {
                 debug!("Successfully fetched AppInstance {}", app_instance_id);
-                if let Some(jobs) = &app_inst.jobs {
-                    debug!("AppInstance {} has Jobs with {} pending jobs", 
-                        app_instance_id, jobs.pending_jobs_count);
-                }
+                let pending_jobs_count = coordination.get_pending_jobs_count(app_instance_id).await.unwrap_or(0);
+                debug!("AppInstance {} has {} pending jobs",
+                    app_instance_id, pending_jobs_count);
                 app_inst
             },
             Err(e) => {
@@ -549,14 +583,14 @@ pub async fn fetch_all_pending_jobs(
                 continue;
             }
         };
-        
+
         // First check for settlement jobs across all chains if not in check-only mode
         if !only_check {
-            let settlement_job_ids = sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app_instance).await
+            let settlement_job_ids = coordination.get_settlement_job_ids(app_instance_id).await
                 .unwrap_or_default();
-            
+
             if !settlement_job_ids.is_empty() {
-                if let Ok(Some((_app_instance_id, jobs_table_id))) = get_jobs_info_from_app_instance(&app_instance).await {
+                if let Ok(Some((_app_instance_id, jobs_table_id))) = coordination.get_jobs_info(app_instance_id).await {
                     // Collect all ready settlement jobs with their timestamps
                     let mut ready_settlement_jobs = Vec::new();
                     
@@ -595,9 +629,9 @@ pub async fn fetch_all_pending_jobs(
                     if !ready_settlement_jobs.is_empty() {
                         ready_settlement_jobs.sort_by_key(|(_, sort_time, _)| *sort_time);
                         if let Some((oldest_job, _, chain)) = ready_settlement_jobs.into_iter().next() {
-                            debug!("Selected oldest ready settlement job {} for chain {} in app_instance {}", 
+                            debug!("Selected oldest ready settlement job {} for chain {} in app_instance {}",
                                 oldest_job.job_sequence, chain, app_instance_id);
-                            all_pending_jobs.push((oldest_job, true)); // true = is_settlement
+                            all_pending_jobs.push((convert_sui_job_to_trait(oldest_job), true)); // true = is_settlement
                         }
                     }
                 }
@@ -606,20 +640,22 @@ pub async fn fetch_all_pending_jobs(
         
         // Fetch regular pending jobs (batch lowest N sequences per instance)
         if !only_check {
-            if let Some(jobs_obj) = &app_instance.jobs {
-                // Sort and take a slice of the lowest job sequences for prioritization
-                let mut seqs = jobs_obj.pending_jobs.clone();
-                seqs.sort();
+            // Use coordination layer to fetch pending jobs
+            let mut seqs = coordination.fetch_pending_job_sequences(app_instance_id).await
+                .unwrap_or_default();
+            seqs.sort();
 
-                if !seqs.is_empty() {
-                    let take_n = std::cmp::min(seqs.len(), MAX_JOBS_PER_INSTANCE_BATCH);
-                    let seq_slice = &seqs[..take_n];
+            if !seqs.is_empty() {
+                let take_n = std::cmp::min(seqs.len(), MAX_JOBS_PER_INSTANCE_BATCH);
+                let seq_slice = &seqs[..take_n];
 
-                    match fetch_jobs_batch(&jobs_obj.jobs_table_id, seq_slice).await {
+                // Get jobs info to fetch the jobs table ID
+                if let Ok(Some((_app_id, jobs_table_id))) = coordination.get_jobs_info(app_instance_id).await {
+                    match fetch_jobs_batch(&jobs_table_id, seq_slice).await {
                         Ok(map) => {
                             // Exclude settlement job IDs which are handled above
                             let settlement_ids: std::collections::HashSet<u64> =
-                                sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app_instance)
+                                coordination.get_settlement_job_ids(app_instance_id)
                                     .await
                                     .unwrap_or_default()
                                     .into_values()
@@ -640,7 +676,7 @@ pub async fn fetch_all_pending_jobs(
                                 {
                                     continue;
                                 }
-                                all_pending_jobs.push((job, false));
+                                all_pending_jobs.push((convert_sui_job_to_trait(job), false));
                                 added += 1;
                             }
                             if added > 0 {

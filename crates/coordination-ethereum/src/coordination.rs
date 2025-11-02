@@ -311,6 +311,76 @@ impl Coordination for EthereumCoordination {
         Ok(Some(job))
     }
 
+    async fn get_pending_jobs_count(&self, app_instance: &str) -> Result<u64> {
+        debug!("Getting pending jobs count for app_instance: {}", app_instance);
+
+        // Fetch pending jobs and count them
+        let pending_jobs = self.fetch_pending_jobs(app_instance).await?;
+        Ok(pending_jobs.len() as u64)
+    }
+
+    async fn get_total_jobs_count(&self, app_instance: &str) -> Result<u64> {
+        debug!("Getting total jobs count for app_instance: {}", app_instance);
+
+        // Ethereum layer doesn't track total jobs count easily
+        // Return sum of pending + failed counts as approximation
+        let pending = self.get_pending_jobs_count(app_instance).await?;
+        let failed = self.get_failed_jobs_count(app_instance).await?;
+        Ok(pending + failed)
+    }
+
+    async fn get_settlement_job_ids(&self, _app_instance: &str) -> Result<HashMap<String, u64>> {
+        // Ethereum layer doesn't implement settlement jobs in the same way as Sui
+        // Settlement is handled differently on Ethereum
+        Ok(HashMap::new())
+    }
+
+    async fn get_jobs_info(&self, _app_instance: &str) -> Result<Option<(String, String)>> {
+        // Ethereum doesn't use object tables like Sui
+        // Jobs are stored in contract mappings
+        Ok(None)
+    }
+
+    async fn fetch_jobs_batch(&self, app_instance: &str, job_ids: &[u64]) -> Result<Vec<Job>> {
+        debug!("Fetching batch of {} jobs for app_instance: {}", job_ids.len(), app_instance);
+
+        let mut jobs = Vec::new();
+        for &job_id in job_ids {
+            if let Some(job) = self.fetch_job_by_id(app_instance, job_id).await? {
+                jobs.push(job);
+            }
+        }
+        Ok(jobs)
+    }
+
+    async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>> {
+        debug!("Fetching pending job sequences for app_instance: {}", app_instance);
+
+        // Fetch pending jobs and extract their sequences
+        let pending_jobs = self.fetch_pending_jobs(app_instance).await?;
+        Ok(pending_jobs.into_iter().map(|j| j.job_sequence).collect())
+    }
+
+    async fn fetch_pending_job_sequences_by_method(
+        &self,
+        app_instance: &str,
+        developer: &str,
+        agent: &str,
+        agent_method: &str,
+    ) -> Result<Vec<u64>> {
+        debug!("Fetching pending job sequences by method for app_instance: {}", app_instance);
+
+        // Fetch all pending jobs and filter by developer, agent, and method
+        let pending_jobs = self.fetch_pending_jobs(app_instance).await?;
+        Ok(pending_jobs
+            .into_iter()
+            .filter(|j| {
+                j.developer == developer && j.agent == agent && j.agent_method == agent_method
+            })
+            .map(|j| j.job_sequence)
+            .collect())
+    }
+
     // ===== Job Management - Write Operations =====
 
     async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool> {

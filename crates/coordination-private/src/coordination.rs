@@ -202,6 +202,90 @@ impl Coordination for PrivateCoordination {
         Ok(job.map(|j| self.convert_job(j)))
     }
 
+    async fn get_pending_jobs_count(&self, app_instance: &str) -> Result<u64> {
+        self.verify_app_ownership(app_instance).await?;
+
+        let count = entity::jobs::Entity::find()
+            .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
+            .filter(entity::jobs::Column::Status.eq("PENDING"))
+            .count(self.db.connection())
+            .await? as u64;
+
+        Ok(count)
+    }
+
+    async fn get_total_jobs_count(&self, app_instance: &str) -> Result<u64> {
+        self.verify_app_ownership(app_instance).await?;
+
+        let count = entity::jobs::Entity::find()
+            .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
+            .count(self.db.connection())
+            .await? as u64;
+
+        Ok(count)
+    }
+
+    async fn get_settlement_job_ids(&self, app_instance: &str) -> Result<HashMap<String, u64>> {
+        self.verify_app_ownership(app_instance).await?;
+
+        // Private layer doesn't have settlement jobs concept
+        // Settlement happens on blockchain layers only
+        Ok(HashMap::new())
+    }
+
+    async fn get_jobs_info(&self, app_instance: &str) -> Result<Option<(String, String)>> {
+        self.verify_app_ownership(app_instance).await?;
+
+        // Private layer uses database, not object tables
+        // Return None as this is layer-specific metadata
+        Ok(None)
+    }
+
+    async fn fetch_jobs_batch(&self, app_instance: &str, job_ids: &[u64]) -> Result<Vec<Job>> {
+        self.verify_app_ownership(app_instance).await?;
+
+        let jobs = entity::jobs::Entity::find()
+            .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
+            .filter(entity::jobs::Column::JobSequence.is_in(job_ids.iter().map(|id| *id as i64)))
+            .all(self.db.connection())
+            .await?;
+
+        Ok(jobs.into_iter().map(|j| self.convert_job(j)).collect())
+    }
+
+    async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>> {
+        self.verify_app_ownership(app_instance).await?;
+
+        let jobs = entity::jobs::Entity::find()
+            .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
+            .filter(entity::jobs::Column::Status.eq("PENDING"))
+            .all(self.db.connection())
+            .await?;
+
+        Ok(jobs.into_iter().map(|j| j.job_sequence as u64).collect())
+    }
+
+    async fn fetch_pending_job_sequences_by_method(
+        &self,
+        app_instance: &str,
+        developer: &str,
+        agent: &str,
+        agent_method: &str,
+    ) -> Result<Vec<u64>> {
+        self.verify_app_ownership(app_instance).await?;
+
+        let jobs = entity::jobs::Entity::find()
+            .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
+            .filter(entity::jobs::Column::Status.eq("PENDING"))
+            .filter(entity::jobs::Column::Developer.eq(developer))
+            .filter(entity::jobs::Column::Agent.eq(agent))
+            .filter(entity::jobs::Column::AgentMethod.eq(agent_method))
+            .all(self.db.connection())
+            .await?;
+
+        Ok(jobs.into_iter().map(|j| j.job_sequence as u64).collect())
+    }
+
     async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool> {
         self.verify_app_ownership(app_instance).await?;
 
