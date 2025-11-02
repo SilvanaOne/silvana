@@ -1,6 +1,6 @@
 use crate::constants::{JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE};
 use crate::coordination_manager::CoordinationManager;
-use crate::coordination_wrapper::CoordinationWrapper;
+use crate::coordination_layer::CoordinationLayer;
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_total_memory_gb};
 use crate::job_lock::get_job_lock_manager;
@@ -21,8 +21,8 @@ use tracing::{debug, error, info, warn};
 pub struct JobSearcher {
     /// Coordination layer ID (e.g., "sui-mainnet", "private-1")
     layer_id: Option<String>,
-    /// Coordination layer wrapper for this searcher
-    layer: Option<Arc<Box<dyn CoordinationWrapper>>>,
+    /// Coordination layer for this searcher
+    layer: Option<Arc<CoordinationLayer>>,
     /// Coordination manager reference
     manager: Option<Arc<CoordinationManager>>,
     /// Shared state

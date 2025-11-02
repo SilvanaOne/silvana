@@ -17,6 +17,9 @@ pub enum CoordinatorError {
     #[error("Tonic/gRPC error: {0}")]
     TonicError(#[from] tonic::Status),
 
+    #[error("Coordination error: {0}")]
+    Coordination(#[from] crate::coordination_layer::CoordinationError),
+
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),
 }

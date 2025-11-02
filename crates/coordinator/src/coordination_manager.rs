@@ -1,18 +1,19 @@
-//! Multi-coordination layer manager using wrapper trait
+//! Multi-coordination layer manager
 
-use crate::coordination_wrapper::{CoordinationWrapper, EthereumCoordinationWrapper, PrivateCoordinationWrapper, SuiCoordinationWrapper};
+use crate::coordination_layer::{CoordinationError, CoordinationLayer};
 use crate::error::Result;
 use crate::layer_config::{CoordinatorConfig, LayerInfo, LayerType, OperationMode};
 use anyhow::anyhow;
+use silvana_coordination_trait::Coordination;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-/// Manages multiple coordination layers using the wrapper trait
+/// Manages multiple coordination layers
 pub struct CoordinationManager {
     /// Map from layer_id to coordination implementation
-    layers: HashMap<String, Arc<Box<dyn CoordinationWrapper>>>,
+    layers: HashMap<String, Arc<CoordinationLayer>>,
 
     /// Map from app_instance to layer_id for routing cache
     app_instance_routing: Arc<RwLock<HashMap<String, String>>>,
@@ -33,7 +34,7 @@ impl CoordinationManager {
         // Validate configuration
         config.validate()?;
 
-        let mut layers: HashMap<String, Arc<Box<dyn CoordinationWrapper>>> = HashMap::new();
+        let mut layers: HashMap<String, Arc<CoordinationLayer>> = HashMap::new();
         let mut layer_info = HashMap::new();
 
         info!("Initializing coordination layers...");
@@ -47,11 +48,11 @@ impl CoordinationManager {
                 sui::state::SharedSuiState::initialize(&config.sui.rpc_url).await?;
             }
 
-            let sui = SuiCoordinationWrapper::new(config.sui.layer_id.clone());
+            let sui = CoordinationLayer::new_sui(config.sui.layer_id.clone());
 
             layers.insert(
                 config.sui.layer_id.clone(),
-                Arc::new(Box::new(sui) as Box<dyn CoordinationWrapper>),
+                Arc::new(sui),
             );
 
             layer_info.insert(
@@ -72,8 +73,7 @@ impl CoordinationManager {
             if config.is_layer_enabled(&private_config.layer_id) {
                 info!("Initializing Private layer: {}", private_config.layer_id);
 
-                let private = PrivateCoordinationWrapper::new(
-                    private_config.layer_id.clone(),
+                let private = CoordinationLayer::new_private(
                     silvana_coordination_private::PrivateCoordinationConfig {
                         database_url: private_config.database_url.clone(),
                         jwt_secret: private_config.jwt_secret.clone(),
@@ -82,11 +82,11 @@ impl CoordinationManager {
                         connection_timeout_secs: private_config.connection_timeout,
                         enable_sql_logging: false,
                     },
-                ).await?;
+                ).await.map_err(|e: CoordinationError| anyhow!("Failed to initialize private layer: {}", e))?;
 
                 layers.insert(
                     private_config.layer_id.clone(),
-                    Arc::new(Box::new(private) as Box<dyn CoordinationWrapper>),
+                    Arc::new(private),
                 );
 
                 layer_info.insert(
@@ -112,8 +112,7 @@ impl CoordinationManager {
                 let private_key = std::env::var(&ethereum_config.private_key_env)
                     .ok(); // Optional - for read-only operations
 
-                let ethereum = EthereumCoordinationWrapper::new(
-                    ethereum_config.layer_id.clone(),
+                let ethereum = CoordinationLayer::new_ethereum(
                     silvana_coordination_ethereum::EthereumCoordinationConfig {
                         rpc_url: ethereum_config.rpc_url.clone(),
                         chain_id: ethereum_config.chain_id.unwrap_or(31337),
@@ -125,11 +124,11 @@ impl CoordinationManager {
                         max_gas_price_gwei: Some(ethereum_config.max_gas as f64 / 1_000_000_000.0),
                         confirmation_blocks: 1,
                     },
-                )?;
+                ).map_err(|e: CoordinationError| anyhow!("Failed to initialize ethereum layer: {}", e))?;
 
                 layers.insert(
                     ethereum_config.layer_id.clone(),
-                    Arc::new(Box::new(ethereum) as Box<dyn CoordinationWrapper>),
+                    Arc::new(ethereum),
                 );
 
                 layer_info.insert(
@@ -161,7 +160,7 @@ impl CoordinationManager {
     }
 
     /// Get the Sui coordination layer (for registry operations)
-    pub fn get_sui_layer(&self) -> Result<Arc<Box<dyn CoordinationWrapper>>> {
+    pub fn get_sui_layer(&self) -> Result<Arc<CoordinationLayer>> {
         self.layers
             .get(&self.sui_layer_id)
             .cloned()
@@ -169,7 +168,7 @@ impl CoordinationManager {
     }
 
     /// Get a specific coordination layer by ID
-    pub fn get_layer(&self, layer_id: &str) -> Option<Arc<Box<dyn CoordinationWrapper>>> {
+    pub fn get_layer(&self, layer_id: &str) -> Option<Arc<CoordinationLayer>> {
         self.layers.get(layer_id).cloned()
     }
 
@@ -179,7 +178,7 @@ impl CoordinationManager {
     }
 
     /// Get coordination layer for a specific app_instance
-    pub async fn get_layer_for_app(&self, app_instance: &str) -> Result<(String, Arc<Box<dyn CoordinationWrapper>>)> {
+    pub async fn get_layer_for_app(&self, app_instance: &str) -> Result<(String, Arc<CoordinationLayer>)> {
         // Check routing cache
         {
             let cache = self.app_instance_routing.read().await;

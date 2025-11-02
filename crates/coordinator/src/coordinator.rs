@@ -6,7 +6,7 @@ use crate::constants::{
     SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
 };
 use crate::coordination_manager::CoordinationManager;
-use crate::coordination_wrapper::CoordinationWrapper;
+use crate::coordination_layer::CoordinationLayer;
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
 use crate::layer_config::{CoordinatorConfig, GeneralConfig, SuiConfig};
@@ -15,6 +15,7 @@ use crate::metrics::{CoordinatorMetrics, start_metrics_reporter};
 use crate::processor::EventProcessor;
 use crate::state::SharedState;
 // use crate::stuck_jobs::StuckJobMonitor; // Removed - reconciliation handles stuck jobs
+use silvana_coordination_trait::Coordination;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,7 +69,7 @@ fn create_default_sui_config(rpc_url: String, package_id: String) -> Result<Coor
 
 /// Check a single coordination layer for stuck jobs
 async fn reconcile_layer(
-    layer: Arc<Box<dyn CoordinationWrapper>>,
+    layer: Arc<CoordinationLayer>,
     layer_id: &str,
     state: &SharedState,
 ) -> Result<usize> {

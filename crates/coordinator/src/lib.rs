@@ -2,3 +2,4 @@
 pub mod proofs_storage;
 pub mod constants;
 pub mod config;
+pub mod coordination_layer;
