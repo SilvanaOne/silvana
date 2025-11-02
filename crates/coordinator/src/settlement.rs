@@ -50,9 +50,12 @@ fn convert_sui_job_to_trait(sui_job: sui::fetch::Job) -> Job {
 /// 4. No pending or running jobs
 /// 5. No active settlement jobs
 pub async fn can_remove_app_instance(
-    coordination: &Arc<CoordinationLayer>,
+    manager: &Arc<crate::coordination_manager::CoordinationManager>,
     app_instance: &AppInstance,
 ) -> Result<bool> {
+    // Get the correct coordination layer for this app instance
+    let (_layer_id, coordination) = manager.get_layer_for_app(&app_instance.id).await?;
+
     // Check if all conditions are met
     // Use the AppInstance's last_settled_block_number which is already the minimum across all chains
     let last_settled_block_number = app_instance.last_settled_block_number;
@@ -544,7 +547,7 @@ pub async fn fetch_pending_job_from_instances(
 /// Also checks next_scheduled_at to ensure jobs are ready to run
 /// Returns a vector of jobs to allow the caller to skip failed ones
 pub async fn fetch_all_pending_jobs(
-    coordination: &Arc<CoordinationLayer>,
+    manager: &Arc<crate::coordination_manager::CoordinationManager>,
     app_instance_ids: &[String],
     only_check: bool,
     is_settle_only: bool,
@@ -569,6 +572,15 @@ pub async fn fetch_all_pending_jobs(
         app_instance_ids.len(), only_check);
     
     for app_instance_id in app_instance_ids {
+        // Get the correct coordination layer for this app instance
+        let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance_id).await {
+            Ok(layer) => layer,
+            Err(e) => {
+                warn!("App instance {} not found on any layer: {}", app_instance_id, e);
+                continue;
+            }
+        };
+
         // First fetch the AppInstance object (for logging only)
         let _app_instance = match coordination.fetch_app_instance(app_instance_id).await {
             Ok(app_inst) => {

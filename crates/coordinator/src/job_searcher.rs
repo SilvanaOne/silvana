@@ -379,13 +379,13 @@ impl JobSearcher {
 
         // Check which app_instances can be removed (completely caught up with no work)
         let mut instances_to_remove = Vec::new();
-        let coordination = self.layer.as_ref().expect("JobSearcher requires coordination layer");
+        let manager = self.manager.as_ref().expect("JobSearcher requires coordination manager");
         for app_instance_id in &app_instances {
             // Fetch the full AppInstance object to check removal conditions
             // TODO: Update can_remove_app_instance to work with trait types, for now use Sui directly
             match sui::fetch::fetch_app_instance(app_instance_id).await {
                 Ok(app_instance) => {
-                    if can_remove_app_instance(coordination, &app_instance).await.unwrap_or(false) {
+                    if can_remove_app_instance(manager, &app_instance).await.unwrap_or(false) {
                         info!(
                             "App instance {} is fully caught up and can be removed",
                             app_instance_id
@@ -420,7 +420,7 @@ impl JobSearcher {
             remaining_instances.len()
         );
 
-        match fetch_all_pending_jobs(coordination, &remaining_instances, false, self.state.is_settle_only()).await
+        match fetch_all_pending_jobs(manager, &remaining_instances, false, self.state.is_settle_only()).await
         {
             Ok(pending_jobs) => {
                 if pending_jobs.is_empty() {
