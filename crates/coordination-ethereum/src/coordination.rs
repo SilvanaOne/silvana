@@ -124,7 +124,7 @@ impl EthereumCoordination {
 /// Ethereum-based coordination smart contracts.
 #[async_trait]
 impl Coordination for EthereumCoordination {
-    type JobId = String;
+    type JobId = u64;
     type SequenceId = u64;
     type BlockId = u64;
     type TransactionHash = String;
@@ -142,7 +142,7 @@ impl Coordination for EthereumCoordination {
 
     // ===== Job Management - Read Operations =====
 
-    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<u64>>> {
         debug!("Fetching pending jobs for app_instance: {}", app_instance);
 
         let provider = self.contract.create_provider()?;
@@ -155,12 +155,11 @@ impl Coordination for EthereumCoordination {
             .map_err(|e| EthereumCoordinationError::ContractCall(e.to_string()))?;
 
         // Convert Solidity jobs to Rust jobs
-        let jobs: Vec<Job<String>> = result
+        let jobs: Vec<Job<u64>> = result
             .into_iter()
             .map(|solidity_job| {
-                let job_id = create_job_id(app_instance, solidity_job.jobSequence);
                 Job {
-                    id: job_id,
+                    id: solidity_job.jobSequence,
                     job_sequence: solidity_job.jobSequence,
                     description: optional_string(solidity_job.description),
                     developer: solidity_job.developer,
@@ -195,7 +194,7 @@ impl Coordination for EthereumCoordination {
         Ok(jobs)
     }
 
-    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<u64>>> {
         debug!("Fetching failed jobs for app_instance: {}", app_instance);
 
         let provider = self.contract.create_provider()?;
@@ -208,12 +207,11 @@ impl Coordination for EthereumCoordination {
             .map_err(|e| EthereumCoordinationError::ContractCall(e.to_string()))?;
 
         // Convert Solidity jobs to Rust jobs (same logic as fetch_pending_jobs)
-        let jobs: Vec<Job<String>> = result
+        let jobs: Vec<Job<u64>> = result
             .into_iter()
             .map(|solidity_job| {
-                let job_id = create_job_id(app_instance, solidity_job.jobSequence);
                 Job {
-                    id: job_id,
+                    id: solidity_job.jobSequence,
                     job_sequence: solidity_job.jobSequence,
                     description: optional_string(solidity_job.description),
                     developer: solidity_job.developer,
@@ -267,26 +265,15 @@ impl Coordination for EthereumCoordination {
     async fn fetch_job_by_id(
         &self,
         app_instance: &str,
-        job_id: &String,
-    ) -> Result<Option<Job<String>>> {
+        job_id: &u64,
+    ) -> Result<Option<Job<u64>>> {
         debug!("Fetching job by ID: {} for app_instance: {}", job_id, app_instance);
-
-        // Parse job_id to extract job_sequence
-        let (parsed_app, job_sequence) = parse_job_id(job_id).ok_or_else(|| {
-            EthereumCoordinationError::InvalidJobId(format!("Invalid job ID format: {}", job_id))
-        })?;
-        if parsed_app != app_instance {
-            return Err(EthereumCoordinationError::InvalidJobId(format!(
-                "Job ID {} does not match app_instance {}",
-                job_id, app_instance
-            )));
-        }
 
         let provider = self.contract.create_provider()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let result = contract
-            .getJob(app_instance.to_string(), U256::from(job_sequence))
+            .getJob(app_instance.to_string(), U256::from(*job_id))
             .call()
             .await
             .map_err(|e| EthereumCoordinationError::ContractCall(e.to_string()))?;
@@ -298,7 +285,7 @@ impl Coordination for EthereumCoordination {
 
         // Convert to Rust Job
         let job = Job {
-            id: job_id.clone(),
+            id: result.jobSequence,
             job_sequence: result.jobSequence,
             description: optional_string(result.description.clone()),
             developer: result.developer.clone(),
@@ -332,25 +319,14 @@ impl Coordination for EthereumCoordination {
 
     // ===== Job Management - Write Operations =====
 
-    async fn start_job(&self, app_instance: &str, job_id: &String) -> Result<bool> {
+    async fn start_job(&self, app_instance: &str, job_id: &u64) -> Result<bool> {
         debug!("Starting job: {} for app_instance: {}", job_id, app_instance);
-
-        // Parse job_id to extract job_sequence
-        let (parsed_app, job_sequence) = parse_job_id(job_id).ok_or_else(|| {
-            EthereumCoordinationError::InvalidJobId(format!("Invalid job ID format: {}", job_id))
-        })?;
-        if parsed_app != app_instance {
-            return Err(EthereumCoordinationError::InvalidJobId(format!(
-                "Job ID {} does not match app_instance {}",
-                job_id, app_instance
-            )));
-        }
 
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .takeJob(app_instance.to_string(), U256::from(job_sequence))
+            .takeJob(app_instance.to_string(), U256::from(*job_id))
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;
@@ -365,25 +341,14 @@ impl Coordination for EthereumCoordination {
         Ok(success)
     }
 
-    async fn complete_job(&self, app_instance: &str, job_id: &String) -> Result<String> {
+    async fn complete_job(&self, app_instance: &str, job_id: &u64) -> Result<String> {
         debug!("Completing job: {} for app_instance: {}", job_id, app_instance);
-
-        // Parse job_id to extract job_sequence
-        let (parsed_app, job_sequence) = parse_job_id(job_id).ok_or_else(|| {
-            EthereumCoordinationError::InvalidJobId(format!("Invalid job ID format: {}", job_id))
-        })?;
-        if parsed_app != app_instance {
-            return Err(EthereumCoordinationError::InvalidJobId(format!(
-                "Job ID {} does not match app_instance {}",
-                job_id, app_instance
-            )));
-        }
 
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .completeJob(app_instance.to_string(), U256::from(job_sequence), Bytes::new())
+            .completeJob(app_instance.to_string(), U256::from(*job_id), Bytes::new())
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;
@@ -398,28 +363,17 @@ impl Coordination for EthereumCoordination {
         Ok(tx_hash)
     }
 
-    async fn fail_job(&self, app_instance: &str, job_id: &String, error: &str) -> Result<String> {
+    async fn fail_job(&self, app_instance: &str, job_id: &u64, error: &str) -> Result<String> {
         debug!(
             "Failing job: {} for app_instance: {} with error: {}",
             job_id, app_instance, error
         );
 
-        // Parse job_id to extract job_sequence
-        let (parsed_app, job_sequence) = parse_job_id(job_id).ok_or_else(|| {
-            EthereumCoordinationError::InvalidJobId(format!("Invalid job ID format: {}", job_id))
-        })?;
-        if parsed_app != app_instance {
-            return Err(EthereumCoordinationError::InvalidJobId(format!(
-                "Job ID {} does not match app_instance {}",
-                job_id, app_instance
-            )));
-        }
-
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .failJob(app_instance.to_string(), U256::from(job_sequence), error.to_string())
+            .failJob(app_instance.to_string(), U256::from(*job_id), error.to_string())
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;
@@ -434,25 +388,14 @@ impl Coordination for EthereumCoordination {
         Ok(tx_hash)
     }
 
-    async fn terminate_job(&self, app_instance: &str, job_id: &String) -> Result<String> {
+    async fn terminate_job(&self, app_instance: &str, job_id: &u64) -> Result<String> {
         debug!("Terminating job: {} for app_instance: {}", job_id, app_instance);
-
-        // Parse job_id to extract job_sequence
-        let (parsed_app, job_sequence) = parse_job_id(job_id).ok_or_else(|| {
-            EthereumCoordinationError::InvalidJobId(format!("Invalid job ID format: {}", job_id))
-        })?;
-        if parsed_app != app_instance {
-            return Err(EthereumCoordinationError::InvalidJobId(format!(
-                "Job ID {} does not match app_instance {}",
-                job_id, app_instance
-            )));
-        }
 
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .terminateJob(app_instance.to_string(), U256::from(job_sequence))
+            .terminateJob(app_instance.to_string(), U256::from(*job_id))
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;
@@ -515,9 +458,9 @@ impl Coordination for EthereumCoordination {
         for log in logs {
             if let Ok(decoded) = log.log_decode::<JobManager::JobCreated>() {
                 let jobSequence = decoded.data().jobSequence;
-                let job_id = create_job_id(app_instance, jobSequence);
-                debug!("Created job with id: {} (sequence: {})", job_id, jobSequence);
-                return Ok((job_id, jobSequence));
+                let tx_hash = self.format_tx_hash(receipt.transaction_hash);
+                debug!("Created job with sequence: {}, tx hash: {}", jobSequence, tx_hash);
+                return Ok((tx_hash, jobSequence));
             }
         }
 

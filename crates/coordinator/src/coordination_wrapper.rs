@@ -281,14 +281,61 @@ impl CoordinationWrapper for PrivateCoordinationWrapper {
 
     async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fetch_pending_jobs(app_instance).await
-            .map_err(|e| anyhow!("Private error: {}", e))
+        let jobs = self.inner.fetch_pending_jobs(app_instance).await
+            .map_err(|e| anyhow!("Private error: {}", e))?;
+
+        // Convert Job<u64> to Job<String>
+        Ok(jobs.into_iter().map(|j| Job {
+            id: j.id.to_string(),
+            job_sequence: j.job_sequence,
+            description: j.description,
+            developer: j.developer,
+            agent: j.agent,
+            agent_method: j.agent_method,
+            app: j.app,
+            app_instance: j.app_instance,
+            app_instance_method: j.app_instance_method,
+            block_number: j.block_number,
+            sequences: j.sequences,
+            sequences1: j.sequences1,
+            sequences2: j.sequences2,
+            data: j.data,
+            status: j.status,
+            attempts: j.attempts,
+            interval_ms: j.interval_ms,
+            next_scheduled_at: j.next_scheduled_at,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+        }).collect())
     }
 
     async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fetch_failed_jobs(app_instance).await
-            .map_err(|e| anyhow!("Private error: {}", e))
+        let jobs = self.inner.fetch_failed_jobs(app_instance).await
+            .map_err(|e| anyhow!("Private error: {}", e))?;
+
+        Ok(jobs.into_iter().map(|j| Job {
+            id: j.id.to_string(),
+            job_sequence: j.job_sequence,
+            description: j.description,
+            developer: j.developer,
+            agent: j.agent,
+            agent_method: j.agent_method,
+            app: j.app,
+            app_instance: j.app_instance,
+            app_instance_method: j.app_instance_method,
+            block_number: j.block_number,
+            sequences: j.sequences,
+            sequences1: j.sequences1,
+            sequences2: j.sequences2,
+            data: j.data,
+            status: j.status,
+            attempts: j.attempts,
+            interval_ms: j.interval_ms,
+            next_scheduled_at: j.next_scheduled_at,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+        }).collect())
     }
 
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64> {
@@ -299,25 +346,63 @@ impl CoordinationWrapper for PrivateCoordinationWrapper {
 
     async fn fetch_job_by_id(&self, app_instance: &str, job_id: &str) -> Result<Option<Job<String>>> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fetch_job_by_id(app_instance, &job_id.to_string()).await
-            .map_err(|e| anyhow!("Private error: {}", e))
+
+        // Parse string → u64
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Private: {}", e))?;
+
+        let job = self.inner.fetch_job_by_id(app_instance, &job_id_u64).await
+            .map_err(|e| anyhow!("Private error: {}", e))?;
+
+        // Convert Job<u64> → Job<String>
+        Ok(job.map(|j| Job {
+            id: j.id.to_string(),
+            job_sequence: j.job_sequence,
+            description: j.description,
+            developer: j.developer,
+            agent: j.agent,
+            agent_method: j.agent_method,
+            app: j.app,
+            app_instance: j.app_instance,
+            app_instance_method: j.app_instance_method,
+            block_number: j.block_number,
+            sequences: j.sequences,
+            sequences1: j.sequences1,
+            sequences2: j.sequences2,
+            data: j.data,
+            status: j.status,
+            attempts: j.attempts,
+            interval_ms: j.interval_ms,
+            next_scheduled_at: j.next_scheduled_at,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+        }))
     }
 
     async fn start_job(&self, app_instance: &str, job_id: &str) -> Result<bool> {
         use silvana_coordination_trait::Coordination;
-        self.inner.start_job(app_instance, &job_id.to_string()).await
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Private: {}", e))?;
+
+        self.inner.start_job(app_instance, &job_id_u64).await
             .map_err(|e| anyhow!("Private error: {}", e))
     }
 
     async fn complete_job(&self, app_instance: &str, job_id: &str) -> Result<String> {
         use silvana_coordination_trait::Coordination;
-        self.inner.complete_job(app_instance, &job_id.to_string()).await
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Private: {}", e))?;
+
+        self.inner.complete_job(app_instance, &job_id_u64).await
             .map_err(|e| anyhow!("Private error: {}", e))
     }
 
     async fn fail_job(&self, app_instance: &str, job_id: &str, error: &str) -> Result<String> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fail_job(app_instance, &job_id.to_string(), error).await
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Private: {}", e))?;
+
+        self.inner.fail_job(app_instance, &job_id_u64, error).await
             .map_err(|e| anyhow!("Private error: {}", e))
     }
 
@@ -404,14 +489,61 @@ impl CoordinationWrapper for EthereumCoordinationWrapper {
 
     async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fetch_pending_jobs(app_instance).await
-            .map_err(|e| anyhow!("Ethereum error: {}", e))
+        let jobs = self.inner.fetch_pending_jobs(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))?;
+
+        // Convert Job<u64> to Job<String>
+        Ok(jobs.into_iter().map(|j| Job {
+            id: j.id.to_string(),
+            job_sequence: j.job_sequence,
+            description: j.description,
+            developer: j.developer,
+            agent: j.agent,
+            agent_method: j.agent_method,
+            app: j.app,
+            app_instance: j.app_instance,
+            app_instance_method: j.app_instance_method,
+            block_number: j.block_number,
+            sequences: j.sequences,
+            sequences1: j.sequences1,
+            sequences2: j.sequences2,
+            data: j.data,
+            status: j.status,
+            attempts: j.attempts,
+            interval_ms: j.interval_ms,
+            next_scheduled_at: j.next_scheduled_at,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+        }).collect())
     }
 
     async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<String>>> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fetch_failed_jobs(app_instance).await
-            .map_err(|e| anyhow!("Ethereum error: {}", e))
+        let jobs = self.inner.fetch_failed_jobs(app_instance).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))?;
+
+        Ok(jobs.into_iter().map(|j| Job {
+            id: j.id.to_string(),
+            job_sequence: j.job_sequence,
+            description: j.description,
+            developer: j.developer,
+            agent: j.agent,
+            agent_method: j.agent_method,
+            app: j.app,
+            app_instance: j.app_instance,
+            app_instance_method: j.app_instance_method,
+            block_number: j.block_number,
+            sequences: j.sequences,
+            sequences1: j.sequences1,
+            sequences2: j.sequences2,
+            data: j.data,
+            status: j.status,
+            attempts: j.attempts,
+            interval_ms: j.interval_ms,
+            next_scheduled_at: j.next_scheduled_at,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+        }).collect())
     }
 
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64> {
@@ -422,25 +554,60 @@ impl CoordinationWrapper for EthereumCoordinationWrapper {
 
     async fn fetch_job_by_id(&self, app_instance: &str, job_id: &str) -> Result<Option<Job<String>>> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fetch_job_by_id(app_instance, &job_id.to_string()).await
-            .map_err(|e| anyhow!("Ethereum error: {}", e))
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Ethereum: {}", e))?;
+
+        let job = self.inner.fetch_job_by_id(app_instance, &job_id_u64).await
+            .map_err(|e| anyhow!("Ethereum error: {}", e))?;
+
+        Ok(job.map(|j| Job {
+            id: j.id.to_string(),
+            job_sequence: j.job_sequence,
+            description: j.description,
+            developer: j.developer,
+            agent: j.agent,
+            agent_method: j.agent_method,
+            app: j.app,
+            app_instance: j.app_instance,
+            app_instance_method: j.app_instance_method,
+            block_number: j.block_number,
+            sequences: j.sequences,
+            sequences1: j.sequences1,
+            sequences2: j.sequences2,
+            data: j.data,
+            status: j.status,
+            attempts: j.attempts,
+            interval_ms: j.interval_ms,
+            next_scheduled_at: j.next_scheduled_at,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+        }))
     }
 
     async fn start_job(&self, app_instance: &str, job_id: &str) -> Result<bool> {
         use silvana_coordination_trait::Coordination;
-        self.inner.start_job(app_instance, &job_id.to_string()).await
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Ethereum: {}", e))?;
+
+        self.inner.start_job(app_instance, &job_id_u64).await
             .map_err(|e| anyhow!("Ethereum error: {}", e))
     }
 
     async fn complete_job(&self, app_instance: &str, job_id: &str) -> Result<String> {
         use silvana_coordination_trait::Coordination;
-        self.inner.complete_job(app_instance, &job_id.to_string()).await
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Ethereum: {}", e))?;
+
+        self.inner.complete_job(app_instance, &job_id_u64).await
             .map_err(|e| anyhow!("Ethereum error: {}", e))
     }
 
     async fn fail_job(&self, app_instance: &str, job_id: &str, error: &str) -> Result<String> {
         use silvana_coordination_trait::Coordination;
-        self.inner.fail_job(app_instance, &job_id.to_string(), error).await
+        let job_id_u64 = job_id.parse::<u64>()
+            .map_err(|e| anyhow!("Invalid job ID for Ethereum: {}", e))?;
+
+        self.inner.fail_job(app_instance, &job_id_u64, error).await
             .map_err(|e| anyhow!("Ethereum error: {}", e))
     }
 

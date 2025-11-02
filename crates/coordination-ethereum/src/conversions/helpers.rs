@@ -54,18 +54,6 @@ pub fn optional_u64(value: u64) -> Option<u64> {
     }
 }
 
-/// Create JobId string from app_instance and job_sequence
-pub fn create_job_id(app_instance: &str, job_sequence: u64) -> String {
-    format!("{}-{}", app_instance, job_sequence)
-}
-
-/// Parse JobId string into (app_instance, job_sequence)
-pub fn parse_job_id(job_id: &str) -> Option<(String, u64)> {
-    let (app_instance, sequence_str) = job_id.rsplit_once('-')?;
-    let sequence = sequence_str.parse().ok()?;
-    Some((app_instance.to_string(), sequence))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,20 +68,6 @@ mod tests {
     fn test_optional_u64() {
         assert_eq!(optional_u64(0), None);
         assert_eq!(optional_u64(42), Some(42));
-    }
-
-    #[test]
-    fn test_create_job_id() {
-        assert_eq!(create_job_id("my-app", 42), "my-app-42");
-    }
-
-    #[test]
-    fn test_parse_job_id() {
-        assert_eq!(
-            parse_job_id("my-app-42"),
-            Some(("my-app".to_string(), 42))
-        );
-        assert_eq!(parse_job_id("invalid"), None);
     }
 
     #[test]

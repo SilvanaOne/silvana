@@ -105,10 +105,10 @@ impl PrivateCoordination {
     }
 
     /// Convert database job model to trait Job
-    fn convert_job(&self, job: entity::jobs::Model) -> Job<String> {
+    fn convert_job(&self, job: entity::jobs::Model) -> Job<u64> {
         Job {
-            id: format!("{}-{}", job.app_instance_id, job.job_sequence),
-            job_sequence: job.job_sequence,
+            id: job.job_sequence as u64,
+            job_sequence: job.job_sequence as u64,
             description: job.description,
             developer: job.developer,
             agent: job.agent,
@@ -138,7 +138,7 @@ impl PrivateCoordination {
 
 #[async_trait]
 impl Coordination for PrivateCoordination {
-    type JobId = String;
+    type JobId = u64;
     type SequenceId = u64;
     type BlockId = u64;
     type TransactionHash = String;
@@ -197,22 +197,9 @@ impl Coordination for PrivateCoordination {
     async fn fetch_job_by_id(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Option<Job<Self::JobId>>> {
         self.verify_app_ownership(app_instance).await?;
 
-        // Parse job_id which is in format "{app_instance_id}-{job_sequence}"
-        let parts: Vec<&str> = job_id.split('-').collect();
-        if parts.len() != 2 {
-            return Err(PrivateCoordinationError::InvalidInput(
-                format!("Invalid job ID format: {}", job_id)
-            ));
-        }
-
-        let job_sequence: u64 = parts[1].parse()
-            .map_err(|_| PrivateCoordinationError::InvalidInput(
-                format!("Invalid job sequence in ID: {}", job_id)
-            ))?;
-
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(job_sequence))
+            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
             .one(self.db.connection())
             .await?;
 
@@ -222,20 +209,10 @@ impl Coordination for PrivateCoordination {
     async fn start_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<bool> {
         self.verify_app_ownership(app_instance).await?;
 
-        // Parse job_id
-        let parts: Vec<&str> = job_id.split('-').collect();
-        if parts.len() != 2 {
-            return Ok(false);
-        }
-
-        let job_sequence: u64 = parts[1].parse().map_err(|_| {
-            PrivateCoordinationError::InvalidInput(format!("Invalid job sequence: {}", parts[1]))
-        })?;
-
         // Find and update job
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(job_sequence))
+            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
             .filter(entity::jobs::Column::Status.eq("PENDING"))
             .one(self.db.connection())
             .await?;
@@ -254,20 +231,9 @@ impl Coordination for PrivateCoordination {
     async fn complete_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Self::TransactionHash> {
         self.verify_app_ownership(app_instance).await?;
 
-        let parts: Vec<&str> = job_id.split('-').collect();
-        if parts.len() != 2 {
-            return Err(PrivateCoordinationError::InvalidInput(
-                format!("Invalid job ID format: {}", job_id)
-            ));
-        }
-
-        let job_sequence: u64 = parts[1].parse().map_err(|_| {
-            PrivateCoordinationError::InvalidInput(format!("Invalid job sequence: {}", parts[1]))
-        })?;
-
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(job_sequence))
+            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
             .one(self.db.connection())
             .await?
             .ok_or_else(|| PrivateCoordinationError::NotFound(
@@ -285,20 +251,9 @@ impl Coordination for PrivateCoordination {
     async fn fail_job(&self, app_instance: &str, job_id: &Self::JobId, error: &str) -> Result<Self::TransactionHash> {
         self.verify_app_ownership(app_instance).await?;
 
-        let parts: Vec<&str> = job_id.split('-').collect();
-        if parts.len() != 2 {
-            return Err(PrivateCoordinationError::InvalidInput(
-                format!("Invalid job ID format: {}", job_id)
-            ));
-        }
-
-        let job_sequence: u64 = parts[1].parse().map_err(|_| {
-            PrivateCoordinationError::InvalidInput(format!("Invalid job sequence: {}", parts[1]))
-        })?;
-
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(job_sequence))
+            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
             .one(self.db.connection())
             .await?
             .ok_or_else(|| PrivateCoordinationError::NotFound(
@@ -454,9 +409,8 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn terminate_app_job(&self, app_instance: &str, job_id: u64) -> Result<Self::TransactionHash> {
-        // Convert u64 job_id to our String format
-        let job_id_str = format!("{}-{}", app_instance, job_id);
-        self.terminate_job(app_instance, &job_id_str).await
+        // Pass u64 directly - no conversion needed
+        self.terminate_job(app_instance, &job_id).await
     }
 
     async fn restart_failed_jobs(
