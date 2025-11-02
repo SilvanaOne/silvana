@@ -26,7 +26,7 @@ impl SilvanaSuiInterface {
     /// Start a job on the Sui blockchain by calling the start_job Move function
     /// This should be called before starting the actual job processing
     /// Returns true if the transaction was successful, false if it failed
-    pub(crate) async fn start_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
+    pub async fn start_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
         debug!("Attempting to start job {} on Sui blockchain", job_sequence);
 
         match start_job_tx(app_instance, job_sequence).await {

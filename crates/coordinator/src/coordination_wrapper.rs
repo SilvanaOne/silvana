@@ -47,13 +47,13 @@ pub trait CoordinationWrapper: Send + Sync {
 
 /// Wrapper for SuiCoordination
 pub struct SuiCoordinationWrapper {
-    inner: sui::coordination::SuiCoordination,
+    inner: silvana_coordination_sui::SuiCoordination,
     layer_id: String,
 }
 
 impl SuiCoordinationWrapper {
     pub fn new(layer_id: String) -> Self {
-        let inner = sui::coordination::SuiCoordination::with_chain_id(layer_id.clone());
+        let inner = silvana_coordination_sui::SuiCoordination::with_chain_id(layer_id.clone());
         Self { inner, layer_id }
     }
 }

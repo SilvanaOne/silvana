@@ -2402,6 +2402,7 @@ dependencies = [
  "sha2",
  "silvana-coordination-ethereum",
  "silvana-coordination-private",
+ "silvana-coordination-sui",
  "silvana-coordination-trait",
  "storage",
  "sui",
@@ -6793,6 +6794,24 @@ dependencies = [
  "tokio-test",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "silvana-coordination-sui"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "silvana-coordination-trait",
+ "sui",
+ "sui-rpc",
+ "sui-sdk-types",
+ "thiserror 2.0.17",
+ "tokio",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

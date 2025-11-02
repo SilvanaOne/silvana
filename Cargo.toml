@@ -5,6 +5,7 @@ members = [
     "crates/rpc-client",
     "crates/coordinator",
     "crates/coordination-trait",
+    "crates/coordination-sui",
     "crates/coordination-private",
     "crates/coordination-ethereum",
     "crates/docker",
