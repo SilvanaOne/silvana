@@ -1041,33 +1041,30 @@ impl DockerBufferProcessor {
                         // Continue processing during shutdown - don't exit yet
                         // The loop will continue and process buffered jobs
                     } else {
-                        // Everything appears done - but we need to check if multicall has pending operations
-                        // that might add jobs to the buffer
-                        let pending_ops = self.state.get_total_operations_count().await;
-                        if pending_ops > 0 {
+                        // Everything appears done - but we need to check if multicall is still running
+                        // The multicall processor might be in the middle of an operation that will add jobs to the buffer
+                        if !self.state.is_multicall_completed() {
                             debug!(
-                                "Docker buffer empty but {} multicall operations pending - waiting...",
-                                pending_ops
+                                "Docker buffer empty but multicall processor still running - waiting for it to complete..."
                             );
-                            sleep(Duration::from_secs(2)).await;
+                            sleep(Duration::from_secs(1)).await;
                             continue; // Go back to check again
                         }
 
-                        // No pending multicall operations - wait 1 second and double-check
-                        // in case multicall just picked up something
-                        info!("Docker buffer appears empty, waiting 1 second to verify...");
+                        // Multicall is done - wait 1 second and double-check buffer one final time
+                        // in case multicall just added something right before completing
+                        info!("Multicall completed, checking buffer one final time...");
                         sleep(Duration::from_secs(1)).await;
 
                         // Final check after delay
                         let (final_loading, final_running) = self.docker_manager.get_container_counts().await;
                         let final_buffer_size = self.state.get_started_jobs_buffer_size().await;
-                        let final_pending_ops = self.state.get_total_operations_count().await;
 
-                        if final_buffer_size > 0 || final_loading > 0 || final_running > 0 || final_pending_ops > 0 {
-                            // Race condition detected - new work appeared
+                        if final_buffer_size > 0 || final_loading > 0 || final_running > 0 {
+                            // Race condition detected - new work appeared right at the end
                             debug!(
-                                "Race condition detected: {} new buffered jobs, {} loading, {} running, {} pending ops - continuing",
-                                final_buffer_size, final_loading, final_running, final_pending_ops
+                                "Race condition detected: {} new buffered jobs, {} loading, {} running - continuing",
+                                final_buffer_size, final_loading, final_running
                             );
                             continue; // Go back to processing
                         }

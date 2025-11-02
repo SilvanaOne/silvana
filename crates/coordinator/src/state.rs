@@ -177,6 +177,7 @@ pub struct SharedState {
     rpc_client: Arc<RwLock<Option<SilvanaRpcServiceClient<Channel>>>>, // Silvana RPC service client
     shutdown_flag: Arc<AtomicBool>, // Global shutdown flag for graceful shutdown
     force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
+    multicall_completed: Arc<AtomicBool>, // Flag set when multicall processor has exited
     app_instance_filter: Arc<RwLock<Option<String>>>, // Optional filter to only process jobs from a specific app instance
     settle_only: Arc<AtomicBool>,                     // Flag to run as a dedicated settlement node
     multicall_requests: Arc<Mutex<HashMap<String, MulticallRequests>>>, // Batched job operation requests per app instance
@@ -213,6 +214,7 @@ impl SharedState {
             rpc_client,
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             force_shutdown_flag: Arc::new(AtomicBool::new(false)),
+            multicall_completed: Arc::new(AtomicBool::new(false)),
             app_instance_filter: Arc::new(RwLock::new(None)),
             settle_only: Arc::new(AtomicBool::new(false)),
             multicall_requests: Arc::new(Mutex::new(HashMap::new())),
@@ -248,6 +250,7 @@ impl SharedState {
             rpc_client,
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             force_shutdown_flag: Arc::new(AtomicBool::new(false)),
+            multicall_completed: Arc::new(AtomicBool::new(false)),
             app_instance_filter: Arc::new(RwLock::new(None)),
             settle_only: Arc::new(AtomicBool::new(false)),
             multicall_requests: Arc::new(Mutex::new(HashMap::new())),
@@ -424,6 +427,16 @@ impl SharedState {
         self.is_force_shutdown()
     }
 
+    /// Set the multicall completed flag to signal that multicall processor has exited
+    pub fn set_multicall_completed(&self) {
+        self.multicall_completed.store(true, Ordering::SeqCst);
+    }
+
+    /// Check if multicall processor has completed
+    pub fn is_multicall_completed(&self) -> bool {
+        self.multicall_completed.load(Ordering::SeqCst)
+    }
+
     /// Get the count of current agents
     pub async fn get_current_agents_count(&self) -> usize {
         let current_agents = self.current_agents.read().await;
@@ -442,6 +455,7 @@ impl SharedState {
         agent: String,
         agent_method: String,
         app_instance: String,
+        layer_id: String,
     ) {
         self.jobs_tracker
             .add_job(
@@ -449,6 +463,7 @@ impl SharedState {
                 developer.clone(),
                 agent.clone(),
                 agent_method.clone(),
+                layer_id.clone(),
             )
             .await;
 
@@ -456,8 +471,8 @@ impl SharedState {
         self.has_pending_jobs.store(true, Ordering::Release);
 
         debug!(
-            "Added app_instance {} for {}/{}/{}",
-            app_instance, developer, agent, agent_method
+            "Added app_instance {} for {}/{}/{} on layer {}",
+            app_instance, developer, agent, agent_method, layer_id
         );
     }
 
@@ -484,6 +499,11 @@ impl SharedState {
     /// Get all app_instances with pending jobs
     pub async fn get_app_instances(&self) -> Vec<String> {
         self.jobs_tracker.get_all_app_instances().await
+    }
+
+    /// Get app_instances with pending jobs for a specific coordination layer
+    pub async fn get_app_instances_for_layer(&self, layer_id: &str) -> Vec<String> {
+        self.jobs_tracker.get_app_instances_for_layer(layer_id).await
     }
 
     /// Get app_instances with pending jobs for the current agent

@@ -58,9 +58,10 @@ impl MulticallProcessor {
                         continue; // Go back to processing
                     }
 
-                    // Really done now
+                    // Really done now - set flag before exiting
                     info!("🛑 Multicall processor received shutdown signal");
                     info!("✅ All multicall operations processed and docker completed");
+                    self.state.set_multicall_completed();
                     return Ok(());
                 } else {
                     // Continue processing during shutdown

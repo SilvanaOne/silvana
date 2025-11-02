@@ -3,23 +3,28 @@
 //! This module provides the `SuiCoordination` struct which implements the
 //! `Coordination` trait for the Sui blockchain, wrapping existing Sui functionality.
 
-use async_trait::async_trait;
 use anyhow::anyhow;
+use async_stream::stream;
+use async_trait::async_trait;
+use futures_util::StreamExt;
 use silvana_coordination_trait::{
-    AppInstance, Block, BlockSettlement, Coordination, CoordinationLayer,
-    Job, JobStatus, MulticallOperations, MulticallResult,
-    Proof, ProofCalculation, ProofStatus, SequenceState, Settlement,
+    AppInstance, Block, BlockSettlement, Coordination, CoordinationLayer, EventStream, Job,
+    JobCreatedEvent, JobStatus, MulticallOperations, MulticallResult, Proof, ProofCalculation,
+    ProofStatus, SequenceState, Settlement,
 };
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
+use tokio::time::timeout;
+use tracing::{debug, error, info, warn};
 
 use sui::{
     app_instance::{
         add_metadata_tx, complete_job_tx, create_app_job_tx, create_merge_job_with_proving_tx,
         create_settle_job_tx, delete_kv_tx, fail_job_tx, multicall_job_operations_tx, purge_tx,
-        reject_proof_tx, remove_failed_jobs_tx, restart_failed_jobs_with_sequences_tx,
-        set_kv_tx, start_proving_tx, submit_proof_tx, terminate_app_job_tx,
-        terminate_job_tx, try_create_block_tx, update_block_proof_data_availability_tx,
+        reject_proof_tx, remove_failed_jobs_tx, restart_failed_jobs_with_sequences_tx, set_kv_tx,
+        start_proving_tx, submit_proof_tx, terminate_app_job_tx, terminate_job_tx,
+        try_create_block_tx, update_block_proof_data_availability_tx,
         update_block_settlement_tx_hash_tx, update_block_settlement_tx_included_in_block_tx,
         update_block_state_data_availability_tx, update_state_for_sequence_tx,
     },
@@ -174,14 +179,21 @@ impl SuiCoordination {
             block_number: calc.block_number,
             start_sequence: calc.start_sequence,
             end_sequence: calc.end_sequence,
-            proofs: calc.proofs.into_iter().map(|p| self.convert_proof(p)).collect(),
+            proofs: calc
+                .proofs
+                .into_iter()
+                .map(|p| self.convert_proof(p))
+                .collect(),
             block_proof: calc.block_proof,
-            block_proof_submitted: calc.is_finished,  // Map is_finished to block_proof_submitted
+            block_proof_submitted: calc.is_finished, // Map is_finished to block_proof_submitted
         }
     }
 
     /// Convert from internal BlockSettlement to trait BlockSettlement
-    fn convert_block_settlement(&self, settlement: fetch::app_instance::BlockSettlement) -> BlockSettlement {
+    fn convert_block_settlement(
+        &self,
+        settlement: fetch::app_instance::BlockSettlement,
+    ) -> BlockSettlement {
         BlockSettlement {
             block_number: settlement.block_number,
             settlement_tx_hash: settlement.settlement_tx_hash,
@@ -202,9 +214,13 @@ impl SuiCoordination {
     }
 
     /// Extract job_sequence from JobCreatedEvent in transaction
-    async fn extract_job_sequence_from_tx(&self, tx_hash: &str) -> Result<u64, SilvanaSuiInterfaceError> {
+    async fn extract_job_sequence_from_tx(
+        &self,
+        tx_hash: &str,
+    ) -> Result<u64, SilvanaSuiInterfaceError> {
         // Fetch transaction events
-        let events_json = sui::transactions::fetch_transaction_events_as_json(tx_hash).await
+        let events_json = sui::transactions::fetch_transaction_events_as_json(tx_hash)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))?;
 
         // Parse events array and look for JobCreatedEvent
@@ -213,9 +229,13 @@ impl SuiCoordination {
                 if let Some(event_type) = event["event_type"].as_str() {
                     if event_type.contains("JobCreatedEvent") {
                         // Try different JSON structures (parsed_json, contents, direct)
-                        let event_data = if event["parsed_json"].is_object() && !event["parsed_json"]["job_sequence"].is_null() {
+                        let event_data = if event["parsed_json"].is_object()
+                            && !event["parsed_json"]["job_sequence"].is_null()
+                        {
                             &event["parsed_json"]
-                        } else if event["contents"].is_object() && !event["contents"]["job_sequence"].is_null() {
+                        } else if event["contents"].is_object()
+                            && !event["contents"]["job_sequence"].is_null()
+                        {
                             &event["contents"]
                         } else {
                             event
@@ -225,21 +245,31 @@ impl SuiCoordination {
                         if let Some(job_seq) = event_data["job_sequence"].as_u64() {
                             return Ok(job_seq);
                         } else if let Some(job_seq_str) = event_data["job_sequence"].as_str() {
-                            return job_seq_str.parse::<u64>()
-                                .map_err(|e| SilvanaSuiInterfaceError::Other(anyhow!("Failed to parse job_sequence: {}", e)));
+                            return job_seq_str.parse::<u64>().map_err(|e| {
+                                SilvanaSuiInterfaceError::Other(anyhow!(
+                                    "Failed to parse job_sequence: {}",
+                                    e
+                                ))
+                            });
                         }
                     }
                 }
             }
         }
 
-        Err(SilvanaSuiInterfaceError::Other(anyhow!("JobCreatedEvent not found in transaction")))
+        Err(SilvanaSuiInterfaceError::Other(anyhow!(
+            "JobCreatedEvent not found in transaction"
+        )))
     }
 
     /// Extract total operation count from MulticallExecutedEvent in transaction
-    async fn extract_operation_count_from_tx(&self, tx_hash: &str) -> Result<usize, SilvanaSuiInterfaceError> {
+    async fn extract_operation_count_from_tx(
+        &self,
+        tx_hash: &str,
+    ) -> Result<usize, SilvanaSuiInterfaceError> {
         // Fetch transaction events
-        let events_json = sui::transactions::fetch_transaction_events_as_json(tx_hash).await
+        let events_json = sui::transactions::fetch_transaction_events_as_json(tx_hash)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))?;
 
         let mut total_operations = 0;
@@ -250,9 +280,13 @@ impl SuiCoordination {
                 if let Some(event_type) = event["event_type"].as_str() {
                     if event_type.contains("MulticallExecutedEvent") {
                         // Try different JSON structures
-                        let event_data = if event["parsed_json"].is_object() && !event["parsed_json"]["start_jobs"].is_null() {
+                        let event_data = if event["parsed_json"].is_object()
+                            && !event["parsed_json"]["start_jobs"].is_null()
+                        {
                             &event["parsed_json"]
-                        } else if event["contents"].is_object() && !event["contents"]["start_jobs"].is_null() {
+                        } else if event["contents"].is_object()
+                            && !event["contents"]["start_jobs"].is_null()
+                        {
                             &event["contents"]
                         } else {
                             event
@@ -277,7 +311,9 @@ impl SuiCoordination {
         }
 
         if total_operations == 0 {
-            return Err(SilvanaSuiInterfaceError::Other(anyhow!("No MulticallExecutedEvent found in transaction or no operations in event")));
+            return Err(SilvanaSuiInterfaceError::Other(anyhow!(
+                "No MulticallExecutedEvent found in transaction or no operations in event"
+            )));
         }
 
         Ok(total_operations)
@@ -300,7 +336,9 @@ impl SuiCoordination {
             last_settled_block_number: app.last_settled_block_number,
             last_settled_sequence: app.last_settled_sequence,
             last_purged_sequence: app.last_purged_sequence,
-            settlements: app.settlements.into_iter()
+            settlements: app
+                .settlements
+                .into_iter()
                 .map(|(k, v)| (k, self.convert_settlement(v)))
                 .collect(),
             is_paused: app.is_paused,
@@ -311,7 +349,10 @@ impl SuiCoordination {
     }
 
     /// Convert from trait MulticallOperations to internal type
-    fn convert_multicall_operations(&self, ops: MulticallOperations) -> sui::types::MulticallOperations {
+    fn convert_multicall_operations(
+        &self,
+        ops: MulticallOperations,
+    ) -> sui::types::MulticallOperations {
         sui::types::MulticallOperations {
             app_instance: ops.app_instance,
             complete_job_sequences: ops.complete_job_sequences,
@@ -327,6 +368,145 @@ impl SuiCoordination {
             create_merge_jobs: ops.create_merge_jobs,
         }
     }
+}
+
+// Helper functions for event parsing (standalone to avoid lifetime issues)
+
+/// Parse JobCreatedEvent from Sui checkpoint
+async fn parse_job_created_events(
+    checkpoint: &sui_rpc::proto::sui::rpc::v2::Checkpoint,
+    checkpoint_seq: u64,
+) -> Vec<JobCreatedEvent> {
+    let mut events = Vec::new();
+
+    for (tx_index, transaction) in checkpoint.transactions.iter().enumerate() {
+        if let Some(tx_events) = &transaction.events {
+            for (event_index, event) in tx_events.events.iter().enumerate() {
+                if let Some(event_type) = &event.event_type {
+                    if event_type.contains("::JobCreatedEvent") {
+                        // Fetch the full event with contents from the transaction
+                        match sui::fetch::checkpoint::fetch_event_with_contents(
+                            checkpoint_seq,
+                            tx_index,
+                            event_index,
+                        )
+                        .await
+                        {
+                            Ok(Some(full_event)) => {
+                                if let Some(contents) = &full_event.contents {
+                                    if let Some(value) = &contents.value {
+                                        debug!(
+                                            "🔍 RAW BCS data length: {} bytes, first 100 bytes: {:02x?}",
+                                            value.len(),
+                                            &value[..100.min(value.len())]
+                                        );
+                                        match decode_job_created_event(value) {
+                                            Ok(job_event) => {
+                                                info!(
+                                                    "✅ Parsed JobCreatedEvent from checkpoint {}: seq={}, app={}",
+                                                    checkpoint_seq,
+                                                    job_event.job_sequence,
+                                                    &job_event.app_instance
+                                                        [..16.min(job_event.app_instance.len())]
+                                                );
+                                                events.push(job_event);
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    "❌ Failed to decode JobCreatedEvent from checkpoint {}: {}",
+                                                    checkpoint_seq, e
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                warn!(
+                                    "Event not found when fetching contents for checkpoint {} tx {} event {}",
+                                    checkpoint_seq, tx_index, event_index
+                                );
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to fetch event contents for checkpoint {} tx {} event {}: {}",
+                                    checkpoint_seq, tx_index, event_index, e
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    events
+}
+
+/// Decode JobCreatedEvent from BCS bytes
+fn decode_job_created_event(bcs_data: &[u8]) -> Result<JobCreatedEvent, SilvanaSuiInterfaceError> {
+    #[derive(serde::Deserialize)]
+    #[allow(dead_code)]
+    enum JobStatusBcs {
+        Pending,
+        Running,
+        Failed(String),
+    }
+
+    #[derive(serde::Deserialize)]
+    struct JobCreatedEventBcs {
+        job_sequence: u64,
+        description: Option<String>,
+        developer: String,
+        agent: String,
+        agent_method: String,
+        app: String,
+        app_instance: String,
+        app_instance_method: String,
+        block_number: Option<u64>,
+        sequences: Option<Vec<u64>>,
+        sequences1: Option<Vec<u64>>,
+        sequences2: Option<Vec<u64>>,
+        data: Vec<u8>,
+        status: JobStatusBcs,
+        created_at: u64,
+    }
+
+    let bcs_event: JobCreatedEventBcs =
+        bcs::from_bytes(bcs_data).map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))?;
+
+    debug!(
+        "📦 BCS decoded ALL fields:\n  seq={}\n  description={:?}\n  developer='{}'\n  agent='{}'\n  agent_method='{}'\n  app='{}' (len={})\n  app_instance='{}' (len={})\n  app_instance_method='{}' (len={})\n  block_number={:?}",
+        bcs_event.job_sequence,
+        bcs_event.description,
+        bcs_event.developer,
+        bcs_event.agent,
+        bcs_event.agent_method,
+        bcs_event.app,
+        bcs_event.app.len(),
+        bcs_event.app_instance,
+        bcs_event.app_instance.len(),
+        bcs_event.app_instance_method,
+        bcs_event.app_instance_method.len(),
+        bcs_event.block_number
+    );
+
+    // Add "0x" prefix to app_instance if not present (Sui addresses need the prefix)
+    let app_instance = if bcs_event.app_instance.starts_with("0x") {
+        bcs_event.app_instance
+    } else {
+        format!("0x{}", bcs_event.app_instance)
+    };
+
+    Ok(JobCreatedEvent {
+        job_sequence: bcs_event.job_sequence,
+        developer: bcs_event.developer,
+        agent: bcs_event.agent,
+        agent_method: bcs_event.agent_method,
+        app_instance,
+        app_instance_method: bcs_event.app_instance_method,
+        block_number: bcs_event.block_number.unwrap_or(0),
+        created_at: bcs_event.created_at,
+    })
 }
 
 impl fmt::Debug for SuiCoordination {
@@ -375,9 +555,16 @@ impl Coordination for SuiCoordination {
         Ok(get_failed_jobs_count(&app).await)
     }
 
-    async fn fetch_job_by_id(&self, app_instance: &str, job_sequence: u64) -> Result<Option<Job>, Self::Error> {
+    async fn fetch_job_by_id(
+        &self,
+        app_instance: &str,
+        job_sequence: u64,
+    ) -> Result<Option<Job>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
-        let jobs_table_id = app.jobs.as_ref().map(|j| j.jobs_table_id.clone())
+        let jobs_table_id = app
+            .jobs
+            .as_ref()
+            .map(|j| j.jobs_table_id.clone())
             .ok_or_else(|| SilvanaSuiInterfaceError::Other(anyhow!("Jobs table not found")))?;
         match fetch_job_by_id(&jobs_table_id, job_sequence).await? {
             Some(job) => Ok(Some(self.convert_job(job))),
@@ -395,32 +582,51 @@ impl Coordination for SuiCoordination {
         Ok(app.jobs.as_ref().map(|j| j.total_jobs_count).unwrap_or(0))
     }
 
-    async fn get_settlement_job_ids(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error> {
+    async fn get_settlement_job_ids(
+        &self,
+        app_instance: &str,
+    ) -> Result<HashMap<String, u64>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         sui::fetch::app_instance::get_settlement_job_ids_for_instance(&app)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))
     }
 
-    async fn get_jobs_info(&self, app_instance: &str) -> Result<Option<(String, String)>, Self::Error> {
+    async fn get_jobs_info(
+        &self,
+        app_instance: &str,
+    ) -> Result<Option<(String, String)>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         sui::fetch::get_jobs_info_from_app_instance(&app)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))
     }
 
-    async fn fetch_jobs_batch(&self, app_instance: &str, job_ids: &[u64]) -> Result<Vec<Job>, Self::Error> {
+    async fn fetch_jobs_batch(
+        &self,
+        app_instance: &str,
+        job_ids: &[u64],
+    ) -> Result<Vec<Job>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
-        let jobs_table_id = app.jobs.as_ref().map(|j| j.jobs_table_id.clone())
+        let jobs_table_id = app
+            .jobs
+            .as_ref()
+            .map(|j| j.jobs_table_id.clone())
             .ok_or_else(|| SilvanaSuiInterfaceError::Other(anyhow!("Jobs table not found")))?;
         let jobs_map = sui::fetch::fetch_jobs_batch(&jobs_table_id, job_ids)
             .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))?;
         // Convert HashMap<u64, Job> to Vec<Job>
-        Ok(jobs_map.into_values().map(|j| self.convert_job(j)).collect())
+        Ok(jobs_map
+            .into_values()
+            .map(|j| self.convert_job(j))
+            .collect())
     }
 
-    async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>, Self::Error> {
+    async fn fetch_pending_job_sequences(
+        &self,
+        app_instance: &str,
+    ) -> Result<Vec<u64>, Self::Error> {
         // Fetch all pending jobs and extract their sequences
         let pending_jobs = self.fetch_pending_jobs(app_instance).await?;
         Ok(pending_jobs.into_iter().map(|j| j.job_sequence).collect())
@@ -434,9 +640,14 @@ impl Coordination for SuiCoordination {
         agent_method: &str,
     ) -> Result<Vec<u64>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
-        sui::fetch::fetch_pending_job_sequences_from_app_instance(&app, developer, agent, agent_method)
-            .await
-            .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))
+        sui::fetch::fetch_pending_job_sequences_from_app_instance(
+            &app,
+            developer,
+            agent,
+            agent_method,
+        )
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))
     }
 
     async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool, Self::Error> {
@@ -445,18 +656,34 @@ impl Coordination for SuiCoordination {
         Ok(interface.start_job(app_instance, job_sequence).await)
     }
 
-    async fn complete_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash, Self::Error> {
-        complete_job_tx(app_instance, job_sequence).await
+    async fn complete_job(
+        &self,
+        app_instance: &str,
+        job_sequence: u64,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        complete_job_tx(app_instance, job_sequence)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
-    async fn fail_job(&self, app_instance: &str, job_sequence: u64, error: &str) -> Result<Self::TransactionHash, Self::Error> {
-        fail_job_tx(app_instance, job_sequence, error).await
+    async fn fail_job(
+        &self,
+        app_instance: &str,
+        job_sequence: u64,
+        error: &str,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        fail_job_tx(app_instance, job_sequence, error)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
-    async fn terminate_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash, Self::Error> {
-        terminate_job_tx(app_instance, job_sequence, None).await
+    async fn terminate_job(
+        &self,
+        app_instance: &str,
+        job_sequence: u64,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        terminate_job_tx(app_instance, job_sequence, None)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -486,7 +713,9 @@ impl Coordination for SuiCoordination {
             interval_ms,
             next_scheduled_at,
             settlement_chain,
-        ).await.map_err(|e| SilvanaSuiInterfaceError::Other(e))?;
+        )
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::Other(e))?;
 
         // Extract job_sequence from transaction events
         let job_sequence = self.extract_job_sequence_from_tx(&tx_hash).await?;
@@ -509,7 +738,9 @@ impl Coordination for SuiCoordination {
             sequences1,
             sequences2,
             job_description,
-        ).await.map_err(|e| SilvanaSuiInterfaceError::Other(e))
+        )
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
     async fn create_settle_job(
@@ -519,12 +750,18 @@ impl Coordination for SuiCoordination {
         chain: String,
         job_description: Option<String>,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        create_settle_job_tx(app_instance, block_number, chain, job_description).await
+        create_settle_job_tx(app_instance, block_number, chain, job_description)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
-    async fn terminate_app_job(&self, app_instance: &str, job_id: u64) -> Result<Self::TransactionHash, Self::Error> {
-        terminate_app_job_tx(app_instance, job_id).await
+    async fn terminate_app_job(
+        &self,
+        app_instance: &str,
+        job_id: u64,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        terminate_app_job_tx(app_instance, job_id)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -533,7 +770,8 @@ impl Coordination for SuiCoordination {
         app_instance: &str,
         job_sequences: Option<Vec<u64>>,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        restart_failed_jobs_with_sequences_tx(app_instance, job_sequences, None).await
+        restart_failed_jobs_with_sequences_tx(app_instance, job_sequences, None)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -542,23 +780,37 @@ impl Coordination for SuiCoordination {
         app_instance: &str,
         sequences: Option<Vec<u64>>,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        remove_failed_jobs_tx(app_instance, sequences, None).await
+        remove_failed_jobs_tx(app_instance, sequences, None)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
     // ===== Sequence State Management =====
 
-    async fn fetch_sequence_state(&self, app_instance: &str, sequence: u64) -> Result<Option<SequenceState>, Self::Error> {
+    async fn fetch_sequence_state(
+        &self,
+        app_instance: &str,
+        sequence: u64,
+    ) -> Result<Option<SequenceState>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
 
         // Get the sequence state manager table ID
-        let sequence_state_manager = serde_json::from_value::<serde_json::Value>(app.sequence_state_manager)
-            .map_err(|e| SilvanaSuiInterfaceError::ParseError(format!("Failed to parse sequence_state_manager: {}", e)))?;
+        let sequence_state_manager = serde_json::from_value::<serde_json::Value>(
+            app.sequence_state_manager,
+        )
+        .map_err(|e| {
+            SilvanaSuiInterfaceError::ParseError(format!(
+                "Failed to parse sequence_state_manager: {}",
+                e
+            ))
+        })?;
 
         let table_id = sequence_state_manager
             .get("sequence_states_table_id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| SilvanaSuiInterfaceError::ParseError("Missing sequence_states_table_id".to_string()))?;
+            .ok_or_else(|| {
+                SilvanaSuiInterfaceError::ParseError("Missing sequence_states_table_id".to_string())
+            })?;
 
         match fetch_sequence_state_by_id(table_id, sequence).await? {
             Some(state) => Ok(Some(self.convert_sequence_state(state))),
@@ -597,13 +849,23 @@ impl Coordination for SuiCoordination {
         new_state_data: Option<Vec<u8>>,
         new_data_availability_hash: Option<String>,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        update_state_for_sequence_tx(app_instance, sequence, new_state_data, new_data_availability_hash).await
-            .map_err(|e| SilvanaSuiInterfaceError::Other(e))
+        update_state_for_sequence_tx(
+            app_instance,
+            sequence,
+            new_state_data,
+            new_data_availability_hash,
+        )
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
     // ===== Block Management =====
 
-    async fn fetch_block(&self, app_instance: &str, block_number: u64) -> Result<Option<Block>, Self::Error> {
+    async fn fetch_block(
+        &self,
+        app_instance: &str,
+        block_number: u64,
+    ) -> Result<Option<Block>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         match fetch_block_info(&app, block_number).await? {
             Some(block) => Ok(Some(self.convert_block(block))),
@@ -619,7 +881,10 @@ impl Coordination for SuiCoordination {
     ) -> Result<Vec<Block>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         let blocks = fetch_blocks_range(&app, from_block, to_block).await?;
-        Ok(blocks.into_iter().map(|(_, b)| self.convert_block(b)).collect())
+        Ok(blocks
+            .into_iter()
+            .map(|(_, b)| self.convert_block(b))
+            .collect())
     }
 
     async fn try_create_block(&self, app_instance: &str) -> Result<Option<u64>, Self::Error> {
@@ -646,7 +911,8 @@ impl Coordination for SuiCoordination {
         block_number: u64,
         state_da: String,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        update_block_state_data_availability_tx(app_instance, block_number, state_da).await
+        update_block_state_data_availability_tx(app_instance, block_number, state_da)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -656,7 +922,8 @@ impl Coordination for SuiCoordination {
         block_number: u64,
         proof_da: String,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        update_block_proof_data_availability_tx(app_instance, block_number, proof_da).await
+        update_block_proof_data_availability_tx(app_instance, block_number, proof_da)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -682,7 +949,10 @@ impl Coordination for SuiCoordination {
     ) -> Result<Vec<ProofCalculation>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         let calcs = fetch_proof_calculations_range(&app, from_block, to_block).await?;
-        Ok(calcs.into_iter().map(|(_, c)| self.convert_proof_calculation(c)).collect())
+        Ok(calcs
+            .into_iter()
+            .map(|(_, c)| self.convert_proof_calculation(c))
+            .collect())
     }
 
     async fn start_proving(
@@ -693,8 +963,15 @@ impl Coordination for SuiCoordination {
         merged_sequences_1: Option<Vec<u64>>,
         merged_sequences_2: Option<Vec<u64>>,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        start_proving_tx(app_instance, block_number, sequences, merged_sequences_1, merged_sequences_2).await
-            .map_err(|e| SilvanaSuiInterfaceError::Other(e))
+        start_proving_tx(
+            app_instance,
+            block_number,
+            sequences,
+            merged_sequences_1,
+            merged_sequences_2,
+        )
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
     async fn submit_proof(
@@ -723,7 +1000,9 @@ impl Coordination for SuiCoordination {
             prover_architecture,
             prover_memory,
             cpu_time,
-        ).await.map_err(|e| SilvanaSuiInterfaceError::Other(e))
+        )
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
     async fn reject_proof(
@@ -732,7 +1011,8 @@ impl Coordination for SuiCoordination {
         block_number: u64,
         sequences: Vec<u64>,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        reject_proof_tx(app_instance, block_number, sequences).await
+        reject_proof_tx(app_instance, block_number, sequences)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -745,8 +1025,9 @@ impl Coordination for SuiCoordination {
         chain: &str,
     ) -> Result<Option<BlockSettlement>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
-        let settlement = app.settlements.get(chain)
-            .ok_or_else(|| SilvanaSuiInterfaceError::Other(anyhow!("Settlement not found for chain")))?;
+        let settlement = app.settlements.get(chain).ok_or_else(|| {
+            SilvanaSuiInterfaceError::Other(anyhow!("Settlement not found for chain"))
+        })?;
         match fetch_block_settlement(settlement, block_number).await? {
             Some(block_settlement) => Ok(Some(self.convert_block_settlement(block_settlement))),
             None => Ok(None),
@@ -758,12 +1039,23 @@ impl Coordination for SuiCoordination {
         Ok(app.settlements.keys().cloned().collect())
     }
 
-    async fn get_settlement_address(&self, app_instance: &str, chain: &str) -> Result<Option<String>, Self::Error> {
+    async fn get_settlement_address(
+        &self,
+        app_instance: &str,
+        chain: &str,
+    ) -> Result<Option<String>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
-        Ok(app.settlements.get(chain).and_then(|s| s.settlement_address.clone()))
+        Ok(app
+            .settlements
+            .get(chain)
+            .and_then(|s| s.settlement_address.clone()))
     }
 
-    async fn get_settlement_job_for_chain(&self, app_instance: &str, chain: &str) -> Result<Option<u64>, Self::Error> {
+    async fn get_settlement_job_for_chain(
+        &self,
+        app_instance: &str,
+        chain: &str,
+    ) -> Result<Option<u64>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         Ok(app.settlements.get(chain).and_then(|s| s.settlement_job))
     }
@@ -787,7 +1079,8 @@ impl Coordination for SuiCoordination {
         chain: String,
         settlement_tx_hash: String,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        update_block_settlement_tx_hash_tx(app_instance, block_number, chain, settlement_tx_hash).await
+        update_block_settlement_tx_hash_tx(app_instance, block_number, chain, settlement_tx_hash)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -798,18 +1091,31 @@ impl Coordination for SuiCoordination {
         chain: String,
         settled_at: u64,
     ) -> Result<Self::TransactionHash, Self::Error> {
-        update_block_settlement_tx_included_in_block_tx(app_instance, block_number, chain, settled_at).await
-            .map_err(|e| SilvanaSuiInterfaceError::Other(e))
+        update_block_settlement_tx_included_in_block_tx(
+            app_instance,
+            block_number,
+            chain,
+            settled_at,
+        )
+        .await
+        .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
     // ===== Key-Value Storage =====
 
-    async fn get_kv_string(&self, app_instance: &str, key: &str) -> Result<Option<String>, Self::Error> {
+    async fn get_kv_string(
+        &self,
+        app_instance: &str,
+        key: &str,
+    ) -> Result<Option<String>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         Ok(app.kv.get(key).cloned())
     }
 
-    async fn get_all_kv_string(&self, app_instance: &str) -> Result<HashMap<String, String>, Self::Error> {
+    async fn get_all_kv_string(
+        &self,
+        app_instance: &str,
+    ) -> Result<HashMap<String, String>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         Ok(app.kv)
     }
@@ -822,7 +1128,8 @@ impl Coordination for SuiCoordination {
     ) -> Result<Vec<String>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         let mut keys: Vec<String> = if let Some(prefix) = prefix {
-            app.kv.keys()
+            app.kv
+                .keys()
                 .filter(|k| k.starts_with(prefix))
                 .cloned()
                 .collect()
@@ -839,18 +1146,33 @@ impl Coordination for SuiCoordination {
         Ok(keys)
     }
 
-    async fn set_kv_string(&self, app_instance: &str, key: String, value: String) -> Result<Self::TransactionHash, Self::Error> {
-        set_kv_tx(app_instance, key, value).await
+    async fn set_kv_string(
+        &self,
+        app_instance: &str,
+        key: String,
+        value: String,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        set_kv_tx(app_instance, key, value)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
-    async fn delete_kv_string(&self, app_instance: &str, key: &str) -> Result<Self::TransactionHash, Self::Error> {
-        delete_kv_tx(app_instance, key.to_string()).await
+    async fn delete_kv_string(
+        &self,
+        app_instance: &str,
+        key: &str,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        delete_kv_tx(app_instance, key.to_string())
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
     // Binary KV operations - not supported on Sui yet
-    async fn get_kv_binary(&self, _app_instance: &str, _key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
+    async fn get_kv_binary(
+        &self,
+        _app_instance: &str,
+        _key: &[u8],
+    ) -> Result<Option<Vec<u8>>, Self::Error> {
         Err(SilvanaSuiInterfaceError::Other(anyhow::anyhow!(
             "Binary KV operations not yet supported on Sui"
         )))
@@ -867,13 +1189,22 @@ impl Coordination for SuiCoordination {
         )))
     }
 
-    async fn set_kv_binary(&self, _app_instance: &str, _key: Vec<u8>, _value: Vec<u8>) -> Result<Self::TransactionHash, Self::Error> {
+    async fn set_kv_binary(
+        &self,
+        _app_instance: &str,
+        _key: Vec<u8>,
+        _value: Vec<u8>,
+    ) -> Result<Self::TransactionHash, Self::Error> {
         Err(SilvanaSuiInterfaceError::Other(anyhow::anyhow!(
             "Binary KV operations not yet supported on Sui"
         )))
     }
 
-    async fn delete_kv_binary(&self, _app_instance: &str, _key: &[u8]) -> Result<Self::TransactionHash, Self::Error> {
+    async fn delete_kv_binary(
+        &self,
+        _app_instance: &str,
+        _key: &[u8],
+    ) -> Result<Self::TransactionHash, Self::Error> {
         Err(SilvanaSuiInterfaceError::Other(anyhow::anyhow!(
             "Binary KV operations not yet supported on Sui"
         )))
@@ -881,18 +1212,31 @@ impl Coordination for SuiCoordination {
 
     // ===== Metadata Management =====
 
-    async fn get_metadata(&self, app_instance: &str, key: &str) -> Result<Option<String>, Self::Error> {
+    async fn get_metadata(
+        &self,
+        app_instance: &str,
+        key: &str,
+    ) -> Result<Option<String>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         Ok(app.metadata.get(key).cloned())
     }
 
-    async fn get_all_metadata(&self, app_instance: &str) -> Result<HashMap<String, String>, Self::Error> {
+    async fn get_all_metadata(
+        &self,
+        app_instance: &str,
+    ) -> Result<HashMap<String, String>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         Ok(app.metadata)
     }
 
-    async fn add_metadata(&self, app_instance: &str, key: String, value: String) -> Result<Self::TransactionHash, Self::Error> {
-        add_metadata_tx(app_instance, key, value).await
+    async fn add_metadata(
+        &self,
+        app_instance: &str,
+        key: String,
+        value: String,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        add_metadata_tx(app_instance, key, value)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -934,7 +1278,8 @@ impl Coordination for SuiCoordination {
             .map(|op| self.convert_multicall_operations(op))
             .collect();
 
-        let tx_hash = multicall_job_operations_tx(internal_ops, None, None).await
+        let tx_hash = multicall_job_operations_tx(internal_ops, None, None)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))?;
 
         // Extract operation count from transaction events
@@ -944,9 +1289,66 @@ impl Coordination for SuiCoordination {
 
     // ===== State Purging =====
 
-    async fn purge(&self, app_instance: &str, sequences_to_purge: u64) -> Result<Self::TransactionHash, Self::Error> {
-        purge_tx(app_instance, sequences_to_purge, None, None).await
+    async fn purge(
+        &self,
+        app_instance: &str,
+        sequences_to_purge: u64,
+    ) -> Result<Self::TransactionHash, Self::Error> {
+        purge_tx(app_instance, sequences_to_purge, None, None)
+            .await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
+    }
+
+    // ===== Event Streaming =====
+
+    async fn event_stream(&self) -> Result<EventStream, Self::Error> {
+        let stream = stream! {
+            loop {
+                // Create checkpoint stream
+                match sui::events::create_checkpoint_stream().await {
+                    Ok(mut checkpoint_stream) => {
+                        info!("✅ Sui: Connected to checkpoint stream");
+
+                        // Process checkpoints
+                        while let Ok(Some(response)) = timeout(
+                            Duration::from_secs(120),
+                            checkpoint_stream.next()
+                        ).await {
+                            match response {
+                                Ok(checkpoint_response) => {
+                                    if let (Some(cursor), Some(checkpoint)) =
+                                        (checkpoint_response.cursor, checkpoint_response.checkpoint)
+                                    {
+                                        // Parse events from this checkpoint
+                                        let events = parse_job_created_events(&checkpoint, cursor).await;
+
+                                        // Yield each event
+                                        for event in events {
+                                            yield Ok(event);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Sui checkpoint stream error: {}", e);
+                                    yield Err(Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
+                                    break; // Reconnect
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to create Sui checkpoint stream: {}", e);
+                        yield Err(Box::new(SilvanaSuiInterfaceError::Other(e)) as Box<dyn std::error::Error + Send + Sync>);
+                    }
+                }
+
+                // Exponential backoff before reconnect
+                warn!("Sui checkpoint stream disconnected, reconnecting in 5s...");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        };
+
+        Ok(Box::pin(stream))
     }
 }
 

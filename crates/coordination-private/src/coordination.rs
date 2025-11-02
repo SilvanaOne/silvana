@@ -1,5 +1,6 @@
 //! Private Coordination layer implementation
 
+use async_stream::stream;
 use async_trait::async_trait;
 use chrono::Utc;
 use sea_orm::{
@@ -7,14 +8,16 @@ use sea_orm::{
     PaginatorTrait, TransactionTrait,
 };
 use silvana_coordination_trait::{
-    AppInstance, Block, BlockSettlement, Coordination, CoordinationLayer,
-    Job, JobStatus, MulticallOperations, MulticallResult,
+    AppInstance, Block, BlockSettlement, Coordination, CoordinationLayer, EventStream,
+    Job, JobCreatedEvent, JobStatus, MulticallOperations, MulticallResult,
     ProofCalculation, SequenceState,
 };
 use state::entity;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tracing::{info, warn};
+use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -37,6 +40,9 @@ pub struct PrivateCoordination {
 
     /// Optional JWT token for current session
     current_token: Option<String>,
+
+    /// Last seen job_sequence for event polling
+    last_seen_job_sequence: Arc<AtomicU64>,
 }
 
 impl PrivateCoordination {
@@ -50,6 +56,7 @@ impl PrivateCoordination {
             auth,
             chain_id: config.chain_id,
             current_token: None,
+            last_seen_job_sequence: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -1630,5 +1637,132 @@ impl Coordination for PrivateCoordination {
         info!("Purged sequences up to {} for app_instance {}", sequences_to_purge, app_instance);
 
         Ok(self.generate_tx_hash())
+    }
+
+    // ===== Event Streaming =====
+
+    async fn event_stream(&self) -> Result<EventStream> {
+        let db = Arc::clone(&self.db);
+        let last_seen = Arc::clone(&self.last_seen_job_sequence);
+
+        let stream = stream! {
+            // INITIAL BACKFILL: Fetch all existing pending jobs first
+            info!("Private: Starting event stream - fetching existing pending jobs");
+
+            match entity::jobs::Entity::find()
+                .filter(entity::jobs::Column::Status.eq("PENDING"))
+                .order_by_asc(entity::jobs::Column::JobSequence)
+                .all(db.connection())
+                .await
+            {
+                Ok(existing_jobs) => {
+                    let job_count = existing_jobs.len();
+                    let mut highest_seq = 0u64;
+
+                    // Yield all existing pending jobs as events
+                    for job_model in existing_jobs {
+                        if job_model.job_sequence > highest_seq {
+                            highest_seq = job_model.job_sequence;
+                        }
+
+                        let event = JobCreatedEvent {
+                            job_sequence: job_model.job_sequence,
+                            developer: job_model.developer,
+                            agent: job_model.agent,
+                            agent_method: job_model.agent_method,
+                            app_instance: job_model.app_instance_id.clone(),
+                            app_instance_method: job_model.metadata
+                                .as_ref()
+                                .and_then(|m| m.get("app_instance_method"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string(),
+                            block_number: job_model.block_number.unwrap_or(0),
+                            created_at: job_model.created_at.timestamp_millis() as u64,
+                        };
+
+                        debug!(
+                            "Private: Backfill JobCreated event - seq={}, app={}",
+                            event.job_sequence,
+                            &event.app_instance[..16.min(event.app_instance.len())]
+                        );
+
+                        yield Ok(event);
+                    }
+
+                    // Set last_seen to highest sequence from backfill
+                    last_seen.store(highest_seq, Ordering::SeqCst);
+                    info!("Private: Backfilled {} pending jobs, starting polling from sequence {}",
+                          job_count, highest_seq);
+                }
+                Err(e) => {
+                    error!("Private: Failed to backfill pending jobs: {}", e);
+                    yield Err(Box::new(PrivateCoordinationError::Database(e))
+                             as Box<dyn std::error::Error + Send + Sync>);
+                }
+            }
+
+            // CONTINUOUS POLLING: Check for new jobs every 5 seconds
+            loop {
+                sleep(Duration::from_secs(5)).await;
+
+                let current_last_seen = last_seen.load(Ordering::SeqCst);
+
+                // Query for jobs with job_sequence > last_seen
+                match entity::jobs::Entity::find()
+                    .filter(entity::jobs::Column::JobSequence.gt(current_last_seen))
+                    .order_by_asc(entity::jobs::Column::JobSequence)
+                    .all(db.connection())
+                    .await
+                {
+                    Ok(new_jobs) => {
+                        if !new_jobs.is_empty() {
+                            let mut highest_seq = current_last_seen;
+
+                            for job_model in new_jobs {
+                                if job_model.job_sequence > highest_seq {
+                                    highest_seq = job_model.job_sequence;
+                                }
+
+                                let event = JobCreatedEvent {
+                                    job_sequence: job_model.job_sequence,
+                                    developer: job_model.developer,
+                                    agent: job_model.agent,
+                                    agent_method: job_model.agent_method,
+                                    app_instance: job_model.app_instance_id.clone(),
+                                    app_instance_method: job_model.metadata
+                                        .as_ref()
+                                        .and_then(|m| m.get("app_instance_method"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown")
+                                        .to_string(),
+                                    block_number: job_model.block_number.unwrap_or(0),
+                                    created_at: job_model.created_at.timestamp_millis() as u64,
+                                };
+
+                                debug!(
+                                    "Private: New JobCreated event - seq={}, app={}",
+                                    event.job_sequence,
+                                    &event.app_instance[..16.min(event.app_instance.len())]
+                                );
+
+                                yield Ok(event);
+                            }
+
+                            // Update last_seen to highest sequence
+                            last_seen.store(highest_seq, Ordering::SeqCst);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Private: Failed to poll for new jobs: {}", e);
+                        yield Err(Box::new(PrivateCoordinationError::Database(e))
+                                 as Box<dyn std::error::Error + Send + Sync>);
+                        // Continue polling even on error
+                    }
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
     }
 }

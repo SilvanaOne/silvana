@@ -60,8 +60,14 @@ layer_id = "ethereum-anvil"
 # Anvil local testnet RPC endpoint
 rpc_url = "http://localhost:8545"
 
+# WebSocket URL for event streaming
+ws_url = "ws://localhost:8545"
+
 # Deployed SilvanaCoordination contract address on Anvil
-contract_address = "0x5eb3Bc0a489C5A8288765d2336659EbCA68FCd00"
+contract_address = "0x7B4f352Cd40114f12e82fC675b5BA8C7582FC513"
+
+# JobManager contract address (for listening to JobCreated events)
+job_manager_address = "0x2625760C4A8e8101801D3a48eE64B2bEA42f1E96"
 
 # Environment variable containing private key for signing transactions
 private_key_env = "ETHEREUM_PRIVATE_KEY"

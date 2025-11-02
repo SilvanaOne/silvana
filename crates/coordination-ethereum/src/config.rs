@@ -10,12 +10,22 @@ pub struct EthereumCoordinationConfig {
     /// Example: "https://rpc-amoy.polygon.technology"
     pub rpc_url: String,
 
+    /// WebSocket URL for event streaming (optional)
+    /// Example: "wss://polygon-amoy.g.alchemy.com/v2/YOUR-API-KEY"
+    /// If not provided, event streaming will not be available
+    pub ws_url: Option<String>,
+
     /// Chain ID (1=mainnet, 80002=Polygon Amoy, 84532=Base Sepolia, etc.)
     pub chain_id: u64,
 
     /// Deployed SilvanaCoordination contract address
     /// Must be a valid Ethereum address (0x-prefixed, 42 characters)
     pub contract_address: String,
+
+    /// JobManager contract address (optional - will be fetched if not provided)
+    /// Used for listening to JobCreated events
+    /// Must be a valid Ethereum address (0x-prefixed, 42 characters)
+    pub job_manager_address: Option<String>,
 
     /// Private key for signing transactions (optional for read-only operations)
     /// Format: 0x-prefixed hex string (64 hex chars + 0x prefix = 66 chars)
@@ -45,8 +55,10 @@ impl Default for EthereumCoordinationConfig {
     fn default() -> Self {
         Self {
             rpc_url: "http://localhost:8545".to_string(),
+            ws_url: Some("ws://localhost:8545".to_string()), // Default WebSocket for Anvil
             chain_id: 1337, // Local anvil/hardhat
             contract_address: String::new(),
+            job_manager_address: None,
             private_key: None,
             multicall_enabled: true,
             multicall_interval_secs: 3,

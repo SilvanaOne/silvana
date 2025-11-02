@@ -13,6 +13,7 @@ chrono = { workspace = true }
 thiserror = "1.0"
 anyhow = { workspace = true }
 hex = { workspace = true }
+futures-util = "0.3"
 
 [features]
 default = []

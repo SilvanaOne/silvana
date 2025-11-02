@@ -117,6 +117,10 @@ pub enum EthereumCoordinationError {
     /// Event parsing error
     #[error("Event parsing error: {0}")]
     EventParsing(String),
+
+    /// Connection error (WebSocket, network, etc.)
+    #[error("Connection error: {0}")]
+    Connection(String),
 }
 
 impl EthereumCoordinationError {

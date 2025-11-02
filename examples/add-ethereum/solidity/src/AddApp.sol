@@ -273,10 +273,10 @@ contract AddApp {
         // Create job input
         DataTypes.JobInput memory jobInput = DataTypes.JobInput({
             description: "Add operation job",
-            developer: "silvana",
-            agent: "add-agent",
-            agentMethod: "process_add",
-            app: "add-app",
+            developer: "AddEthereumDeveloper",
+            agent: "AddEthereumAgent",
+            agentMethod: "prove",
+            app: "add_ethereum_app",
             appInstance: appInstanceId,
             appInstanceMethod: "add",
             data: data,

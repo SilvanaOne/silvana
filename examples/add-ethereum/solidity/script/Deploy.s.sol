@@ -43,13 +43,18 @@ contract DeployAddApp is Script {
         ICoordination coordination = ICoordination(coordinationAddress);
         address appInstanceManagerAddr = address(coordination.appInstanceManager());
 
+        // Get app metadata from environment variables
+        string memory appName = vm.envOr("APP_NAME", string("add-app-demo"));
+        string memory agentName = vm.envOr("AGENT_NAME", string("add-agent"));
+        string memory developerName = vm.envOr("DEVELOPER_NAME", string("silvana"));
+
         // Call createAppInstance on the appInstanceManager
         (bool success, bytes memory data) = appInstanceManagerAddr.call(
             abi.encodeWithSignature(
                 "createAppInstance(string,string,string)",
-                "add-app-demo",
-                "add-app",
-                "silvana"
+                appName,
+                agentName,
+                developerName
             )
         );
         require(success, "Failed to create app instance");
@@ -111,12 +116,17 @@ contract DeployAddAppLocal is Script {
         ICoordination coordination = ICoordination(coordinationAddress);
         address appInstanceManagerAddr = address(coordination.appInstanceManager());
 
+        // Get app metadata from environment variables
+        string memory appName = vm.envOr("APP_NAME", string("add-app-demo"));
+        string memory agentName = vm.envOr("AGENT_NAME", string("add-agent"));
+        string memory developerName = vm.envOr("DEVELOPER_NAME", string("silvana"));
+
         (bool success, bytes memory data) = appInstanceManagerAddr.call(
             abi.encodeWithSignature(
                 "createAppInstance(string,string,string)",
-                "add-app-demo",
-                "add-app",
-                "silvana"
+                appName,
+                agentName,
+                developerName
             )
         );
         require(success, "Failed to create app instance");

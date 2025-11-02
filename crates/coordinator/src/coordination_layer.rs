@@ -1431,4 +1431,14 @@ impl Coordination for CoordinationLayer {
                 .map_err(Into::into),
         }
     }
+
+    // ===== Event Streaming =====
+
+    async fn event_stream(&self) -> Result<silvana_coordination_trait::EventStream, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui.event_stream().await.map_err(Into::into),
+            Self::Private(private) => private.event_stream().await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.event_stream().await.map_err(Into::into),
+        }
+    }
 }

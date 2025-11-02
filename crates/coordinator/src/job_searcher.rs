@@ -88,8 +88,14 @@ impl JobSearcher {
 
             debug!("Starting job searcher{} cycle", layer_info);
 
+            // Get app instances for this layer (or all if no layer)
+            let app_instances = if let Some(ref layer_id) = self.layer_id {
+                self.state.get_app_instances_for_layer(layer_id).await
+            } else {
+                self.state.get_app_instances().await
+            };
+
             // Analyze proof completion for all app instances
-            let app_instances = self.state.get_app_instances().await;
             for app_instance_id in app_instances {
                 // TODO: Update analyze_proof_completion to work with trait types, for now use Sui directly
                 match sui::fetch::fetch_app_instance(&app_instance_id).await {
@@ -366,7 +372,12 @@ impl JobSearcher {
     /// This combines job searching with cleanup that reconciliation would do
     /// Collects all viable jobs for batching instead of selecting one randomly
     async fn check_and_clean_pending_jobs(&self) -> Result<Vec<Job>> {
-        let app_instances = self.state.get_app_instances().await;
+        // Get app instances for this layer (or all if no layer)
+        let app_instances = if let Some(ref layer_id) = self.layer_id {
+            self.state.get_app_instances_for_layer(layer_id).await
+        } else {
+            self.state.get_app_instances().await
+        };
 
         if app_instances.is_empty() {
             return Ok(Vec::new());
@@ -408,8 +419,12 @@ impl JobSearcher {
             debug!("Removed fully caught up app_instance: {}", instance_id);
         }
 
-        // Now fetch actual pending jobs from remaining app_instances
-        let remaining_instances = self.state.get_app_instances().await;
+        // Now fetch actual pending jobs from remaining app_instances (layer-filtered)
+        let remaining_instances = if let Some(ref layer_id) = self.layer_id {
+            self.state.get_app_instances_for_layer(layer_id).await
+        } else {
+            self.state.get_app_instances().await
+        };
         if remaining_instances.is_empty() {
             debug!("No app_instances with pending jobs remaining after cleanup");
             return Ok(Vec::new());

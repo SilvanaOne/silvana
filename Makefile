@@ -420,6 +420,7 @@ deploy-ethereum-local: ## Deploy to local Anvil testnet (no verification)
 	echo "💰 Funding local accounts..."; \
 	cast send 0xD99b88cd8c784D9efd42646b4C1E27358D2179E6 --value 100ether --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
 	cast send 0xbc356b91e24e0f3809fd1E455fc974995eF124dF --value 100ether --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
+	cast send 0x78a7ddbc8b7a5afee8870d8a40ae5631b959a39e --value 100ether --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
 	echo ""; \
 	echo "⚙️  Initializing contracts..."; \
 	cast send "$$COORD_ADDR" "initialize(address,address,address,address,address,address)" "$$ADMIN" "$$JOB_ADDR" "$$APP_ADDR" "$$PROOF_ADDR" "$$SETTLE_ADDR" "$$STORAGE_ADDR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
@@ -454,7 +455,8 @@ deploy-ethereum-local: ## Deploy to local Anvil testnet (no verification)
 	cast send "$$STORAGE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD1" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
 	cast send "$$STORAGE_ADDR" "grantRole(bytes32,address)" "$$COORD_ROLE" "$$COORD2" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
 	cast send "$$STORAGE_ADDR" "grantRole(bytes32,address)" "$$OPERATOR_ROLE" "$$OPERATOR" --rpc-url localhost --private-key "$$PRIVATE_KEY" --legacy > /dev/null 2>&1; \
-	printf '{\n  "timestamp": "%s",\n  "network": "anvil-local",\n  "chainId": 31337,\n  "admin": "%s",\n  "coordinator1": "%s",\n  "coordinator2": "%s",\n  "operator": "%s",\n  "contracts": {\n    "SilvanaCoordination": "%s",\n    "JobManager": "%s",\n    "AppInstanceManager": "%s",\n    "ProofManager": "%s",\n    "SettlementManager": "%s",\n    "StorageManager": "%s"\n  }\n}\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$ADMIN" "$$COORD1" "$$COORD2" "$$OPERATOR" "$$COORD_ADDR" "$$JOB_ADDR" "$$APP_ADDR" "$$PROOF_ADDR" "$$SETTLE_ADDR" "$$STORAGE_ADDR" > "../../$$DEPLOY_FILE"; \
+	cd ../..; \
+	printf '{\n  "timestamp": "%s",\n  "network": "anvil-local",\n  "chainId": 31337,\n  "admin": "%s",\n  "coordinator1": "%s",\n  "coordinator2": "%s",\n  "operator": "%s",\n  "contracts": {\n    "SilvanaCoordination": "%s",\n    "JobManager": "%s",\n    "AppInstanceManager": "%s",\n    "ProofManager": "%s",\n    "SettlementManager": "%s",\n    "StorageManager": "%s"\n  }\n}\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$ADMIN" "$$COORD1" "$$COORD2" "$$OPERATOR" "$$COORD_ADDR" "$$JOB_ADDR" "$$APP_ADDR" "$$PROOF_ADDR" "$$SETTLE_ADDR" "$$STORAGE_ADDR" > "$$DEPLOY_FILE"; \
 	echo ""; \
 	echo "✅ Local deployment complete!"; \
 	echo ""; \
@@ -474,6 +476,22 @@ deploy-ethereum-local: ## Deploy to local Anvil testnet (no verification)
 	echo "    StorageManager:      $$STORAGE_ADDR"; \
 	echo ""; \
 	echo "📄 Deployment info saved to: $$DEPLOY_FILE"; \
+	echo ""; \
+	echo "⚙️  Update coordinator.toml with:"; \
+	echo ""; \
+	echo "[[ethereum]]"; \
+	echo "layer_id = \"ethereum-anvil\""; \
+	echo "rpc_url = \"http://localhost:8545\""; \
+	echo "ws_url = \"ws://localhost:8545\""; \
+	echo "contract_address = \"$$COORD_ADDR\""; \
+	echo "job_manager_address = \"$$JOB_ADDR\""; \
+	echo "private_key_env = \"ETHEREUM_PRIVATE_KEY\""; \
+	echo "operation_mode = \"direct\""; \
+	echo "chain_id = 31337"; \
+	echo ""; \
+	echo "Or run these commands:"; \
+	echo "  sed -i '' 's/contract_address = \".*\"/contract_address = \"$$COORD_ADDR\"/' coordinator.toml"; \
+	echo "  sed -i '' 's/job_manager_address = \".*\"/job_manager_address = \"$$JOB_ADDR\"/' coordinator.toml"; \
 	echo ""
 
 test-ethereum-coordination: ## Run Ethereum coordination layer integration tests

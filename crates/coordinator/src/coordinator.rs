@@ -12,7 +12,7 @@ use crate::job_searcher::JobSearcher;
 use crate::layer_config::{CoordinatorConfig, GeneralConfig, SuiConfig};
 use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
 use crate::metrics::{CoordinatorMetrics, start_metrics_reporter};
-use crate::processor::EventProcessor;
+use crate::multi_layer_processor::MultiLayerEventProcessor;
 use crate::state::SharedState;
 // use crate::stuck_jobs::StuckJobMonitor; // Removed - reconciliation handles stuck jobs
 use silvana_coordination_trait::Coordination;
@@ -693,10 +693,9 @@ pub async fn start_coordinator(
     });
     info!("🐳 Started docker buffer processor thread");
 
-    // 7. Start event processor in main thread (processes events and updates shared state)
-    let mut processor = EventProcessor::new(config, state.clone()).await?;
-    processor.set_metrics(metrics.clone());
-    info!("👁️ Starting event monitoring...");
+    // 7. Start multi-layer event processor (processes events from all coordination layers)
+    let mut processor = MultiLayerEventProcessor::new(coordination_manager.clone(), state.clone());
+    info!("👁️ Starting multi-layer event monitoring...");
 
     // Run processor in a task so we can monitor shutdown
     let processor_handle = task::spawn(async move { processor.run().await });

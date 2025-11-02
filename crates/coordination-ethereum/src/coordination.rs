@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use silvana_coordination_trait::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use std::time::Duration;
+use tracing::{debug, error, info, warn};
 
 use crate::{
     abi::*,
@@ -20,8 +21,29 @@ use crate::{
     error::{EthereumCoordinationError, Result},
 };
 
-use alloy::primitives::{Bytes, TxHash, U256};
-use alloy::providers::Provider;
+use alloy::primitives::{Address, Bytes, TxHash, U256};
+use alloy::providers::{Provider, ProviderBuilder};
+use alloy::rpc::types::Filter;
+use alloy::sol;
+use alloy::sol_types::SolEvent;
+use async_stream::stream;
+use futures::StreamExt;
+use std::str::FromStr;
+
+// Define JobCreated event ABI using Alloy's sol! macro
+// This must match the Solidity event definition in DataTypes.sol
+sol! {
+    #[derive(Debug)]
+    event JobCreated(
+        string indexed appInstance,
+        uint256 indexed jobId,
+        uint64 jobSequence,
+        string developer,
+        string agent,
+        string agentMethod,
+        uint256 timestamp
+    );
+}
 
 /// Ethereum coordination layer implementation
 ///
@@ -59,6 +81,9 @@ pub struct EthereumCoordination {
 
     /// Chain ID as string (for trait implementation)
     chain_id: String,
+
+    /// JobManager contract address (for event listening)
+    job_manager_address: Address,
 }
 
 impl EthereumCoordination {
@@ -93,12 +118,28 @@ impl EthereumCoordination {
         let contract = Arc::new(ContractClient::new(config.clone())?);
         let chain_id = config.chain_id.to_string();
 
+        // Parse JobManager address if provided, otherwise use coordination address as fallback
+        // The event stream will fetch the actual JobManager address lazily if needed
+        let job_manager_address = if let Some(ref jm_addr) = config.job_manager_address {
+            Address::from_str(jm_addr).map_err(|e| {
+                EthereumCoordinationError::Configuration(format!(
+                    "Invalid job_manager_address '{}': {}",
+                    jm_addr, e
+                ))
+            })?
+        } else {
+            // Use coordination address as temporary fallback
+            // Will be replaced by actual JobManager address when event stream starts
+            *contract.contract_address()
+        };
+
         info!("Ethereum coordination layer initialized successfully");
 
         Ok(Self {
             contract,
             config,
             chain_id,
+            job_manager_address,
         })
     }
 
@@ -115,6 +156,33 @@ impl EthereumCoordination {
             8453 | 84532 => CoordinationLayer::Base,       // Base, Base Sepolia
             _ => CoordinationLayer::Ethereum,              // Default to Ethereum
         }
+    }
+
+    /// Decode JobCreated event from Ethereum log (currently unused, kept for reference)
+    #[allow(dead_code)]
+    fn decode_job_created_event(&self, log: &alloy::rpc::types::Log) -> Result<JobCreatedEvent> {
+        // Decode the log using Alloy's generated event decoder
+        let decoded = JobCreated::decode_log_data(&log.inner.data)
+            .map_err(|e| EthereumCoordinationError::EventParsing(format!("Failed to decode JobCreated event: {}", e)))?;
+
+        // Get block number from log metadata
+        let block_number = log.block_number.unwrap_or(0);
+
+        // Note: appInstance is indexed as string, so it's hashed to a topic (FixedBytes<32>)
+        // We cannot recover the original string from the hash
+        // For now, use hex representation of the hash
+        let app_instance_hash = format!("0x{}", hex::encode(decoded.appInstance.as_slice()));
+
+        Ok(JobCreatedEvent {
+            job_sequence: decoded.jobSequence,
+            developer: decoded.developer,
+            agent: decoded.agent,
+            agent_method: decoded.agentMethod,
+            app_instance: app_instance_hash,
+            app_instance_method: String::new(), // Not in Solidity event
+            block_number,
+            created_at: decoded.timestamp.try_into().unwrap_or(0),
+        })
     }
 }
 
@@ -1668,6 +1736,116 @@ impl Coordination for EthereumCoordination {
         Err(EthereumCoordinationError::UnsupportedOperation(
             "Multicall not supported in Ethereum coordination layer".to_string(),
         ))
+    }
+
+    // ===== Event Streaming =====
+
+    async fn event_stream(&self) -> Result<EventStream> {
+        // Check if WebSocket URL is configured
+        let ws_url = self.config.ws_url.as_ref()
+            .ok_or_else(|| EthereumCoordinationError::Configuration(
+                "WebSocket URL not configured - cannot create event stream".to_string()
+            ))?;
+
+        let ws_url_clone = ws_url.clone();
+        let job_manager_address = self.job_manager_address;
+
+        info!("🔌 Ethereum: Connecting to WebSocket at {}", ws_url);
+        info!("👁️  Ethereum: Listening for JobCreated events from JobManager at {}", job_manager_address);
+
+        let stream = stream! {
+            loop {
+                // Connect to WebSocket using ProviderBuilder
+                match ProviderBuilder::new().connect(&ws_url_clone).await {
+                    Ok(provider) => {
+                        info!("✅ Ethereum: Connected to WebSocket event stream");
+
+                        // Create filter for JobCreated events from JobManager contract
+                        // Only subscribe to new events (from Latest block)
+                        let filter = Filter::new()
+                            .address(job_manager_address)
+                            .event(JobCreated::SIGNATURE)
+                            .from_block(alloy::rpc::types::BlockNumberOrTag::Latest);
+
+                        // Subscribe to logs
+                        match provider.subscribe_logs(&filter).await {
+                            Ok(log_stream) => {
+                                info!("✅ Ethereum: Subscribed to JobCreated events");
+
+                                // Convert subscription to stream and process logs as they arrive
+                                let mut stream = log_stream.into_stream();
+                                while let Some(log) = stream.next().await {
+                                    // Decode the event
+                                    match JobCreated::decode_log_data(&log.inner.data) {
+                                        Ok(decoded) => {
+                                            // Get block number from log metadata, not from event data
+                                            let block_number = log.block_number.unwrap_or(0);
+
+                                            // Note: appInstance is indexed as string, so it's hashed to a topic (FixedBytes<32>)
+                                            // We cannot recover the original string from the hash
+                                            // Use hex representation of the hash
+                                            let app_instance_hash = format!("0x{}", hex::encode(decoded.appInstance.as_slice()));
+
+                                            let event = JobCreatedEvent {
+                                                job_sequence: decoded.jobSequence,
+                                                developer: decoded.developer,
+                                                agent: decoded.agent,
+                                                agent_method: decoded.agentMethod,
+                                                app_instance: app_instance_hash,
+                                                app_instance_method: String::new(), // Not in Solidity event
+                                                block_number,
+                                                created_at: decoded.timestamp.try_into().unwrap_or(0),
+                                            };
+
+                                            debug!(
+                                                "Ethereum: JobCreated event - seq={}, app={}",
+                                                event.job_sequence,
+                                                &event.app_instance[..16.min(event.app_instance.len())]
+                                            );
+
+                                            yield Ok(event);
+                                        }
+                                        Err(e) => {
+                                            error!("Ethereum: Failed to decode JobCreated event: {}", e);
+                                            yield Err(Box::new(
+                                                EthereumCoordinationError::EventParsing(
+                                                    format!("Failed to decode event: {}", e)
+                                                )
+                                            ) as Box<dyn std::error::Error + Send + Sync>);
+                                        }
+                                    }
+                                }
+
+                                // If we get here, stream ended
+                                warn!("Ethereum: Log subscription stream ended");
+                            }
+                            Err(e) => {
+                                error!("Ethereum: Failed to subscribe to logs: {}", e);
+                                yield Err(Box::new(
+                                    EthereumCoordinationError::Connection(
+                                        format!("Failed to subscribe to logs: {}", e)
+                                    )
+                                ) as Box<dyn std::error::Error + Send + Sync>);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Ethereum: WebSocket connection failed: {}", e);
+                        yield Err(Box::new(
+                            EthereumCoordinationError::Connection(
+                                format!("WebSocket connection failed: {}", e)
+                            )
+                        ) as Box<dyn std::error::Error + Send + Sync>);
+                    }
+                }
+
+                // Wait before reconnecting
+                warn!("Ethereum: WebSocket stream disconnected, reconnecting in 5s...");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        };
+
+        Ok(Box::pin(stream))
     }
 
     // ===== State Purging =====

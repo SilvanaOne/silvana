@@ -26,6 +26,7 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml = "0.8"
+bcs.workspace = true
 
 # Sui SDK
 sui-rpc.workspace = true
@@ -33,3 +34,6 @@ sui-sdk-types.workspace = true
 
 # Async utilities
 async-trait.workspace = true
+async-stream = "0.3"
+tokio-stream = "0.1"
+futures-util = "0.3"

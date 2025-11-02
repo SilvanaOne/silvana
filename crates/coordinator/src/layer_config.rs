@@ -130,8 +130,14 @@ pub struct EthereumConfig {
     /// Ethereum RPC URL
     pub rpc_url: String,
 
+    /// WebSocket URL for event streaming (optional)
+    pub ws_url: Option<String>,
+
     /// Coordination contract address
     pub contract_address: String,
+
+    /// JobManager contract address (optional - will be fetched from coordination contract if not provided)
+    pub job_manager_address: Option<String>,
 
     /// Environment variable containing private key
     pub private_key_env: String,

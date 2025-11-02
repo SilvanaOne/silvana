@@ -4,8 +4,10 @@
 //! for different coordination layers (Sui, Private/TiDB, future Ethereum/Solana).
 
 use async_trait::async_trait;
+use futures_util::stream::Stream;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
+use std::pin::Pin;
 
 pub mod error;
 pub mod layer;
@@ -14,6 +16,10 @@ pub mod types;
 pub use error::{CoordinationError, CoordinationResult};
 pub use layer::{CoordinationLayer, CoordinationLayerOperationMode};
 pub use types::*;
+
+/// Type alias for event stream
+/// Returns a stream of JobCreatedEvent or errors
+pub type EventStream = Pin<Box<dyn Stream<Item = Result<JobCreatedEvent, Box<dyn std::error::Error + Send + Sync>>> + Send>>;
 
 /// Main Coordination trait that all coordination layers must implement
 ///
@@ -407,4 +413,22 @@ pub trait Coordination: Send + Sync {
 
     /// Purge old states up to a certain sequence
     async fn purge(&self, app_instance: &str, sequences_to_purge: u64) -> Result<Self::TransactionHash, Self::Error>;
+
+    // ===== Event Streaming =====
+
+    /// Subscribe to coordination layer events (new jobs only)
+    ///
+    /// Returns a stream of JobCreatedEvent that can be consumed by the coordinator.
+    /// The stream should:
+    /// - Emit events only for NEW jobs (not historical jobs)
+    /// - Handle reconnections automatically with exponential backoff
+    /// - Skip backfilling of historical events (only new events from now on)
+    /// - Filter for JobCreated events only
+    /// - Continue running indefinitely until the coordinator shuts down
+    ///
+    /// # Implementation Notes
+    /// - Sui: Uses gRPC checkpoint subscription
+    /// - Ethereum: Uses WebSocket eth_subscribe with logs filter
+    /// - Private: May return empty stream if events aren't supported
+    async fn event_stream(&self) -> Result<EventStream, Self::Error>;
 }

@@ -1243,7 +1243,7 @@ impl SilvanaSuiInterface {
         registry_id: &str,
         developer_owner: sui::Address,
         name: String,
-        github: String,
+        github: Option<String>,
         image: Option<String>,
         description: Option<String>,
         site: Option<String>,
@@ -1252,7 +1252,7 @@ impl SilvanaSuiInterface {
 
         match add_developer(
             registry_id,
-            developer_owner,
+            developer_owner.to_string(),
             name.clone(),
             github,
             image,
@@ -1283,7 +1283,7 @@ impl SilvanaSuiInterface {
         &mut self,
         registry_id: &str,
         name: String,
-        github: String,
+        github: Option<String>,
         image: Option<String>,
         description: Option<String>,
         site: Option<String>,
@@ -1469,7 +1469,7 @@ impl SilvanaSuiInterface {
     ) -> Result<String, String> {
         debug!("Adding app '{}' to registry '{}'", name, registry_id);
 
-        match add_app(registry_id, name.clone(), owner, description).await {
+        match add_app(registry_id, name.clone(), owner.to_string(), description).await {
             Ok(tx_digest) => {
                 info!(
                     "Successfully added app '{}' to registry '{}' (tx: {})",
@@ -1548,8 +1548,8 @@ impl SilvanaSuiInterface {
         agent_name: String,
         method_name: String,
         docker_image: String,
-        docker_sha256: String,
-        min_memory_mb: u32,
+        docker_sha256: Option<String>,
+        min_memory_gb: u16,
         min_cpu_cores: u16,
         requires_tee: bool,
     ) -> Result<String, String> {
@@ -1565,7 +1565,7 @@ impl SilvanaSuiInterface {
             method_name.clone(),
             docker_image,
             docker_sha256,
-            min_memory_mb,
+            min_memory_gb,
             min_cpu_cores,
             requires_tee,
         )
@@ -1596,8 +1596,8 @@ impl SilvanaSuiInterface {
         agent_name: String,
         method_name: String,
         docker_image: String,
-        docker_sha256: String,
-        min_memory_mb: u32,
+        docker_sha256: Option<String>,
+        min_memory_gb: u16,
         min_cpu_cores: u16,
         requires_tee: bool,
     ) -> Result<String, String> {
@@ -1613,7 +1613,7 @@ impl SilvanaSuiInterface {
             method_name.clone(),
             docker_image,
             docker_sha256,
-            min_memory_mb,
+            min_memory_gb,
             min_cpu_cores,
             requires_tee,
         )
@@ -1737,6 +1737,30 @@ impl SilvanaSuiInterface {
                     "Failed to remove default method from agent '{}' for developer '{}' in registry '{}': {}",
                     agent_name, developer, registry_id, e
                 );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// List all contents of a registry
+    pub async fn list_registry(
+        &mut self,
+        registry_id: &str,
+    ) -> Result<crate::registry::RegistryListData, String> {
+        debug!("Listing registry '{}'", registry_id);
+
+        match crate::registry::list_registry(registry_id).await {
+            Ok(data) => {
+                info!(
+                    "Successfully listed registry '{}' ({} developers, {} apps)",
+                    registry_id,
+                    data.developers.len(),
+                    data.apps.len()
+                );
+                Ok(data)
+            }
+            Err(e) => {
+                error!("Failed to list registry '{}': {}", registry_id, e);
                 Err(e.to_string())
             }
         }

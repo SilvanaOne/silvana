@@ -576,7 +576,7 @@ pub async fn fetch_all_pending_jobs(
         let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance_id).await {
             Ok(layer) => layer,
             Err(e) => {
-                warn!("App instance {} not found on any layer: {}", app_instance_id, e);
+                error!("❌ App instance {} not found on any coordination layer: {}. This app's jobs will be skipped!", app_instance_id, e);
                 continue;
             }
         };
@@ -602,49 +602,47 @@ pub async fn fetch_all_pending_jobs(
                 .unwrap_or_default();
 
             if !settlement_job_ids.is_empty() {
-                if let Ok(Some((_app_instance_id, jobs_table_id))) = coordination.get_jobs_info(app_instance_id).await {
-                    // Collect all ready settlement jobs with their timestamps
-                    let mut ready_settlement_jobs = Vec::new();
-                    
-                    for (chain, settle_job_id) in &settlement_job_ids {
-                        match fetch_job_by_id(&jobs_table_id, *settle_job_id).await {
-                            Ok(Some(settle_job)) => {
-                                // Check if it's pending and ready to run
-                                if matches!(settle_job.status, sui::fetch::JobStatus::Pending) {
-                                    let is_ready = settle_job.next_scheduled_at
-                                        .map(|scheduled| scheduled + buffer_ms <= current_time_ms)
-                                        .unwrap_or(true);
-                                    if is_ready {
-                                        let sort_time = settle_job.updated_at;
-                                        debug!("Found pending settlement job {} for chain {} (updated_at: {})", 
-                                            settle_job.job_sequence, chain, sort_time);
-                                        ready_settlement_jobs.push((settle_job, sort_time, chain.clone()));
-                                    } else {
-                                        debug!("Settlement job {} for chain {} is pending but not ready yet (scheduled for {:?})", 
-                                               settle_job_id, chain, settle_job.next_scheduled_at);
-                                    }
+                // Collect all ready settlement jobs with their timestamps
+                let mut ready_settlement_jobs = Vec::new();
+
+                for (chain, settle_job_id) in &settlement_job_ids {
+                    match coordination.fetch_job_by_id(app_instance_id, *settle_job_id).await {
+                        Ok(Some(settle_job)) => {
+                            // Check if it's pending and ready to run
+                            if matches!(settle_job.status, JobStatus::Pending) {
+                                let is_ready = settle_job.next_scheduled_at
+                                    .map(|scheduled| scheduled + buffer_ms <= current_time_ms)
+                                    .unwrap_or(true);
+                                if is_ready {
+                                    let sort_time = settle_job.updated_at;
+                                    debug!("Found pending settlement job {} for chain {} (updated_at: {})",
+                                        settle_job.job_sequence, chain, sort_time);
+                                    ready_settlement_jobs.push((settle_job, sort_time, chain.clone()));
                                 } else {
-                                    debug!("Settlement job {} for chain {} exists but status is {:?}, not Pending", 
-                                           settle_job_id, chain, settle_job.status);
+                                    debug!("Settlement job {} for chain {} is pending but not ready yet (scheduled for {:?})",
+                                           settle_job_id, chain, settle_job.next_scheduled_at);
                                 }
+                            } else {
+                                debug!("Settlement job {} for chain {} exists but status is {:?}, not Pending",
+                                       settle_job_id, chain, settle_job.status);
                             }
-                            Ok(None) => {
-                                debug!("Settlement job ID {} for chain {} not found in jobs table", settle_job_id, chain);
-                            }
-                            Err(e) => {
-                                debug!("Failed to fetch settlement job {} for chain {}: {}", settle_job_id, chain, e);
-                            }
+                        }
+                        Ok(None) => {
+                            debug!("Settlement job ID {} for chain {} not found", settle_job_id, chain);
+                        }
+                        Err(e) => {
+                            debug!("Failed to fetch settlement job {} for chain {}: {}", settle_job_id, chain, e);
                         }
                     }
-                    
-                    // If we found ready settlement jobs, add only the oldest one
-                    if !ready_settlement_jobs.is_empty() {
-                        ready_settlement_jobs.sort_by_key(|(_, sort_time, _)| *sort_time);
-                        if let Some((oldest_job, _, chain)) = ready_settlement_jobs.into_iter().next() {
-                            debug!("Selected oldest ready settlement job {} for chain {} in app_instance {}",
-                                oldest_job.job_sequence, chain, app_instance_id);
-                            all_pending_jobs.push((convert_sui_job_to_trait(oldest_job), true)); // true = is_settlement
-                        }
+                }
+
+                // If we found ready settlement jobs, add only the oldest one
+                if !ready_settlement_jobs.is_empty() {
+                    ready_settlement_jobs.sort_by_key(|(_, sort_time, _)| *sort_time);
+                    if let Some((oldest_job, _, chain)) = ready_settlement_jobs.into_iter().next() {
+                        debug!("Selected oldest ready settlement job {} for chain {} in app_instance {}",
+                            oldest_job.job_sequence, chain, app_instance_id);
+                        all_pending_jobs.push((oldest_job, true)); // true = is_settlement
                     }
                 }
             }
@@ -661,43 +659,41 @@ pub async fn fetch_all_pending_jobs(
                 let take_n = std::cmp::min(seqs.len(), MAX_JOBS_PER_INSTANCE_BATCH);
                 let seq_slice = &seqs[..take_n];
 
-                // Get jobs info to fetch the jobs table ID
-                if let Ok(Some((_app_id, jobs_table_id))) = coordination.get_jobs_info(app_instance_id).await {
-                    match fetch_jobs_batch(&jobs_table_id, seq_slice).await {
-                        Ok(map) => {
-                            // Exclude settlement job IDs which are handled above
-                            let settlement_ids: std::collections::HashSet<u64> =
-                                coordination.get_settlement_job_ids(app_instance_id)
-                                    .await
-                                    .unwrap_or_default()
-                                    .into_values()
-                                    .collect();
+                // Fetch jobs using coordination trait method (works for all layers)
+                match coordination.fetch_jobs_batch(app_instance_id, seq_slice).await {
+                    Ok(jobs) => {
+                        // Exclude settlement job IDs which are handled above
+                        let settlement_ids: std::collections::HashSet<u64> =
+                            coordination.get_settlement_job_ids(app_instance_id)
+                                .await
+                                .unwrap_or_default()
+                                .into_values()
+                                .collect();
 
-                            let mut added = 0usize;
-                            for (_seq, job) in map {
-                                if settlement_ids.contains(&job.job_sequence) {
-                                    continue;
-                                }
-                                // Ensure job is Pending and ready per schedule buffer
-                                if !matches!(job.status, sui::fetch::JobStatus::Pending) {
-                                    continue;
-                                }
-                                if job.next_scheduled_at
-                                    .map(|scheduled| scheduled + buffer_ms > current_time_ms)
-                                    .unwrap_or(false)
-                                {
-                                    continue;
-                                }
-                                all_pending_jobs.push((convert_sui_job_to_trait(job), false));
-                                added += 1;
+                        let mut added = 0usize;
+                        for job in jobs {
+                            if settlement_ids.contains(&job.job_sequence) {
+                                continue;
                             }
-                            if added > 0 {
-                                debug!("Added {} pending jobs from app_instance {} (batch)", added, app_instance_id);
+                            // Ensure job is Pending and ready per schedule buffer
+                            if !matches!(job.status, JobStatus::Pending) {
+                                continue;
                             }
+                            if job.next_scheduled_at
+                                .map(|scheduled| scheduled + buffer_ms > current_time_ms)
+                                .unwrap_or(false)
+                            {
+                                continue;
+                            }
+                            all_pending_jobs.push((job, false));
+                            added += 1;
                         }
-                        Err(e) => {
-                            error!("Failed to batch fetch jobs for {}: {}", app_instance_id, e);
+                        if added > 0 {
+                            debug!("Added {} pending jobs from app_instance {} (batch)", added, app_instance_id);
                         }
+                    }
+                    Err(e) => {
+                        error!("Failed to batch fetch jobs for {}: {}", app_instance_id, e);
                     }
                 }
             }

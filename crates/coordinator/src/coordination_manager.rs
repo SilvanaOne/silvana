@@ -8,7 +8,7 @@ use silvana_coordination_trait::Coordination;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Manages multiple coordination layers
 pub struct CoordinationManager {
@@ -115,8 +115,10 @@ impl CoordinationManager {
                 let ethereum = CoordinationLayer::new_ethereum(
                     silvana_coordination_ethereum::EthereumCoordinationConfig {
                         rpc_url: ethereum_config.rpc_url.clone(),
+                        ws_url: ethereum_config.ws_url.clone(),
                         chain_id: ethereum_config.chain_id.unwrap_or(31337),
                         contract_address: ethereum_config.contract_address.clone(),
+                        job_manager_address: ethereum_config.job_manager_address.clone(),
                         private_key,
                         multicall_enabled: false, // Not supported yet
                         multicall_interval_secs: ethereum_config.multicall_interval_secs,
@@ -224,6 +226,12 @@ impl CoordinationManager {
             }
         }
 
+        error!(
+            "❌ ROUTING ERROR: App instance {} not found in any of {} coordination layers. Available layers: {:?}",
+            app_instance,
+            self.layers.len(),
+            self.layers.keys().collect::<Vec<_>>()
+        );
         Err(anyhow!(
             "App instance {} not found in any coordination layer",
             app_instance
@@ -321,6 +329,16 @@ pub struct LayerMetrics {
     pub running_jobs: usize,
     pub completed_jobs: usize,
     pub failed_jobs: usize,
+}
+
+impl CoordinationManager {
+    /// Get all enabled coordination layers
+    pub async fn get_all_layers(&self) -> Vec<(String, Arc<CoordinationLayer>)> {
+        self.layers
+            .iter()
+            .map(|(id, layer)| (id.clone(), Arc::clone(layer)))
+            .collect()
+    }
 }
 
 #[cfg(test)]

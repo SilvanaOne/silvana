@@ -354,8 +354,9 @@ pub enum RegistryCommands {
         /// Developer name
         name: String,
 
-        /// GitHub username
-        github: String,
+        /// Optional GitHub username
+        #[arg(long)]
+        github: Option<String>,
 
         /// Optional image URL
         #[arg(long)]
@@ -379,8 +380,9 @@ pub enum RegistryCommands {
         /// Developer name
         name: String,
 
-        /// GitHub username
-        github: String,
+        /// Optional GitHub username
+        #[arg(long)]
+        github: Option<String>,
 
         /// Optional image URL
         #[arg(long)]
@@ -536,12 +538,13 @@ pub enum RegistryCommands {
         /// Docker image
         docker_image: String,
 
-        /// Docker SHA256 hash
-        docker_sha256: String,
+        /// Optional Docker SHA256 hash
+        #[arg(long)]
+        docker_sha256: Option<String>,
 
-        /// Minimum memory in MB
-        #[arg(long, default_value = "512")]
-        min_memory_mb: u32,
+        /// Minimum memory in GB
+        #[arg(long, default_value = "1")]
+        min_memory_gb: u16,
 
         /// Minimum CPU cores
         #[arg(long, default_value = "1")]
@@ -570,12 +573,13 @@ pub enum RegistryCommands {
         /// Docker image
         docker_image: String,
 
-        /// Docker SHA256 hash
-        docker_sha256: String,
+        /// Optional Docker SHA256 hash
+        #[arg(long)]
+        docker_sha256: Option<String>,
 
-        /// Minimum memory in MB
-        #[arg(long, default_value = "512")]
-        min_memory_mb: u32,
+        /// Minimum memory in GB
+        #[arg(long, default_value = "1")]
+        min_memory_gb: u16,
 
         /// Minimum CPU cores
         #[arg(long, default_value = "1")]
@@ -629,6 +633,17 @@ pub enum RegistryCommands {
 
         /// Agent name
         agent: String,
+    },
+
+    /// List all developers, agents, methods, and apps in the registry
+    List {
+        /// Registry object ID (defaults to SILVANA_REGISTRY env var)
+        #[arg(long, env = "SILVANA_REGISTRY")]
+        registry: Option<String>,
+
+        /// Display raw JSON output instead of formatted display
+        #[arg(long)]
+        json: bool,
     },
 }
 

@@ -160,6 +160,7 @@ impl EventProcessor {
                                                 agent.clone(),
                                                 agent_method.clone(),
                                                 app_instance.clone(),
+                                                "sui".to_string(), // Default layer for legacy processor
                                             )
                                             .await;
 
@@ -247,6 +248,7 @@ impl EventProcessor {
                                                     agent.clone(),
                                                     agent_method.clone(),
                                                     app_instance.clone(),
+                                                    "sui".to_string(), // Default layer for legacy processor
                                                 )
                                                 .await;
                                             info!(
