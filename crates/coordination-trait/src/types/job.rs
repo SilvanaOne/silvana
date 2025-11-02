@@ -29,11 +29,8 @@ impl fmt::Display for JobStatus {
 
 /// Represents a job in the coordination layer
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Job<JobId = String> {
-    /// The unique identifier of the Job (format depends on coordination layer)
-    pub id: JobId,
-
-    /// Job sequence number
+pub struct Job {
+    /// Job sequence number (the unique on-chain identifier)
     pub job_sequence: u64,
 
     /// Optional description
@@ -91,7 +88,7 @@ pub struct Job<JobId = String> {
     pub updated_at: u64,
 }
 
-impl<JobId> Job<JobId> {
+impl Job {
     /// Check if this job is periodic
     pub fn is_periodic(&self) -> bool {
         self.interval_ms.is_some()

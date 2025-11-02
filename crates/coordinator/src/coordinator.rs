@@ -99,19 +99,16 @@ async fn reconcile_layer(
                                     layer_id
                                 );
 
-                                // For Sui layer, use job_sequence (numeric ID)
-                                // For other layers, we'd need to handle string IDs
-                                if let Ok(job_sequence) = job.id.parse::<u64>() {
-                                    state.add_fail_job_request(
-                                        app_instance.clone(),
-                                        job_sequence,
-                                        error_msg,
-                                    ).await;
-                                }
+                                // Use job_sequence directly (already u64)
+                                state.add_fail_job_request(
+                                    app_instance.clone(),
+                                    job.job_sequence,
+                                    error_msg,
+                                ).await;
 
                                 info!(
                                     "Found stuck job {} in layer {} for app_instance {}",
-                                    job.id, layer_id, app_instance
+                                    job.job_sequence, layer_id, app_instance
                                 );
                             }
                         }
@@ -132,7 +129,7 @@ async fn reconcile_layer(
 }
 
 /// Check if a job is stuck (running for too long)
-fn is_job_stuck(job: &silvana_coordination_trait::Job<String>, current_time_ms: u64) -> bool {
+fn is_job_stuck(job: &silvana_coordination_trait::Job, current_time_ms: u64) -> bool {
     use silvana_coordination_trait::JobStatus;
 
     // Only check running jobs

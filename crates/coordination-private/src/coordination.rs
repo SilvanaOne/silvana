@@ -105,9 +105,8 @@ impl PrivateCoordination {
     }
 
     /// Convert database job model to trait Job
-    fn convert_job(&self, job: entity::jobs::Model) -> Job<u64> {
+    fn convert_job(&self, job: entity::jobs::Model) -> Job {
         Job {
-            id: job.job_sequence as u64,
             job_sequence: job.job_sequence as u64,
             description: job.description,
             developer: job.developer,
@@ -138,9 +137,6 @@ impl PrivateCoordination {
 
 #[async_trait]
 impl Coordination for PrivateCoordination {
-    type JobId = u64;
-    type SequenceId = u64;
-    type BlockId = u64;
     type TransactionHash = String;
     type Error = PrivateCoordinationError;
 
@@ -156,7 +152,7 @@ impl Coordination for PrivateCoordination {
 
     // ===== Job Management =====
 
-    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>> {
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
         self.verify_app_ownership(app_instance).await?;
 
         let jobs = entity::jobs::Entity::find()
@@ -169,7 +165,7 @@ impl Coordination for PrivateCoordination {
         Ok(jobs.into_iter().map(|j| self.convert_job(j)).collect())
     }
 
-    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>> {
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
         self.verify_app_ownership(app_instance).await?;
 
         let jobs = entity::jobs::Entity::find()
@@ -194,25 +190,25 @@ impl Coordination for PrivateCoordination {
         Ok(count)
     }
 
-    async fn fetch_job_by_id(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Option<Job<Self::JobId>>> {
+    async fn fetch_job_by_id(&self, app_instance: &str, job_sequence: u64) -> Result<Option<Job>> {
         self.verify_app_ownership(app_instance).await?;
 
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
+            .filter(entity::jobs::Column::JobSequence.eq(job_sequence as i64))
             .one(self.db.connection())
             .await?;
 
         Ok(job.map(|j| self.convert_job(j)))
     }
 
-    async fn start_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<bool> {
+    async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool> {
         self.verify_app_ownership(app_instance).await?;
 
         // Find and update job
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
+            .filter(entity::jobs::Column::JobSequence.eq(job_sequence as i64))
             .filter(entity::jobs::Column::Status.eq("PENDING"))
             .one(self.db.connection())
             .await?;
@@ -228,16 +224,16 @@ impl Coordination for PrivateCoordination {
         }
     }
 
-    async fn complete_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Self::TransactionHash> {
+    async fn complete_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash> {
         self.verify_app_ownership(app_instance).await?;
 
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
+            .filter(entity::jobs::Column::JobSequence.eq(job_sequence as i64))
             .one(self.db.connection())
             .await?
             .ok_or_else(|| PrivateCoordinationError::NotFound(
-                format!("Job {} not found", job_id)
+                format!("Job {} not found", job_sequence)
             ))?;
 
         let mut job: entity::jobs::ActiveModel = job.into();
@@ -248,16 +244,16 @@ impl Coordination for PrivateCoordination {
         Ok(self.generate_tx_hash())
     }
 
-    async fn fail_job(&self, app_instance: &str, job_id: &Self::JobId, error: &str) -> Result<Self::TransactionHash> {
+    async fn fail_job(&self, app_instance: &str, job_sequence: u64, error: &str) -> Result<Self::TransactionHash> {
         self.verify_app_ownership(app_instance).await?;
 
         let job = entity::jobs::Entity::find()
             .filter(entity::jobs::Column::AppInstanceId.eq(app_instance))
-            .filter(entity::jobs::Column::JobSequence.eq(*job_id as i64))
+            .filter(entity::jobs::Column::JobSequence.eq(job_sequence as i64))
             .one(self.db.connection())
             .await?
             .ok_or_else(|| PrivateCoordinationError::NotFound(
-                format!("Job {} not found", job_id)
+                format!("Job {} not found", job_sequence)
             ))?;
 
         let mut job: entity::jobs::ActiveModel = job.into();
@@ -270,9 +266,9 @@ impl Coordination for PrivateCoordination {
         Ok(self.generate_tx_hash())
     }
 
-    async fn terminate_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Self::TransactionHash> {
+    async fn terminate_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash> {
         // For Private layer, terminate is same as marking completed
-        self.complete_job(app_instance, job_id).await
+        self.complete_job(app_instance, job_sequence).await
     }
 
     async fn create_app_job(
@@ -410,7 +406,7 @@ impl Coordination for PrivateCoordination {
 
     async fn terminate_app_job(&self, app_instance: &str, job_id: u64) -> Result<Self::TransactionHash> {
         // Pass u64 directly - no conversion needed
-        self.terminate_job(app_instance, &job_id).await
+        self.terminate_job(app_instance, job_id).await
     }
 
     async fn restart_failed_jobs(
@@ -686,7 +682,7 @@ impl Coordination for PrivateCoordination {
         }).collect())
     }
 
-    async fn try_create_block(&self, app_instance: &str) -> Result<Option<Self::BlockId>> {
+    async fn try_create_block(&self, app_instance: &str) -> Result<Option<u64>> {
         self.verify_app_ownership(app_instance).await?;
 
         // Get app instance to check block creation conditions

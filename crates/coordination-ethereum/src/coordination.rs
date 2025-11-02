@@ -124,9 +124,6 @@ impl EthereumCoordination {
 /// Ethereum-based coordination smart contracts.
 #[async_trait]
 impl Coordination for EthereumCoordination {
-    type JobId = u64;
-    type SequenceId = u64;
-    type BlockId = u64;
     type TransactionHash = String;
     type Error = EthereumCoordinationError;
 
@@ -142,7 +139,7 @@ impl Coordination for EthereumCoordination {
 
     // ===== Job Management - Read Operations =====
 
-    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<u64>>> {
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
         debug!("Fetching pending jobs for app_instance: {}", app_instance);
 
         let provider = self.contract.create_provider()?;
@@ -155,11 +152,10 @@ impl Coordination for EthereumCoordination {
             .map_err(|e| EthereumCoordinationError::ContractCall(e.to_string()))?;
 
         // Convert Solidity jobs to Rust jobs
-        let jobs: Vec<Job<u64>> = result
+        let jobs: Vec<Job> = result
             .into_iter()
             .map(|solidity_job| {
                 Job {
-                    id: solidity_job.jobSequence,
                     job_sequence: solidity_job.jobSequence,
                     description: optional_string(solidity_job.description),
                     developer: solidity_job.developer,
@@ -194,7 +190,7 @@ impl Coordination for EthereumCoordination {
         Ok(jobs)
     }
 
-    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<u64>>> {
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
         debug!("Fetching failed jobs for app_instance: {}", app_instance);
 
         let provider = self.contract.create_provider()?;
@@ -207,11 +203,10 @@ impl Coordination for EthereumCoordination {
             .map_err(|e| EthereumCoordinationError::ContractCall(e.to_string()))?;
 
         // Convert Solidity jobs to Rust jobs (same logic as fetch_pending_jobs)
-        let jobs: Vec<Job<u64>> = result
+        let jobs: Vec<Job> = result
             .into_iter()
             .map(|solidity_job| {
                 Job {
-                    id: solidity_job.jobSequence,
                     job_sequence: solidity_job.jobSequence,
                     description: optional_string(solidity_job.description),
                     developer: solidity_job.developer,
@@ -265,15 +260,15 @@ impl Coordination for EthereumCoordination {
     async fn fetch_job_by_id(
         &self,
         app_instance: &str,
-        job_id: &u64,
-    ) -> Result<Option<Job<u64>>> {
-        debug!("Fetching job by ID: {} for app_instance: {}", job_id, app_instance);
+        job_sequence: u64,
+    ) -> Result<Option<Job>> {
+        debug!("Fetching job by ID: {} for app_instance: {}", job_sequence, app_instance);
 
         let provider = self.contract.create_provider()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let result = contract
-            .getJob(app_instance.to_string(), U256::from(*job_id))
+            .getJob(app_instance.to_string(), U256::from(job_sequence))
             .call()
             .await
             .map_err(|e| EthereumCoordinationError::ContractCall(e.to_string()))?;
@@ -285,7 +280,6 @@ impl Coordination for EthereumCoordination {
 
         // Convert to Rust Job
         let job = Job {
-            id: result.jobSequence,
             job_sequence: result.jobSequence,
             description: optional_string(result.description.clone()),
             developer: result.developer.clone(),
@@ -319,14 +313,14 @@ impl Coordination for EthereumCoordination {
 
     // ===== Job Management - Write Operations =====
 
-    async fn start_job(&self, app_instance: &str, job_id: &u64) -> Result<bool> {
-        debug!("Starting job: {} for app_instance: {}", job_id, app_instance);
+    async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool> {
+        debug!("Starting job: {} for app_instance: {}", job_sequence, app_instance);
 
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .takeJob(app_instance.to_string(), U256::from(*job_id))
+            .takeJob(app_instance.to_string(), U256::from(job_sequence))
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;
@@ -341,14 +335,14 @@ impl Coordination for EthereumCoordination {
         Ok(success)
     }
 
-    async fn complete_job(&self, app_instance: &str, job_id: &u64) -> Result<String> {
-        debug!("Completing job: {} for app_instance: {}", job_id, app_instance);
+    async fn complete_job(&self, app_instance: &str, job_sequence: u64) -> Result<String> {
+        debug!("Completing job: {} for app_instance: {}", job_sequence, app_instance);
 
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .completeJob(app_instance.to_string(), U256::from(*job_id), Bytes::new())
+            .completeJob(app_instance.to_string(), U256::from(job_sequence), Bytes::new())
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;
@@ -363,17 +357,17 @@ impl Coordination for EthereumCoordination {
         Ok(tx_hash)
     }
 
-    async fn fail_job(&self, app_instance: &str, job_id: &u64, error: &str) -> Result<String> {
+    async fn fail_job(&self, app_instance: &str, job_sequence: u64, error: &str) -> Result<String> {
         debug!(
             "Failing job: {} for app_instance: {} with error: {}",
-            job_id, app_instance, error
+            job_sequence, app_instance, error
         );
 
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .failJob(app_instance.to_string(), U256::from(*job_id), error.to_string())
+            .failJob(app_instance.to_string(), U256::from(job_sequence), error.to_string())
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;
@@ -388,14 +382,14 @@ impl Coordination for EthereumCoordination {
         Ok(tx_hash)
     }
 
-    async fn terminate_job(&self, app_instance: &str, job_id: &u64) -> Result<String> {
-        debug!("Terminating job: {} for app_instance: {}", job_id, app_instance);
+    async fn terminate_job(&self, app_instance: &str, job_sequence: u64) -> Result<String> {
+        debug!("Terminating job: {} for app_instance: {}", job_sequence, app_instance);
 
         let provider = self.contract.create_provider_with_signer()?;
         let contract = JobManager::new(*self.contract.contract_address(), &provider);
 
         let pending_tx = contract
-            .terminateJob(app_instance.to_string(), U256::from(*job_id))
+            .terminateJob(app_instance.to_string(), U256::from(job_sequence))
             .send()
             .await
             .map_err(|e| EthereumCoordinationError::Transaction(e.to_string()))?;

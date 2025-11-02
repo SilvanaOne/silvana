@@ -75,9 +75,8 @@ impl SuiCoordination {
     }
 
     /// Convert from internal Job type to trait Job type
-    fn convert_job(&self, job: fetch::jobs::Job) -> Job<u64> {
+    fn convert_job(&self, job: fetch::jobs::Job) -> Job {
         Job {
-            id: job.job_sequence, // Use sequence as ID for Sui
             job_sequence: job.job_sequence,
             description: job.description,
             developer: job.developer,
@@ -340,9 +339,6 @@ impl fmt::Debug for SuiCoordination {
 
 #[async_trait]
 impl Coordination for SuiCoordination {
-    type JobId = u64;
-    type SequenceId = u64;
-    type BlockId = u64;
     type TransactionHash = String;
     type Error = SilvanaSuiInterfaceError;
 
@@ -358,7 +354,7 @@ impl Coordination for SuiCoordination {
 
     // ===== Job Management =====
 
-    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>, Self::Error> {
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
 
         // Use the existing function but convert the result
@@ -368,7 +364,7 @@ impl Coordination for SuiCoordination {
         }
     }
 
-    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>, Self::Error> {
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         let jobs = fetch_failed_jobs_from_app_instance(&app).await?;
         Ok(jobs.into_iter().map(|j| self.convert_job(j)).collect())
@@ -379,34 +375,34 @@ impl Coordination for SuiCoordination {
         Ok(get_failed_jobs_count(&app).await)
     }
 
-    async fn fetch_job_by_id(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Option<Job<Self::JobId>>, Self::Error> {
+    async fn fetch_job_by_id(&self, app_instance: &str, job_sequence: u64) -> Result<Option<Job>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         let jobs_table_id = app.jobs.as_ref().map(|j| j.jobs_table_id.clone())
             .ok_or_else(|| SilvanaSuiInterfaceError::Other(anyhow!("Jobs table not found")))?;
-        match fetch_job_by_id(&jobs_table_id, *job_id).await? {
+        match fetch_job_by_id(&jobs_table_id, job_sequence).await? {
             Some(job) => Ok(Some(self.convert_job(job))),
             None => Ok(None),
         }
     }
 
-    async fn start_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<bool, Self::Error> {
+    async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool, Self::Error> {
         // Use the existing interface method which returns bool
         let mut interface = SilvanaSuiInterface::new();
-        Ok(interface.start_job(app_instance, *job_id).await)
+        Ok(interface.start_job(app_instance, job_sequence).await)
     }
 
-    async fn complete_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Self::TransactionHash, Self::Error> {
-        complete_job_tx(app_instance, *job_id).await
+    async fn complete_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash, Self::Error> {
+        complete_job_tx(app_instance, job_sequence).await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
-    async fn fail_job(&self, app_instance: &str, job_id: &Self::JobId, error: &str) -> Result<Self::TransactionHash, Self::Error> {
-        fail_job_tx(app_instance, *job_id, error).await
+    async fn fail_job(&self, app_instance: &str, job_sequence: u64, error: &str) -> Result<Self::TransactionHash, Self::Error> {
+        fail_job_tx(app_instance, job_sequence, error).await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
-    async fn terminate_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Self::TransactionHash, Self::Error> {
-        terminate_job_tx(app_instance, *job_id, None).await
+    async fn terminate_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash, Self::Error> {
+        terminate_job_tx(app_instance, job_sequence, None).await
             .map_err(|e| SilvanaSuiInterfaceError::Other(e))
     }
 
@@ -572,7 +568,7 @@ impl Coordination for SuiCoordination {
         Ok(blocks.into_iter().map(|(_, b)| self.convert_block(b)).collect())
     }
 
-    async fn try_create_block(&self, app_instance: &str) -> Result<Option<Self::BlockId>, Self::Error> {
+    async fn try_create_block(&self, app_instance: &str) -> Result<Option<u64>, Self::Error> {
         match try_create_block_tx(app_instance).await {
             Ok(_tx_hash) => {
                 // Fetch the app instance to get the new block number

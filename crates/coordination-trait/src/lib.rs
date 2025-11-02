@@ -16,18 +16,13 @@ pub use layer::{CoordinationLayer, CoordinationLayerOperationMode};
 pub use types::*;
 
 /// Main Coordination trait that all coordination layers must implement
+///
+/// This trait is object-safe, allowing dynamic dispatch with `Box<dyn Coordination>`.
+/// All ID types use concrete types (u64 for sequences/blocks, String for transactions)
+/// to enable trait object usage.
 #[async_trait]
 pub trait Coordination: Send + Sync {
-    /// Type for Job IDs (could be u64 for some layers, String for others)
-    type JobId: Display + Clone + Send + Sync + Debug;
-
-    /// Type for Sequence IDs
-    type SequenceId: Display + Clone + Send + Sync + Debug;
-
-    /// Type for Block IDs
-    type BlockId: Display + Clone + Send + Sync + Debug;
-
-    /// Type for Transaction Hashes
+    /// Type for Transaction Hashes (varies by blockchain)
     type TransactionHash: Display + Clone + Send + Sync + Debug;
 
     /// Error type for this coordination layer
@@ -46,30 +41,30 @@ pub trait Coordination: Send + Sync {
     // Read operations
 
     /// Fetch all pending jobs for an app instance
-    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>, Self::Error>;
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error>;
 
     /// Fetch all failed jobs for an app instance
-    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job<Self::JobId>>, Self::Error>;
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error>;
 
     /// Get the count of failed jobs
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
 
-    /// Fetch a specific job by its ID
-    async fn fetch_job_by_id(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Option<Job<Self::JobId>>, Self::Error>;
+    /// Fetch a specific job by its sequence number
+    async fn fetch_job_by_id(&self, app_instance: &str, job_sequence: u64) -> Result<Option<Job>, Self::Error>;
 
     // Write operations
 
     /// Start a job (returns true if successfully started)
-    async fn start_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<bool, Self::Error>;
+    async fn start_job(&self, app_instance: &str, job_sequence: u64) -> Result<bool, Self::Error>;
 
     /// Mark a job as completed
-    async fn complete_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Self::TransactionHash, Self::Error>;
+    async fn complete_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash, Self::Error>;
 
     /// Mark a job as failed with an error message
-    async fn fail_job(&self, app_instance: &str, job_id: &Self::JobId, error: &str) -> Result<Self::TransactionHash, Self::Error>;
+    async fn fail_job(&self, app_instance: &str, job_sequence: u64, error: &str) -> Result<Self::TransactionHash, Self::Error>;
 
     /// Terminate a job
-    async fn terminate_job(&self, app_instance: &str, job_id: &Self::JobId) -> Result<Self::TransactionHash, Self::Error>;
+    async fn terminate_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash, Self::Error>;
 
     /// Create a new app job
     async fn create_app_job(
@@ -170,8 +165,8 @@ pub trait Coordination: Send + Sync {
 
     // Write operations
 
-    /// Try to create a new block
-    async fn try_create_block(&self, app_instance: &str) -> Result<Option<Self::BlockId>, Self::Error>;
+    /// Try to create a new block (returns block number if created)
+    async fn try_create_block(&self, app_instance: &str) -> Result<Option<u64>, Self::Error>;
 
     /// Update block's state data availability
     async fn update_block_state_data_availability(
