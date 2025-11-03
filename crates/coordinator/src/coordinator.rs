@@ -101,7 +101,7 @@ async fn reconcile_layer(
                                 );
 
                                 // Use job_sequence directly (already u64)
-                                state.add_fail_job_request(
+                                state.execute_or_queue_fail_job(
                                     app_instance.clone(),
                                     job.job_sequence,
                                     error_msg,

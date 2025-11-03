@@ -39,6 +39,35 @@ use coordinator::{
     coordinator_service_server::{CoordinatorService, CoordinatorServiceServer},
 };
 
+/// Convert sui::fetch::Job to coordination trait Job
+fn sui_job_to_coordination_job(job: &sui::fetch::Job) -> silvana_coordination_trait::Job {
+    silvana_coordination_trait::Job {
+        job_sequence: job.job_sequence,
+        description: job.description.clone(),
+        developer: job.developer.clone(),
+        agent: job.agent.clone(),
+        agent_method: job.agent_method.clone(),
+        app: job.app.clone(),
+        app_instance: job.app_instance.clone(),
+        app_instance_method: job.app_instance_method.clone(),
+        block_number: job.block_number,
+        sequences: job.sequences.clone(),
+        sequences1: job.sequences1.clone(),
+        sequences2: job.sequences2.clone(),
+        data: job.data.clone(),
+        status: match &job.status {
+            sui::fetch::JobStatus::Pending => silvana_coordination_trait::JobStatus::Pending,
+            sui::fetch::JobStatus::Running => silvana_coordination_trait::JobStatus::Running,
+            sui::fetch::JobStatus::Failed(err) => silvana_coordination_trait::JobStatus::Failed(err.clone()),
+        },
+        attempts: job.attempts,
+        interval_ms: job.interval_ms,
+        next_scheduled_at: job.next_scheduled_at,
+        created_at: job.created_at,
+        updated_at: job.updated_at,
+    }
+}
+
 #[derive(Clone)]
 pub struct CoordinatorServiceImpl {
     state: SharedState,
@@ -750,7 +779,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                         // Add terminate request to multicall queue
                         self.state
-                            .add_terminate_job_request(
+                            .execute_or_queue_terminate_job(
                                 agent_job.app_instance.clone(),
                                 agent_job.job_sequence,
                             )
@@ -929,7 +958,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                     // Create AgentJob and add it to agent database
                     let agent_job = match crate::agent::AgentJob::new(
-                        pending_job.clone(),
+                        sui_job_to_coordination_job(&pending_job),
                         req.session_id.clone(),
                         &self.state,
                         agent_method.min_memory_gb,
@@ -986,7 +1015,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                         // Add terminate request to multicall queue
                         self.state
-                            .add_terminate_job_request(
+                            .execute_or_queue_terminate_job(
                                 started_job.app_instance.clone(),
                                 started_job.job_sequence,
                             )
@@ -1184,7 +1213,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Add complete job request to batch instead of executing immediately
         self.state
-            .add_complete_job_request(agent_job.app_instance.clone(), agent_job.job_sequence)
+            .execute_or_queue_complete_job(agent_job.app_instance.clone(), agent_job.job_sequence)
             .await;
 
         // Send JobFinishedEvent before removing from database
@@ -1287,7 +1316,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Add fail job request to batch instead of executing immediately
         self.state
-            .add_fail_job_request(
+            .execute_or_queue_fail_job(
                 agent_job.app_instance.clone(),
                 agent_job.job_sequence,
                 req.error_message.clone(),

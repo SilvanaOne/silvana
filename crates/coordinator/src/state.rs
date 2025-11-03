@@ -2,6 +2,7 @@ use crate::agent::AgentJobDatabase;
 use crate::coordination_manager::CoordinationManager;
 use crate::jobs::JobsTracker;
 use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
+use silvana_coordination_trait::Coordination;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -997,6 +998,194 @@ impl SharedState {
             "Added create merge job request for app_instance {}",
             app_instance
         );
+    }
+
+    // ===== Execute or Queue Methods (Immediate execution for non-multicall layers) =====
+
+    /// Execute start_job immediately for non-multicall layers, or queue for multicall layers
+    pub async fn execute_or_queue_start_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+        memory_requirement: u64,
+        job_type: String,
+        block_number: Option<u64>,
+        sequences: Option<Vec<u64>>,
+        layer_id: String,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        // Check if this layer supports multicall
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // DIRECT EXECUTION - Execute immediately without queuing
+                    info!(
+                        "🚀 Direct execution: start_job {} for {} on non-multicall layer {}",
+                        job_sequence, app_instance, layer_id
+                    );
+
+                    match layer.start_job(&app_instance, job_sequence).await {
+                        Ok(_) => {
+                            info!(
+                                "✅ Direct start_job succeeded: {} seq {}",
+                                app_instance, job_sequence
+                            );
+
+                            // Add to buffer for Docker launching
+                            self.add_started_jobs(vec![StartedJob {
+                                app_instance,
+                                job_sequence,
+                                memory_requirement,
+                                job_type,
+                                block_number,
+                                sequences,
+                                layer_id,
+                            }]).await;
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Direct start_job failed: {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return; // Done - no queuing
+                }
+            }
+        }
+
+        // MULTICALL LAYER - Queue for batching (existing behavior)
+        self.add_start_job_request(
+            app_instance,
+            job_sequence,
+            memory_requirement,
+            job_type,
+            block_number,
+            sequences,
+            layer_id,
+        ).await;
+    }
+
+    /// Execute complete_job immediately for non-multicall layers, or queue for multicall
+    pub async fn execute_or_queue_complete_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // Direct execution
+                    info!(
+                        "🚀 Direct execution: complete_job {} for {}",
+                        job_sequence, app_instance
+                    );
+
+                    match layer.complete_job(&app_instance, job_sequence).await {
+                        Ok(tx_hash) => {
+                            info!(
+                                "✅ Direct complete_job succeeded: {} seq {} (tx: {})",
+                                app_instance, job_sequence, tx_hash
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Direct complete_job failed: {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Queue for multicall
+        self.add_complete_job_request(app_instance, job_sequence).await;
+    }
+
+    /// Execute fail_job immediately for non-multicall layers, or queue for multicall
+    pub async fn execute_or_queue_fail_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+        error: String,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // Direct execution
+                    info!(
+                        "🚀 Direct execution: fail_job {} for {}",
+                        job_sequence, app_instance
+                    );
+
+                    match layer.fail_job(&app_instance, job_sequence, &error).await {
+                        Ok(tx_hash) => {
+                            info!(
+                                "✅ Direct fail_job succeeded: {} seq {} (tx: {})",
+                                app_instance, job_sequence, tx_hash
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Direct fail_job failed: {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Queue for multicall
+        self.add_fail_job_request(app_instance, job_sequence, error).await;
+    }
+
+    /// Execute terminate_job immediately for non-multicall layers, or queue for multicall
+    pub async fn execute_or_queue_terminate_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // Direct execution
+                    info!(
+                        "🚀 Direct execution: terminate_job {} for {}",
+                        job_sequence, app_instance
+                    );
+
+                    match layer.terminate_job(&app_instance, job_sequence).await {
+                        Ok(tx_hash) => {
+                            info!(
+                                "✅ Direct terminate_job succeeded: {} seq {} (tx: {})",
+                                app_instance, job_sequence, tx_hash
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Direct terminate_job failed: {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Queue for multicall
+        self.add_terminate_job_request(app_instance, job_sequence).await;
     }
 
     /// Check if any app instance has pending requests ready for execution

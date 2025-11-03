@@ -335,7 +335,7 @@ impl JobSearcher {
                             }
 
                             self.state
-                                .add_start_job_request(
+                                .execute_or_queue_start_job(
                                     job.app_instance.clone(),
                                     job.job_sequence,
                                     memory_requirement,

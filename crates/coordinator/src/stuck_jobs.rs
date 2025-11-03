@@ -140,7 +140,7 @@ impl StuckJobMonitor {
         );
         
         // Add fail job request to multicall batch instead of direct call
-        self.state.add_fail_job_request(app_instance_id.to_string(), job_sequence, error_msg).await;
+        self.state.execute_or_queue_fail_job(app_instance_id.to_string(), job_sequence, error_msg).await;
         info!(
             "Added fail request for stuck job {} in app_instance {} to multicall batch",
             job_sequence, app_instance_id

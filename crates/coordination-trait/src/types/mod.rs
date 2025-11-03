@@ -1,5 +1,6 @@
 //! Common data types used across coordination layers
 
+pub mod agent;
 pub mod app;
 pub mod block;
 pub mod event;
@@ -9,6 +10,7 @@ pub mod proof;
 pub mod sequence;
 pub mod settlement;
 
+pub use agent::*;
 pub use app::*;
 pub use block::*;
 pub use event::*;

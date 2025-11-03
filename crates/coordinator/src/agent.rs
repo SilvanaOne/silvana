@@ -1,10 +1,10 @@
 use crate::job_id::generate_job_id;
 use crate::state::SharedState;
 use proto;
+use silvana_coordination_trait::Job;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sui::fetch::Job;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 

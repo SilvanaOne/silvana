@@ -255,6 +255,11 @@ impl CoordinationManager {
         self.layer_info.get(layer_id)
     }
 
+    /// Get a coordination layer by its ID
+    pub fn get_layer_by_id(&self, layer_id: &str) -> Option<Arc<CoordinationLayer>> {
+        self.layers.get(layer_id).map(|layer| layer.clone())
+    }
+
     /// Check if a layer supports multicall operations
     pub fn supports_multicall(&self, layer_id: &str) -> bool {
         self.layer_info
