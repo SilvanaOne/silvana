@@ -537,11 +537,33 @@ impl Coordination for SuiCoordination {
     async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
 
-        // Use the existing function but convert the result
-        match fetch_pending_jobs_from_app_instance(&app, false).await? {
-            Some(job) => Ok(vec![self.convert_job(job)]),
-            None => Ok(vec![]),
+        // Get the Jobs object and extract pending_jobs VecSet
+        let jobs_obj = match app.jobs.as_ref() {
+            Some(jobs) => jobs,
+            None => return Ok(vec![]),
+        };
+
+        // Get all pending job sequences from the VecSet
+        let pending_sequences: Vec<u64> = jobs_obj.pending_jobs.clone();
+
+        if pending_sequences.is_empty() {
+            return Ok(vec![]);
         }
+
+        // Fetch all pending jobs in a batch
+        let jobs_table_id = &jobs_obj.jobs_table_id;
+        let jobs_map = sui::fetch::fetch_jobs_batch(jobs_table_id, &pending_sequences)
+            .await
+            .map_err(|e| SilvanaSuiInterfaceError::Other(e.into()))?;
+
+        // Convert and filter for Pending status (defensive check)
+        let pending_jobs: Vec<Job> = jobs_map
+            .into_values()
+            .filter(|job| matches!(job.status, sui::fetch::JobStatus::Pending))
+            .map(|job| self.convert_job(job))
+            .collect();
+
+        Ok(pending_jobs)
     }
 
     async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error> {

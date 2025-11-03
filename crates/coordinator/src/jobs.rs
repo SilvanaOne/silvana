@@ -1,7 +1,9 @@
 #[cfg(test)]
 use crate::constants::JOB_PROCESSING_CHECK_DELAY_MS;
 use crate::constants::{RETRY_MAX_DELAY_SECS, STUCK_JOB_TIMEOUT_SECS};
+use crate::coordination_manager::CoordinationManager;
 use crate::error::Result;
+use silvana_coordination_trait::Coordination;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -34,6 +36,9 @@ pub struct JobsTracker {
 
     /// Track last reconciliation time
     last_reconciliation: Arc<RwLock<Instant>>,
+
+    /// Coordination manager for multi-layer support (optional for backward compatibility)
+    coordination_manager: Option<Arc<CoordinationManager>>,
 }
 
 impl JobsTracker {
@@ -42,6 +47,17 @@ impl JobsTracker {
             app_instances_with_jobs: Arc::new(RwLock::new(HashMap::new())),
             agent_method_index: Arc::new(RwLock::new(HashMap::new())),
             last_reconciliation: Arc::new(RwLock::new(Instant::now())),
+            coordination_manager: None,
+        }
+    }
+
+    /// Create a new JobsTracker with CoordinationManager for multi-layer support
+    pub fn new_with_manager(manager: Arc<CoordinationManager>) -> Self {
+        Self {
+            app_instances_with_jobs: Arc::new(RwLock::new(HashMap::new())),
+            agent_method_index: Arc::new(RwLock::new(HashMap::new())),
+            last_reconciliation: Arc::new(RwLock::new(Instant::now())),
+            coordination_manager: Some(manager),
         }
     }
 
@@ -77,9 +93,15 @@ impl JobsTracker {
                 },
             );
             if is_new {
-                info!("✅ Added NEW app_instance {} to tracking on layer {}", app_instance_id, layer_id);
+                info!(
+                    "✅ Added NEW app_instance {} to tracking on layer {}",
+                    app_instance_id, layer_id
+                );
             } else {
-                debug!("Updated timestamp for app_instance {} on layer {}", app_instance_id, layer_id);
+                debug!(
+                    "Updated timestamp for app_instance {} on layer {}",
+                    app_instance_id, layer_id
+                );
             }
         }
 
@@ -176,10 +198,7 @@ impl JobsTracker {
             .filter(|(_, info)| info.layer_id == layer_id)
             .map(|(id, _)| id.clone())
             .collect();
-        info!(
-            "🟢 get_app_instances_for_layer('{}') returning {} instances: {:?}",
-            layer_id, result.len(), result
-        );
+
         result
     }
 
@@ -235,8 +254,62 @@ impl JobsTracker {
         let mut skipped_updated = 0;
 
         for (app_instance_id, original_timestamp) in &instances_to_check {
+            // Get the coordination layer for this app instance
+            let coordination = if let Some(ref manager) = self.coordination_manager {
+                // Get layer info from our tracking
+                let layer_id = {
+                    let instances = self.app_instances_with_jobs.read().await;
+                    instances
+                        .get(app_instance_id)
+                        .map(|info| info.layer_id.clone())
+                };
+
+                match layer_id {
+                    Some(lid) => match manager.get_layer(&lid) {
+                        Some(layer) => layer,
+                        None => {
+                            warn!(
+                                "Layer {} not found for app_instance {}, skipping",
+                                lid, app_instance_id
+                            );
+                            instances_with_errors += 1;
+                            continue;
+                        }
+                    },
+                    None => {
+                        warn!(
+                            "No layer_id found for app_instance {}, skipping",
+                            app_instance_id
+                        );
+                        instances_with_errors += 1;
+                        continue;
+                    }
+                }
+            } else {
+                // Backward compatibility: fall back to Sui fetch if no manager
+                let _app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+                    Ok(app_inst) => app_inst,
+                    Err(e) => {
+                        if e.to_string().contains("not found") || e.to_string().contains("NotFound")
+                        {
+                            debug!(
+                                "App_instance {} not found on chain (likely deleted), removing from tracker",
+                                app_instance_id
+                            );
+                            self.remove_app_instance(app_instance_id).await;
+                            removed_count += 1;
+                        } else {
+                            error!("Failed to fetch app_instance {}: {}", app_instance_id, e);
+                            instances_with_errors += 1;
+                        }
+                        continue;
+                    }
+                };
+                continue; // Skip to next iteration after Sui-specific handling
+            };
+
             // Fetch the app instance to check its state
-            let _app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
+            let _app_instance = match coordination.fetch_app_instance(app_instance_id).await {
                 Ok(app_inst) => app_inst,
                 Err(e) => {
                     if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
@@ -269,75 +342,62 @@ impl JobsTracker {
             // }
 
             // AppInstance passed settlement checks, now check if it has pending or running jobs
-            match fetch_pending_jobs_count_from_app_instance(app_instance_id).await {
-                Ok(count) => {
-                    if count == 0 {
-                        // Also check for running jobs before removing
-                        let has_running_jobs = match check_for_running_jobs(app_instance_id).await {
-                            Ok(has_running) => has_running,
-                            Err(e) => {
-                                debug!(
-                                    "Error checking for running jobs in {}: {}, keeping instance",
-                                    app_instance_id, e
-                                );
-                                true // Assume there might be running jobs on error
-                            }
-                        };
+            let pending_jobs_count = coordination
+                .get_pending_jobs_count(app_instance_id)
+                .await
+                .unwrap_or(0);
+            if pending_jobs_count == 0 {
+                // Also check for running jobs before removing
+                let total_jobs = coordination
+                    .get_total_jobs_count(app_instance_id)
+                    .await
+                    .unwrap_or(0);
+                let failed_jobs = coordination
+                    .get_failed_jobs_count(app_instance_id)
+                    .await
+                    .unwrap_or(0);
+                let running_jobs_count =
+                    total_jobs.saturating_sub(pending_jobs_count + failed_jobs);
+                let has_running_jobs = running_jobs_count > 0;
 
-                        if has_running_jobs {
-                            debug!("App_instance {} has running jobs, keeping", app_instance_id);
-                            instances_with_jobs += 1;
-                            continue;
-                        }
-
-                        // Check if the timestamp has changed (new events arrived)
-                        let should_remove = {
-                            let instances = self.app_instances_with_jobs.read().await;
-                            instances
-                                .get(app_instance_id)
-                                .map(|info| info.updated_at == *original_timestamp)
-                                .unwrap_or(false)
-                        };
-
-                        if should_remove {
-                            info!(
-                                "App_instance {} passed all removal checks (settlement complete, no jobs), removing from tracking",
-                                app_instance_id
-                            );
-                            self.remove_app_instance(app_instance_id).await;
-                            removed_count += 1;
-                        } else {
-                            debug!(
-                                "App_instance {} is ready for removal but was updated during reconciliation, keeping",
-                                app_instance_id
-                            );
-                            skipped_updated += 1;
-                        }
-                    } else {
-                        debug!(
-                            "App_instance {} has {} pending jobs",
-                            app_instance_id, count
-                        );
-                        instances_with_jobs += 1;
-                    }
+                if has_running_jobs {
+                    debug!(
+                        "App_instance {} has {} running jobs, keeping",
+                        app_instance_id, running_jobs_count
+                    );
+                    instances_with_jobs += 1;
+                    continue;
                 }
-                Err(e) => {
-                    // Handle errors from fetch_pending_jobs_count
-                    if e.to_string().contains("not found") || e.to_string().contains("NotFound") {
-                        debug!(
-                            "Jobs object for app_instance {} not found, removing from tracker",
-                            app_instance_id
-                        );
-                        self.remove_app_instance(app_instance_id).await;
-                        removed_count += 1;
-                    } else {
-                        warn!(
-                            "Failed to fetch pending_jobs_count for {}: {}",
-                            app_instance_id, e
-                        );
-                        instances_with_errors += 1;
-                    }
+
+                // Check if the timestamp has changed (new events arrived)
+                let should_remove = {
+                    let instances = self.app_instances_with_jobs.read().await;
+                    instances
+                        .get(app_instance_id)
+                        .map(|info| info.updated_at == *original_timestamp)
+                        .unwrap_or(false)
+                };
+
+                if should_remove {
+                    info!(
+                        "App_instance {} passed all removal checks (settlement complete, no jobs), removing from tracking",
+                        app_instance_id
+                    );
+                    self.remove_app_instance(app_instance_id).await;
+                    removed_count += 1;
+                } else {
+                    debug!(
+                        "App_instance {} is ready for removal but was updated during reconciliation, keeping",
+                        app_instance_id
+                    );
+                    skipped_updated += 1;
                 }
+            } else {
+                debug!(
+                    "App_instance {} has {} pending jobs",
+                    app_instance_id, pending_jobs_count
+                );
+                instances_with_jobs += 1;
             }
         }
 
@@ -370,7 +430,7 @@ impl JobsTracker {
     async fn fail_stuck_running_jobs<F>(
         &self,
         instances_to_check: &[(String, Instant)],
-        add_fail_request: F,
+        _add_fail_request: F,
     ) where
         F: Fn(
             String,
@@ -378,7 +438,7 @@ impl JobsTracker {
             String,
         ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
     {
-        let max_running_duration = Duration::from_secs(STUCK_JOB_TIMEOUT_SECS);
+        let _max_running_duration = Duration::from_secs(STUCK_JOB_TIMEOUT_SECS);
 
         if instances_to_check.is_empty() {
             debug!("No app_instances to check for stuck jobs");
@@ -398,7 +458,90 @@ impl JobsTracker {
         );
 
         for (app_instance_id, _) in instances_to_check {
-            // First fetch the AppInstance object
+            // Get the coordination manager if available
+            let manager = match &self.coordination_manager {
+                Some(m) => m,
+                None => {
+                    // No coordination manager - skip stuck job checking for now
+                    // This would be the old Sui-only path
+                    debug!(
+                        "No coordination manager available, skipping stuck job check for {}",
+                        app_instance_id
+                    );
+                    continue;
+                }
+            };
+
+            // Get layer info from our tracking
+            let layer_id = {
+                let instances = self.app_instances_with_jobs.read().await;
+                match instances.get(app_instance_id) {
+                    Some(info) => info.layer_id.clone(),
+                    None => {
+                        debug!(
+                            "No layer_id found for app_instance {}, skipping stuck job check",
+                            app_instance_id
+                        );
+                        continue;
+                    }
+                }
+            };
+
+            // Get the coordination layer
+            let coordination = match manager.get_layer(&layer_id) {
+                Some(layer) => layer,
+                None => {
+                    debug!(
+                        "Layer {} not found for app_instance {}, skipping stuck job check",
+                        layer_id, app_instance_id
+                    );
+                    continue;
+                }
+            };
+
+            // Use coordination trait to check for stuck jobs
+            // For now, we only check if jobs exist - the full stuck job detection
+            // requires fetching job details which the coordination trait doesn't fully support yet
+            // This is a simplified version that at least validates the app instance exists
+            match coordination.fetch_app_instance(app_instance_id).await {
+                Ok(_) => {
+                    debug!(
+                        "App instance {} exists on coordination layer, skipping detailed stuck job check for now",
+                        app_instance_id
+                    );
+                    // TODO: Implement full stuck job checking using coordination trait once it supports:
+                    // 1. Fetching all jobs
+                    // 2. Getting settlement job IDs
+                    // 3. Checking job status and timing
+                }
+                Err(e) => {
+                    if !e.to_string().contains("not found") && !e.to_string().contains("NotFound") {
+                        debug!(
+                            "Failed to fetch app_instance {} for stuck job check: {}",
+                            app_instance_id, e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Backward-compatible Sui-specific stuck job checking (deprecated, kept for reference)
+    #[allow(dead_code)]
+    async fn fail_stuck_running_jobs_sui<F>(
+        &self,
+        instances_to_check: &[(String, Instant)],
+        add_fail_request: F,
+    ) where
+        F: Fn(
+            String,
+            u64,
+            String,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+    {
+        let max_running_duration = Duration::from_secs(STUCK_JOB_TIMEOUT_SECS);
+        for (app_instance_id, _) in instances_to_check {
+            // Backward compatibility: use Sui-specific code path
             let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
                 Ok(app_inst) => app_inst,
                 Err(e) => {
@@ -409,7 +552,7 @@ impl JobsTracker {
                 }
             };
 
-            // Fetch all jobs for this app_instance
+            // Continue with Sui-specific stuck job checking...
             match sui::fetch::fetch_all_jobs_from_app_instance(&app_instance).await {
                 Ok(jobs) => {
                     let job_numbers: Vec<u64> = jobs.iter().map(|j| j.job_sequence).collect();

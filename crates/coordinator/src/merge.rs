@@ -284,9 +284,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 }
                 Err(e) => {
                     let error_str = e.to_string();
-                    if proof_calc.block_number == 180 {
-                        info!("❌ Block 180: Failed to create merge job: {}", e);
-                    }
 
                     // Log based on error type
                     if error_str.contains("already reserved")
@@ -305,7 +302,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                             e
                         );
                     } else {
-                        warn!(
+                        info!(
                             "⚠️ Failed to create merge job #{} for block {}: {}",
                             idx + 1,
                             proof_calc.block_number,
@@ -515,9 +512,10 @@ fn find_proofs_to_merge_excluding(
                 let right_range: Vec<u64> = (split..=end_seq).collect();
 
                 // Check if this merge is excluded
-                if !excluded.iter().any(|(s1, s2)| {
-                    arrays_equal(s1, &left_range) && arrays_equal(s2, &right_range)
-                }) {
+                if !excluded
+                    .iter()
+                    .any(|(s1, s2)| arrays_equal(s1, &left_range) && arrays_equal(s2, &right_range))
+                {
                     // Check if both halves exist and are available
                     let left_proof = block_proofs
                         .proofs
@@ -1097,6 +1095,58 @@ async fn create_merge_job(
         debug!("✅ Combined proof exists but is REJECTED - can proceed");
     } else {
         debug!("✅ Combined proof does not exist yet - can create new");
+    }
+
+    // Step 2.5: Check if there's already a pending merge job for these sequences
+    // This prevents duplicate job creation when analyze_proof_completion runs multiple times
+    if let Some(ref jobs_obj) = fresh_app_instance.jobs {
+        let pending_job_ids = &jobs_obj.pending_jobs;
+
+        for job_seq in pending_job_ids {
+            // Fetch the job to check its details
+            if let Ok(Some(job)) =
+                sui::fetch::jobs::fetch_job_by_id(&jobs_obj.jobs_table_id, *job_seq).await
+            {
+                // Check if this is a merge job with matching sequences
+                if job.app_instance_method == "merge" && job.block_number == Some(block_number) {
+                    // Check if sequences match (in either order since merge is commutative)
+                    let matches_forward = job
+                        .sequences1
+                        .as_ref()
+                        .map(|s1| arrays_equal(s1, &sequences1))
+                        .unwrap_or(false)
+                        && job
+                            .sequences2
+                            .as_ref()
+                            .map(|s2| arrays_equal(s2, &sequences2))
+                            .unwrap_or(false);
+                    let matches_reverse = job
+                        .sequences1
+                        .as_ref()
+                        .map(|s1| arrays_equal(s1, &sequences2))
+                        .unwrap_or(false)
+                        && job
+                            .sequences2
+                            .as_ref()
+                            .map(|s2| arrays_equal(s2, &sequences1))
+                            .unwrap_or(false);
+
+                    if matches_forward || matches_reverse {
+                        debug!(
+                            "✋ Pending merge job #{} already exists for block {} with sequences {:?} + {:?} - skipping duplicate",
+                            job_seq, block_number, sequences1, sequences2
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Merge job already pending: job #{} for sequences {:?} + {:?}",
+                            job_seq,
+                            sequences1,
+                            sequences2
+                        ));
+                    }
+                }
+            }
+        }
+        debug!("✅ No duplicate pending merge jobs found - proceeding with creation");
     }
 
     // Check that sequence1 and sequence2 proofs exist and are CALCULATED

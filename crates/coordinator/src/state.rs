@@ -244,7 +244,7 @@ impl SharedState {
 
         Self {
             current_agents: Arc::new(RwLock::new(HashMap::new())),
-            jobs_tracker: JobsTracker::new(),
+            jobs_tracker: JobsTracker::new_with_manager(manager.clone()),
             agent_job_db: AgentJobDatabase::new(),
             has_pending_jobs: Arc::new(AtomicBool::new(false)),
             rpc_client,
