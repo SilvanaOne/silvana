@@ -2039,10 +2039,34 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Err(Status::unauthenticated("Invalid session ID"));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                return Err(Status::internal(format!(
+                    "Coordination layer {} not found",
+                    agent_job.layer_id
+                )));
+            }
+        };
+
         // First fetch the AppInstance object
         let app_instance_id = agent_job.app_instance.clone();
-        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
-            Ok(app_inst) => app_inst,
+        let app_instance = match layer.fetch_app_instance(&app_instance_id).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for query_sequence_states
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Err(Status::unimplemented(
+                            "GetSequenceStates is only supported for Sui app instances"
+                        ));
+                    }
+                }
+            }
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 return Err(Status::internal(format!(
@@ -2256,12 +2280,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                }));
+            }
+        };
+
         // Use the app_instance from the job
         let app_instance_id = agent_job.app_instance.clone();
 
         // First fetch the AppInstance object
-        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
-            Ok(app_inst) => app_inst,
+        let app_instance = match layer.fetch_app_instance(&app_instance_id).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for fetch_proof_calculation
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetProofResponse {
+                            success: false,
+                            proof: None,
+                            message: "GetProof is only supported for Sui app instances".to_string(),
+                        }));
+                    }
+                }
+            }
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 return Ok(Response::new(GetProofResponse {
@@ -2450,12 +2501,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                }));
+            }
+        };
+
         // Use the app_instance from the job
         let app_instance_id = agent_job.app_instance.clone();
 
         // First fetch the AppInstance object
-        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
-            Ok(app_inst) => app_inst,
+        let app_instance = match layer.fetch_app_instance(&app_instance_id).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for fetch_proof_calculation
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetBlockProofResponse {
+                            success: false,
+                            block_proof: None,
+                            message: "GetBlockProof is only supported for Sui app instances".to_string(),
+                        }));
+                    }
+                }
+            }
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 return Ok(Response::new(GetBlockProofResponse {
@@ -3179,8 +3257,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetKvResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    value: None,
+                }));
+            }
+        };
+
         // Fetch the app instance and get the key-value
-        match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+        match layer.fetch_app_instance(&agent_job.app_instance).await {
             Ok(app_instance) => {
                 if let Some(value) = app_instance.kv.get(&req.key) {
                     info!(
@@ -3452,8 +3545,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetMetadataResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    metadata: None,
+                }));
+            }
+        };
+
         // Fetch the app instance and get the metadata
-        match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+        match layer.fetch_app_instance(&agent_job.app_instance).await {
             Ok(app_instance) => {
                 // Handle the optional key - if provided, look up the metadata value
                 let metadata_value = if let Some(ref key) = req.key {
@@ -3852,9 +3960,34 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 req.block_number, WALRUS_QUILT_BLOCK_INTERVAL
             );
 
-            // Fetch app_instance to get block data
-            match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
-                Ok(app_instance) => {
+            // Get coordination layer for this job
+            let layer = match self.state.get_coordination_manager()
+                .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+            {
+                Some(l) => l,
+                None => {
+                    error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                    return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                        success: false,
+                        message: format!("Coordination layer {} not found", agent_job.layer_id),
+                        tx_hash: String::new(),
+                    }));
+                }
+            };
+
+            // Fetch app_instance to get block data - need Sui type for fetch_block_info
+            match layer.fetch_app_instance(&agent_job.app_instance).await {
+                Ok(_trait_app) => {
+                    let app_instance = match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                        Ok(sui_app) => sui_app,
+                        Err(_) => {
+                            return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                                success: false,
+                                message: "UpdateBlockProofDataAvailability is only supported for Sui app instances".to_string(),
+                                tx_hash: String::new(),
+                            }));
+                        }
+                    };
                     // Fetch the last N blocks including current
                     let start_block = req
                         .block_number
@@ -4417,18 +4550,43 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Fetch app instance
-        let app_instance =
-            match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
-                Ok(ai) => ai,
-                Err(e) => {
-                    return Ok(Response::new(GetBlockResponse {
-                        success: false,
-                        message: format!("Failed to fetch app instance: {}", e),
-                        block: None,
-                    }));
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    block: None,
+                }));
+            }
+        };
+
+        // Fetch app instance - need Sui type for fetch_block_info
+        let app_instance = match layer.fetch_app_instance(&agent_job.app_instance).await {
+            Ok(_trait_app) => {
+                match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetBlockResponse {
+                            success: false,
+                            message: "GetBlock is only supported for Sui app instances".to_string(),
+                            block: None,
+                        }));
+                    }
                 }
-            };
+            }
+            Err(e) => {
+                return Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Failed to fetch app instance: {}", e),
+                    block: None,
+                }));
+            }
+        };
 
         // Fetch block info
         match sui::fetch::block::fetch_block_info(&app_instance, req.block_number).await {
@@ -4516,13 +4674,32 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetBlockSettlementResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    block_settlement: None,
+                    chain: req.chain.clone(),
+                }));
+            }
+        };
+
         // Fetch the app instance and get settlement info for the specific chain
-        match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
-            Ok(app_instance) => {
-                // Get the settlement for the specified chain
-                if let Some(settlement) = app_instance.settlements.get(&req.chain) {
-                    // Fetch the block settlement from the ObjectTable
-                    match sui::fetch::fetch_block_settlement(settlement, req.block_number).await {
+        match layer.fetch_app_instance(&agent_job.app_instance).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for fetch_block_settlement
+                match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                    Ok(app_instance) => {
+                        // Get the settlement for the specified chain
+                        if let Some(settlement) = app_instance.settlements.get(&req.chain) {
+                            // Fetch the block settlement from the ObjectTable
+                            match sui::fetch::fetch_block_settlement(settlement, req.block_number).await {
                         Ok(Some(block_settlement)) => {
                             let response_settlement = BlockSettlement {
                                 block_number: block_settlement.block_number,
@@ -4562,13 +4739,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             }))
                         }
                     }
-                } else {
-                    Ok(Response::new(GetBlockSettlementResponse {
-                        success: false,
-                        message: format!("Chain {} not found in settlements", req.chain),
-                        block_settlement: None,
-                        chain: req.chain.clone(),
-                    }))
+                        } else {
+                            Ok(Response::new(GetBlockSettlementResponse {
+                                success: false,
+                                message: format!("Chain {} not found in settlements", req.chain),
+                                block_settlement: None,
+                                chain: req.chain.clone(),
+                            }))
+                        }
+                    }
+                    Err(_) => {
+                        Ok(Response::new(GetBlockSettlementResponse {
+                            success: false,
+                            message: "GetBlockSettlement is only supported for Sui app instances".to_string(),
+                            block_settlement: None,
+                            chain: req.chain.clone(),
+                        }))
+                    }
                 }
             }
             Err(e) => {
@@ -4636,9 +4823,36 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Fetch app instance from blockchain
-        let app_instance = match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
-            Ok(ai) => ai,
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetAppInstanceResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    app_instance: None,
+                }));
+            }
+        };
+
+        // Fetch app instance from blockchain - need Sui-specific type for methods field
+        let app_instance = match layer.fetch_app_instance(&agent_job.app_instance).await {
+            Ok(_trait_app) => {
+                // Get Sui-specific type for methods field access
+                match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetAppInstanceResponse {
+                            success: false,
+                            message: "GetAppInstance is only supported for Sui app instances".to_string(),
+                            app_instance: None,
+                        }));
+                    }
+                }
+            }
             Err(e) => {
                 return Ok(Response::new(GetAppInstanceResponse {
                     success: false,

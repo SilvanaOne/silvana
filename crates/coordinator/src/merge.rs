@@ -1525,8 +1525,8 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
 
         debug!("Running periodic proof completion analysis...");
 
-        // Get all app instances
-        let app_instances = state.get_app_instances().await;
+        // Get all app instances with their layer_ids
+        let app_instances = state.get_jobs_tracker().get_all_app_instances_with_layer().await;
 
         if !app_instances.is_empty() {
             debug!(
@@ -1536,16 +1536,33 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
 
             let mut analyzed_count = 0;
 
-            for app_instance_id in app_instances {
+            for (app_instance_id, layer_id) in app_instances {
                 if state.is_shutting_down() {
                     break;
                 }
 
-                // Fetch the app instance first
-                match sui::fetch::fetch_app_instance(&app_instance_id).await {
-                    Ok(app_instance) => {
-                        // Analyze proof completion for this app instance
-                        match crate::proof::analyze_proof_completion(&app_instance, &state).await {
+                // Get coordination layer for this app instance
+                let layer = match state.get_coordination_manager()
+                    .and_then(|cm| cm.get_layer_by_id(&layer_id))
+                {
+                    Some(l) => l,
+                    None => {
+                        error!(
+                            "Failed to get coordination layer {} for app instance {} - skipping",
+                            layer_id, app_instance_id
+                        );
+                        continue;
+                    }
+                };
+
+                // Fetch the app instance from the coordination layer
+                match layer.fetch_app_instance(&app_instance_id).await {
+                    Ok(_trait_app) => {
+                        // Need Sui-specific type for analyze_proof_completion
+                        match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                            Ok(app_instance) => {
+                                // Analyze proof completion for this app instance (Sui-only operation)
+                                match crate::proof::analyze_proof_completion(&app_instance, &state).await {
                             Ok(()) => {
                                 analyzed_count += 1;
                                 debug!(
@@ -1560,9 +1577,15 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
                                 );
                             }
                         }
+                            }
+                            Err(_) => {
+                                // Not a Sui app instance, skip proof analysis (Sui-only)
+                                debug!("Skipping proof analysis for non-Sui app instance {}", app_instance_id);
+                            }
+                        }
                     }
                     Err(e) => {
-                        error!("Failed to fetch app instance {}: {}", app_instance_id, e);
+                        error!("Failed to fetch app instance {} from layer {}: {}", app_instance_id, layer_id, e);
                     }
                 }
             }

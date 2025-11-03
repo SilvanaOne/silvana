@@ -208,6 +208,21 @@ impl JobsTracker {
         instances.len()
     }
 
+    /// Get the layer_id for a specific app_instance
+    pub async fn get_layer_id_for_app_instance(&self, app_instance: &str) -> Option<String> {
+        let instances = self.app_instances_with_jobs.read().await;
+        instances.get(app_instance).map(|info| info.layer_id.clone())
+    }
+
+    /// Get all app_instances with their layer_ids
+    pub async fn get_all_app_instances_with_layer(&self) -> Vec<(String, String)> {
+        let instances = self.app_instances_with_jobs.read().await;
+        instances
+            .iter()
+            .map(|(app_id, info)| (app_id.clone(), info.layer_id.clone()))
+            .collect()
+    }
+
     /// Reconcile with on-chain state by checking pending_jobs_count for each tracked app_instance
     /// Also checks for stuck running jobs and fails them if they've been running too long
     /// Only removes app_instances that haven't been updated during the reconciliation
