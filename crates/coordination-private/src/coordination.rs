@@ -171,12 +171,42 @@ impl Coordination for PrivateCoordination {
 
     // ===== Job Management =====
 
-    async fn fetch_pending_jobs(&self, _app_instance: &str) -> Result<Vec<Job>> {
-        Err(PrivateCoordinationError::NotImplemented("fetch_pending_jobs - Phase 2".to_string()))
+    async fn fetch_pending_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
+        let request = proto::silvana::state::v1::CoordinatorJobRequest {
+            coordinator_auth: Some(self.auth.sign_request(app_instance, "get_pending_jobs")),
+            app_instance_id: app_instance.to_string(),
+            operation: Some(proto::silvana::state::v1::coordinator_job_request::Operation::GetPendingJobs(
+                proto::silvana::state::v1::GetPendingJobsOperation {},
+            )),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .coordinator_job_operation(request)
+            .await?
+            .into_inner();
+
+        Ok(response.jobs.into_iter().map(|j| self.proto_job_to_trait_job(j)).collect())
     }
 
-    async fn fetch_failed_jobs(&self, _app_instance: &str) -> Result<Vec<Job>> {
-        Err(PrivateCoordinationError::NotImplemented("fetch_failed_jobs - Phase 2".to_string()))
+    async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
+        let request = proto::silvana::state::v1::CoordinatorJobRequest {
+            coordinator_auth: Some(self.auth.sign_request(app_instance, "get_failed_jobs")),
+            app_instance_id: app_instance.to_string(),
+            operation: Some(proto::silvana::state::v1::coordinator_job_request::Operation::GetFailedJobs(
+                proto::silvana::state::v1::GetFailedJobsOperation {},
+            )),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .coordinator_job_operation(request)
+            .await?
+            .into_inner();
+
+        Ok(response.jobs.into_iter().map(|j| self.proto_job_to_trait_job(j)).collect())
     }
 
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64> {
@@ -269,9 +299,25 @@ impl Coordination for PrivateCoordination {
         Err(PrivateCoordinationError::NotImplemented("Layer-specific metadata not accessible by coordinators".to_string()))
     }
 
-    async fn fetch_jobs_batch(&self, _app_instance: &str, _job_sequences: &[u64]) -> Result<Vec<Job>> {
-        // Batch operations will be implemented in Phase 3
-        Err(PrivateCoordinationError::NotImplemented("fetch_jobs_batch - Phase 3".to_string()))
+    async fn fetch_jobs_batch(&self, app_instance: &str, job_sequences: &[u64]) -> Result<Vec<Job>> {
+        let request = proto::silvana::state::v1::CoordinatorJobRequest {
+            coordinator_auth: Some(self.auth.sign_request(app_instance, "get_jobs_batch")),
+            app_instance_id: app_instance.to_string(),
+            operation: Some(proto::silvana::state::v1::coordinator_job_request::Operation::GetJobsBatch(
+                proto::silvana::state::v1::GetJobsBatchOperation {
+                    job_sequences: job_sequences.to_vec(),
+                },
+            )),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .coordinator_job_operation(request)
+            .await?
+            .into_inner();
+
+        Ok(response.jobs.into_iter().map(|j| self.proto_job_to_trait_job(j)).collect())
     }
 
     async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>> {
@@ -511,24 +557,77 @@ impl Coordination for PrivateCoordination {
         Err(PrivateCoordinationError::NotImplemented("create_settle_job - Phase 2".to_string()))
     }
 
-    async fn terminate_app_job(&self, _app_instance: &str, _job_sequence: u64) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("terminate_app_job - Phase 2".to_string()))
+    async fn terminate_app_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash> {
+        // terminate_app_job is semantically the same as terminate_job for coordinators
+        self.terminate_job(app_instance, job_sequence).await
     }
 
     async fn restart_failed_jobs(
         &self,
-        _app_instance: &str,
-        _job_sequences: Option<Vec<u64>>,
+        app_instance: &str,
+        job_sequences: Option<Vec<u64>>,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("restart_failed_jobs - Phase 2".to_string()))
+        let count = job_sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+
+        let request = proto::silvana::state::v1::CoordinatorJobRequest {
+            coordinator_auth: Some(self.auth.sign_request(app_instance, "restart_failed_jobs")),
+            app_instance_id: app_instance.to_string(),
+            operation: Some(proto::silvana::state::v1::coordinator_job_request::Operation::RestartFailedJobs(
+                proto::silvana::state::v1::RestartFailedJobsOperation {
+                    job_sequences: job_sequences.unwrap_or_default(),
+                },
+            )),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .coordinator_job_operation(request)
+            .await?
+            .into_inner();
+
+        if !response.success {
+            return Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to restart jobs: {}",
+                response.message
+            )));
+        }
+
+        Ok(format!("private-restart-{}", count))
     }
 
     async fn remove_failed_jobs(
         &self,
-        _app_instance: &str,
-        _sequences: Option<Vec<u64>>,
+        app_instance: &str,
+        sequences: Option<Vec<u64>>,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("remove_failed_jobs - Phase 2".to_string()))
+        let count = sequences.as_ref().map(|s| s.len()).unwrap_or(0);
+
+        let request = proto::silvana::state::v1::CoordinatorJobRequest {
+            coordinator_auth: Some(self.auth.sign_request(app_instance, "remove_failed_jobs")),
+            app_instance_id: app_instance.to_string(),
+            operation: Some(proto::silvana::state::v1::coordinator_job_request::Operation::RemoveFailedJobs(
+                proto::silvana::state::v1::RemoveFailedJobsOperation {
+                    job_sequences: sequences.unwrap_or_default(),
+                },
+            )),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .coordinator_job_operation(request)
+            .await?
+            .into_inner();
+
+        if !response.success {
+            return Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to remove jobs: {}",
+                response.message
+            )));
+        }
+
+        Ok(format!("private-remove-{}", count))
     }
 
     // ===== Sequence State Management =====

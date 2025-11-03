@@ -872,6 +872,11 @@ message CoordinatorJobRequest {
     GetPendingJobsCountOperation get_pending_count = 10;
     GetFailedJobsCountOperation get_failed_count = 11;
     GetTotalJobsCountOperation get_total_count = 12;
+    GetPendingJobsOperation get_pending_jobs = 13;
+    GetFailedJobsOperation get_failed_jobs = 14;
+    GetJobsBatchOperation get_jobs_batch = 15;
+    RestartFailedJobsOperation restart_failed_jobs = 16;
+    RemoveFailedJobsOperation remove_failed_jobs = 17;
   }
 }
 
@@ -930,6 +935,26 @@ message GetTotalJobsCountOperation {
   // No fields needed - count all jobs for app_instance
 }
 
+message GetPendingJobsOperation {
+  // Returns full Job objects for all pending jobs
+}
+
+message GetFailedJobsOperation {
+  // Returns full Job objects for all failed jobs
+}
+
+message GetJobsBatchOperation {
+  repeated uint64 job_sequences = 1;
+}
+
+message RestartFailedJobsOperation {
+  repeated uint64 job_sequences = 1;  // Empty = restart all failed jobs
+}
+
+message RemoveFailedJobsOperation {
+  repeated uint64 job_sequences = 1;  // Empty = remove all failed jobs
+}
+
 message CoordinatorJobResponse {
   bool success = 1;
   string message = 2;
@@ -937,6 +962,7 @@ message CoordinatorJobResponse {
   optional uint64 job_sequence = 4;  // For create operation
   repeated uint64 job_sequences = 5;  // For list operations
   optional uint64 count = 6;  // For count operations
+  repeated Job jobs = 7;  // For get_pending_jobs, get_failed_jobs, get_jobs_batch operations
 }
 
 // ============================================================================
