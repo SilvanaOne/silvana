@@ -1471,7 +1471,12 @@ impl SharedState {
     }
 
     /// Return operations back to the multicall queue (used when multicall fails)
-    pub async fn return_operations_to_queue(&self, operations: sui::MulticallOperations) {
+    /// Also accepts start job metadata to preserve layer_id and other fields
+    pub async fn return_operations_to_queue(
+        &self,
+        operations: sui::MulticallOperations,
+        start_job_metadata: Vec<(String, u64, u64, String, Option<u64>, Option<Vec<u64>>, String)>, // (app_instance, job_sequence, memory_requirement, job_type, block_number, sequences, layer_id)
+    ) {
         let app_instance = normalize_app_instance_id(&operations.app_instance);
         let mut requests = self.multicall_requests.lock().await;
 
@@ -1577,20 +1582,31 @@ impl SharedState {
                 });
         }
 
-        // Return start jobs - we only have sequences and memory requirements, not full metadata
+        // Return start jobs - use provided metadata to preserve layer_id and other fields
         for (i, job_sequence) in operations.start_job_sequences.iter().enumerate() {
-            let memory_requirement = operations
-                .start_job_memory_requirements
-                .get(i)
-                .copied()
-                .unwrap_or(0);
+            // Try to find matching metadata
+            let metadata = start_job_metadata.iter().find(|(_, seq, _, _, _, _, _)| seq == job_sequence);
+
+            let (memory_requirement, job_type, block_number, sequences, layer_id) = if let Some((_, _, mem, jtype, block, seqs, lid)) = metadata {
+                (*mem, jtype.clone(), *block, seqs.clone(), lid.clone())
+            } else {
+                // Fallback to basic data if metadata not found
+                let memory_requirement = operations
+                    .start_job_memory_requirements
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0);
+                warn!("No metadata found for job_sequence {} when returning to queue - using fallback", job_sequence);
+                (memory_requirement, String::new(), None, None, String::from("unknown"))
+            };
+
             entry.start_jobs.push(StartJobRequest {
                 job_sequence: *job_sequence,
                 memory_requirement,
-                job_type: String::new(), // Lost metadata
-                block_number: None,      // Lost metadata
-                sequences: None,         // Lost metadata
-                layer_id: String::from("unknown"), // Lost metadata - will be recovered on retry
+                job_type,
+                block_number,
+                sequences,
+                layer_id,
                 _timestamp: Instant::now(),
             });
         }

@@ -347,11 +347,21 @@ impl MulticallProcessor {
                         || error_msg.contains("Computation cost")
                         || error_msg.contains("Balance of gas object");
 
-                    // Return operations to queue for retry
+                    // Return operations to queue for retry, preserving start job metadata
                     let mut total_returned = 0;
                     for operations in current_batch_operations {
                         let op_count = operations.total_operations();
-                        self.state.return_operations_to_queue(operations).await;
+
+                        // Filter metadata for this specific app_instance
+                        let app_instance_metadata: Vec<_> = current_batch_started_jobs
+                            .iter()
+                            .filter(|(app_inst, _, _, _, _, _, _)| app_inst == &operations.app_instance)
+                            .map(|(app, seq, mem, jtype, block, seqs, lid)| {
+                                (app.clone(), *seq, *mem, jtype.clone(), *block, seqs.clone(), lid.clone())
+                            })
+                            .collect();
+
+                        self.state.return_operations_to_queue(operations, app_instance_metadata).await;
                         total_returned += op_count;
                     }
 
