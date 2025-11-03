@@ -86,6 +86,13 @@ pub struct Job {
 
     /// Last update timestamp
     pub updated_at: u64,
+
+    /// Optional JWT for agent to access private state
+    /// Only used in Private coordination layer
+    pub agent_jwt: Option<String>,
+
+    /// When the agent JWT expires (Unix timestamp in seconds)
+    pub jwt_expires_at: Option<u64>,
 }
 
 impl Job {
@@ -102,5 +109,19 @@ impl Job {
     /// Check if this is a merge job
     pub fn is_merge(&self) -> bool {
         self.sequences1.is_some() && self.sequences2.is_some()
+    }
+
+    /// Check if the agent JWT is still valid
+    pub fn is_jwt_valid(&self) -> bool {
+        match (self.agent_jwt.as_ref(), self.jwt_expires_at) {
+            (Some(_), Some(expires)) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                expires > now
+            }
+            _ => false,
+        }
     }
 }
