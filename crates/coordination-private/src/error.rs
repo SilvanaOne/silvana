@@ -5,9 +5,17 @@ use thiserror::Error;
 /// Error type for Private Coordination layer operations
 #[derive(Error, Debug)]
 pub enum PrivateCoordinationError {
-    /// Database connection or operation error
-    #[error("Database error: {0}")]
-    Database(#[from] sea_orm::DbErr),
+    /// gRPC transport error
+    #[error("gRPC transport error: {0}")]
+    Transport(#[from] tonic::transport::Error),
+
+    /// gRPC status error
+    #[error("gRPC status error: {0}")]
+    Status(#[from] tonic::Status),
+
+    /// Coordinator not authorized
+    #[error("Coordinator not authorized: {0}")]
+    NotAuthorized(String),
 
     /// Authentication error
     #[error("Authentication failed: {0}")]
@@ -16,10 +24,6 @@ pub enum PrivateCoordinationError {
     /// Authorization error
     #[error("Unauthorized: {0}")]
     Unauthorized(String),
-
-    /// JWT token error
-    #[error("JWT error: {0}")]
-    Jwt(#[from] jsonwebtoken::errors::Error),
 
     /// Not found error
     #[error("Not found: {0}")]

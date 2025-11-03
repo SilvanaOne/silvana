@@ -2,53 +2,50 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Configuration for Private Coordination layer
+/// Configuration for Private Coordination layer (gRPC client)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivateCoordinationConfig {
-    /// Database connection URL (MySQL/TiDB)
-    pub database_url: String,
+    /// gRPC endpoint for private state server
+    pub grpc_endpoint: String,
 
-    /// JWT secret for authentication
-    pub jwt_secret: String,
+    /// Coordinator's Ed25519 private key (hex format)
+    /// Should be loaded from SUI_SECRET_KEY environment variable
+    #[serde(skip)]
+    pub coordinator_private_key: Option<String>,
+
+    /// Request timeout in seconds
+    #[serde(default = "default_request_timeout")]
+    pub request_timeout_secs: u64,
 
     /// Chain ID (defaults to "private")
     #[serde(default = "default_chain_id")]
     pub chain_id: String,
 
-    /// Maximum database connections in pool
-    #[serde(default = "default_max_connections")]
-    pub max_connections: u32,
-
-    /// Database connection timeout in seconds
-    #[serde(default = "default_connection_timeout")]
-    pub connection_timeout_secs: u64,
-
-    /// Enable SQL query logging
+    /// TLS configuration
     #[serde(default)]
-    pub enable_sql_logging: bool,
+    pub tls_enabled: bool,
+
+    /// Path to TLS CA certificate
+    pub tls_ca_cert: Option<String>,
 }
 
 impl Default for PrivateCoordinationConfig {
     fn default() -> Self {
         Self {
-            database_url: String::new(),
-            jwt_secret: String::new(),
+            grpc_endpoint: "http://localhost:50051".to_string(),
+            coordinator_private_key: None,
+            request_timeout_secs: default_request_timeout(),
             chain_id: default_chain_id(),
-            max_connections: default_max_connections(),
-            connection_timeout_secs: default_connection_timeout(),
-            enable_sql_logging: false,
+            tls_enabled: false,
+            tls_ca_cert: None,
         }
     }
 }
 
+fn default_request_timeout() -> u64 {
+    30
+}
+
 fn default_chain_id() -> String {
     "private".to_string()
-}
-
-fn default_max_connections() -> u32 {
-    50
-}
-
-fn default_connection_timeout() -> u64 {
-    30
 }

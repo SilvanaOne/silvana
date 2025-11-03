@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (proto_files, proto_includes) = if std::path::Path::new("./proto/options.proto").exists() {
         // Docker environment - proto files are in ./proto/
         (
-            vec!["./proto/options.proto", "./proto/rpc.proto"],
+            vec!["./proto/options.proto", "./proto/rpc.proto", "./proto/state.proto"],
             vec!["./proto"],
         )
     } else {
@@ -18,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec![
                 "../../proto/silvana/options/v1/options.proto",
                 "../../proto/silvana/rpc/v1/rpc.proto",
+                "../../proto/silvana/state/v1/state.proto",
             ],
             vec!["../../proto"],
         )

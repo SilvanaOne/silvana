@@ -56,7 +56,7 @@ pub trait Coordination: Send + Sync {
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
 
     /// Fetch a specific job by its sequence number
-    async fn fetch_job_by_id(&self, app_instance: &str, job_sequence: u64) -> Result<Option<Job>, Self::Error>;
+    async fn fetch_job_by_sequence(&self, app_instance: &str, job_sequence: u64) -> Result<Option<Job>, Self::Error>;
 
     /// Get the count of pending jobs for an app instance
     async fn get_pending_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
@@ -64,15 +64,15 @@ pub trait Coordination: Send + Sync {
     /// Get the count of all jobs for an app instance
     async fn get_total_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
 
-    /// Get settlement job IDs for an app instance (maps chain name to job ID)
-    async fn get_settlement_job_ids(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error>;
+    /// Get settlement job sequences for an app instance (maps chain name to job_sequence)
+    async fn get_settlement_job_sequences(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error>;
 
     /// Get jobs table info (returns app_instance_id and jobs_table_id)
     /// This is layer-specific metadata needed for batch job operations
     async fn get_jobs_info(&self, app_instance: &str) -> Result<Option<(String, String)>, Self::Error>;
 
-    /// Fetch multiple jobs by their IDs in a batch
-    async fn fetch_jobs_batch(&self, app_instance: &str, job_ids: &[u64]) -> Result<Vec<Job>, Self::Error>;
+    /// Fetch multiple jobs by their sequences in a batch
+    async fn fetch_jobs_batch(&self, app_instance: &str, job_sequences: &[u64]) -> Result<Vec<Job>, Self::Error>;
 
     /// Fetch pending job sequences for an app instance
     async fn fetch_pending_job_sequences(&self, app_instance: &str) -> Result<Vec<u64>, Self::Error>;
@@ -136,8 +136,8 @@ pub trait Coordination: Send + Sync {
         job_description: Option<String>,
     ) -> Result<Self::TransactionHash, Self::Error>;
 
-    /// Terminate an app job by its ID
-    async fn terminate_app_job(&self, app_instance: &str, job_id: u64) -> Result<Self::TransactionHash, Self::Error>;
+    /// Terminate an app job by its sequence
+    async fn terminate_app_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash, Self::Error>;
 
     /// Restart failed jobs (optionally specify which job sequences)
     async fn restart_failed_jobs(
