@@ -3,6 +3,7 @@ use crate::proofs_storage::{ProofMetadata, ProofStorage};
 use crate::state::SharedState;
 use monitoring::coordinator_metrics;
 use proto;
+use silvana_coordination_trait::Coordination;
 use std::path::Path;
 use sui::fetch::block::fetch_block_info;
 use tokio::net::UnixListener;
@@ -748,14 +749,41 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                 // Determine settlement chain if this is a settlement job
                 let settlement_chain = if agent_job.job.app_instance_method == "settle" {
-                    // Use helper function to get chain by job sequence
-                    match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                        &agent_job.app_instance,
-                        agent_job.job_sequence,
-                    )
-                    .await
+                    // Get coordination layer for this job
+                    let layer = match self.state.get_coordination_manager()
+                        .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
                     {
-                        Ok(chain) => chain,
+                        Some(l) => l,
+                        None => {
+                            error!(
+                                "Failed to get coordination layer {} for settlement job {} - terminating",
+                                agent_job.layer_id, agent_job.job_sequence
+                            );
+
+                            // Terminate the job
+                            self.state
+                                .execute_or_queue_terminate_job(
+                                    agent_job.app_instance.clone(),
+                                    agent_job.job_sequence,
+                                )
+                                .await;
+
+                            self.state
+                                .get_agent_job_db()
+                                .terminate_job(&agent_job.job_id)
+                                .await;
+
+                            continue 'job_search;
+                        }
+                    };
+
+                    // Use layer to get settlement chain by job sequence
+                    match layer.get_settlement_job_ids(&agent_job.app_instance).await {
+                        Ok(settlement_jobs) => {
+                            settlement_jobs.iter()
+                                .find(|(_, job_id)| **job_id == agent_job.job_sequence)
+                                .map(|(chain, _)| chain.clone())
+                        }
                         Err(e) => {
                             warn!(
                                 "Failed to lookup settlement chain for job {} in app instance {}: {}",
@@ -892,41 +920,26 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 started_job.app_instance, started_job.job_sequence
             );
 
-            // Fetch the app instance to get the jobs table (we know this should work since get_started_job_for_agent already checked)
-            let app_instance = match sui::fetch::fetch_app_instance(&started_job.app_instance).await
+            // Get coordination layer for this job
+            let layer = match self.state.get_coordination_manager()
+                .and_then(|cm| cm.get_layer_by_id(&started_job.layer_id))
             {
-                Ok(instance) => instance,
-                Err(e) => {
-                    error!(
-                        "Failed to fetch app instance {} (this should not happen): {}",
-                        started_job.app_instance, e
-                    );
-                    return Ok(Response::new(GetJobResponse {
-                        success: true,
-                        message: "Failed to fetch app instance".to_string(),
-                        job: None,
-                    }));
-                }
-            };
-
-            // Get the jobs table ID
-            let jobs_table_id = match &app_instance.jobs {
-                Some(jobs) => &jobs.jobs_table_id,
+                Some(l) => l,
                 None => {
                     error!(
-                        "App instance {} has no jobs table (this should not happen)",
-                        started_job.app_instance
+                        "Failed to get coordination layer {} for job {} - skipping",
+                        started_job.layer_id, started_job.job_sequence
                     );
                     return Ok(Response::new(GetJobResponse {
                         success: true,
-                        message: "App instance has no jobs table".to_string(),
+                        message: "No job available".to_string(),
                         job: None,
                     }));
                 }
             };
 
-            // Fetch the full job details from blockchain using the jobs table
-            match sui::fetch::jobs::fetch_job_by_id(jobs_table_id, started_job.job_sequence).await {
+            // Fetch the full job details from coordination layer
+            match layer.fetch_job_by_id(&started_job.app_instance, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
                     // Fetch agent method to get resource requirements
@@ -958,12 +971,13 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                     // Create AgentJob and add it to agent database
                     let agent_job = match crate::agent::AgentJob::new(
-                        sui_job_to_coordination_job(&pending_job),
+                        pending_job.clone(),
                         req.session_id.clone(),
                         &self.state,
                         agent_method.min_memory_gb,
                         agent_method.min_cpu_cores,
                         agent_method.requires_tee,
+                        started_job.layer_id.clone(),
                     ) {
                         Ok(job) => job,
                         Err(e) => {
@@ -986,14 +1000,40 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                     // Check if this is a settlement job and get the chain
                     let settlement_chain = if pending_job.app_instance_method == "settle" {
-                        // Use helper function to get chain by job sequence
-                        match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                            &started_job.app_instance,
-                            started_job.job_sequence,
-                        )
-                        .await
+                        // Get coordination layer for this job
+                        let layer = match self.state.get_coordination_manager()
+                            .and_then(|cm| cm.get_layer_by_id(&started_job.layer_id))
                         {
-                            Ok(chain) => chain,
+                            Some(l) => l,
+                            None => {
+                                error!(
+                                    "Failed to get coordination layer {} for settlement job {} - terminating",
+                                    started_job.layer_id, started_job.job_sequence
+                                );
+
+                                // Terminate the job
+                                self.state
+                                    .execute_or_queue_terminate_job(
+                                        started_job.app_instance.clone(),
+                                        started_job.job_sequence,
+                                    )
+                                    .await;
+
+                                return Ok(Response::new(GetJobResponse {
+                                    success: true,
+                                    message: "No job available".to_string(),
+                                    job: None,
+                                }));
+                            }
+                        };
+
+                        // Use layer to get settlement chain by job sequence
+                        match layer.get_settlement_job_ids(&started_job.app_instance).await {
+                            Ok(settlement_jobs) => {
+                                settlement_jobs.iter()
+                                    .find(|(_, job_id)| **job_id == started_job.job_sequence)
+                                    .map(|(chain, _)| chain.clone())
+                            }
                             Err(e) => {
                                 warn!(
                                     "Failed to lookup settlement chain for job {} in app instance {}: {}",

@@ -555,6 +555,7 @@ pub async fn run_docker_container_task(
         agent_method.min_memory_gb,
         agent_method.min_cpu_cores,
         agent_method.requires_tee,
+        layer_id.clone(),
     ) {
         Ok(job) => job,
         Err(e) => {

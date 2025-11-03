@@ -64,15 +64,15 @@ build:
 	@echo "Platform: linux/arm64 (AWS Graviton, Apple Silicon servers)"
 	@echo "⏱️  Start time: $$(date '+%Y-%m-%d %H:%M:%S')"
 	@echo "📦 Copying proto files for build..."
-	@rm -rf proto && cp -r ../../proto . && \
-	trap "rm -rf proto" EXIT; \
+	@rm -rf agent/proto && cp -r ../../proto agent/ && \
+	trap "rm -rf agent/proto" EXIT; \
 	start_time=$$(date +%s); \
 	DOCKER_BUILDKIT=1 docker build \
 		--platform linux/arm64 \
-		-f Dockerfile \
+		-f agent/Dockerfile \
 		-t $(DOCKER_IMAGE) \
 		--progress=plain \
-		. && \
+		agent && \
 	end_time=$$(date +%s); \
 	duration=$$((end_time - start_time)); \
 	echo "⏱️  End time: $$(date '+%Y-%m-%d %H:%M:%S')"; \

@@ -1339,114 +1339,103 @@ impl SharedState {
 
         // Search through buffer for a matching job
         while let Some(started_job) = buffer.pop_front() {
-            // Fetch app instance to get jobs table
-            match sui::fetch::fetch_app_instance(&started_job.app_instance).await {
-                Ok(app_instance) => {
-                    if let Some(ref jobs) = app_instance.jobs {
-                        // Fetch job details from blockchain
-                        match sui::fetch::jobs::fetch_job_by_id(
-                            &jobs.jobs_table_id,
-                            started_job.job_sequence,
-                        )
-                        .await
-                        {
-                            Ok(Some(pending_job)) => {
-                                // Check if this job matches the requested agent
-                                if pending_job.developer == developer
-                                    && pending_job.agent == agent
-                                    && pending_job.agent_method == agent_method
+            // Get coordination layer for this job
+            let layer = match self.coordination_manager.as_ref().and_then(|cm| cm.get_layer_by_id(&started_job.layer_id)) {
+                Some(l) => l,
+                None => {
+                    error!(
+                        "Failed to get coordination layer {} for buffered job {}, skipping",
+                        started_job.layer_id, started_job.job_sequence
+                    );
+                    checked_jobs.push(started_job);
+                    continue;
+                }
+            };
+
+            // Fetch job details from the coordination layer
+            match layer.fetch_job_by_id(&started_job.app_instance, started_job.job_sequence).await {
+                Ok(Some(pending_job)) => {
+                    // Check if this job matches the requested agent
+                    if pending_job.developer == developer
+                        && pending_job.agent == agent
+                        && pending_job.agent_method == agent_method
+                    {
+                        // For settlement jobs, check chain consistency
+                        if pending_job.app_instance_method == "settle" {
+                            // Get the settlement chain for this job from settlement job IDs
+                            let job_chain = match layer.get_settlement_job_ids(&started_job.app_instance).await {
+                                Ok(settlement_jobs) => {
+                                    // Find which chain this job sequence belongs to
+                                    settlement_jobs.iter()
+                                        .find(|(_, job_id)| **job_id == started_job.job_sequence)
+                                        .map(|(chain, _)| chain.clone())
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to get settlement job IDs for app instance {}: {}",
+                                        started_job.app_instance, e
+                                    );
+                                    None
+                                }
+                            };
+
+                            // Check if session already has a settlement chain
+                            let current_agents = self.current_agents.read().await;
+                            if let Some(current_agent) = current_agents.get(session_id)
+                            {
+                                if let Some(session_chain) =
+                                    &current_agent.settlement_chain
                                 {
-                                    // For settlement jobs, check chain consistency
-                                    if pending_job.app_instance_method == "settle" {
-                                        // Get the settlement chain for this job
-                                        let job_chain = match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                                            &started_job.app_instance,
+                                    // Session is locked to a chain, only accept jobs for that chain
+                                    if job_chain.as_ref() != Some(session_chain) {
+                                        debug!(
+                                            "Settlement job {} for chain {:?} doesn't match session chain {}, skipping",
                                             started_job.job_sequence,
-                                        ).await {
-                                            Ok(chain) => chain,
-                                            Err(e) => {
-                                                warn!(
-                                                    "Failed to get settlement chain for job {}: {}",
-                                                    started_job.job_sequence, e
-                                                );
-                                                None
-                                            }
-                                        };
-
-                                        // Check if session already has a settlement chain
-                                        let current_agents = self.current_agents.read().await;
-                                        if let Some(current_agent) = current_agents.get(session_id)
-                                        {
-                                            if let Some(session_chain) =
-                                                &current_agent.settlement_chain
-                                            {
-                                                // Session is locked to a chain, only accept jobs for that chain
-                                                if job_chain.as_ref() != Some(session_chain) {
-                                                    debug!(
-                                                        "Settlement job {} for chain {:?} doesn't match session chain {}, skipping",
-                                                        started_job.job_sequence,
-                                                        job_chain,
-                                                        session_chain
-                                                    );
-                                                    checked_jobs.push(started_job);
-                                                    continue;
-                                                }
-                                            }
-                                        }
+                                            job_chain,
+                                            session_chain
+                                        );
+                                        checked_jobs.push(started_job);
+                                        continue;
                                     }
-
-                                    debug!(
-                                        "Found matching buffer job: app_instance={}, sequence={}, dev={}, agent={}, method={}",
-                                        started_job.app_instance,
-                                        started_job.job_sequence,
-                                        pending_job.developer,
-                                        pending_job.agent,
-                                        pending_job.agent_method
-                                    );
-                                    matching_job = Some(started_job);
-                                    break;
-                                } else {
-                                    debug!(
-                                        "Buffer job doesn't match: job(dev={}, agent={}, method={}) vs request(dev={}, agent={}, method={})",
-                                        pending_job.developer,
-                                        pending_job.agent,
-                                        pending_job.agent_method,
-                                        developer,
-                                        agent,
-                                        agent_method
-                                    );
-                                    // Keep this job to put back in buffer
-                                    checked_jobs.push(started_job);
                                 }
                             }
-                            Ok(None) => {
-                                error!(
-                                    "Job {} not found in app instance {}",
-                                    started_job.job_sequence, started_job.app_instance
-                                );
-                                checked_jobs.push(started_job);
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to fetch job {} from app instance {}: {}",
-                                    started_job.job_sequence, started_job.app_instance, e
-                                );
-                                // Put back jobs we couldn't fetch (might be temporary issue)
-                                checked_jobs.push(started_job);
-                            }
                         }
-                    } else {
-                        error!(
-                            "App instance {} has no jobs table",
-                            started_job.app_instance
+
+                        debug!(
+                            "Found matching buffer job: app_instance={}, sequence={}, dev={}, agent={}, method={}",
+                            started_job.app_instance,
+                            started_job.job_sequence,
+                            pending_job.developer,
+                            pending_job.agent,
+                            pending_job.agent_method
                         );
+                        matching_job = Some(started_job);
+                        break;
+                    } else {
+                        debug!(
+                            "Buffer job doesn't match: job(dev={}, agent={}, method={}) vs request(dev={}, agent={}, method={})",
+                            pending_job.developer,
+                            pending_job.agent,
+                            pending_job.agent_method,
+                            developer,
+                            agent,
+                            agent_method
+                        );
+                        // Keep this job to put back in buffer
                         checked_jobs.push(started_job);
                     }
                 }
+                Ok(None) => {
+                    error!(
+                        "Job {} not found in app instance {} on layer {}",
+                        started_job.job_sequence, started_job.app_instance, started_job.layer_id
+                    );
+                    checked_jobs.push(started_job);
+                }
                 Err(e) => {
                     warn!(
-                        "Failed to fetch app instance {}: {}",
-                        started_job.app_instance, e
+                        "Failed to fetch job {} from app instance {} on layer {}: {}",
+                        started_job.job_sequence, started_job.app_instance, started_job.layer_id, e
                     );
                     // Put back jobs we couldn't fetch (might be temporary issue)
                     checked_jobs.push(started_job);
