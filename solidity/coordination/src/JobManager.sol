@@ -75,7 +75,7 @@ contract JobManager is IJobManager, AccessControl {
 
     // ============ Constructor ============
 
-    constructor() AccessControl() {
+    constructor() {
         coordination = msg.sender;
     }
 
@@ -133,7 +133,6 @@ contract JobManager is IJobManager, AccessControl {
         // Emit event
         emit DataTypes.JobCreated(
             input.appInstance,
-            jobId,
             sequence,
             input.developer,
             input.agent,
@@ -176,7 +175,7 @@ contract JobManager is IJobManager, AccessControl {
         agentJobs[appInstance][msg.sender].push(jobId);
 
         // Emit event
-        emit DataTypes.JobTaken(appInstance, jobId, msg.sender, block.timestamp);
+        emit DataTypes.JobTaken(appInstance, job.jobSequence, msg.sender, block.timestamp);
     }
 
     /**
@@ -213,7 +212,7 @@ contract JobManager is IJobManager, AccessControl {
         }
 
         // Emit event
-        emit DataTypes.JobCompleted(appInstance, jobId, msg.sender, output, block.timestamp);
+        emit DataTypes.JobCompleted(appInstance, job.jobSequence, msg.sender, output, block.timestamp);
     }
 
     /**
@@ -262,7 +261,7 @@ contract JobManager is IJobManager, AccessControl {
         }
 
         // Emit event
-        emit DataTypes.JobFailed(appInstance, jobId, msg.sender, error, job.attempts, block.timestamp);
+        emit DataTypes.JobFailed(appInstance, job.jobSequence, msg.sender, error, job.attempts, block.timestamp);
     }
 
     /**
@@ -297,7 +296,7 @@ contract JobManager is IJobManager, AccessControl {
         failedJobs[appInstance].push(jobId);
 
         // Emit event
-        emit DataTypes.JobTerminated(appInstance, jobId, msg.sender, block.timestamp);
+        emit DataTypes.JobTerminated(appInstance, job.jobSequence, msg.sender, block.timestamp);
     }
 
     /**
@@ -667,7 +666,7 @@ contract JobManager is IJobManager, AccessControl {
 
             _removeFromActive(appInstance, jobId);
 
-            emit DataTypes.JobCompleted(appInstance, jobId, msg.sender, outputs[i], block.timestamp);
+            emit DataTypes.JobCompleted(appInstance, job.jobSequence, msg.sender, outputs[i], block.timestamp);
 
             // Handle periodic jobs - create new job with same parameters
             if (job.intervalMs > 0) {
@@ -716,14 +715,14 @@ contract JobManager is IJobManager, AccessControl {
                 job.takenBy = address(0);
                 job.updatedAt = block.timestamp;
                 pendingJobs[appInstance].push(jobId);
-                emit DataTypes.JobFailed(appInstance, jobId, msg.sender, errors[i], job.attempts, block.timestamp);
+                emit DataTypes.JobFailed(appInstance, job.jobSequence, msg.sender, errors[i], job.attempts, block.timestamp);
             } else {
                 // Mark as permanently failed
                 job.status = DataTypes.JobStatus.Failed;
                 job.output = abi.encode(errors[i]);
                 job.updatedAt = block.timestamp;
                 failedJobs[appInstance].push(jobId);
-                emit DataTypes.JobFailed(appInstance, jobId, msg.sender, errors[i], job.attempts, block.timestamp);
+                emit DataTypes.JobFailed(appInstance, job.jobSequence, msg.sender, errors[i], job.attempts, block.timestamp);
             }
         }
     }
@@ -758,7 +757,7 @@ contract JobManager is IJobManager, AccessControl {
             // Delete the job
             delete jobs[appInstance][jobId];
 
-            emit DataTypes.JobTerminated(appInstance, jobId, msg.sender, block.timestamp);
+            emit DataTypes.JobTerminated(appInstance, job.jobSequence, msg.sender, block.timestamp);
         }
     }
 
@@ -798,7 +797,7 @@ contract JobManager is IJobManager, AccessControl {
             _removeFromPending(appInstance, jobId);
             activeJobs[appInstance].push(jobId);
 
-            emit DataTypes.JobTaken(appInstance, jobId, msg.sender, block.timestamp);
+            emit DataTypes.JobTaken(appInstance, job.jobSequence, msg.sender, block.timestamp);
         }
     }
 
@@ -836,7 +835,6 @@ contract JobManager is IJobManager, AccessControl {
 
         emit DataTypes.JobCreated(
             appInstance,
-            newJobId,
             newSequence,
             completedJob.developer,
             completedJob.agent,
@@ -930,7 +928,6 @@ contract JobManager is IJobManager, AccessControl {
         // Emit event
         emit DataTypes.JobCreated(
             appInstance,
-            newJobId,
             sequence,
             job.developer,
             job.agent,

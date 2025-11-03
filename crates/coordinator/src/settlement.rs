@@ -351,6 +351,7 @@ pub async fn create_periodic_settle_job(
 /// Try to fetch a pending job from any of the given app_instances using the index
 #[allow(dead_code)]
 pub async fn fetch_pending_job_from_instances(
+    manager: &Arc<crate::coordination_manager::CoordinationManager>,
     app_instances: &[String],
     developer: &str,
     agent: &str,
@@ -376,9 +377,29 @@ pub async fn fetch_pending_job_from_instances(
     // (job_sequence, app_instance_id, jobs_table_id, app_instance_method, next_scheduled_at, is_settlement_job)
     
     for app_instance_id in app_instances {
+        // Get the correct coordination layer for this app instance
+        let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance_id).await {
+            Ok(layer) => layer,
+            Err(e) => {
+                warn!("Could not find coordination layer for AppInstance {}: {}", app_instance_id, e);
+                continue;
+            }
+        };
+
         // First fetch the AppInstance object
-        let app_instance = match sui::fetch::fetch_app_instance(app_instance_id).await {
-            Ok(app_inst) => app_inst,
+        let app_instance = match coordination.fetch_app_instance(app_instance_id).await {
+            Ok(app_inst) => {
+                // Convert from coordination trait AppInstance to Sui AppInstance for compatibility
+                // TODO: Eventually refactor to use trait types throughout
+                match sui::fetch::fetch_app_instance(app_instance_id).await {
+                    Ok(sui_app_inst) => sui_app_inst,
+                    Err(_) => {
+                        // Not a Sui app instance, skip for now as this function uses Sui-specific types
+                        warn!("AppInstance {} is not on Sui layer, skipping in fetch_pending_job_from_instances", app_instance_id);
+                        continue;
+                    }
+                }
+            },
             Err(e) => {
                 warn!("Could not fetch AppInstance {}: {}", app_instance_id, e);
                 continue;
@@ -655,13 +676,18 @@ pub async fn fetch_all_pending_jobs(
                 .unwrap_or_default();
             seqs.sort();
 
+            info!("📊 App instance {} has {} pending job sequences", app_instance_id, seqs.len());
+
             if !seqs.is_empty() {
                 let take_n = std::cmp::min(seqs.len(), MAX_JOBS_PER_INSTANCE_BATCH);
                 let seq_slice = &seqs[..take_n];
 
+                info!("📦 Fetching batch of {} jobs for app instance {}", take_n, app_instance_id);
+
                 // Fetch jobs using coordination trait method (works for all layers)
                 match coordination.fetch_jobs_batch(app_instance_id, seq_slice).await {
                     Ok(jobs) => {
+                        info!("✅ Fetched {} jobs from batch for app instance {}", jobs.len(), app_instance_id);
                         // Exclude settlement job IDs which are handled above
                         let settlement_ids: std::collections::HashSet<u64> =
                             coordination.get_settlement_job_ids(app_instance_id)
@@ -671,25 +697,38 @@ pub async fn fetch_all_pending_jobs(
                                 .collect();
 
                         let mut added = 0usize;
+                        let mut settlement_filtered = 0usize;
+                        let mut status_filtered = 0usize;
+                        let mut schedule_filtered = 0usize;
+
                         for job in jobs {
                             if settlement_ids.contains(&job.job_sequence) {
+                                settlement_filtered += 1;
                                 continue;
                             }
                             // Ensure job is Pending and ready per schedule buffer
                             if !matches!(job.status, JobStatus::Pending) {
+                                status_filtered += 1;
+                                info!("⏭️  Skipping job {} - status is {:?}, not Pending", job.job_sequence, job.status);
                                 continue;
                             }
                             if job.next_scheduled_at
                                 .map(|scheduled| scheduled + buffer_ms > current_time_ms)
                                 .unwrap_or(false)
                             {
+                                schedule_filtered += 1;
+                                info!("⏰ Skipping job {} - not ready yet (scheduled: {:?})", job.job_sequence, job.next_scheduled_at);
                                 continue;
                             }
                             all_pending_jobs.push((job, false));
                             added += 1;
                         }
                         if added > 0 {
-                            debug!("Added {} pending jobs from app_instance {} (batch)", added, app_instance_id);
+                            info!("✅ Added {} pending jobs from app_instance {} (filtered: {} settlement, {} status, {} schedule)",
+                                added, app_instance_id, settlement_filtered, status_filtered, schedule_filtered);
+                        } else if settlement_filtered + status_filtered + schedule_filtered > 0 {
+                            info!("⚠️  No jobs added for {} (all filtered: {} settlement, {} status, {} schedule)",
+                                app_instance_id, settlement_filtered, status_filtered, schedule_filtered);
                         }
                     }
                     Err(e) => {

@@ -2,6 +2,7 @@ use crate::constants::{
     BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS, PROOF_TIMEOUT_MS,
 };
 use anyhow::Result;
+use silvana_coordination_trait::Coordination;
 use sui::fetch::fetch_proof_calculation;
 use sui::fetch::{Proof, ProofCalculation, ProofStatus};
 use tracing::{debug, error, info, warn};
@@ -21,9 +22,37 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             .unwrap_or(&vec![])
     );
 
+    // Get the coordination manager from state
+    let manager = match state.get_coordination_manager() {
+        Some(mgr) => mgr,
+        None => {
+            error!("❌ No coordination manager available for merge job creation");
+            return Err(anyhow::anyhow!("No coordination manager available"));
+        }
+    };
+
+    // Get the correct coordination layer for this app instance
+    let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance).await {
+        Ok(layer) => layer,
+        Err(e) => {
+            error!("❌ Failed to find coordination layer for AppInstance {}: {}", app_instance, e);
+            return Err(anyhow::anyhow!("Failed to find coordination layer: {}", e));
+        }
+    };
+
     // First fetch the AppInstance to get the AppInstance object
-    let app_instance_obj = match sui::fetch::fetch_app_instance(app_instance).await {
-        Ok(app_inst) => app_inst,
+    // For now, still use Sui-specific types for merge operations
+    let app_instance_obj = match coordination.fetch_app_instance(app_instance).await {
+        Ok(_trait_app_instance) => {
+            // Still need Sui-specific type for merge operations
+            match sui::fetch::fetch_app_instance(app_instance).await {
+                Ok(sui_app_inst) => sui_app_inst,
+                Err(_) => {
+                    debug!("Skipping merge job creation for non-Sui app instance {}", app_instance);
+                    return Ok(());
+                }
+            }
+        },
         Err(e) => {
             error!("❌ Failed to fetch AppInstance {}: {}", app_instance, e);
             return Err(anyhow::anyhow!("Failed to fetch AppInstance: {}", e));
@@ -1042,14 +1071,42 @@ async fn create_merge_job(
     }
 
     // Step 2: Check if proofs can be reserved before attempting
+    // Get the coordination manager from state
+    let manager = match state.get_coordination_manager() {
+        Some(mgr) => mgr,
+        None => {
+            error!("❌ No coordination manager available for merge job creation");
+            return Err(anyhow::anyhow!("No coordination manager available"));
+        }
+    };
+
+    // Get the correct coordination layer for this app instance
+    let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance).await {
+        Ok(layer) => layer,
+        Err(e) => {
+            warn!("Failed to find coordination layer for merge job: {}", e);
+            return Err(anyhow::anyhow!("Failed to find coordination layer: {}", e));
+        }
+    };
+
     // Fetch fresh proof calculation state to check if proofs are available
     debug!("🔍 Fetching fresh proof calculation state before reservation attempt");
-    let fresh_app_instance = match sui::fetch::app_instance::fetch_app_instance(app_instance).await
-    {
-        Ok(instance) => instance,
-        Err(e) => {
-            warn!("Failed to fetch fresh app instance: {}", e);
-            return Err(anyhow::anyhow!("Failed to fetch app instance: {}", e));
+    // For now, still use Sui-specific types for merge operations
+    let fresh_app_instance = match coordination.fetch_app_instance(app_instance).await {
+        Ok(_trait_app_instance) => {
+            // Still need Sui-specific type for merge operations
+            match sui::fetch::app_instance::fetch_app_instance(app_instance).await {
+                Ok(sui_app_inst) => sui_app_inst,
+                Err(_) => {
+                    debug!("Skipping merge job reservation for non-Sui app instance {}", app_instance);
+                    return Ok(());
+                }
+            }
+        },
+        Err(_e) => {
+            // App instance not found - likely non-Sui instance
+            debug!("Skipping merge job reservation - app instance {} not found in this coordination layer", app_instance);
+            return Ok(());
         }
     };
 
@@ -1397,9 +1454,15 @@ pub async fn start_periodic_block_creation(state: crate::state::SharedState) {
                     break;
                 }
 
-                // Try to create a block for this app instance
-                let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-                match crate::block::try_create_block(&mut sui_interface, &app_instance_id).await {
+                // Try to create a block for this app instance using coordination manager
+                let manager = match state.get_coordination_manager() {
+                    Some(m) => m,
+                    None => {
+                        error!("Coordination manager not available for block creation");
+                        continue;
+                    }
+                };
+                match crate::block::try_create_block(&manager, &app_instance_id).await {
                     Ok(Some((tx_digest, sequences, time_since))) => {
                         info!(
                             "✅ Created block for app instance {} - tx: {}, sequences: {}, time since last: {}s",

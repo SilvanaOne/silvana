@@ -2,6 +2,7 @@ use crate::constants::MULTICALL_INTERVAL_SECS;
 use crate::error::Result;
 use crate::metrics::CoordinatorMetrics;
 use crate::state::{SharedState, StartedJob, TerminateJobRequest};
+use silvana_coordination_trait::Coordination;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant, sleep};
 use tracing::{debug, error, info, warn};
@@ -554,61 +555,73 @@ impl MulticallProcessor {
                     let mut is_valid = false;
                     let mut is_error = false;
 
-                    match sui::fetch::fetch_app_instance(&app_instance).await {
-                        Ok(fresh_app_instance) => {
-                            if let Some(jobs) = fresh_app_instance.jobs {
-                                // Fetch the job from blockchain
-                                match sui::fetch::fetch_job_by_id(
-                                    &jobs.jobs_table_id,
-                                    start_job.job_sequence,
-                                )
-                                .await
-                                {
+                    // Use coordination manager to route to correct layer
+                    let coordination_result = match self.state.get_coordination_manager() {
+                        Some(manager) => {
+                            match manager.get_layer_for_app(&app_instance).await {
+                                Ok((_layer_id, coordination)) => Some(coordination),
+                                Err(e) => {
+                                    error!("Failed to find coordination layer for app instance {}: {}", app_instance, e);
+                                    None
+                                }
+                            }
+                        }
+                        None => {
+                            error!("No coordination manager available");
+                            None
+                        }
+                    };
+
+                    if let Some(coordination) = coordination_result {
+                        match coordination.fetch_app_instance(&app_instance).await {
+                            Ok(_fresh_app_instance) => {
+                                // Fetch the job from blockchain using trait method
+                                match coordination.fetch_job_by_id(&app_instance, start_job.job_sequence).await {
                                     Ok(Some(fresh_job)) => {
                                         // Check if job status is Pending
-                                        if fresh_job.status == sui::fetch::JobStatus::Pending {
-                                            // Check if it's a settlement job (contains "settle" in method name)
+                                        if matches!(fresh_job.status, silvana_coordination_trait::JobStatus::Pending) {
+                                            // Check if it's a settlement job
                                             let is_settlement_job =
                                                 fresh_job.app_instance_method == "settle";
 
-                                            // Fetch settlement chain for this job
-                                            match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                                                &app_instance,
-                                                start_job.job_sequence,
-                                            ).await {
-                                                Ok(Some(chain)) => {
-                                                    // Has settlement chain - validate if it's a settlement job
-                                                    if is_settlement_job {
-                                                        is_valid = true;
-                                                        info!(
-                                                            "Settlement job {} for chain {} validated (status: Pending)",
-                                                            start_job.job_sequence, chain
-                                                        );
-                                                    } else {
-                                                        warn!(
-                                                            "Job {} has settlement_chain {} but is not a settlement job (method: {}) - skipping",
-                                                            start_job.job_sequence, chain, fresh_job.app_instance_method
-                                                        );
-                                                    }
-                                                }
-                                                Ok(None) => {
-                                                    // No settlement chain - validate if it's NOT a settlement job
-                                                    if !is_settlement_job {
-                                                        is_valid = true;
-                                                        info!(
-                                                            "Regular job {} validated (status: Pending)",
-                                                            start_job.job_sequence
-                                                        );
-                                                    } else {
-                                                        warn!(
-                                                            "🧹 Orphaned settlement job {} detected (method: {}) - adding to terminate queue",
-                                                            start_job.job_sequence, fresh_job.app_instance_method
-                                                        );
+                                            // Check settlement chain using coordination trait
+                                            match coordination.get_settlement_job_ids(&app_instance).await {
+                                                Ok(settlement_ids) => {
+                                                    let has_settlement_chain = settlement_ids.values().any(|&id| id == start_job.job_sequence);
 
-                                                        requests.terminate_jobs.push(TerminateJobRequest {
-                                                            job_sequence: start_job.job_sequence,
-                                                            _timestamp: Instant::now(),
-                                                        });
+                                                    if has_settlement_chain {
+                                                        // Has settlement chain - validate if it's a settlement job
+                                                        if is_settlement_job {
+                                                            is_valid = true;
+                                                            info!(
+                                                                "Settlement job {} validated (status: Pending)",
+                                                                start_job.job_sequence
+                                                            );
+                                                        } else {
+                                                            warn!(
+                                                                "Job {} has settlement_chain but is not a settlement job (method: {}) - skipping",
+                                                                start_job.job_sequence, fresh_job.app_instance_method
+                                                            );
+                                                        }
+                                                    } else {
+                                                        // No settlement chain - validate if it's NOT a settlement job
+                                                        if !is_settlement_job {
+                                                            is_valid = true;
+                                                            info!(
+                                                                "Regular job {} validated (status: Pending)",
+                                                                start_job.job_sequence
+                                                            );
+                                                        } else {
+                                                            warn!(
+                                                                "🧹 Orphaned settlement job {} detected (method: {}) - adding to terminate queue",
+                                                                start_job.job_sequence, fresh_job.app_instance_method
+                                                            );
+
+                                                            requests.terminate_jobs.push(TerminateJobRequest {
+                                                                job_sequence: start_job.job_sequence,
+                                                                _timestamp: Instant::now(),
+                                                            });
+                                                        }
                                                     }
                                                 }
                                                 Err(e) => {
@@ -640,16 +653,17 @@ impl MulticallProcessor {
                                         is_error = true;
                                     }
                                 }
-                            } else {
-                                warn!("App instance {} has no jobs object", app_instance);
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to fetch app instance {} from blockchain: {}",
+                                    app_instance, e
+                                );
                             }
                         }
-                        Err(e) => {
-                            error!(
-                                "Failed to fetch app instance {} from blockchain: {}",
-                                app_instance, e
-                            );
-                        }
+                    } else {
+                        // No coordination layer found - mark as error to retry later
+                        is_error = true;
                     }
 
                     if is_valid {

@@ -64,10 +64,10 @@ rpc_url = "http://localhost:8545"
 ws_url = "ws://localhost:8545"
 
 # Deployed SilvanaCoordination contract address on Anvil
-contract_address = "0x7B4f352Cd40114f12e82fC675b5BA8C7582FC513"
+contract_address = "0xd753c12650c280383Ce873Cc3a898F6f53973d16"
 
 # JobManager contract address (for listening to JobCreated events)
-job_manager_address = "0x2625760C4A8e8101801D3a48eE64B2bEA42f1E96"
+job_manager_address = "0x8E45C0936fa1a65bDaD3222bEFeC6a03C83372cE"
 
 # Environment variable containing private key for signing transactions
 private_key_env = "ETHEREUM_PRIVATE_KEY"

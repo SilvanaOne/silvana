@@ -36,7 +36,7 @@ contract SettlementManager is ISettlementManager, AccessControl {
 
     // ============ Constructor ============
 
-    constructor() AccessControl() {}
+    constructor() {}
 
     // ============ External Functions - Write ============
 

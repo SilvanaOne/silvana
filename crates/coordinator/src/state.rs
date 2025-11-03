@@ -10,13 +10,10 @@ use tokio::time::Instant;
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 
-/// Normalize app instance ID to always have 0x prefix
+/// Normalize app instance ID - pass through unchanged
+/// Each coordination layer handles its own ID format (Sui uses 0x prefix, Ethereum uses strings)
 pub fn normalize_app_instance_id(app_instance: &str) -> String {
-    if app_instance.starts_with("0x") {
-        app_instance.to_string()
-    } else {
-        format!("0x{}", app_instance)
-    }
+    app_instance.to_string()
 }
 
 #[derive(Debug, Clone)]

@@ -244,9 +244,8 @@ library DataTypes {
      * @notice Emitted when a job is created
      */
     event JobCreated(
-        string indexed appInstance,
-        uint256 indexed jobId,
-        uint64 jobSequence,
+        string appInstance,
+        uint64 indexed jobSequence,
         string developer,
         string agent,
         string agentMethod,
@@ -258,7 +257,7 @@ library DataTypes {
      */
     event JobTaken(
         string indexed appInstance,
-        uint256 indexed jobId,
+        uint64 indexed jobSequence,
         address indexed coordinator,
         uint256 timestamp
     );
@@ -268,7 +267,7 @@ library DataTypes {
      */
     event JobCompleted(
         string indexed appInstance,
-        uint256 indexed jobId,
+        uint64 indexed jobSequence,
         address indexed coordinator,
         bytes output,
         uint256 timestamp
@@ -279,7 +278,7 @@ library DataTypes {
      */
     event JobFailed(
         string indexed appInstance,
-        uint256 indexed jobId,
+        uint64 indexed jobSequence,
         address indexed coordinator,
         string error,
         uint8 attempts,
@@ -291,7 +290,7 @@ library DataTypes {
      */
     event JobTerminated(
         string indexed appInstance,
-        uint256 indexed jobId,
+        uint64 indexed jobSequence,
         address indexed coordinator,
         uint256 timestamp
     );

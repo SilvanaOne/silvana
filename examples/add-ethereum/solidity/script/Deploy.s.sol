@@ -4,6 +4,7 @@ pragma solidity ^0.8.23;
 import "forge-std/Script.sol";
 import "../src/AddApp.sol";
 import "coordination/interfaces/ICoordination.sol";
+import "coordination/interfaces/IAppInstanceManager.sol";
 
 /**
  * @title DeployAddApp
@@ -20,7 +21,7 @@ contract DeployAddApp is Script {
     function run() external {
         // Load deployment info for coordination contract address
         // On local Anvil, this should point to the deployed SilvanaCoordination
-        address coordinationAddress = vm.envAddress("SILVANA_COORDINATION_ADDRESS");
+        address coordinationAddress = vm.envAddress("SILVANA_COORDINATION_CONTRACT");
 
         // Get deployer private key
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -39,27 +40,31 @@ contract DeployAddApp is Script {
         AddApp addApp = new AddApp(coordinationAddress);
         console.log("AddApp deployed at:", address(addApp));
 
+        // Generate Ed25519 public key as app instance ID
+        string[] memory inputs = new string[](1);
+        inputs[0] = "script/generate_ed25519_id.sh";
+        bytes memory result = vm.ffi(inputs);
+        // Convert bytes to 0x-prefixed hex string
+        string memory appInstanceId = vm.toString(result);
+        console.log("Generated app instance ID:", appInstanceId);
+
         // 2. Create app instance in coordination layer
         ICoordination coordination = ICoordination(coordinationAddress);
-        address appInstanceManagerAddr = address(coordination.appInstanceManager());
+        IAppInstanceManager appManager = coordination.appInstanceManager();
 
         // Get app metadata from environment variables
         string memory appName = vm.envOr("APP_NAME", string("add-app-demo"));
         string memory agentName = vm.envOr("AGENT_NAME", string("add-agent"));
         string memory developerName = vm.envOr("DEVELOPER_NAME", string("silvana"));
 
-        // Call createAppInstance on the appInstanceManager
-        (bool success, bytes memory data) = appInstanceManagerAddr.call(
-            abi.encodeWithSignature(
-                "createAppInstance(string,string,string)",
-                appName,
-                agentName,
-                developerName
-            )
+        // Create app instance with the generated ID
+        string memory createdId = appManager.createAppInstance(
+            appInstanceId,
+            appName,
+            agentName,
+            developerName
         );
-        require(success, "Failed to create app instance");
-        string memory appInstanceId = abi.decode(data, (string));
-        console.log("App instance created:", appInstanceId);
+        console.log("App instance created:", createdId);
 
         // 3. Initialize AddApp with the instance ID
         addApp.initialize(appInstanceId);
@@ -91,7 +96,7 @@ contract DeployAddAppLocal is Script {
     function run() external {
         // For local Anvil, read from environment or use default
         address coordinationAddress = vm.envOr(
-            "SILVANA_COORDINATION_ADDRESS",
+            "SILVANA_COORDINATION_CONTRACT",
             address(0x5eb3Bc0a489C5A8288765d2336659EbCA68FCd00) // Default from recent deployment
         );
 
@@ -112,26 +117,31 @@ contract DeployAddAppLocal is Script {
         AddApp addApp = new AddApp(coordinationAddress);
         console.log("AddApp deployed at:", address(addApp));
 
+        // Generate Ed25519 public key as app instance ID
+        string[] memory inputs = new string[](1);
+        inputs[0] = "script/generate_ed25519_id.sh";
+        bytes memory result = vm.ffi(inputs);
+        // Convert bytes to 0x-prefixed hex string
+        string memory appInstanceId = vm.toString(result);
+        console.log("Generated app instance ID:", appInstanceId);
+
         // Create app instance
         ICoordination coordination = ICoordination(coordinationAddress);
-        address appInstanceManagerAddr = address(coordination.appInstanceManager());
+        IAppInstanceManager appManager = coordination.appInstanceManager();
 
         // Get app metadata from environment variables
         string memory appName = vm.envOr("APP_NAME", string("add-app-demo"));
         string memory agentName = vm.envOr("AGENT_NAME", string("add-agent"));
         string memory developerName = vm.envOr("DEVELOPER_NAME", string("silvana"));
 
-        (bool success, bytes memory data) = appInstanceManagerAddr.call(
-            abi.encodeWithSignature(
-                "createAppInstance(string,string,string)",
-                appName,
-                agentName,
-                developerName
-            )
+        // Create app instance with the generated ID
+        string memory createdId = appManager.createAppInstance(
+            appInstanceId,
+            appName,
+            agentName,
+            developerName
         );
-        require(success, "Failed to create app instance");
-        string memory appInstanceId = abi.decode(data, (string));
-        console.log("App instance created:", appInstanceId);
+        console.log("App instance created:", createdId);
 
         // Initialize
         addApp.initialize(appInstanceId);

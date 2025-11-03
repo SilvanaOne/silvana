@@ -13,16 +13,18 @@ interface IAppInstanceManager {
 
     /**
      * @notice Create a new app instance
+     * @param instanceId The unique identifier for the app instance (e.g., Ed25519 public key)
      * @param name The name of the app instance
      * @param appName The name of the Silvana app
      * @param developerName The name of the developer
      * @return instanceId The created instance identifier
      */
     function createAppInstance(
+        string calldata instanceId,
         string calldata name,
         string calldata appName,
         string calldata developerName
-    ) external returns (string memory instanceId);
+    ) external returns (string memory);
 
     /**
      * @notice Delete an app instance

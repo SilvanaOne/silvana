@@ -35,9 +35,8 @@ use std::str::FromStr;
 sol! {
     #[derive(Debug)]
     event JobCreated(
-        string indexed appInstance,
-        uint256 indexed jobId,
-        uint64 jobSequence,
+        string appInstance,
+        uint64 indexed jobSequence,
         string developer,
         string agent,
         string agentMethod,
@@ -168,17 +167,14 @@ impl EthereumCoordination {
         // Get block number from log metadata
         let block_number = log.block_number.unwrap_or(0);
 
-        // Note: appInstance is indexed as string, so it's hashed to a topic (FixedBytes<32>)
-        // We cannot recover the original string from the hash
-        // For now, use hex representation of the hash
-        let app_instance_hash = format!("0x{}", hex::encode(decoded.appInstance.as_slice()));
-
+        // With the Solidity fix, appInstance is no longer indexed,
+        // so we get the full string value directly from the event
         Ok(JobCreatedEvent {
             job_sequence: decoded.jobSequence,
             developer: decoded.developer,
             agent: decoded.agent,
             agent_method: decoded.agentMethod,
-            app_instance: app_instance_hash,
+            app_instance: decoded.appInstance,
             app_instance_method: String::new(), // Not in Solidity event
             block_number,
             created_at: decoded.timestamp.try_into().unwrap_or(0),
@@ -1781,17 +1777,14 @@ impl Coordination for EthereumCoordination {
                                             // Get block number from log metadata, not from event data
                                             let block_number = log.block_number.unwrap_or(0);
 
-                                            // Note: appInstance is indexed as string, so it's hashed to a topic (FixedBytes<32>)
-                                            // We cannot recover the original string from the hash
-                                            // Use hex representation of the hash
-                                            let app_instance_hash = format!("0x{}", hex::encode(decoded.appInstance.as_slice()));
-
+                                            // With the Solidity fix, appInstance is no longer indexed,
+                                            // so we get the full string value directly from the event
                                             let event = JobCreatedEvent {
                                                 job_sequence: decoded.jobSequence,
                                                 developer: decoded.developer,
                                                 agent: decoded.agent,
                                                 agent_method: decoded.agentMethod,
-                                                app_instance: app_instance_hash,
+                                                app_instance: decoded.appInstance,
                                                 app_instance_method: String::new(), // Not in Solidity event
                                                 block_number,
                                                 created_at: decoded.timestamp.try_into().unwrap_or(0),

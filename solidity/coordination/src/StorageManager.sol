@@ -53,7 +53,7 @@ contract StorageManager is AccessControl, IStorageManager {
 
     // ============ Constructor ============
 
-    constructor() AccessControl() {}
+    constructor() {}
 
     // ============ String KV Storage Functions ============
 

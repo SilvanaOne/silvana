@@ -62,7 +62,7 @@ contract ProofIntegrationTest is Test {
 
         // Create app instance and capture the returned ID
         vm.prank(coordinator);
-        appInstance = coordination.createAppInstance("test-app", APP_NAME, DEVELOPER_NAME);
+        appInstance = coordination.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-app", APP_NAME, DEVELOPER_NAME);
     }
 
     function testBlockCreatesProofCalculation() public {

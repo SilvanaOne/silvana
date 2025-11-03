@@ -82,7 +82,7 @@ contract AppInstanceManager is IAppInstanceManager, AccessControl {
 
     // ============ Constructor ============
 
-    constructor() AccessControl() {}
+    constructor() {}
 
     // ============ External Functions - Write ============
 
@@ -90,16 +90,15 @@ contract AppInstanceManager is IAppInstanceManager, AccessControl {
      * @inheritdoc IAppInstanceManager
      */
     function createAppInstance(
+        string calldata instanceId,
         string calldata name,
         string calldata appName,
         string calldata developerName
-    ) external override whenNotPaused returns (string memory instanceId) {
+    ) external override whenNotPaused returns (string memory) {
+        require(bytes(instanceId).length > 0, "AppInstanceManager: empty instance ID");
         require(bytes(name).length > 0, "AppInstanceManager: empty name");
         require(bytes(appName).length > 0, "AppInstanceManager: empty app name");
         require(bytes(developerName).length > 0, "AppInstanceManager: empty developer name");
-
-        // Generate unique instance ID
-        instanceId = _generateInstanceId(name, msg.sender);
 
         // Ensure ID is unique
         require(!appInstanceExists(instanceId), "AppInstanceManager: instance already exists");
@@ -729,9 +728,10 @@ contract AppInstanceManager is IAppInstanceManager, AccessControl {
 
     /**
      * @dev Generate a unique instance ID
+     * @dev Uses totalInstances counter for deterministic ID generation
      */
     function _generateInstanceId(string memory name, address owner) internal view returns (string memory) {
-        bytes32 hash = keccak256(abi.encodePacked(name, owner, block.timestamp, block.number));
+        bytes32 hash = keccak256(abi.encodePacked(name, owner, totalInstances));
         return string(abi.encodePacked(name, "-", _bytes32ToString(hash)));
     }
 

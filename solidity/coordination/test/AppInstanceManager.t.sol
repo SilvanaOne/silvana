@@ -30,7 +30,7 @@ contract AppInstanceManagerTest is Test {
     function testCreateAppInstance() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Verify instance was created
         assertTrue(appInstanceManager.appInstanceExists(instanceId));
@@ -48,7 +48,7 @@ contract AppInstanceManagerTest is Test {
     function testDeleteAppInstance() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Delete app instance
         vm.prank(user);
@@ -61,7 +61,7 @@ contract AppInstanceManagerTest is Test {
     function testUpdateSequence() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Update sequence
         bytes32 actionsCommitment = keccak256("actions");
@@ -85,7 +85,7 @@ contract AppInstanceManagerTest is Test {
     function testPauseAndUnpauseAppInstance() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Pause app instance
         vm.prank(user);
@@ -107,7 +107,7 @@ contract AppInstanceManagerTest is Test {
     function testTransferOwnership() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Transfer ownership
         vm.prank(user);
@@ -131,7 +131,7 @@ contract AppInstanceManagerTest is Test {
     function testCreateBlock() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Update sequence first
         vm.prank(user);
@@ -159,7 +159,7 @@ contract AppInstanceManagerTest is Test {
     function testSetDataAvailability() public {
         // Create app instance and block
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         vm.prank(coordinator);
         uint64 blockNumber = appInstanceManager.createBlock(instanceId, 10, keccak256("actions"), keccak256("state"));
@@ -182,7 +182,7 @@ contract AppInstanceManagerTest is Test {
     function testCapabilityManagement() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Create capability for user2
         vm.prank(user);
@@ -203,9 +203,9 @@ contract AppInstanceManagerTest is Test {
     function testGetAppInstances() public {
         // Create multiple instances
         vm.startPrank(user);
-        string memory id1 = appInstanceManager.createAppInstance("instance-1", APP_NAME, DEVELOPER_NAME);
-        string memory id2 = appInstanceManager.createAppInstance("instance-2", APP_NAME, DEVELOPER_NAME);
-        string memory id3 = appInstanceManager.createAppInstance("instance-3", APP_NAME, DEVELOPER_NAME);
+        string memory id1 = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "instance-1", APP_NAME, DEVELOPER_NAME);
+        string memory id2 = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "instance-2", APP_NAME, DEVELOPER_NAME);
+        string memory id3 = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "instance-3", APP_NAME, DEVELOPER_NAME);
         vm.stopPrank();
 
         // Get all instances
@@ -227,10 +227,10 @@ contract AppInstanceManagerTest is Test {
     function testGetAppInstancesByOwner() public {
         // Create instances for different owners
         vm.prank(user);
-        string memory id1 = appInstanceManager.createAppInstance("user1-instance", APP_NAME, DEVELOPER_NAME);
+        string memory id1 = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "user1-instance", APP_NAME, DEVELOPER_NAME);
 
         vm.prank(user2);
-        string memory id2 = appInstanceManager.createAppInstance("user2-instance", APP_NAME, DEVELOPER_NAME);
+        string memory id2 = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "user2-instance", APP_NAME, DEVELOPER_NAME);
 
         // Get instances by owner
         string[] memory userInstances = appInstanceManager.getAppInstancesByOwner(user);
@@ -245,7 +245,7 @@ contract AppInstanceManagerTest is Test {
     function testGetBlocksRange() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Create multiple blocks
         vm.startPrank(coordinator);
@@ -271,7 +271,7 @@ contract AppInstanceManagerTest is Test {
     function testMinTimeBetweenBlocks() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Create first block
         vm.prank(coordinator);
@@ -308,7 +308,7 @@ contract AppInstanceManagerTest is Test {
     function testAccessControl() public {
         // Create app instance
         vm.prank(user);
-        string memory instanceId = appInstanceManager.createAppInstance("test-instance", APP_NAME, DEVELOPER_NAME);
+        string memory instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-instance", APP_NAME, DEVELOPER_NAME);
 
         // Try to pause without being owner
         vm.prank(user2);

@@ -55,7 +55,7 @@ contract IntegrationTest is Test {
 
         // Create an app instance for testing - call AppInstanceManager directly so user is the owner
         vm.prank(user);
-        instanceId = appInstanceManager.createAppInstance("test-app", "TestApp", "TestDeveloper");
+        instanceId = appInstanceManager.createAppInstance("0x0000000000000000000000000000000000000000000000000000000000000001", "test-app", "TestApp", "TestDeveloper");
     }
 
     function testFullJobLifecycle() public {

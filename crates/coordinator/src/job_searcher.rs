@@ -113,21 +113,54 @@ impl JobSearcher {
                 .unwrap_or(true);
             if is_sui_layer {
                 for app_instance_id in app_instances {
+                    // Get the correct coordination layer for this app instance
+                    let manager = match &self.manager {
+                        Some(mgr) => mgr,
+                        None => {
+                            error!("No coordination manager available for merge analysis");
+                            continue;
+                        }
+                    };
+
+                    let (_layer_id, coordination) = match manager.get_layer_for_app(&app_instance_id).await {
+                        Ok(layer) => layer,
+                        Err(e) => {
+                            error!(
+                                "Failed to find coordination layer for AppInstance {} for merge analysis: {}",
+                                app_instance_id, e
+                            );
+                            continue;
+                        }
+                    };
+
                     // For Sui layers, use Sui-specific fetch to get the right type
-                    match sui::fetch::fetch_app_instance(&app_instance_id).await {
-                        Ok(app_instance) => {
-                            if let Err(analysis_err) =
-                                analyze_proof_completion(&app_instance, &self.state.clone()).await
-                            {
-                                warn!(
-                                    "Failed to analyze failed proof for merge opportunities: {}",
-                                    analysis_err
-                                );
-                            } else {
-                                debug!(
-                                    "✅ Background merge analysis completed for app instance {}",
-                                    app_instance_id
-                                );
+                    // This is temporary until analyze_proof_completion is refactored to use trait types
+                    match coordination.fetch_app_instance(&app_instance_id).await {
+                        Ok(_trait_app_instance) => {
+                            // Still need Sui-specific type for analyze_proof_completion
+                            match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                                Ok(app_instance) => {
+                                    if let Err(analysis_err) =
+                                        analyze_proof_completion(&app_instance, &self.state.clone()).await
+                                    {
+                                        warn!(
+                                            "Failed to analyze failed proof for merge opportunities: {}",
+                                            analysis_err
+                                        );
+                                    } else {
+                                        debug!(
+                                            "✅ Background merge analysis completed for app instance {}",
+                                            app_instance_id
+                                        );
+                                    }
+                                }
+                                Err(_) => {
+                                    // Not a Sui app instance, skip proof analysis
+                                    debug!(
+                                        "Skipping proof analysis for non-Sui app instance {}",
+                                        app_instance_id
+                                    );
+                                }
                             }
                         }
                         Err(e) => {
@@ -423,18 +456,43 @@ impl JobSearcher {
             .unwrap_or(true);
         if is_sui_layer {
             for app_instance_id in &app_instances {
+                // Get the correct coordination layer for this app instance
+                let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance_id).await {
+                    Ok(layer) => layer,
+                    Err(e) => {
+                        warn!(
+                            "Failed to find coordination layer for app_instance {} for removal check: {}",
+                            app_instance_id, e
+                        );
+                        continue;
+                    }
+                };
+
                 // For Sui layers, use Sui-specific fetch to get the right type
-                match sui::fetch::fetch_app_instance(app_instance_id).await {
-                    Ok(app_instance) => {
-                        if can_remove_app_instance(manager, &app_instance)
-                            .await
-                            .unwrap_or(false)
-                        {
-                            info!(
-                                "App instance {} is fully caught up and can be removed",
-                                app_instance_id
-                            );
-                            instances_to_remove.push(app_instance_id.clone());
+                // This is temporary until can_remove_app_instance is fully refactored
+                match coordination.fetch_app_instance(app_instance_id).await {
+                    Ok(_trait_app_instance) => {
+                        // Still need Sui-specific type for can_remove_app_instance
+                        match sui::fetch::fetch_app_instance(app_instance_id).await {
+                            Ok(app_instance) => {
+                                if can_remove_app_instance(manager, &app_instance)
+                                    .await
+                                    .unwrap_or(false)
+                                {
+                                    info!(
+                                        "App instance {} is fully caught up and can be removed",
+                                        app_instance_id
+                                    );
+                                    instances_to_remove.push(app_instance_id.clone());
+                                }
+                            }
+                            Err(_) => {
+                                // Not a Sui app instance, skip removal check for now
+                                debug!(
+                                    "Skipping removal check for non-Sui app instance {}",
+                                    app_instance_id
+                                );
+                            }
                         }
                     }
                     Err(e) => {

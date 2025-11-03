@@ -14,6 +14,9 @@ remappings = [
 # Allow reading from parent directories
 allow_paths = ["../../../solidity/coordination"]
 
+# Enable FFI for running external scripts
+ffi = true
+
 # Solidity compiler settings
 solc_version = "0.8.23"
 evm_version = "paris"

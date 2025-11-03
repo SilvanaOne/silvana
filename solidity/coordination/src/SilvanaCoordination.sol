@@ -43,7 +43,7 @@ contract SilvanaCoordination is ICoordination, AccessControl {
 
     // ============ Constructor ============
 
-    constructor() AccessControl() {}
+    constructor() {}
 
     // ============ Initialization ============
 
@@ -221,11 +221,12 @@ contract SilvanaCoordination is ICoordination, AccessControl {
      * @dev Delegates to AppInstanceManager
      */
     function createAppInstance(
+        string calldata instanceId,
         string calldata name,
         string calldata appName,
         string calldata developerName
     ) external whenNotPaused onlyInitialized returns (string memory) {
-        return appInstanceManager.createAppInstance(name, appName, developerName);
+        return appInstanceManager.createAppInstance(instanceId, name, appName, developerName);
     }
 
     /**

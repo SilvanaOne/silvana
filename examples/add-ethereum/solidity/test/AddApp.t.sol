@@ -48,7 +48,7 @@ contract AddAppTest is Test {
 
         // Get coordination address from environment or use default
         address coordinationAddress = vm.envOr(
-            "SILVANA_COORDINATION_ADDRESS",
+            "SILVANA_COORDINATION_CONTRACT",
             address(0x5eb3Bc0a489C5A8288765d2336659EbCA68FCd00)
         );
         coordination = ICoordination(coordinationAddress);
@@ -56,11 +56,19 @@ contract AddAppTest is Test {
         // Deploy AddApp
         addApp = new AddApp(coordinationAddress);
 
-        // Create app instance
+        // Generate Ed25519 public key as app instance ID
+        string[] memory inputs = new string[](1);
+        inputs[0] = "script/generate_ed25519_id.sh";
+        bytes memory result = vm.ffi(inputs);
+        // Convert bytes to 0x-prefixed hex string
+        string memory generatedId = vm.toString(result);
+
+        // Create app instance with the generated ID
         address appInstanceManagerAddr = address(coordination.appInstanceManager());
         (bool success, bytes memory data) = appInstanceManagerAddr.call(
             abi.encodeWithSignature(
-                "createAppInstance(string,string,string)",
+                "createAppInstance(string,string,string,string)",
+                generatedId,
                 "test-add-app",
                 "add-app",
                 "silvana"
