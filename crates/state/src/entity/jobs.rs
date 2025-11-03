@@ -30,6 +30,14 @@ pub struct Model {
     pub data: Option<Vec<u8>>,  // vector<u8> as BLOB
     pub data_da: Option<String>,  // S3 reference for large job data
 
+    /// JWT for agent to access private state (only used in Private coordination)
+    #[sea_orm(column_type = "Text", nullable)]
+    pub agent_jwt: Option<String>,
+
+    /// When the agent JWT expires
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
+    pub jwt_expires_at: Option<DateTimeUtc>,
+
     // Status (matching Move enum and SQL ENUM)
     pub status: String,  // PENDING, RUNNING, COMPLETED, FAILED (maps to SQL ENUM)
     #[sea_orm(column_type = "Text", nullable)]
