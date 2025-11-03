@@ -867,6 +867,11 @@ message CoordinatorJobRequest {
     CompleteJobOperation complete = 5;
     FailJobOperation fail = 6;
     GetJobOperation get = 7;
+    TerminateJobOperation terminate = 8;
+    GetPendingJobSequencesOperation get_pending_sequences = 9;
+    GetPendingJobsCountOperation get_pending_count = 10;
+    GetFailedJobsCountOperation get_failed_count = 11;
+    GetTotalJobsCountOperation get_total_count = 12;
   }
 }
 
@@ -903,11 +908,35 @@ message GetJobOperation {
   uint64 job_sequence = 1;
 }
 
+message TerminateJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message GetPendingJobSequencesOperation {
+  optional string developer = 1;
+  optional string agent = 2;
+  optional string agent_method = 3;
+}
+
+message GetPendingJobsCountOperation {
+  // No fields needed - count all pending for app_instance
+}
+
+message GetFailedJobsCountOperation {
+  // No fields needed - count all failed for app_instance
+}
+
+message GetTotalJobsCountOperation {
+  // No fields needed - count all jobs for app_instance
+}
+
 message CoordinatorJobResponse {
   bool success = 1;
   string message = 2;
   optional Job job = 3;
   optional uint64 job_sequence = 4;  // For create operation
+  repeated uint64 job_sequences = 5;  // For list operations
+  optional uint64 count = 6;  // For count operations
 }
 
 // ============================================================================
