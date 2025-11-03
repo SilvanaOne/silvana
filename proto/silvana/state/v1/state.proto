@@ -238,6 +238,10 @@ message Job {
   google.protobuf.Timestamp created_at = 18;
   google.protobuf.Timestamp updated_at = 19;
   optional google.protobuf.Struct metadata = 20;  // Optional metadata
+
+  // Agent authentication (for Private coordination layer)
+  optional string agent_jwt = 21;  // JWT for agent to access private state
+  optional google.protobuf.Timestamp jwt_expires_at = 22;  // When the agent JWT expires
 }
 
 // ============================================================================
@@ -817,6 +821,121 @@ message ListProofsResponse {
 }
 
 // ============================================================================
+// Coordinator Management Messages
+// ============================================================================
+
+// Coordinator authentication using its own Ed25519 key
+message CoordinatorAuth {
+  string coordinator_public_key = 1;  // Ed25519 public key (hex)
+  string signature = 2;                // Ed25519 signature of request hash
+  int64 timestamp = 3;                 // Unix timestamp for replay protection
+  string nonce = 4;                    // Random nonce for uniqueness
+}
+
+// Coordinator group management
+message CoordinatorGroup {
+  string group_id = 1;
+  string group_name = 2;
+  optional string description = 3;
+  repeated string coordinator_public_keys = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// App instance access grant
+message AppInstanceAccess {
+  string app_instance_id = 1;
+  string group_id = 2;
+  string access_level = 3;  // READ_ONLY, JOB_MANAGE, FULL
+  google.protobuf.Timestamp granted_at = 4;
+  optional google.protobuf.Timestamp expires_at = 5;
+}
+
+// ============================================================================
+// Coordinator Job Operations
+// ============================================================================
+
+// Coordinator creates/manages jobs with limited access
+message CoordinatorJobRequest {
+  CoordinatorAuth coordinator_auth = 1;  // Coordinator's own auth
+  string app_instance_id = 2;
+
+  oneof operation {
+    CreateJobOperation create = 3;
+    StartJobOperation start = 4;
+    CompleteJobOperation complete = 5;
+    FailJobOperation fail = 6;
+    GetJobOperation get = 7;
+  }
+}
+
+message CreateJobOperation {
+  optional string description = 1;
+  string developer = 2;
+  string agent = 3;
+  string agent_method = 4;
+  optional uint64 block_number = 5;
+  repeated uint64 sequences = 6;
+  repeated uint64 sequences1 = 7;
+  repeated uint64 sequences2 = 8;
+  optional bytes data = 9;
+  optional string data_da = 10;
+  optional uint64 interval_ms = 11;
+  optional string agent_jwt = 12;  // Owner-provided JWT for agent
+  optional google.protobuf.Timestamp jwt_expires_at = 13;
+}
+
+message StartJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message CompleteJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message FailJobOperation {
+  uint64 job_sequence = 1;
+  string error_message = 2;
+}
+
+message GetJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message CoordinatorJobResponse {
+  bool success = 1;
+  string message = 2;
+  optional Job job = 3;
+  optional uint64 job_sequence = 4;  // For create operation
+}
+
+// ============================================================================
+// Access Management Operations (Owner Only)
+// ============================================================================
+
+message GrantCoordinatorAccessRequest {
+  JWTAuth auth = 1;  // Must be signed by app instance owner
+  string app_instance_id = 2;
+  string group_id = 3;
+  string access_level = 4;  // READ_ONLY, JOB_MANAGE, FULL
+  optional google.protobuf.Timestamp expires_at = 5;
+}
+
+message RevokeCoordinatorAccessRequest {
+  JWTAuth auth = 1;  // Must be signed by app instance owner
+  string app_instance_id = 2;
+  string group_id = 3;
+}
+
+message ListCoordinatorAccessRequest {
+  JWTAuth auth = 1;  // Must be signed by app instance owner
+  string app_instance_id = 2;
+}
+
+message ListCoordinatorAccessResponse {
+  repeated AppInstanceAccess access_grants = 1;
+}
+
+// ============================================================================
 // Service Definition
 // ============================================================================
 
@@ -885,4 +1004,12 @@ service StateService {
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
   rpc ListProofs(ListProofsRequest) returns (ListProofsResponse);
+
+  // Coordinator Operations (authenticated with coordinator's Ed25519 key)
+  rpc CoordinatorJobOperation(CoordinatorJobRequest) returns (CoordinatorJobResponse);
+
+  // Access Management (owner only)
+  rpc GrantCoordinatorAccess(GrantCoordinatorAccessRequest) returns (google.protobuf.Empty);
+  rpc RevokeCoordinatorAccess(RevokeCoordinatorAccessRequest) returns (google.protobuf.Empty);
+  rpc ListCoordinatorAccess(ListCoordinatorAccessRequest) returns (ListCoordinatorAccessResponse);
 }
