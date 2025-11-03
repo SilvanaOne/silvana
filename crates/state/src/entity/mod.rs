@@ -19,6 +19,10 @@ pub mod proof_calculations;
 pub mod settlements;
 pub mod block_settlements;
 pub mod app_instance_metadata;
+pub mod coordinator_groups;
+pub mod coordinator_group_members;
+pub mod app_instance_coordinator_access;
+pub mod coordinator_audit_log;
 
 // Re-export entities for convenience
 pub use app_instances::Entity as AppInstances;
@@ -40,3 +44,7 @@ pub use proof_calculations::Entity as ProofCalculations;
 pub use settlements::Entity as Settlements;
 pub use block_settlements::Entity as BlockSettlements;
 pub use app_instance_metadata::Entity as AppInstanceMetadata;
+pub use coordinator_groups::Entity as CoordinatorGroups;
+pub use coordinator_group_members::Entity as CoordinatorGroupMembers;
+pub use app_instance_coordinator_access::Entity as AppInstanceCoordinatorAccess;
+pub use coordinator_audit_log::Entity as CoordinatorAuditLog;

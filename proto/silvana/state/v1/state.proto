@@ -651,6 +651,8 @@ message CreateJobRequest {
   optional string data_da = 12;      // Renumbered from 13
   optional uint64 interval_ms = 13;   // Renumbered from 14 - For periodic jobs
   optional google.protobuf.Struct metadata = 14;  // Optional metadata
+  optional string agent_jwt = 15;    // JWT for agent to access private state
+  optional google.protobuf.Timestamp jwt_expires_at = 16;  // When the agent JWT expires
 }
 
 message CreateJobResponse {

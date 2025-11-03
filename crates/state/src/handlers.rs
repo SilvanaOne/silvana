@@ -2206,6 +2206,12 @@ impl StateService for StateServiceImpl {
             sequences2: Set(sequences2_json.clone()),
             data: Set(req.data.clone()),
             data_da: Set(req.data_da.clone()),
+            agent_jwt: Set(req.agent_jwt.clone()),
+            jwt_expires_at: Set(req.jwt_expires_at.as_ref().map(|ts| {
+                chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
+                    .expect("Invalid timestamp")
+                    .with_timezone(&chrono::Utc)
+            })),
             status: Set("PENDING".to_string()),
             error_message: NotSet,
             attempts: Set(0),
@@ -2251,6 +2257,8 @@ impl StateService for StateServiceImpl {
             sequences2: req.sequences2,
             data: result.data,
             data_da: result.data_da,
+            agent_jwt: result.agent_jwt,
+            jwt_expires_at: result.jwt_expires_at.map(to_timestamp),
             status: JobStatus::Pending.into(),
             error_message: None,
             attempts: result.attempts as u32,
@@ -2322,6 +2330,8 @@ impl StateService for StateServiceImpl {
             sequences2,
             data: result.data,
             data_da: result.data_da,
+            agent_jwt: result.agent_jwt,
+            jwt_expires_at: result.jwt_expires_at.map(to_timestamp),
             status: JobStatus::Running.into(),
             error_message: result.error_message,
             attempts: result.attempts as u32,
@@ -2451,6 +2461,8 @@ impl StateService for StateServiceImpl {
             sequences2,
             data: result.data,
             data_da: result.data_da,
+            agent_jwt: result.agent_jwt,
+            jwt_expires_at: result.jwt_expires_at.map(to_timestamp),
             status: JobStatus::Failed.into(),
             error_message: result.error_message,
             attempts: result.attempts as u32,
@@ -2530,6 +2542,8 @@ impl StateService for StateServiceImpl {
             sequences2,
             data: job.data,
             data_da: job.data_da,
+            agent_jwt: job.agent_jwt,
+            jwt_expires_at: job.jwt_expires_at.map(to_timestamp),
             status: job_status.into(),
             error_message: job.error_message,
             attempts: job.attempts as u32,
@@ -2628,6 +2642,8 @@ impl StateService for StateServiceImpl {
                     sequences2,
                     data: job.data,
                     data_da: job.data_da,
+                    agent_jwt: job.agent_jwt,
+                    jwt_expires_at: job.jwt_expires_at.map(to_timestamp),
                     status: job_status.into(),
                     error_message: job.error_message,
                     attempts: job.attempts as u32,
@@ -2717,6 +2733,8 @@ impl StateService for StateServiceImpl {
                     sequences2,
                     data: job.data,
                     data_da: job.data_da,
+                    agent_jwt: job.agent_jwt,
+                    jwt_expires_at: job.jwt_expires_at.map(to_timestamp),
                     status: JobStatus::Pending.into(),
                     error_message: job.error_message,
                     attempts: job.attempts as u32,
@@ -3079,6 +3097,46 @@ impl StateService for StateServiceImpl {
             proofs: proto_proofs,
             has_more,
         }))
+    }
+
+    // ============================================================================
+    // Coordinator Authentication Methods (Phase 3 - Not Yet Implemented)
+    // ============================================================================
+
+    async fn coordinator_job_operation(
+        &self,
+        _request: Request<CoordinatorJobRequest>,
+    ) -> Result<Response<CoordinatorJobResponse>, Status> {
+        Err(Status::unimplemented(
+            "Coordinator job operations not yet implemented - Phase 3"
+        ))
+    }
+
+    async fn grant_coordinator_access(
+        &self,
+        _request: Request<GrantCoordinatorAccessRequest>,
+    ) -> Result<Response<()>, Status> {
+        Err(Status::unimplemented(
+            "Grant coordinator access not yet implemented - Phase 3"
+        ))
+    }
+
+    async fn revoke_coordinator_access(
+        &self,
+        _request: Request<RevokeCoordinatorAccessRequest>,
+    ) -> Result<Response<()>, Status> {
+        Err(Status::unimplemented(
+            "Revoke coordinator access not yet implemented - Phase 3"
+        ))
+    }
+
+    async fn list_coordinator_access(
+        &self,
+        _request: Request<ListCoordinatorAccessRequest>,
+    ) -> Result<Response<ListCoordinatorAccessResponse>, Status> {
+        Err(Status::unimplemented(
+            "List coordinator access not yet implemented - Phase 3"
+        ))
     }
 }
 
