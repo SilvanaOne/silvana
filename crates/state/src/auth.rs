@@ -273,16 +273,18 @@ fn base64_url_decode(data: &str) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use rand::rngs::OsRng;
 
     #[test]
     fn test_jwt_create_and_verify() {
         // Set required environment variable
-        std::env::set_var("SILVANA_AUD", "test-service");
+        unsafe { std::env::set_var("SILVANA_AUD", "test-service"); }
 
-        // Generate a keypair
-        let mut csprng = OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
+        // Generate a test keypair (fixed seed for deterministic tests)
+        let test_secret_key: [u8; 32] = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+            17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32
+        ];
+        let signing_key = SigningKey::from_bytes(&test_secret_key);
         let verifying_key = signing_key.verifying_key();
 
         let private_key_bytes = signing_key.to_bytes();
@@ -310,11 +312,14 @@ mod tests {
     #[test]
     fn test_expired_token() {
         // Set required environment variable
-        std::env::set_var("SILVANA_AUD", "test-service");
+        unsafe { std::env::set_var("SILVANA_AUD", "test-service"); }
 
-        // Generate a keypair
-        let mut csprng = OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
+        // Generate a test keypair (fixed seed for deterministic tests)
+        let test_secret_key: [u8; 32] = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+            17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32
+        ];
+        let signing_key = SigningKey::from_bytes(&test_secret_key);
         let verifying_key = signing_key.verifying_key();
 
         let private_key_bytes = signing_key.to_bytes();
@@ -352,10 +357,13 @@ mod tests {
     #[test]
     fn test_invalid_audience() {
         // Set required environment variable
-        std::env::set_var("SILVANA_AUD", "test-service");
+        unsafe { std::env::set_var("SILVANA_AUD", "test-service"); }
 
-        let mut csprng = OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
+        let test_secret_key: [u8; 32] = [
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+            49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64
+        ];
+        let signing_key = SigningKey::from_bytes(&test_secret_key);
         let verifying_key = signing_key.verifying_key();
 
         let private_key_bytes = signing_key.to_bytes();

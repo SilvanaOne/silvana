@@ -219,7 +219,7 @@ mod tests {
     async fn test_database_connection() {
         // This test requires STATE_DATABASE_URL to be set
         if let Ok(url) = env::var("STATE_DATABASE_URL") {
-            let db = StateDatabase::new(&url).await;
+            let db = Database::new(&url).await;
             assert!(db.is_ok());
 
             let db = db.unwrap();

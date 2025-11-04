@@ -905,6 +905,136 @@ impl StateServiceImpl {
             jobs: vec![],
         })
     }
+
+    async fn handle_create_merge_job(
+        &self,
+        app_instance_id: &str,
+        op: CreateMergeJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        // Step 1: Verify proof calculation exists (matching app_instance.move:1211-1219)
+        // For simplicity, we'll check if proofs can be reserved by querying the proof_calculations table
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(op.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?;
+
+        if proof_calc.is_none() {
+            return Ok(CoordinatorJobResponse {
+                success: false,
+                message: "Failed to reserve proofs for merge: proof calculation not found".to_string(),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            });
+        }
+
+        // Step 2: Create the merge job (matching app_instance.move:1238-1250)
+        let create_job_op = CreateJobOperation {
+            description: op.job_description,
+            developer: "system".to_string(),
+            agent: "merge".to_string(),
+            agent_method: "merge_proofs".to_string(),
+            block_number: Some(op.block_number),
+            sequences: op.sequences,
+            sequences1: op.sequences1,
+            sequences2: op.sequences2,
+            data: None,
+            data_da: None,
+            interval_ms: None,
+            agent_jwt: None,
+            jwt_expires_at: None,
+        };
+
+        // Reuse the handle_create_job method
+        self.handle_create_job(app_instance_id, create_job_op).await
+    }
+
+    async fn handle_create_settle_job(
+        &self,
+        app_instance_id: &str,
+        op: CreateSettleJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        // Step 1: Verify chain exists in settlements table
+        let settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(app_instance_id))
+            .filter(settlements::Column::Chain.eq(&op.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        if settlement.is_none() {
+            return Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Settlement chain '{}' not found for app instance", op.chain),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            });
+        }
+
+        let settlement = settlement.unwrap();
+
+        // Step 2: Check if there's already an active settlement job for this chain
+        if settlement.settlement_job.is_some() {
+            return Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Settlement job already exists for chain '{}'", op.chain),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            });
+        }
+
+        // Step 3: Create the settlement job
+        // Encode chain in the data field
+        let chain_data = op.chain.as_bytes().to_vec();
+
+        let create_job_op = CreateJobOperation {
+            description: op.job_description,
+            developer: "system".to_string(),
+            agent: "settlement".to_string(),
+            agent_method: "settle_block".to_string(),
+            block_number: Some(op.block_number),
+            sequences: vec![],
+            sequences1: vec![],
+            sequences2: vec![],
+            data: Some(chain_data),
+            data_da: None,
+            interval_ms: None,
+            agent_jwt: None,
+            jwt_expires_at: None,
+        };
+
+        // Create the job
+        let job_result = self.handle_create_job(app_instance_id, create_job_op).await?;
+
+        // Step 4: Update settlements.settlement_job with the new job_sequence
+        if let Some(job_sequence) = job_result.job_sequence {
+            let mut settlement_active: settlements::ActiveModel = settlement.into();
+            settlement_active.settlement_job = Set(Some(job_sequence));
+            settlement_active.updated_at = Set(chrono::Utc::now().into());
+
+            settlement_active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update settlement_job", e))?;
+
+            info!(
+                "Created settlement job {} for chain '{}' in app_instance {}",
+                job_sequence, op.chain, app_instance_id
+            );
+        }
+
+        Ok(job_result)
+    }
 }
 
 #[tonic::async_trait]
@@ -973,6 +1103,15 @@ impl StateService for StateServiceImpl {
                 created_at: Some(to_timestamp(result.created_at)),
                 updated_at: Some(to_timestamp(result.updated_at)),
                 metadata: result.metadata.and_then(json_to_prost_struct),
+                admin: result.admin,
+                is_paused: result.is_paused,
+                min_time_between_blocks: result.min_time_between_blocks,
+                block_number: result.block_number,
+                sequence: result.sequence,
+                last_proved_block_number: result.last_proved_block_number,
+                last_settled_block_number: result.last_settled_block_number,
+                last_settled_sequence: result.last_settled_sequence,
+                last_purged_sequence: result.last_purged_sequence,
             }),
         }))
     }
@@ -1014,6 +1153,15 @@ impl StateService for StateServiceImpl {
                 created_at: Some(to_timestamp(app_instance.created_at)),
                 updated_at: Some(to_timestamp(app_instance.updated_at)),
                 metadata: app_instance.metadata.and_then(json_to_prost_struct),
+                admin: app_instance.admin,
+                is_paused: app_instance.is_paused,
+                min_time_between_blocks: app_instance.min_time_between_blocks,
+                block_number: app_instance.block_number,
+                sequence: app_instance.sequence,
+                last_proved_block_number: app_instance.last_proved_block_number,
+                last_settled_block_number: app_instance.last_settled_block_number,
+                last_settled_sequence: app_instance.last_settled_sequence,
+                last_purged_sequence: app_instance.last_purged_sequence,
             }),
         }))
     }
@@ -1066,6 +1214,15 @@ impl StateService for StateServiceImpl {
                 created_at: Some(to_timestamp(instance.created_at)),
                 updated_at: Some(to_timestamp(instance.updated_at)),
                 metadata: instance.metadata.and_then(json_to_prost_struct),
+                admin: instance.admin,
+                is_paused: instance.is_paused,
+                min_time_between_blocks: instance.min_time_between_blocks,
+                block_number: instance.block_number,
+                sequence: instance.sequence,
+                last_proved_block_number: instance.last_proved_block_number,
+                last_settled_block_number: instance.last_settled_block_number,
+                last_settled_sequence: instance.last_settled_sequence,
+                last_purged_sequence: instance.last_purged_sequence,
             })
             .collect();
 
@@ -4861,6 +5018,271 @@ impl StateService for StateServiceImpl {
     }
 
     // ============================================================================
+    // State Update & Configuration Methods
+    // ============================================================================
+
+    async fn update_state_for_sequence(
+        &self,
+        request: Request<UpdateStateForSequenceRequest>,
+    ) -> Result<Response<UpdateStateForSequenceResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Calculate state hash if state data is provided
+        let state_hash = if let Some(ref state_data) = req.new_state_data {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(state_data);
+            hasher.finalize().to_vec()
+        } else {
+            vec![] // Empty hash if only DA hash provided
+        };
+
+        // Find existing state record
+        let existing_state = state::Entity::find()
+            .filter(state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(state::Column::Sequence.eq(req.sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch state", e))?;
+
+        if let Some(state_record) = existing_state {
+            // Update existing state
+            let mut active: state::ActiveModel = state_record.into();
+
+            if let Some(state_data) = req.new_state_data {
+                active.state_data = Set(Some(state_data));
+                active.state_hash = Set(state_hash);
+            }
+
+            if let Some(da_hash) = req.new_data_availability_hash {
+                active.state_da = Set(Some(da_hash));
+            }
+
+            active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update state", e))?;
+        } else {
+            // Create new state record
+            let new_state = state::ActiveModel {
+                app_instance_id: Set(req.app_instance_id.clone()),
+                sequence: Set(req.sequence),
+                state_hash: Set(state_hash),
+                state_data: Set(req.new_state_data),
+                state_da: Set(req.new_data_availability_hash),
+                proof_data: Set(None),
+                proof_da: Set(None),
+                proof_hash: Set(None),
+                commitment: Set(None),
+                metadata: Set(None),
+                proved_at: Set(chrono::Utc::now().into()),
+                id: NotSet,
+            };
+
+            new_state
+                .insert(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to create state", e))?;
+        }
+
+        info!(
+            "Updated state for sequence {} in app_instance {}",
+            req.sequence, req.app_instance_id
+        );
+
+        Ok(Response::new(UpdateStateForSequenceResponse {
+            success: true,
+            message: "State updated successfully".to_string(),
+        }))
+    }
+
+    async fn is_app_paused(
+        &self,
+        request: Request<IsAppPausedRequest>,
+    ) -> Result<Response<IsAppPausedResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch app instance
+        let app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        Ok(Response::new(IsAppPausedResponse {
+            is_paused: app.is_paused,
+        }))
+    }
+
+    async fn get_min_time_between_blocks(
+        &self,
+        request: Request<GetMinTimeBetweenBlocksRequest>,
+    ) -> Result<Response<GetMinTimeBetweenBlocksResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch app instance
+        let app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        // Return the value in seconds (as stored in database)
+        let min_time_seconds = app.min_time_between_blocks;
+
+        Ok(Response::new(GetMinTimeBetweenBlocksResponse {
+            min_time_seconds,
+        }))
+    }
+
+    async fn purge(
+        &self,
+        request: Request<PurgeRequest>,
+    ) -> Result<Response<PurgeResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Validate sequences_to_purge > 0
+        if req.sequences_to_purge == 0 {
+            return Err(Status::invalid_argument("sequences_to_purge must be greater than 0"));
+        }
+
+        // Fetch app instance
+        let app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        // Calculate target purge sequence (capped at last_settled_sequence)
+        let mut target_sequence = app.last_purged_sequence + req.sequences_to_purge;
+        if target_sequence > app.last_settled_sequence {
+            target_sequence = app.last_settled_sequence;
+        }
+
+        // If no sequences to purge, return early
+        if target_sequence <= app.last_purged_sequence {
+            return Ok(Response::new(PurgeResponse {
+                success: true,
+                message: "No sequences to purge".to_string(),
+                last_purged_sequence: app.last_purged_sequence,
+            }));
+        }
+
+        // Delete old records from state table
+        state::Entity::delete_many()
+            .filter(state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(state::Column::Sequence.lte(target_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to purge state records", e))?;
+
+        // Delete old records from optimistic_state table
+        optimistic_state::Entity::delete_many()
+            .filter(optimistic_state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(optimistic_state::Column::Sequence.lte(target_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to purge optimistic_state records", e))?;
+
+        // Delete old records from user_actions table
+        user_actions::Entity::delete_many()
+            .filter(user_actions::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(user_actions::Column::Sequence.lte(target_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to purge user_actions records", e))?;
+
+        // Update app instance last_purged_sequence
+        let mut app_active: app_instances::ActiveModel = app.into();
+        app_active.last_purged_sequence = Set(target_sequence);
+        app_active.updated_at = Set(chrono::Utc::now().into());
+
+        app_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update last_purged_sequence", e))?;
+
+        info!(
+            "Purged sequences up to {} for app_instance {}",
+            target_sequence, req.app_instance_id
+        );
+
+        Ok(Response::new(PurgeResponse {
+            success: true,
+            message: format!("Purged sequences up to {}", target_sequence),
+            last_purged_sequence: target_sequence,
+        }))
+    }
+
+    async fn get_metadata(
+        &self,
+        request: Request<GetMetadataRequest>,
+    ) -> Result<Response<GetMetadataResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        use crate::entity::app_instance_metadata;
+
+        let metadata = app_instance_metadata::Entity::find()
+            .filter(app_instance_metadata::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(app_instance_metadata::Column::Key.eq(&req.key))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch metadata", e))?;
+
+        Ok(Response::new(GetMetadataResponse {
+            metadata: metadata.map(|m| AppInstanceMetadata {
+                app_instance_id: m.app_instance_id,
+                key: m.key,
+                value: m.value,
+                created_at: Some(to_timestamp(m.created_at)),
+                updated_at: Some(to_timestamp(m.updated_at)),
+            }),
+        }))
+    }
+
+    async fn add_metadata(
+        &self,
+        request: Request<AddMetadataRequest>,
+    ) -> Result<Response<AddMetadataResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        use crate::entity::app_instance_metadata;
+
+        let metadata = app_instance_metadata::ActiveModel {
+            app_instance_id: Set(req.app_instance_id.clone()),
+            key: Set(req.key.clone()),
+            value: Set(req.value),
+            created_at: Set(chrono::Utc::now().into()),
+            updated_at: Set(chrono::Utc::now().into()),
+        };
+
+        metadata
+            .insert(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to insert metadata", e))?;
+
+        Ok(Response::new(AddMetadataResponse {
+            success: true,
+            message: format!("Metadata added for key '{}'", req.key),
+        }))
+    }
+
+    // ============================================================================
     // Coordinator Authentication Methods
     // ============================================================================
 
@@ -4900,6 +5322,8 @@ impl StateService for StateServiceImpl {
             coordinator_job_request::Operation::GetJobsBatch(_) => "get_jobs_batch",
             coordinator_job_request::Operation::RestartFailedJobs(_) => "restart_failed_jobs",
             coordinator_job_request::Operation::RemoveFailedJobs(_) => "remove_failed_jobs",
+            coordinator_job_request::Operation::CreateMergeJob(_) => "create_merge_job",
+            coordinator_job_request::Operation::CreateSettleJob(_) => "create_settle_job",
         };
 
         // Verify signature and access
@@ -4957,6 +5381,12 @@ impl StateService for StateServiceImpl {
             }
             coordinator_job_request::Operation::RemoveFailedJobs(op) => {
                 self.handle_remove_failed_jobs(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::CreateMergeJob(op) => {
+                self.handle_create_merge_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::CreateSettleJob(op) => {
+                self.handle_create_settle_job(app_instance_id, op).await
             }
         };
 

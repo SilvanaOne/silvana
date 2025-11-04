@@ -1,8 +1,6 @@
 use anyhow::Result;
 use std::env;
 use std::str::FromStr;
-use sui_rpc::field::FieldMask;
-use sui_rpc::proto::sui::rpc::v2::GetObjectRequest;
 use sui_sdk_types as sui;
 use tracing::{debug, info, warn};
 

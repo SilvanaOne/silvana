@@ -24,6 +24,13 @@ task_local! {
     static CURRENT_JOB_CONTEXT: (String, u64);
 }
 
+/// JWT context for caching tokens
+struct JWTContext {
+    token: String,
+    expires_at: u64,
+    app_instance_id: String,
+}
+
 /// Private Coordination layer implementation using gRPC client
 pub struct PrivateCoordination {
     /// gRPC client to private state server
@@ -38,6 +45,9 @@ pub struct PrivateCoordination {
     /// Request timeout (reserved for future use)
     #[allow(dead_code)]
     request_timeout: Duration,
+
+    /// JWT context for agent operations (cached tokens)
+    jwt_context: tokio::sync::RwLock<Option<JWTContext>>,
 }
 
 impl PrivateCoordination {
@@ -51,7 +61,7 @@ impl PrivateCoordination {
             ))?;
 
         // Create authentication helper
-        let auth = CoordinatorAuth::from_private_key_hex(&private_key)?;
+        let auth = CoordinatorAuth::from_private_key(&private_key)?;
 
         debug!(
             "Initializing Private Coordination with coordinator public key: {}",
@@ -91,7 +101,99 @@ impl PrivateCoordination {
             auth,
             chain_id: config.chain_id,
             request_timeout: Duration::from_secs(config.request_timeout_secs),
+            jwt_context: tokio::sync::RwLock::new(None),
         })
+    }
+
+    /// Get or create JWT for app instance context
+    async fn get_or_create_jwt(&self, app_instance_id: &str) -> Result<String> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Check if we have a valid cached JWT
+        {
+            let ctx = self.jwt_context.read().await;
+            if let Some(jwt_ctx) = ctx.as_ref() {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+
+                // Use cached JWT if it's for the same app and hasn't expired (with 60s buffer)
+                if jwt_ctx.app_instance_id == app_instance_id && jwt_ctx.expires_at > now + 60 {
+                    return Ok(jwt_ctx.token.clone());
+                }
+            }
+        }
+
+        // Create new JWT (valid for 1 hour)
+        let token = crate::jwt::create_coordinator_jwt(
+            self.auth.secret_key_bytes(),
+            self.auth.public_key(),
+            app_instance_id,
+            3600,  // 1 hour
+        )?;
+
+        let expires_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() + 3600;
+
+        // Cache the JWT
+        {
+            let mut ctx = self.jwt_context.write().await;
+            *ctx = Some(JWTContext {
+                token: token.clone(),
+                expires_at,
+                app_instance_id: app_instance_id.to_string(),
+            });
+        }
+
+        Ok(token)
+    }
+
+    /// Get JWT for agent operations with fallback logic
+    ///
+    /// Strategy:
+    /// 1. If running within job context -> use job's embedded JWT
+    /// 2. Otherwise -> create coordinator JWT on-demand
+    ///
+    /// This enables both agent job execution (using job JWT) and
+    /// coordinator direct access (using coordinator-created JWT)
+    async fn get_jwt_for_operation(&self, app_instance: &str) -> Result<String> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // Try to get JWT from current job context (if we're running inside a job)
+        if let Ok((ctx_app, ctx_sequence)) = CURRENT_JOB_CONTEXT.try_with(|ctx| ctx.clone()) {
+            // Only use job context if it matches the requested app instance
+            if ctx_app == app_instance {
+                // Fetch job to get its JWT (job was created with JWT by coordinator)
+                if let Ok(Some(job)) = self.fetch_job_by_sequence(&ctx_app, ctx_sequence).await {
+                    if let Some(jwt) = job.agent_jwt {
+                        // Validate JWT hasn't expired
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+
+                        let is_expired = job.jwt_expires_at
+                            .map(|exp| now >= exp)
+                            .unwrap_or(false);
+
+                        if !is_expired {
+                            debug!("Using job-embedded JWT for job {}", ctx_sequence);
+                            return Ok(jwt);
+                        } else {
+                            debug!("Job JWT expired, falling back to coordinator JWT");
+                        }
+                    }
+                }
+            }
+        }
+
+        // Not in job context OR job JWT missing/expired
+        // Fall back to coordinator-created JWT
+        debug!("Using coordinator-created JWT for app {}", app_instance);
+        self.get_or_create_jwt(app_instance).await
     }
 
     /// Parse method name in format "developer/agent/method" into components
@@ -181,6 +283,10 @@ impl PrivateCoordination {
 
     /// Get JWT from the current job context
     /// This fetches the job and extracts the JWT on-demand - JWT is never stored
+    ///
+    /// # Deprecated
+    /// Use `get_jwt_for_operation()` instead for better fallback handling
+    #[allow(dead_code)]
     async fn get_current_job_jwt(&self) -> Result<String> {
         // Get current job context
         let (app_instance, job_sequence) = CURRENT_JOB_CONTEXT
@@ -215,6 +321,15 @@ impl PrivateCoordination {
         }
 
         Ok(jwt)
+    }
+
+    /// Create coordinator authentication for an operation
+    fn create_coordinator_auth(
+        &self,
+        operation: &str,
+        app_instance: &str,
+    ) -> proto::silvana::state::v1::CoordinatorAuth {
+        self.auth.sign_request(app_instance, operation)
     }
 
     /// Convert proto State response to trait SequenceState
@@ -731,24 +846,88 @@ impl Coordination for PrivateCoordination {
 
     async fn create_merge_job_with_proving(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _sequences: Vec<u64>,
-        _sequences1: Vec<u64>,
-        _sequences2: Vec<u64>,
-        _job_description: Option<String>,
+        app_instance: &str,
+        block_number: u64,
+        sequences: Vec<u64>,
+        sequences1: Vec<u64>,
+        sequences2: Vec<u64>,
+        job_description: Option<String>,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("create_merge_job_with_proving - Phase 2".to_string()))
+        // Use coordinator Ed25519 auth (NOT JWT)
+        let coordinator_auth = self.create_coordinator_auth("create_merge_job", app_instance);
+
+        let operation = proto::silvana::state::v1::coordinator_job_request::Operation::CreateMergeJob(
+            proto::silvana::state::v1::CreateMergeJobOperation {
+                block_number,
+                sequences,
+                sequences1,
+                sequences2,
+                job_description,
+            },
+        );
+
+        let request = proto::silvana::state::v1::CoordinatorJobRequest {
+            coordinator_auth: Some(coordinator_auth),
+            app_instance_id: app_instance.to_string(),
+            operation: Some(operation),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .coordinator_job_operation(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok(response.job_sequence.unwrap_or(0).to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to create merge job: {}",
+                response.message
+            )))
+        }
     }
 
     async fn create_settle_job(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _chain: String,
-        _job_description: Option<String>,
+        app_instance: &str,
+        block_number: u64,
+        chain: String,
+        job_description: Option<String>,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("create_settle_job - Phase 2".to_string()))
+        // Use coordinator Ed25519 auth (NOT JWT)
+        let coordinator_auth = self.create_coordinator_auth("create_settle_job", app_instance);
+
+        let operation = proto::silvana::state::v1::coordinator_job_request::Operation::CreateSettleJob(
+            proto::silvana::state::v1::CreateSettleJobOperation {
+                block_number,
+                chain,
+                job_description,
+            },
+        );
+
+        let request = proto::silvana::state::v1::CoordinatorJobRequest {
+            coordinator_auth: Some(coordinator_auth),
+            app_instance_id: app_instance.to_string(),
+            operation: Some(operation),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .coordinator_job_operation(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok(response.job_sequence.unwrap_or(0).to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to create settle job: {}",
+                response.message
+            )))
+        }
     }
 
     async fn terminate_app_job(&self, app_instance: &str, job_sequence: u64) -> Result<Self::TransactionHash> {
@@ -827,7 +1006,7 @@ impl Coordination for PrivateCoordination {
     // ===== Sequence State Management =====
 
     async fn fetch_sequence_state(&self, app_instance: &str, sequence: u64) -> Result<Option<SequenceState>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetStateRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -852,7 +1031,7 @@ impl Coordination for PrivateCoordination {
         from_sequence: u64,
         to_sequence: u64,
     ) -> Result<Vec<SequenceState>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetStateRangeRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -884,7 +1063,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn get_current_sequence(&self, app_instance: &str) -> Result<u64> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetLatestStateRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -913,22 +1092,42 @@ impl Coordination for PrivateCoordination {
 
     async fn update_state_for_sequence(
         &self,
-        _app_instance: &str,
-        _sequence: u64,
-        _new_state_data: Option<Vec<u8>>,
-        _new_data_availability_hash: Option<String>,
+        app_instance: &str,
+        sequence: u64,
+        new_state_data: Option<Vec<u8>>,
+        new_data_availability_hash: Option<String>,
     ) -> Result<Self::TransactionHash> {
-        // State updates are typically done by the state service during proof submission
-        // This operation is not directly exposed via gRPC for agents
-        Err(PrivateCoordinationError::NotImplemented(
-            "update_state_for_sequence - state updates handled by proof submission".to_string()
-        ))
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
+
+        let request = proto::silvana::state::v1::UpdateStateForSequenceRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            sequence,
+            new_state_data,
+            new_data_availability_hash,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .update_state_for_sequence(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to update state: {}",
+                response.message
+            )))
+        }
     }
 
     // ===== Block Management =====
 
     async fn fetch_block(&self, app_instance: &str, block_number: u64) -> Result<Option<Block>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetBlockRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -952,7 +1151,7 @@ impl Coordination for PrivateCoordination {
         from_block: u64,
         to_block: u64,
     ) -> Result<Vec<Block>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetBlocksRangeRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -976,7 +1175,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn try_create_block(&self, app_instance: &str) -> Result<Option<u64>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::TryCreateBlockRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -999,7 +1198,7 @@ impl Coordination for PrivateCoordination {
         block_number: u64,
         state_da: String,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::UpdateBlockStateDaRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1031,7 +1230,7 @@ impl Coordination for PrivateCoordination {
         block_number: u64,
         proof_da: String,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::UpdateBlockProofDaRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1064,7 +1263,7 @@ impl Coordination for PrivateCoordination {
         app_instance: &str,
         block_number: u64,
     ) -> Result<Option<ProofCalculation>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetProofCalculationRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1090,7 +1289,7 @@ impl Coordination for PrivateCoordination {
         from_block: u64,
         to_block: u64,
     ) -> Result<Vec<ProofCalculation>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetProofCalculationsRangeRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1121,7 +1320,7 @@ impl Coordination for PrivateCoordination {
         merged_sequences_1: Option<Vec<u64>>,
         merged_sequences_2: Option<Vec<u64>>,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::StartProvingRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1163,7 +1362,7 @@ impl Coordination for PrivateCoordination {
         prover_memory: u64,
         cpu_time: u64,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::SubmitCalculatedProofRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1203,7 +1402,7 @@ impl Coordination for PrivateCoordination {
         block_number: u64,
         sequences: Vec<u64>,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::RejectProofRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1237,7 +1436,7 @@ impl Coordination for PrivateCoordination {
         block_number: u64,
         chain: &str,
     ) -> Result<Option<BlockSettlement>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetBlockSettlementRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1262,7 +1461,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn get_settlement_chains(&self, app_instance: &str) -> Result<Vec<String>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetSettlementChainsRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1280,7 +1479,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn get_settlement_address(&self, app_instance: &str, chain: &str) -> Result<Option<String>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetSettlementAddressRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1299,7 +1498,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn get_settlement_job_for_chain(&self, app_instance: &str, chain: &str) -> Result<Option<u64>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetSettlementJobForChainRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1323,7 +1522,7 @@ impl Coordination for PrivateCoordination {
         chain: String,
         address: Option<String>,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::SetSettlementAddressRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1356,7 +1555,7 @@ impl Coordination for PrivateCoordination {
         chain: String,
         settlement_tx_hash: String,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1399,7 +1598,7 @@ impl Coordination for PrivateCoordination {
         chain: String,
         settled_at: u64,
     ) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let settled_at_ts = prost_types::Timestamp {
             seconds: (settled_at / 1000) as i64,
@@ -1435,7 +1634,7 @@ impl Coordination for PrivateCoordination {
     // ===== Key-Value Storage =====
 
     async fn get_kv_string(&self, app_instance: &str, key: &str) -> Result<Option<String>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetKvStringRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1458,7 +1657,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn get_all_kv_string(&self, app_instance: &str) -> Result<HashMap<String, String>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         // List all keys (no prefix filter, no limit)
         let keys_request = proto::silvana::state::v1::ListKvStringKeysRequest {
@@ -1506,7 +1705,7 @@ impl Coordination for PrivateCoordination {
         prefix: Option<&str>,
         limit: Option<u32>,
     ) -> Result<Vec<String>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::ListKvStringKeysRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1526,7 +1725,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn set_kv_string(&self, app_instance: &str, key: String, value: String) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::SetKvStringRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1553,7 +1752,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn delete_kv_string(&self, app_instance: &str, key: &str) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::DeleteKvStringRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1579,7 +1778,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn get_kv_binary(&self, app_instance: &str, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetKvBinaryRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1607,7 +1806,7 @@ impl Coordination for PrivateCoordination {
         prefix: Option<&[u8]>,
         limit: Option<u32>,
     ) -> Result<Vec<Vec<u8>>> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::ListKvBinaryKeysRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1627,7 +1826,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn set_kv_binary(&self, app_instance: &str, key: Vec<u8>, value: Vec<u8>) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::SetKvBinaryRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1655,7 +1854,7 @@ impl Coordination for PrivateCoordination {
     }
 
     async fn delete_kv_binary(&self, app_instance: &str, key: &[u8]) -> Result<Self::TransactionHash> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::DeleteKvBinaryRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1709,7 +1908,7 @@ impl Coordination for PrivateCoordination {
     // ===== App Instance Data =====
 
     async fn fetch_app_instance(&self, app_instance: &str) -> Result<AppInstance> {
-        let jwt = self.get_current_job_jwt().await?;
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
 
         let request = proto::silvana::state::v1::GetAppInstanceRequest {
             auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
@@ -1759,12 +1958,40 @@ impl Coordination for PrivateCoordination {
         Ok(app.admin)
     }
 
-    async fn is_app_paused(&self, _app_instance: &str) -> Result<bool> {
-        Err(PrivateCoordinationError::NotImplemented("is_app_paused - Phase 2".to_string()))
+    async fn is_app_paused(&self, app_instance: &str) -> Result<bool> {
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
+
+        let request = proto::silvana::state::v1::IsAppPausedRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .is_app_paused(request)
+            .await?
+            .into_inner();
+
+        Ok(response.is_paused)
     }
 
-    async fn get_min_time_between_blocks(&self, _app_instance: &str) -> Result<u64> {
-        Err(PrivateCoordinationError::NotImplemented("get_min_time_between_blocks - Phase 2".to_string()))
+    async fn get_min_time_between_blocks(&self, app_instance: &str) -> Result<u64> {
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
+
+        let request = proto::silvana::state::v1::GetMinTimeBetweenBlocksRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_min_time_between_blocks(request)
+            .await?
+            .into_inner();
+
+        Ok(response.min_time_seconds)
     }
 
     // ===== Batch Operations =====
@@ -1782,8 +2009,30 @@ impl Coordination for PrivateCoordination {
 
     // ===== State Purging =====
 
-    async fn purge(&self, _app_instance: &str, _sequences_to_purge: u64) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("purge - Phase 2".to_string()))
+    async fn purge(&self, app_instance: &str, sequences_to_purge: u64) -> Result<Self::TransactionHash> {
+        let jwt = self.get_jwt_for_operation(app_instance).await?;
+
+        let request = proto::silvana::state::v1::PurgeRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            sequences_to_purge,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .purge(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to purge: {}",
+                response.message
+            )))
+        }
     }
 
     // ===== Event Streaming =====

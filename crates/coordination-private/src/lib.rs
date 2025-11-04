@@ -10,6 +10,7 @@ pub mod auth;
 pub mod config;
 pub mod coordination;
 pub mod error;
+pub mod jwt;
 
 pub use config::PrivateCoordinationConfig;
 pub use coordination::PrivateCoordination;

@@ -68,6 +68,17 @@ message AppInstance {
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp updated_at = 6;
   optional google.protobuf.Struct metadata = 7;  // Optional metadata
+
+  // Coordination layer support fields
+  optional string admin = 8;                                                     // Administrator public key
+  bool is_paused = 9;                                                           // Pause functionality
+  uint64 min_time_between_blocks = 10 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];  // Block timing in seconds
+  uint64 block_number = 11 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];              // Current block number
+  uint64 sequence = 12 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];                  // Current sequence number
+  uint64 last_proved_block_number = 13 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];  // Last proved block
+  uint64 last_settled_block_number = 14 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"]; // Last settled block
+  uint64 last_settled_sequence = 15 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];     // Last settled sequence
+  uint64 last_purged_sequence = 16 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];      // Last purged sequence
 }
 
 // User Action message
@@ -313,6 +324,15 @@ message BlockSettlement {
   optional google.protobuf.Timestamp settled_at = 7;
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp updated_at = 9;
+}
+
+// App Instance Metadata message
+message AppInstanceMetadata {
+  string app_instance_id = 1;
+  string key = 2;
+  string value = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
 }
 
 // ============================================================================
@@ -1099,6 +1119,75 @@ message UpdateBlockSettlementTxIncludedInBlockResponse {
   string message = 2;
 }
 
+// State update operations
+message UpdateStateForSequenceRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 sequence = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional bytes new_state_data = 4;
+  optional string new_data_availability_hash = 5;
+}
+
+message UpdateStateForSequenceResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// App configuration queries
+message IsAppPausedRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message IsAppPausedResponse {
+  bool is_paused = 1;
+}
+
+message GetMinTimeBetweenBlocksRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message GetMinTimeBetweenBlocksResponse {
+  uint64 min_time_seconds = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+// State purge operation
+message PurgeRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 sequences_to_purge = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+message PurgeResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 last_purged_sequence = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+// Metadata operations
+message GetMetadataRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string key = 3;
+}
+
+message GetMetadataResponse {
+  optional AppInstanceMetadata metadata = 1;
+}
+
+message AddMetadataRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string key = 3;
+  string value = 4;
+}
+
+message AddMetadataResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // ============================================================================
 // Coordinator Management Messages
 // ============================================================================
@@ -1154,6 +1243,8 @@ message CoordinatorJobRequest {
     GetJobsBatchOperation get_jobs_batch = 15;
     RestartFailedJobsOperation restart_failed_jobs = 16;
     RemoveFailedJobsOperation remove_failed_jobs = 17;
+    CreateMergeJobOperation create_merge_job = 18;
+    CreateSettleJobOperation create_settle_job = 19;
   }
 }
 
@@ -1230,6 +1321,20 @@ message RestartFailedJobsOperation {
 
 message RemoveFailedJobsOperation {
   repeated uint64 job_sequences = 1;  // Empty = remove all failed jobs
+}
+
+message CreateMergeJobOperation {
+  uint64 block_number = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  repeated uint64 sequences = 2;   // Combined sequences to merge
+  repeated uint64 sequences1 = 3;  // First proof sequences
+  repeated uint64 sequences2 = 4;  // Second proof sequences
+  optional string job_description = 5;
+}
+
+message CreateSettleJobOperation {
+  uint64 block_number = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 2;  // Settlement chain (e.g., "ethereum", "polygon")
+  optional string job_description = 3;
 }
 
 message CoordinatorJobResponse {
@@ -1379,6 +1484,18 @@ service StateService {
   rpc SetSettlementAddress(SetSettlementAddressRequest) returns (SetSettlementAddressResponse);
   rpc UpdateBlockSettlementTxHash(UpdateBlockSettlementTxHashRequest) returns (UpdateBlockSettlementTxHashResponse);
   rpc UpdateBlockSettlementTxIncludedInBlock(UpdateBlockSettlementTxIncludedInBlockRequest) returns (UpdateBlockSettlementTxIncludedInBlockResponse);
+
+  // State Update & Configuration (agent operations with JWT)
+  rpc UpdateStateForSequence(UpdateStateForSequenceRequest) returns (UpdateStateForSequenceResponse);
+  rpc IsAppPaused(IsAppPausedRequest) returns (IsAppPausedResponse);
+  rpc GetMinTimeBetweenBlocks(GetMinTimeBetweenBlocksRequest) returns (GetMinTimeBetweenBlocksResponse);
+
+  // State Cleanup (agent operations with JWT)
+  rpc Purge(PurgeRequest) returns (PurgeResponse);
+
+  // Metadata operations (agent operations with JWT)
+  rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
+  rpc AddMetadata(AddMetadataRequest) returns (AddMetadataResponse);
 
   // Coordinator Operations (authenticated with coordinator's Ed25519 key)
   rpc CoordinatorJobOperation(CoordinatorJobRequest) returns (CoordinatorJobResponse);
