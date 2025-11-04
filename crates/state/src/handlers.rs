@@ -14,11 +14,13 @@ use tracing::{debug, error, info, warn};
 use crate::{
     auth::{verify_jwt, AuthInfo},
     concurrency::ConcurrencyController,
+    coordinator_auth::verify_and_authorize,
     database::Database,
     entity::{
         app_instance_kv_binary, app_instance_kv_string, app_instances, jobs,
         object_lock_queue, object_versions, objects, optimistic_state, proofs, state, user_actions,
         lock_request_bundle,
+        coordinator_groups, app_instance_coordinator_access,
     },
     proto::state_service_server::StateService,
     proto::*,
@@ -234,6 +236,72 @@ impl StateServiceImpl {
         Ok(())
     }
 
+    // ===== Coordinator Helper Functions =====
+
+    /// Log coordinator action to audit log
+    async fn log_coordinator_action(
+        &self,
+        coordinator_public_key: &str,
+        app_instance_id: &str,
+        action: &str,
+        job_sequence: Option<u64>,
+        success: bool,
+        error_message: Option<String>,
+    ) -> Result<()> {
+        use crate::entity::coordinator_audit_log;
+
+        let audit_entry = coordinator_audit_log::ActiveModel {
+            id: NotSet,
+            coordinator_public_key: Set(coordinator_public_key.to_string()),
+            app_instance_id: Set(app_instance_id.to_string()),
+            action: Set(action.to_string()),
+            job_sequence: Set(job_sequence),
+            timestamp: Set(Utc::now()),
+            success: Set(success),
+            error_message: Set(error_message),
+        };
+
+        coordinator_audit_log::Entity::insert(audit_entry)
+            .exec(self.db.connection())
+            .await?;
+
+        Ok(())
+    }
+
+    /// Convert proto Job to database jobs::Model for response
+    fn db_job_to_proto(&self, job: jobs::Model) -> Job {
+        Job {
+            job_sequence: job.job_sequence,
+            description: job.description,
+            developer: job.developer,
+            agent: job.agent,
+            agent_method: job.agent_method,
+            app_instance_id: job.app_instance_id,
+            block_number: job.block_number,
+            sequences: job.sequences.and_then(|j| serde_json::from_value(j).ok()).unwrap_or_default(),
+            sequences1: job.sequences1.and_then(|j| serde_json::from_value(j).ok()).unwrap_or_default(),
+            sequences2: job.sequences2.and_then(|j| serde_json::from_value(j).ok()).unwrap_or_default(),
+            data: job.data,
+            data_da: job.data_da,
+            interval_ms: job.interval_ms,
+            next_scheduled_at: job.next_scheduled_at.map(|dt| to_timestamp(dt)),
+            status: match job.status.as_str() {
+                "pending" => 0,
+                "running" => 1,
+                "completed" => 2,
+                "failed" => 3,
+                _ => 0,
+            },
+            error_message: job.error_message,
+            attempts: job.attempts as u32,
+            created_at: Some(to_timestamp(job.created_at)),
+            updated_at: Some(to_timestamp(job.updated_at)),
+            metadata: job.metadata.and_then(json_to_prost_struct),
+            agent_jwt: job.agent_jwt,
+            jwt_expires_at: job.jwt_expires_at.map(|dt| to_timestamp(dt)),
+        }
+    }
+
     /// Start background cleanup task for old completed jobs
     pub fn start_jobs_cleanup_task(self: Arc<Self>) {
         tokio::spawn(async move {
@@ -265,6 +333,452 @@ impl StateServiceImpl {
 
         info!("Cleaned up {} old completed jobs", result.rows_affected);
         Ok(result.rows_affected)
+    }
+
+    // ===== Individual Job Operation Handlers (Private helpers for coordinator ops) =====
+
+    async fn handle_create_job(
+        &self,
+        app_instance_id: &str,
+        op: CreateJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        // Create job in database
+        let job = jobs::ActiveModel {
+            job_sequence: NotSet,
+            app_instance_id: Set(app_instance_id.to_string()),
+            description: Set(op.description),
+            developer: Set(op.developer),
+            agent: Set(op.agent),
+            agent_method: Set(op.agent_method),
+            block_number: Set(op.block_number),
+            sequences: Set(if op.sequences.is_empty() { None } else { Some(serde_json::to_value(&op.sequences).unwrap()) }),
+            sequences1: Set(if op.sequences1.is_empty() { None } else { Some(serde_json::to_value(&op.sequences1).unwrap()) }),
+            sequences2: Set(if op.sequences2.is_empty() { None } else { Some(serde_json::to_value(&op.sequences2).unwrap()) }),
+            data: Set(op.data),
+            data_da: Set(op.data_da),
+            status: Set("pending".to_string()),
+            error_message: Set(None),
+            attempts: Set(0),
+            interval_ms: Set(op.interval_ms),
+            next_scheduled_at: Set(None),
+            created_at: Set(Utc::now()),
+            updated_at: Set(Utc::now()),
+            metadata: Set(None),  // Coordinator operations don't set metadata
+            agent_jwt: Set(op.agent_jwt),
+            jwt_expires_at: Set(op.jwt_expires_at.map(|ts| {
+                chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_else(Utc::now)
+            })),
+        };
+
+        let inserted = job.insert(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to create job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} created successfully", inserted.job_sequence),
+            job: None,
+            job_sequence: Some(inserted.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_start_job(
+        &self,
+        app_instance_id: &str,
+        op: StartJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .ok_or_else(|| Status::not_found(format!("Job {} not found", op.job_sequence)))?;
+
+        let mut job: jobs::ActiveModel = job.into();
+        job.status = Set("running".to_string());
+        job.updated_at = Set(Utc::now());
+        job.update(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to start job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} started successfully", op.job_sequence),
+            job: None,
+            job_sequence: Some(op.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_complete_job(
+        &self,
+        app_instance_id: &str,
+        op: CompleteJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .ok_or_else(|| Status::not_found(format!("Job {} not found", op.job_sequence)))?;
+
+        let mut job: jobs::ActiveModel = job.into();
+        job.status = Set("completed".to_string());
+        job.updated_at = Set(Utc::now());
+        job.update(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to complete job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} completed successfully", op.job_sequence),
+            job: None,
+            job_sequence: Some(op.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_fail_job(
+        &self,
+        app_instance_id: &str,
+        op: FailJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .ok_or_else(|| Status::not_found(format!("Job {} not found", op.job_sequence)))?;
+
+        let mut job: jobs::ActiveModel = job.into();
+        job.status = Set("failed".to_string());
+        job.error_message = Set(Some(op.error_message));
+        job.attempts = Set(job.attempts.unwrap() + 1);
+        job.updated_at = Set(Utc::now());
+        job.update(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to fail job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} marked as failed", op.job_sequence),
+            job: None,
+            job_sequence: Some(op.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_job(
+        &self,
+        app_instance_id: &str,
+        op: GetJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        match job {
+            Some(job) => Ok(CoordinatorJobResponse {
+                success: true,
+                message: "Job found".to_string(),
+                job: Some(self.db_job_to_proto(job)),
+                job_sequence: Some(op.job_sequence),
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            }),
+            None => Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Job {} not found", op.job_sequence),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            }),
+        }
+    }
+
+    async fn handle_terminate_job(
+        &self,
+        app_instance_id: &str,
+        op: TerminateJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let result = jobs::Entity::delete_many()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to terminate job", e))?;
+
+        if result.rows_affected > 0 {
+            Ok(CoordinatorJobResponse {
+                success: true,
+                message: format!("Job {} terminated successfully", op.job_sequence),
+                job: None,
+                job_sequence: Some(op.job_sequence),
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            })
+        } else {
+            Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Job {} not found", op.job_sequence),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            })
+        }
+    }
+
+    async fn handle_get_pending_sequences(
+        &self,
+        app_instance_id: &str,
+        op: GetPendingJobSequencesOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let mut query = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("pending"));
+
+        if let Some(dev) = op.developer {
+            query = query.filter(jobs::Column::Developer.eq(dev));
+        }
+        if let Some(agent) = op.agent {
+            query = query.filter(jobs::Column::Agent.eq(agent));
+        }
+        if let Some(method) = op.agent_method {
+            query = query.filter(jobs::Column::AgentMethod.eq(method));
+        }
+
+        let jobs = query
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let sequences: Vec<u64> = jobs.iter().map(|j| j.job_sequence).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} pending jobs", sequences.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: sequences,
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_pending_count(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let count = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("pending"))
+            .count(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Pending jobs count: {}", count),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(count),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_failed_count(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let count = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"))
+            .count(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Failed jobs count: {}", count),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(count),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_total_count(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let count = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .count(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Total jobs count: {}", count),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(count),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_pending_jobs(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let jobs_list = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("pending"))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let proto_jobs: Vec<Job> = jobs_list.into_iter().map(|j| self.db_job_to_proto(j)).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} pending jobs", proto_jobs.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: None,
+            jobs: proto_jobs,
+        })
+    }
+
+    async fn handle_get_failed_jobs(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let jobs_list = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let proto_jobs: Vec<Job> = jobs_list.into_iter().map(|j| self.db_job_to_proto(j)).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} failed jobs", proto_jobs.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: None,
+            jobs: proto_jobs,
+        })
+    }
+
+    async fn handle_get_jobs_batch(
+        &self,
+        app_instance_id: &str,
+        op: GetJobsBatchOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let jobs_list = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.is_in(op.job_sequences))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let proto_jobs: Vec<Job> = jobs_list.into_iter().map(|j| self.db_job_to_proto(j)).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} jobs", proto_jobs.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: None,
+            jobs: proto_jobs,
+        })
+    }
+
+    async fn handle_restart_failed_jobs(
+        &self,
+        app_instance_id: &str,
+        op: RestartFailedJobsOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let mut query = jobs::Entity::update_many()
+            .col_expr(jobs::Column::Status, sea_orm::sea_query::Expr::value("pending"))
+            .col_expr(jobs::Column::ErrorMessage, sea_orm::sea_query::Expr::value(None::<String>))
+            .col_expr(jobs::Column::UpdatedAt, sea_orm::sea_query::Expr::value(Utc::now()))
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"));
+
+        if !op.job_sequences.is_empty() {
+            query = query.filter(jobs::Column::JobSequence.is_in(op.job_sequences));
+        }
+
+        let result = query
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to restart failed jobs", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Restarted {} failed jobs", result.rows_affected),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(result.rows_affected),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_remove_failed_jobs(
+        &self,
+        app_instance_id: &str,
+        op: RemoveFailedJobsOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let mut query = jobs::Entity::delete_many()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"));
+
+        if !op.job_sequences.is_empty() {
+            query = query.filter(jobs::Column::JobSequence.is_in(op.job_sequences));
+        }
+
+        let result = query
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to remove failed jobs", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Removed {} failed jobs", result.rows_affected),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(result.rows_affected),
+            jobs: vec![],
+        })
     }
 }
 
@@ -3100,43 +3614,262 @@ impl StateService for StateServiceImpl {
     }
 
     // ============================================================================
-    // Coordinator Authentication Methods (Phase 3 - Not Yet Implemented)
+    // Coordinator Authentication Methods
     // ============================================================================
 
     async fn coordinator_job_operation(
         &self,
-        _request: Request<CoordinatorJobRequest>,
+        request: Request<CoordinatorJobRequest>,
     ) -> Result<Response<CoordinatorJobResponse>, Status> {
-        Err(Status::unimplemented(
-            "Coordinator job operations not yet implemented - Phase 3"
-        ))
+        let req = request.into_inner();
+
+        // Extract coordinator auth
+        let coordinator_auth = req
+            .coordinator_auth
+            .ok_or_else(|| Status::unauthenticated("Missing coordinator authentication"))?;
+
+        let app_instance_id = &req.app_instance_id;
+        let coordinator_public_key = &coordinator_auth.coordinator_public_key;
+
+        // Extract operation
+        let operation = req
+            .operation
+            .ok_or_else(|| Status::invalid_argument("Missing operation"))?;
+
+        // Determine operation name for auth
+        let operation_name = match &operation {
+            coordinator_job_request::Operation::Create(_) => "create_job",
+            coordinator_job_request::Operation::Start(_) => "start_job",
+            coordinator_job_request::Operation::Complete(_) => "complete_job",
+            coordinator_job_request::Operation::Fail(_) => "fail_job",
+            coordinator_job_request::Operation::Get(_) => "get_job",
+            coordinator_job_request::Operation::Terminate(_) => "terminate_job",
+            coordinator_job_request::Operation::GetPendingSequences(_) => "get_pending_sequences",
+            coordinator_job_request::Operation::GetPendingCount(_) => "get_pending_count",
+            coordinator_job_request::Operation::GetFailedCount(_) => "get_failed_count",
+            coordinator_job_request::Operation::GetTotalCount(_) => "get_total_count",
+            coordinator_job_request::Operation::GetPendingJobs(_) => "get_pending_jobs",
+            coordinator_job_request::Operation::GetFailedJobs(_) => "get_failed_jobs",
+            coordinator_job_request::Operation::GetJobsBatch(_) => "get_jobs_batch",
+            coordinator_job_request::Operation::RestartFailedJobs(_) => "restart_failed_jobs",
+            coordinator_job_request::Operation::RemoveFailedJobs(_) => "remove_failed_jobs",
+        };
+
+        // Verify signature and access
+        verify_and_authorize(
+            self.db.connection(),
+            &coordinator_auth,
+            app_instance_id,
+            operation_name,
+        )
+        .await?;
+
+        // Execute operation
+        let result = match operation {
+            coordinator_job_request::Operation::Create(op) => {
+                self.handle_create_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Start(op) => {
+                self.handle_start_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Complete(op) => {
+                self.handle_complete_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Fail(op) => {
+                self.handle_fail_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Get(op) => {
+                self.handle_get_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Terminate(op) => {
+                self.handle_terminate_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::GetPendingSequences(op) => {
+                self.handle_get_pending_sequences(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::GetPendingCount(_) => {
+                self.handle_get_pending_count(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetFailedCount(_) => {
+                self.handle_get_failed_count(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetTotalCount(_) => {
+                self.handle_get_total_count(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetPendingJobs(_) => {
+                self.handle_get_pending_jobs(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetFailedJobs(_) => {
+                self.handle_get_failed_jobs(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetJobsBatch(op) => {
+                self.handle_get_jobs_batch(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::RestartFailedJobs(op) => {
+                self.handle_restart_failed_jobs(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::RemoveFailedJobs(op) => {
+                self.handle_remove_failed_jobs(app_instance_id, op).await
+            }
+        };
+
+        // Log result to audit log
+        let (success, error_msg, job_seq) = match &result {
+            Ok(resp) => (resp.success, None, resp.job_sequence),
+            Err(e) => (false, Some(e.to_string()), None),
+        };
+
+        if let Err(e) = self
+            .log_coordinator_action(
+                coordinator_public_key,
+                app_instance_id,
+                operation_name,
+                job_seq,
+                success,
+                error_msg,
+            )
+            .await
+        {
+            warn!("Failed to log coordinator action: {}", e);
+        }
+
+        result.map(Response::new)
     }
+
 
     async fn grant_coordinator_access(
         &self,
-        _request: Request<GrantCoordinatorAccessRequest>,
+        request: Request<GrantCoordinatorAccessRequest>,
     ) -> Result<Response<()>, Status> {
-        Err(Status::unimplemented(
-            "Grant coordinator access not yet implemented - Phase 3"
-        ))
+        let req = request.into_inner();
+
+        // Verify JWT authentication
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Verify group exists
+        let group_exists = coordinator_groups::Entity::find_by_id(&req.group_id)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .is_some();
+
+        if !group_exists {
+            return Err(Status::not_found(format!(
+                "Coordinator group {} not found",
+                req.group_id
+            )));
+        }
+
+        // Insert or update access grant
+        let access_grant = app_instance_coordinator_access::ActiveModel {
+            app_instance_id: Set(req.app_instance_id.clone()),
+            group_id: Set(req.group_id.clone()),
+            granted_at: Set(Utc::now()),
+            granted_by: Set(auth.public_key.clone()),
+            expires_at: Set(req.expires_at.map(|ts| {
+                chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_else(Utc::now)
+            })),
+            access_level: Set(req.access_level.clone()),
+        };
+
+        // Use ON DUPLICATE KEY UPDATE logic via insert with on_conflict
+        app_instance_coordinator_access::Entity::insert(access_grant)
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::columns(vec![
+                    app_instance_coordinator_access::Column::AppInstanceId,
+                    app_instance_coordinator_access::Column::GroupId,
+                ])
+                .update_columns(vec![
+                    app_instance_coordinator_access::Column::GrantedAt,
+                    app_instance_coordinator_access::Column::GrantedBy,
+                    app_instance_coordinator_access::Column::ExpiresAt,
+                    app_instance_coordinator_access::Column::AccessLevel,
+                ])
+                .to_owned(),
+            )
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to grant coordinator access", e))?;
+
+        info!(
+            "Granted {} access to group {} for app instance {} by {}",
+            req.access_level, req.group_id, req.app_instance_id, auth.public_key
+        );
+
+        Ok(Response::new(()))
     }
 
     async fn revoke_coordinator_access(
         &self,
-        _request: Request<RevokeCoordinatorAccessRequest>,
+        request: Request<RevokeCoordinatorAccessRequest>,
     ) -> Result<Response<()>, Status> {
-        Err(Status::unimplemented(
-            "Revoke coordinator access not yet implemented - Phase 3"
-        ))
+        let req = request.into_inner();
+
+        // Verify JWT authentication
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Delete access grant
+        let result = app_instance_coordinator_access::Entity::delete_many()
+            .filter(app_instance_coordinator_access::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(app_instance_coordinator_access::Column::GroupId.eq(&req.group_id))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to revoke coordinator access", e))?;
+
+        if result.rows_affected > 0 {
+            info!(
+                "Revoked access for group {} from app instance {} by {}",
+                req.group_id, req.app_instance_id, auth.public_key
+            );
+            Ok(Response::new(()))
+        } else {
+            Err(Status::not_found(format!(
+                "No access grant found for group {} on app instance {}",
+                req.group_id, req.app_instance_id
+            )))
+        }
     }
 
     async fn list_coordinator_access(
         &self,
-        _request: Request<ListCoordinatorAccessRequest>,
+        request: Request<ListCoordinatorAccessRequest>,
     ) -> Result<Response<ListCoordinatorAccessResponse>, Status> {
-        Err(Status::unimplemented(
-            "List coordinator access not yet implemented - Phase 3"
-        ))
+        let req = request.into_inner();
+
+        // Verify JWT authentication
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch all access grants for this app instance
+        let access_grants = app_instance_coordinator_access::Entity::find()
+            .filter(app_instance_coordinator_access::Column::AppInstanceId.eq(&req.app_instance_id))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        // Convert to proto format
+        let proto_grants: Vec<AppInstanceAccess> = access_grants
+            .into_iter()
+            .map(|grant| AppInstanceAccess {
+                app_instance_id: grant.app_instance_id,
+                group_id: grant.group_id,
+                access_level: grant.access_level,
+                granted_at: Some(to_timestamp(grant.granted_at)),
+                expires_at: grant.expires_at.map(|dt| to_timestamp(dt)),
+            })
+            .collect();
+
+        Ok(Response::new(ListCoordinatorAccessResponse {
+            access_grants: proto_grants,
+        }))
     }
 }
 

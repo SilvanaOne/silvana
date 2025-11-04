@@ -11,6 +11,7 @@
 
 pub mod auth;
 pub mod concurrency;
+pub mod coordinator_auth;
 pub mod database;
 pub mod entity;
 pub mod handlers;
@@ -20,6 +21,7 @@ pub mod storage;
 // Re-export commonly used types
 pub use auth::{verify_jwt, AuthInfo};
 pub use concurrency::ConcurrencyController;
+pub use coordinator_auth::{verify_and_authorize, verify_coordinator_access, verify_coordinator_signature};
 pub use database::Database;
 pub use handlers::StateServiceImpl;
 pub use service::{ServiceConfig, StateServiceRunner};
