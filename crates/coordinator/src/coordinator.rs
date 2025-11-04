@@ -362,7 +362,7 @@ pub async fn start_coordinator(
         ),
     }
 
-    let config = Config {
+    let _config = Config {
         package_id: sui_package_id.clone(),
         modules: vec!["jobs".to_string()],
     };

@@ -17,6 +17,7 @@ type AgentMethodKey = (String, String, String);
 #[derive(Clone, Debug)]
 struct AppInstanceInfo {
     /// When this app_instance was last updated (job added or reconciliation)
+    #[allow(dead_code)]
     updated_at: Instant,
     /// Which coordination layer this app_instance belongs to
     layer_id: String,
@@ -35,9 +36,11 @@ pub struct JobsTracker {
     agent_method_index: Arc<RwLock<HashMap<AgentMethodKey, HashSet<String>>>>,
 
     /// Track last reconciliation time
+    #[allow(dead_code)]
     last_reconciliation: Arc<RwLock<Instant>>,
 
     /// Coordination manager for multi-layer support (optional for backward compatibility)
+    #[allow(dead_code)]
     coordination_manager: Option<Arc<CoordinationManager>>,
 }
 
@@ -209,6 +212,7 @@ impl JobsTracker {
     }
 
     /// Get the layer_id for a specific app_instance
+    #[allow(dead_code)]
     pub async fn get_layer_id_for_app_instance(&self, app_instance: &str) -> Option<String> {
         let instances = self.app_instances_with_jobs.read().await;
         instances.get(app_instance).map(|info| info.layer_id.clone())
@@ -227,6 +231,7 @@ impl JobsTracker {
     /// Also checks for stuck running jobs and fails them if they've been running too long
     /// Only removes app_instances that haven't been updated during the reconciliation
     /// Returns true if there are still pending jobs after reconciliation
+    #[allow(dead_code)]
     pub async fn reconcile_with_chain<F>(&self, add_fail_request: F) -> Result<bool>
     where
         F: Fn(
@@ -442,6 +447,7 @@ impl JobsTracker {
 
     /// Check for stuck running jobs and fail them if they've been running too long
     /// Also check for orphaned pending jobs (jobs with Pending status but not in pending_jobs array)
+    #[allow(dead_code)]
     async fn fail_stuck_running_jobs<F>(
         &self,
         instances_to_check: &[(String, Instant)],
@@ -909,6 +915,7 @@ pub struct TrackerStats {
 }
 
 /// Helper function to fetch pending_jobs_count from embedded Jobs in AppInstance
+#[allow(dead_code)]
 async fn fetch_pending_jobs_count_from_app_instance(app_instance_id: &str) -> Result<u64> {
     // Use the fetch_app_instance function from sui crate
     let app_instance = sui::fetch::fetch_app_instance(app_instance_id)
@@ -924,6 +931,7 @@ async fn fetch_pending_jobs_count_from_app_instance(app_instance_id: &str) -> Re
 }
 
 /// Helper function to check if there are any running jobs for an app instance
+#[allow(dead_code)]
 async fn check_for_running_jobs(app_instance_id: &str) -> Result<bool> {
     // Use the fetch_app_instance function from sui crate
     let app_instance = sui::fetch::fetch_app_instance(app_instance_id)

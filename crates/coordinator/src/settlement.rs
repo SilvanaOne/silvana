@@ -1,5 +1,4 @@
 use crate::constants::{MAX_JOBS_PER_INSTANCE_BATCH, PERIODIC_JOB_EXECUTION_BUFFER_MS};
-use crate::coordination_layer::CoordinationLayer;
 use silvana_coordination_trait::Coordination;
 use anyhow::Result;
 use std::sync::Arc;
@@ -7,7 +6,7 @@ use tracing::{debug, warn, error, info};
 use crate::state::{SharedState, CreateAppJobRequest};
 use tokio::time::Instant;
 // Temporary: Keep Sui types for functions not yet refactored to use coordination trait
-use sui::fetch::{AppInstance, Settlement};
+use sui::fetch::AppInstance;
 use sui::fetch::{fetch_block_info, fetch_block_settlement, fetch_blocks_range};
 use sui::fetch::{fetch_proof_calculation, fetch_proof_calculations_range};
 use sui::fetch::{fetch_job_by_id, fetch_jobs_batch, get_jobs_info_from_app_instance, fetch_pending_job_sequences_from_app_instance};
@@ -39,6 +38,8 @@ fn convert_sui_job_to_trait(sui_job: sui::fetch::Job) -> Job {
         next_scheduled_at: sui_job.next_scheduled_at,
         created_at: sui_job.created_at,
         updated_at: sui_job.updated_at,
+        agent_jwt: None, // Sui jobs don't have JWT
+        jwt_expires_at: None,
     }
 }
 
@@ -388,7 +389,7 @@ pub async fn fetch_pending_job_from_instances(
 
         // First fetch the AppInstance object
         let app_instance = match coordination.fetch_app_instance(app_instance_id).await {
-            Ok(app_inst) => {
+            Ok(_app_inst) => {
                 // Convert from coordination trait AppInstance to Sui AppInstance for compatibility
                 // TODO: Eventually refactor to use trait types throughout
                 match sui::fetch::fetch_app_instance(app_instance_id).await {
@@ -619,7 +620,7 @@ pub async fn fetch_all_pending_jobs(
 
         // First check for settlement jobs across all chains if not in check-only mode
         if !only_check {
-            let settlement_job_ids = coordination.get_settlement_job_ids(app_instance_id).await
+            let settlement_job_ids = coordination.get_settlement_job_sequences(app_instance_id).await
                 .unwrap_or_default();
 
             if !settlement_job_ids.is_empty() {
@@ -627,7 +628,7 @@ pub async fn fetch_all_pending_jobs(
                 let mut ready_settlement_jobs = Vec::new();
 
                 for (chain, settle_job_id) in &settlement_job_ids {
-                    match coordination.fetch_job_by_id(app_instance_id, *settle_job_id).await {
+                    match coordination.fetch_job_by_sequence(app_instance_id, *settle_job_id).await {
                         Ok(Some(settle_job)) => {
                             // Check if it's pending and ready to run
                             if matches!(settle_job.status, JobStatus::Pending) {
@@ -690,7 +691,7 @@ pub async fn fetch_all_pending_jobs(
                         info!("✅ Fetched {} jobs from batch for app instance {}", jobs.len(), app_instance_id);
                         // Exclude settlement job IDs which are handled above
                         let settlement_ids: std::collections::HashSet<u64> =
-                            coordination.get_settlement_job_ids(app_instance_id)
+                            coordination.get_settlement_job_sequences(app_instance_id)
                                 .await
                                 .unwrap_or_default()
                                 .into_values()

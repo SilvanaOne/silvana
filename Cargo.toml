@@ -90,4 +90,16 @@ tonic-prost-build = "0.14.2"
 prost-build = "0.14"
 prost-reflect-build = "0.16"
 
+# Alloy for Ethereum interactions
+alloy = { version = "1.0", features = [
+    "contract",
+    "providers",
+    "provider-ws",
+    "rpc-types",
+    "rpc-client",
+    "signers",
+    "network",
+    "sol-types",
+] }
+
 

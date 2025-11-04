@@ -187,6 +187,7 @@ pub struct SharedState {
 }
 
 impl SharedState {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         // Initialize the Silvana RPC client asynchronously using shared client
         let rpc_client = Arc::new(RwLock::new(None));
@@ -1353,7 +1354,7 @@ impl SharedState {
             };
 
             // Fetch job details from the coordination layer
-            match layer.fetch_job_by_id(&started_job.app_instance, started_job.job_sequence).await {
+            match layer.fetch_job_by_sequence(&started_job.app_instance, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
                     // Check if this job matches the requested agent
                     if pending_job.developer == developer
@@ -1363,7 +1364,7 @@ impl SharedState {
                         // For settlement jobs, check chain consistency
                         if pending_job.app_instance_method == "settle" {
                             // Get the settlement chain for this job from settlement job IDs
-                            let job_chain = match layer.get_settlement_job_ids(&started_job.app_instance).await {
+                            let job_chain = match layer.get_settlement_job_sequences(&started_job.app_instance).await {
                                 Ok(settlement_jobs) => {
                                     // Find which chain this job sequence belongs to
                                     settlement_jobs.iter()

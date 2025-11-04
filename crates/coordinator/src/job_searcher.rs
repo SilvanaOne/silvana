@@ -22,6 +22,7 @@ pub struct JobSearcher {
     /// Coordination layer ID (e.g., "sui-mainnet", "private-1")
     layer_id: Option<String>,
     /// Coordination layer for this searcher
+    #[allow(dead_code)]
     layer: Option<Arc<CoordinationLayer>>,
     /// Coordination manager reference
     manager: Option<Arc<CoordinationManager>>,
@@ -35,6 +36,7 @@ pub struct JobSearcher {
 
 impl JobSearcher {
     /// Create a new job searcher (backward compatibility - no layer support)
+    #[allow(dead_code)]
     pub fn new(state: SharedState) -> Result<Self> {
         Ok(Self {
             layer_id: None,

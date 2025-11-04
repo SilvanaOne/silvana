@@ -3,6 +3,7 @@
 use thiserror::Error;
 
 /// Result type alias for Sui coordination operations
+#[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, SuiCoordinationError>;
 
 /// Errors that can occur in the Sui coordination layer

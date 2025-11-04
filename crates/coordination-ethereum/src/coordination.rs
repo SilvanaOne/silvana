@@ -246,6 +246,8 @@ impl Coordination for EthereumCoordination {
                     next_scheduled_at: optional_u64(solidity_job.nextScheduledAt),
                     created_at: timestamp_to_u64(solidity_job.createdAt),
                     updated_at: timestamp_to_u64(solidity_job.updatedAt),
+                    agent_jwt: None, // Ethereum layer doesn't support JWT
+                    jwt_expires_at: None,
                 }
             })
             .collect();
@@ -297,6 +299,8 @@ impl Coordination for EthereumCoordination {
                     next_scheduled_at: optional_u64(solidity_job.nextScheduledAt),
                     created_at: timestamp_to_u64(solidity_job.createdAt),
                     updated_at: timestamp_to_u64(solidity_job.updatedAt),
+                    agent_jwt: None, // Ethereum layer doesn't support JWT
+                    jwt_expires_at: None,
                 }
             })
             .collect();
@@ -321,7 +325,7 @@ impl Coordination for EthereumCoordination {
         Ok(result.to::<u64>())
     }
 
-    async fn fetch_job_by_id(
+    async fn fetch_job_by_sequence(
         &self,
         app_instance: &str,
         job_sequence: u64,
@@ -370,6 +374,8 @@ impl Coordination for EthereumCoordination {
             next_scheduled_at: optional_u64(result.nextScheduledAt),
             created_at: timestamp_to_u64(result.createdAt),
             updated_at: timestamp_to_u64(result.updatedAt),
+            agent_jwt: None, // Ethereum layer doesn't support JWT
+            jwt_expires_at: None,
         };
 
         Ok(Some(job))
@@ -393,7 +399,7 @@ impl Coordination for EthereumCoordination {
         Ok(pending + failed)
     }
 
-    async fn get_settlement_job_ids(&self, _app_instance: &str) -> Result<HashMap<String, u64>> {
+    async fn get_settlement_job_sequences(&self, _app_instance: &str) -> Result<HashMap<String, u64>> {
         // Ethereum layer doesn't implement settlement jobs in the same way as Sui
         // Settlement is handled differently on Ethereum
         Ok(HashMap::new())
@@ -410,7 +416,7 @@ impl Coordination for EthereumCoordination {
 
         let mut jobs = Vec::new();
         for &job_id in job_ids {
-            if let Some(job) = self.fetch_job_by_id(app_instance, job_id).await? {
+            if let Some(job) = self.fetch_job_by_sequence(app_instance, job_id).await? {
                 jobs.push(job);
             }
         }
@@ -543,14 +549,14 @@ impl Coordination for EthereumCoordination {
         app_instance: &str,
         method_name: String,
         job_description: Option<String>,
-        block_number: Option<u64>,
-        sequences: Option<Vec<u64>>,
-        sequences1: Option<Vec<u64>>,
-        sequences2: Option<Vec<u64>>,
+        _block_number: Option<u64>,
+        _sequences: Option<Vec<u64>>,
+        _sequences1: Option<Vec<u64>>,
+        _sequences2: Option<Vec<u64>>,
         data: Vec<u8>,
         interval_ms: Option<u64>,
-        next_scheduled_at: Option<u64>,
-        settlement_chain: Option<String>,
+        _next_scheduled_at: Option<u64>,
+        _settlement_chain: Option<String>,
     ) -> Result<(String, u64)> {
         debug!("Creating app job for method: {} in app_instance: {}", method_name, app_instance);
 
@@ -585,10 +591,10 @@ impl Coordination for EthereumCoordination {
         let logs = receipt.inner.logs();
         for log in logs {
             if let Ok(decoded) = log.log_decode::<JobManager::JobCreated>() {
-                let jobSequence = decoded.data().jobSequence;
+                let job_sequence = decoded.data().jobSequence;
                 let tx_hash = self.format_tx_hash(receipt.transaction_hash);
-                debug!("Created job with sequence: {}, tx hash: {}", jobSequence, tx_hash);
-                return Ok((tx_hash, jobSequence));
+                debug!("Created job with sequence: {}, tx hash: {}", job_sequence, tx_hash);
+                return Ok((tx_hash, job_sequence));
             }
         }
 
@@ -749,7 +755,7 @@ impl Coordination for EthereumCoordination {
     async fn remove_failed_jobs(
         &self,
         app_instance: &str,
-        sequences: Option<Vec<u64>>,
+        _sequences: Option<Vec<u64>>,
     ) -> Result<String> {
         debug!("Removing failed jobs in app_instance: {}", app_instance);
 
@@ -1446,7 +1452,7 @@ impl Coordination for EthereumCoordination {
         app_instance: &str,
         block_number: u64,
         chain: String,
-        settled_at: u64,
+        _settled_at: u64,
     ) -> Result<String> {
         debug!("Updating block settlement inclusion for block {} on chain {} in app_instance: {}", block_number, chain, app_instance);
 
@@ -1623,7 +1629,7 @@ impl Coordination for EthereumCoordination {
 
     async fn list_kv_string_keys(
         &self,
-        app_instance: &str,
+        _app_instance: &str,
         _prefix: Option<&str>,
         _limit: Option<u32>,
     ) -> Result<Vec<String>> {
@@ -1636,7 +1642,7 @@ impl Coordination for EthereumCoordination {
 
     async fn list_kv_binary_keys(
         &self,
-        app_instance: &str,
+        _app_instance: &str,
         _prefix: Option<&[u8]>,
         _limit: Option<u32>,
     ) -> Result<Vec<Vec<u8>>> {
@@ -1654,7 +1660,7 @@ impl Coordination for EthereumCoordination {
         self.get_kv_string(app_instance, key).await
     }
 
-    async fn get_all_metadata(&self, app_instance: &str) -> Result<HashMap<String, String>> {
+    async fn get_all_metadata(&self, _app_instance: &str) -> Result<HashMap<String, String>> {
         // Cannot retrieve all keys without off-chain indexing
         warn!("get_all_metadata not fully supported - requires off-chain indexing");
         Ok(HashMap::new())

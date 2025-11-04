@@ -22,9 +22,11 @@ pub struct CoordinationManager {
     layer_info: HashMap<String, LayerInfo>,
 
     /// Configuration
+    #[allow(dead_code)]
     config: CoordinatorConfig,
 
     /// Registry client (from Sui layer)
+    #[allow(dead_code)]
     sui_layer_id: String,
 }
 
@@ -75,12 +77,12 @@ impl CoordinationManager {
 
                 let private = CoordinationLayer::new_private(
                     silvana_coordination_private::PrivateCoordinationConfig {
-                        database_url: private_config.database_url.clone(),
-                        jwt_secret: private_config.jwt_secret.clone(),
+                        grpc_endpoint: private_config.database_url.clone(), // database_url is repurposed as grpc_endpoint
+                        coordinator_private_key: None, // Will be set from environment
+                        request_timeout_secs: private_config.connection_timeout,
                         chain_id: private_config.layer_id.clone(),
-                        max_connections: private_config.max_connections,
-                        connection_timeout_secs: private_config.connection_timeout,
-                        enable_sql_logging: false,
+                        tls_enabled: false,
+                        tls_ca_cert: None,
                     },
                 ).await.map_err(|e: CoordinationError| anyhow!("Failed to initialize private layer: {}", e))?;
 
@@ -162,6 +164,7 @@ impl CoordinationManager {
     }
 
     /// Get the Sui coordination layer (for registry operations)
+    #[allow(dead_code)]
     pub fn get_sui_layer(&self) -> Result<Arc<CoordinationLayer>> {
         self.layers
             .get(&self.sui_layer_id)
@@ -239,12 +242,14 @@ impl CoordinationManager {
     }
 
     /// Clear routing cache for an app_instance
+    #[allow(dead_code)]
     pub async fn clear_routing_cache(&self, app_instance: &str) {
         let mut cache = self.app_instance_routing.write().await;
         cache.remove(app_instance);
     }
 
     /// Clear entire routing cache
+    #[allow(dead_code)]
     pub async fn clear_all_routing_cache(&self) {
         let mut cache = self.app_instance_routing.write().await;
         cache.clear();
@@ -261,6 +266,7 @@ impl CoordinationManager {
     }
 
     /// Check if a layer supports multicall operations
+    #[allow(dead_code)]
     pub fn supports_multicall(&self, layer_id: &str) -> bool {
         self.layer_info
             .get(layer_id)
@@ -269,6 +275,7 @@ impl CoordinationManager {
     }
 
     /// Get all layers that support multicall
+    #[allow(dead_code)]
     pub fn get_multicall_layers(&self) -> Vec<String> {
         self.layer_info
             .iter()
@@ -278,6 +285,7 @@ impl CoordinationManager {
     }
 
     /// Get all layers with Direct operation mode
+    #[allow(dead_code)]
     pub fn get_direct_layers(&self) -> Vec<String> {
         self.layer_info
             .iter()
@@ -287,6 +295,7 @@ impl CoordinationManager {
     }
 
     /// Get metrics for all layers
+    #[allow(dead_code)]
     pub async fn get_metrics(&self) -> HashMap<String, LayerMetrics> {
         let mut metrics = HashMap::new();
 
@@ -319,6 +328,7 @@ impl CoordinationManager {
     }
 
     /// Get the configuration
+    #[allow(dead_code)]
     pub fn config(&self) -> &CoordinatorConfig {
         &self.config
     }
@@ -326,6 +336,7 @@ impl CoordinationManager {
 
 /// Metrics for a coordination layer
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LayerMetrics {
     pub layer_id: String,
     pub layer_type: LayerType,

@@ -41,6 +41,7 @@ use coordinator::{
 };
 
 /// Convert sui::fetch::Job to coordination trait Job
+#[allow(dead_code)]
 fn sui_job_to_coordination_job(job: &sui::fetch::Job) -> silvana_coordination_trait::Job {
     silvana_coordination_trait::Job {
         job_sequence: job.job_sequence,
@@ -66,6 +67,8 @@ fn sui_job_to_coordination_job(job: &sui::fetch::Job) -> silvana_coordination_tr
         next_scheduled_at: job.next_scheduled_at,
         created_at: job.created_at,
         updated_at: job.updated_at,
+        agent_jwt: None, // Sui jobs don't have JWT
+        jwt_expires_at: None,
     }
 }
 
@@ -778,7 +781,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                     };
 
                     // Use layer to get settlement chain by job sequence
-                    match layer.get_settlement_job_ids(&agent_job.app_instance).await {
+                    match layer.get_settlement_job_sequences(&agent_job.app_instance).await {
                         Ok(settlement_jobs) => {
                             settlement_jobs.iter()
                                 .find(|(_, job_id)| **job_id == agent_job.job_sequence)
@@ -939,7 +942,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
             };
 
             // Fetch the full job details from coordination layer
-            match layer.fetch_job_by_id(&started_job.app_instance, started_job.job_sequence).await {
+            match layer.fetch_job_by_sequence(&started_job.app_instance, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
                     // Fetch agent method to get resource requirements
@@ -1028,7 +1031,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         };
 
                         // Use layer to get settlement chain by job sequence
-                        match layer.get_settlement_job_ids(&started_job.app_instance).await {
+                        match layer.get_settlement_job_sequences(&started_job.app_instance).await {
                             Ok(settlement_jobs) => {
                                 settlement_jobs.iter()
                                     .find(|(_, job_id)| **job_id == started_job.job_sequence)

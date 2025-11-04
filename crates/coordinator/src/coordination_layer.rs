@@ -39,6 +39,7 @@ impl CoordinationError {
     /// Check if this error is retriable
     ///
     /// Delegates to the underlying layer-specific error's `is_retriable()` method.
+    #[allow(dead_code)]
     pub fn is_retriable(&self) -> bool {
         match self {
             Self::Sui(e) => e.is_retriable(),
@@ -49,6 +50,7 @@ impl CoordinationError {
     }
 
     /// Check if this error indicates a network problem
+    #[allow(dead_code)]
     pub fn is_network_error(&self) -> bool {
         match self {
             Self::Sui(e) => e.is_network_error(),
@@ -59,6 +61,7 @@ impl CoordinationError {
     }
 
     /// Check if this error indicates a configuration problem
+    #[allow(dead_code)]
     pub fn is_configuration_error(&self) -> bool {
         match self {
             Self::Sui(e) => e.is_configuration_error(),
@@ -115,6 +118,7 @@ impl CoordinationLayer {
     ///
     /// For now, this returns the chain_id. In the current implementation,
     /// layer_id and chain_id are the same value.
+    #[allow(dead_code)]
     pub fn layer_id(&self) -> String {
         self.chain_id()
     }
@@ -203,22 +207,22 @@ impl Coordination for CoordinationLayer {
         }
     }
 
-    async fn fetch_job_by_id(
+    async fn fetch_job_by_sequence(
         &self,
         app_instance: &str,
         job_sequence: u64,
     ) -> Result<Option<Job>, Self::Error> {
         match self {
             Self::Sui(sui) => sui
-                .fetch_job_by_id(app_instance, job_sequence)
+                .fetch_job_by_sequence(app_instance, job_sequence)
                 .await
                 .map_err(Into::into),
             Self::Private(private) => private
-                .fetch_job_by_id(app_instance, job_sequence)
+                .fetch_job_by_sequence(app_instance, job_sequence)
                 .await
                 .map_err(Into::into),
             Self::Ethereum(eth) => eth
-                .fetch_job_by_id(app_instance, job_sequence)
+                .fetch_job_by_sequence(app_instance, job_sequence)
                 .await
                 .map_err(Into::into),
         }
@@ -240,11 +244,11 @@ impl Coordination for CoordinationLayer {
         }
     }
 
-    async fn get_settlement_job_ids(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error> {
+    async fn get_settlement_job_sequences(&self, app_instance: &str) -> Result<HashMap<String, u64>, Self::Error> {
         match self {
-            Self::Sui(sui) => sui.get_settlement_job_ids(app_instance).await.map_err(Into::into),
-            Self::Private(private) => private.get_settlement_job_ids(app_instance).await.map_err(Into::into),
-            Self::Ethereum(eth) => eth.get_settlement_job_ids(app_instance).await.map_err(Into::into),
+            Self::Sui(sui) => sui.get_settlement_job_sequences(app_instance).await.map_err(Into::into),
+            Self::Private(private) => private.get_settlement_job_sequences(app_instance).await.map_err(Into::into),
+            Self::Ethereum(eth) => eth.get_settlement_job_sequences(app_instance).await.map_err(Into::into),
         }
     }
 

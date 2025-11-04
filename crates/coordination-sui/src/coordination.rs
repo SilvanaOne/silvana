@@ -34,8 +34,7 @@ use sui::{
         app_instance::{fetch_app_instance, fetch_block_settlement},
         block::{fetch_block_info, fetch_blocks_range},
         jobs::{
-            fetch_failed_jobs_from_app_instance, fetch_job_by_id,
-            fetch_pending_jobs_from_app_instance, get_failed_jobs_count,
+            fetch_failed_jobs_from_app_instance, fetch_job_by_id, get_failed_jobs_count,
         },
         prover::{fetch_proof_calculation, fetch_proof_calculations_range},
         sequence_state::fetch_sequence_state_by_id,
@@ -101,6 +100,8 @@ impl SuiCoordination {
             next_scheduled_at: job.next_scheduled_at,
             created_at: job.created_at,
             updated_at: job.updated_at,
+            agent_jwt: None, // Sui layer doesn't support JWT
+            jwt_expires_at: None,
         }
     }
 
@@ -463,10 +464,15 @@ fn decode_job_created_event(bcs_data: &[u8]) -> Result<JobCreatedEvent, SilvanaS
         app_instance: String,
         app_instance_method: String,
         block_number: Option<u64>,
+        #[allow(dead_code)]
         sequences: Option<Vec<u64>>,
+        #[allow(dead_code)]
         sequences1: Option<Vec<u64>>,
+        #[allow(dead_code)]
         sequences2: Option<Vec<u64>>,
+        #[allow(dead_code)]
         data: Vec<u8>,
+        #[allow(dead_code)]
         status: JobStatusBcs,
         created_at: u64,
     }
@@ -577,7 +583,7 @@ impl Coordination for SuiCoordination {
         Ok(get_failed_jobs_count(&app).await)
     }
 
-    async fn fetch_job_by_id(
+    async fn fetch_job_by_sequence(
         &self,
         app_instance: &str,
         job_sequence: u64,
@@ -604,7 +610,7 @@ impl Coordination for SuiCoordination {
         Ok(app.jobs.as_ref().map(|j| j.total_jobs_count).unwrap_or(0))
     }
 
-    async fn get_settlement_job_ids(
+    async fn get_settlement_job_sequences(
         &self,
         app_instance: &str,
     ) -> Result<HashMap<String, u64>, Self::Error> {

@@ -15,6 +15,7 @@ pub struct CoordinationEvent {
     pub event_index: usize,
 }
 
+#[allow(dead_code)]
 pub fn parse_coordination_events(
     checkpoint: &Checkpoint,
     checkpoint_seq: u64,
@@ -78,6 +79,7 @@ pub fn parse_coordination_events(
     events
 }
 
+#[allow(dead_code)]
 pub fn parse_jobs_event_with_contents(event: &Event) -> Option<String> {
     if let Some(contents) = &event.contents {
         if let Some(value) = &contents.value {
@@ -167,6 +169,7 @@ pub fn parse_jobs_event_with_contents(event: &Event) -> Option<String> {
 
 // BCS structures matching the Move types
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct JobCreatedEventBcs {
     job_sequence: u64,
     description: Option<String>,
@@ -186,6 +189,7 @@ struct JobCreatedEventBcs {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct JobFailedEventBcs {
     job_sequence: u64,
     app_instance: String,

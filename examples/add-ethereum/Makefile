@@ -1,7 +1,7 @@
 # Add Ethereum Agent Makefile
 # This Makefile helps with building, running, and deploying the agent
 
-.PHONY: help run build-local build push test clean deploy add
+.PHONY: help run build-local build push test clean deploy add batch
 
 # Load environment variables from .env file
 -include .env
@@ -31,6 +31,7 @@ help:
 	@echo ""
 	@echo "Usage:"
 	@echo "  add            - Call add(1, 1) on deployed AddApp contract"
+	@echo "  batch          - Call add(1, 1) every second continuously"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  clean          - Clean build artifacts"
@@ -210,3 +211,12 @@ add:
 	@echo "  Value[1]: $$(cast call $(APP_CONTRACT) 'getValue(uint32)(uint256)' 1 --rpc-url http://localhost:8545)"
 	@echo "  Sequence: $$(cast call $(APP_CONTRACT) 'getSequence()(uint256)' --rpc-url http://localhost:8545)"
 	@echo ""
+
+batch:
+	@echo "🔄 Starting batch mode - calling add(1, 1) every second..."
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@while true; do \
+		$(MAKE) add; \
+		sleep 1; \
+	done

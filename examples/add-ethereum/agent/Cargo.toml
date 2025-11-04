@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # Silvana SDK
-silvana-sdk = { path = "../../../crates/sdk" }
+silvana-sdk = { git = "https://github.com/SilvanaOne/silvana", rev = "93a76e45bf1176f61aac2fad7785e0ae636b830a" }
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

@@ -179,6 +179,7 @@ pub enum LayerType {
 
 /// Common layer information
 pub struct LayerInfo {
+    #[allow(dead_code)]
     pub layer_id: String,
     pub layer_type: LayerType,
     pub operation_mode: OperationMode,
@@ -270,6 +271,7 @@ impl CoordinatorConfig {
     }
 
     /// Load configuration from environment variables and/or default values
+    #[allow(dead_code)]
     pub fn from_env() -> anyhow::Result<Self> {
         // Start with minimal default configuration
         let sui_config = SuiConfig {
@@ -343,6 +345,7 @@ impl CoordinatorConfig {
     }
 
     /// Get all configured layer IDs
+    #[allow(dead_code)]
     pub fn all_layer_ids(&self) -> Vec<String> {
         let mut ids = vec![self.sui.layer_id.clone()];
 

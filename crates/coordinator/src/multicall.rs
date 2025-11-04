@@ -586,7 +586,7 @@ impl MulticallProcessor {
                         match coordination.fetch_app_instance(&app_instance).await {
                             Ok(_fresh_app_instance) => {
                                 // Fetch the job from blockchain using trait method
-                                match coordination.fetch_job_by_id(&app_instance, start_job.job_sequence).await {
+                                match coordination.fetch_job_by_sequence(&app_instance, start_job.job_sequence).await {
                                     Ok(Some(fresh_job)) => {
                                         // Check if job status is Pending
                                         if matches!(fresh_job.status, silvana_coordination_trait::JobStatus::Pending) {
@@ -595,7 +595,7 @@ impl MulticallProcessor {
                                                 fresh_job.app_instance_method == "settle";
 
                                             // Check settlement chain using coordination trait
-                                            match coordination.get_settlement_job_ids(&app_instance).await {
+                                            match coordination.get_settlement_job_sequences(&app_instance).await {
                                                 Ok(settlement_ids) => {
                                                     let has_settlement_chain = settlement_ids.values().any(|&id| id == start_job.job_sequence);
 

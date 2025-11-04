@@ -496,7 +496,7 @@ pub async fn run_docker_container_task(
         }
     };
 
-    let fresh_app_instance = match layer.fetch_app_instance(&job.app_instance).await {
+    let _fresh_app_instance = match layer.fetch_app_instance(&job.app_instance).await {
         Ok(app_inst) => app_inst,
         Err(e) => {
             warn!(
@@ -1149,7 +1149,7 @@ impl DockerBufferProcessor {
             };
 
             // Fetch the job using coordination trait method
-            let job_from_layer = match layer.fetch_job_by_id(&started_job.app_instance, started_job.job_sequence).await {
+            let job_from_layer = match layer.fetch_job_by_sequence(&started_job.app_instance, started_job.job_sequence).await {
                 Ok(Some(job)) => {
                     // Check if job is in Running state
                     let is_running = matches!(job.status, silvana_coordination_trait::JobStatus::Running);

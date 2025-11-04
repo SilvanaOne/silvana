@@ -20,17 +20,8 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 toml = "0.8"
 
-# Alloy for Ethereum interactions (local path)
-alloy = { path = "/Users/mike/Documents/Silvana/Tests/alloy/crates/alloy", features = [
-    "contract",
-    "providers",
-    "provider-ws",
-    "rpc-types",
-    "rpc-client",
-    "signers",
-    "network",
-    "sol-types",
-] }
+# Alloy for Ethereum interactions
+alloy = { workspace = true }
 async-stream = "0.3"
 futures = "0.3"
 
