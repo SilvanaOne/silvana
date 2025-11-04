@@ -1161,6 +1161,290 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         }
 
+        // For Direct mode layers, try to fetch and start pending jobs directly
+        // This bypasses the multicall buffer and immediately starts jobs
+        if let Some(coordination_manager) = self.state.get_coordination_manager() {
+            // Get app_instances for this specific agent/method
+            let app_instances = self
+                .state
+                .get_jobs_tracker()
+                .get_app_instances_for_agent_method(&req.developer, &req.agent, &req.agent_method)
+                .await;
+
+            if !app_instances.is_empty() {
+                debug!(
+                    "Found {} app_instances for agent {}/{}/{}: {:?}",
+                    app_instances.len(),
+                    req.developer,
+                    req.agent,
+                    req.agent_method,
+                    app_instances
+                );
+
+                // Check each app_instance against Direct mode layers
+                for app_instance in app_instances {
+                    // Get the layer for this app_instance
+                    let (layer_id, layer) = match coordination_manager.get_layer_for_app(&app_instance).await {
+                        Ok((id, l)) => (id, l),
+                        Err(e) => {
+                            debug!("No layer found for app_instance {}: {}", app_instance, e);
+                            continue;
+                        }
+                    };
+
+                    // Check if this layer uses Direct operation mode
+                    if coordination_manager.supports_multicall(&layer_id) {
+                        // Skip multicall layers - they use the buffer
+                        continue;
+                    }
+
+                    debug!(
+                        "Checking Direct mode layer {} for pending jobs in app {}: dev={}, agent={}, method={}",
+                        layer_id, app_instance, req.developer, req.agent, req.agent_method
+                    );
+
+                    // Fetch pending job sequences for this specific agent/method
+                    let mut pending_sequences = match layer
+                        .fetch_pending_job_sequences_by_method(
+                            &app_instance,
+                            &req.developer,
+                            &req.agent,
+                            &req.agent_method,
+                        )
+                        .await
+                    {
+                        Ok(sequences) => sequences,
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch pending job sequences for app {} on layer {}: {}",
+                                app_instance, layer_id, e
+                            );
+                            continue;
+                        }
+                    };
+
+                    if pending_sequences.is_empty() {
+                        debug!("No pending jobs for app {} on layer {}", app_instance, layer_id);
+                        continue;
+                    }
+
+                    // Sort by sequence to process oldest jobs first
+                    pending_sequences.sort_unstable();
+
+                    debug!(
+                        "Found {} pending job sequences for app {}: {:?}",
+                        pending_sequences.len(),
+                        app_instance,
+                        &pending_sequences[..pending_sequences.len().min(5)] // Log first 5
+                    );
+
+                    // Try to start up to 3 jobs (retry on concurrency conflicts)
+                    let max_attempts = 3.min(pending_sequences.len());
+                    for job_sequence in pending_sequences.iter().take(max_attempts) {
+                        debug!(
+                            "Attempting to start job {} in app {} on layer {}",
+                            job_sequence, app_instance, layer_id
+                        );
+
+                        // Try to start the job
+                        match layer.start_job(&app_instance, *job_sequence).await {
+                            Ok(true) => {
+                                info!(
+                                    "✅ Successfully started job {} in app {} on Direct mode layer {}",
+                                    job_sequence, app_instance, layer_id
+                                );
+
+                                // Fetch the full job details
+                                let pending_job = match layer
+                                    .fetch_job_by_sequence(&app_instance, *job_sequence)
+                                    .await
+                                {
+                                    Ok(Some(job)) => job,
+                                    Ok(None) => {
+                                        error!(
+                                            "Job {} not found after successful start in app {}",
+                                            job_sequence, app_instance
+                                        );
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to fetch job {} after start in app {}: {}",
+                                            job_sequence, app_instance, e
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                // Fetch agent method to get resource requirements
+                                let agent_method = match sui::fetch_agent_method(
+                                    &pending_job.developer,
+                                    &pending_job.agent,
+                                    &pending_job.agent_method,
+                                )
+                                .await
+                                {
+                                    Ok(method) => method,
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to fetch agent method for job {}: {}",
+                                            pending_job.job_sequence, e
+                                        );
+                                        // Use default values if fetch fails
+                                        sui::fetch::AgentMethod {
+                                            docker_image: String::new(),
+                                            docker_sha256: None,
+                                            min_memory_gb: 1,
+                                            min_cpu_cores: 1,
+                                            requires_tee: false,
+                                        }
+                                    }
+                                };
+
+                                // Create AgentJob and add it to agent database
+                                let agent_job = match crate::agent::AgentJob::new(
+                                    pending_job.clone(),
+                                    req.session_id.clone(),
+                                    &self.state,
+                                    agent_method.min_memory_gb,
+                                    agent_method.min_cpu_cores,
+                                    agent_method.requires_tee,
+                                    layer_id.clone(),
+                                ) {
+                                    Ok(job) => job,
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to create agent job for job {}: {}",
+                                            pending_job.job_sequence, e
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                // Store in agent database
+                                self.state
+                                    .get_agent_job_db()
+                                    .add_to_running(agent_job.clone())
+                                    .await;
+
+                                // Handle settlement chain for settlement jobs
+                                let settlement_chain = if pending_job.app_instance_method == "settle" {
+                                    match layer.get_settlement_job_sequences(&app_instance).await {
+                                        Ok(settlement_jobs) => {
+                                            settlement_jobs.iter()
+                                                .find(|(_, job_id)| **job_id == *job_sequence)
+                                                .map(|(chain, _)| chain.clone())
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                "Failed to lookup settlement chain for job {} in app {}: {}",
+                                                job_sequence, app_instance, e
+                                            );
+                                            None
+                                        }
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                // Set current agent for this session
+                                self.state
+                                    .set_current_agent(
+                                        req.session_id.clone(),
+                                        pending_job.developer.clone(),
+                                        pending_job.agent.clone(),
+                                        pending_job.agent_method.clone(),
+                                    )
+                                    .await;
+
+                                // Set settlement chain if this is a settlement job
+                                if pending_job.app_instance_method == "settle" {
+                                    if let Err(e) = self
+                                        .state
+                                        .set_settlement_chain_for_session(
+                                            &req.session_id,
+                                            settlement_chain.clone(),
+                                        )
+                                        .await
+                                    {
+                                        warn!("Failed to set settlement chain for session: {}", e);
+                                    }
+                                }
+
+                                // Convert to protobuf Job
+                                let job = Job {
+                                    job_sequence: *job_sequence,
+                                    description: pending_job.description.clone(),
+                                    developer: pending_job.developer.clone(),
+                                    agent: pending_job.agent.clone(),
+                                    agent_method: pending_job.agent_method.clone(),
+                                    app: pending_job.app.clone(),
+                                    app_instance: app_instance.clone(),
+                                    app_instance_method: pending_job.app_instance_method.clone(),
+                                    block_number: pending_job.block_number,
+                                    sequences: pending_job.sequences.clone().unwrap_or_default(),
+                                    sequences1: pending_job.sequences1.clone().unwrap_or_default(),
+                                    sequences2: pending_job.sequences2.clone().unwrap_or_default(),
+                                    data: pending_job.data.clone(),
+                                    job_id: agent_job.job_id.clone(),
+                                    attempts: pending_job.attempts as u32,
+                                    created_at: pending_job.created_at,
+                                    updated_at: pending_job.updated_at,
+                                    chain: settlement_chain,
+                                };
+
+                                let elapsed = start_time.elapsed();
+                                info!(
+                                    "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=direct_start, layer={}, time={:?}",
+                                    app_instance,
+                                    req.developer,
+                                    req.agent,
+                                    req.agent_method,
+                                    job_sequence,
+                                    pending_job.app_instance_method,
+                                    layer_id,
+                                    elapsed
+                                );
+
+                                // Send JobStartedEvent
+                                self.send_job_started_event(
+                                    req.session_id.clone(),
+                                    agent_job.job_id.clone(),
+                                    app_instance.clone(),
+                                )
+                                .await;
+
+                                return Ok(Response::new(GetJobResponse {
+                                    success: true,
+                                    message: format!("Job {} started and retrieved from Direct mode layer", job_sequence),
+                                    job: Some(job),
+                                }));
+                            }
+                            Ok(false) => {
+                                debug!(
+                                    "Failed to start job {} (already started by another worker) - trying next job",
+                                    job_sequence
+                                );
+                                // Continue to next job
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Error starting job {} in app {} on layer {}: {} - trying next job",
+                                    job_sequence, app_instance, layer_id, e
+                                );
+                                // Continue to next job
+                            }
+                        }
+                    }
+
+                    debug!(
+                        "Failed to start any of {} attempted jobs for app {} on layer {}",
+                        max_attempts, app_instance, layer_id
+                    );
+                }
+            }
+        }
+
         // If no session jobs and no buffer jobs, check if system is shutting down
         let elapsed = start_time.elapsed();
         let elapsed_ms = elapsed.as_millis() as f64;

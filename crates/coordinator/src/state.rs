@@ -1045,8 +1045,8 @@ impl SharedState {
                             }]).await;
                         }
                         Err(e) => {
-                            error!(
-                                "❌ Direct start_job failed: {} seq {}: {}",
+                            info!(
+                                "⚠️  Direct start_job failed (likely concurrency): {} seq {}: {}",
                                 app_instance, job_sequence, e
                             );
                         }
