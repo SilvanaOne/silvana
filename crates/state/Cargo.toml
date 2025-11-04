@@ -40,6 +40,7 @@ aws-sdk-s3.workspace = true
 
 # Async runtime
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait.workspace = true
 futures.workspace = true
 

@@ -4,10 +4,14 @@ use anyhow::Result;
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, NotSet, PaginatorTrait,
-    QueryFilter, QueryOrder, Set,
+    QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
@@ -784,6 +788,10 @@ impl StateServiceImpl {
 
 #[tonic::async_trait]
 impl StateService for StateServiceImpl {
+    type SubscribeJobEventsStream = std::pin::Pin<
+        Box<dyn Stream<Item = Result<JobEventMessage, Status>> + Send>
+    >;
+
     async fn create_app_instance(
         &self,
         request: Request<CreateAppInstanceRequest>,
@@ -3870,6 +3878,132 @@ impl StateService for StateServiceImpl {
         Ok(Response::new(ListCoordinatorAccessResponse {
             access_grants: proto_grants,
         }))
+    }
+
+    /// Subscribe to job creation events for an app instance
+    /// Uses database polling with SeaORM to detect new jobs
+    async fn subscribe_job_events(
+        &self,
+        request: Request<SubscribeJobEventsRequest>,
+    ) -> Result<Response<Self::SubscribeJobEventsStream>, Status> {
+        let req = request.into_inner();
+
+        // TODO: Temporarily skip auth check - will add proper JWT auth later
+        // let auth = self.extract_auth_from_body(&req.auth)?;
+        // self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Use provided app_instance_id, or empty string to stream from all app instances
+        let app_instance_id = if req.app_instance_id.is_empty() {
+            warn!("Event stream requested without app_instance_id - streaming all jobs (temp development mode)");
+            None
+        } else {
+            Some(req.app_instance_id.clone())
+        };
+
+        info!(
+            "Starting event stream for app_instance={:?}, from_sequence={:?}",
+            app_instance_id, req.from_job_sequence
+        );
+
+        // Create broadcast channel for this subscription
+        let (tx, rx) = broadcast::channel::<JobEventMessage>(100);
+
+        // Clone what we need for the spawned task
+        let db = self.db.clone();
+        let from_sequence = req.from_job_sequence.unwrap_or(0);
+
+        // Spawn background task to monitor database for new jobs
+        tokio::spawn(async move {
+            let mut last_sequence = from_sequence;
+
+            loop {
+                // Poll database every 1 second for new jobs
+                tokio::time::sleep(Duration::from_secs(1)).await;
+
+                // Use SeaORM to query new jobs
+                let mut query = jobs::Entity::find()
+                    .filter(jobs::Column::JobSequence.gt(last_sequence))
+                    .order_by_asc(jobs::Column::JobSequence);
+
+                // Optionally filter by app_instance_id
+                if let Some(ref app_id) = app_instance_id {
+                    query = query.filter(jobs::Column::AppInstanceId.eq(app_id));
+                }
+
+                let result = query
+                    .limit(100)
+                    .all(db.connection())
+                    .await;
+
+                match result {
+                    Ok(job_models) => {
+                        for job_model in job_models {
+                            last_sequence = job_model.job_sequence;
+
+                            // Convert SeaORM model to proto Job using existing helper
+                            let proto_job = Job {
+                                job_sequence: job_model.job_sequence,
+                                description: job_model.description,
+                                developer: job_model.developer,
+                                agent: job_model.agent,
+                                agent_method: job_model.agent_method,
+                                app_instance_id: job_model.app_instance_id,
+                                block_number: job_model.block_number,
+                                sequences: job_model.sequences
+                                    .and_then(|j| serde_json::from_value(j).ok())
+                                    .unwrap_or_default(),
+                                sequences1: job_model.sequences1
+                                    .and_then(|j| serde_json::from_value(j).ok())
+                                    .unwrap_or_default(),
+                                sequences2: job_model.sequences2
+                                    .and_then(|j| serde_json::from_value(j).ok())
+                                    .unwrap_or_default(),
+                                data: job_model.data,
+                                data_da: job_model.data_da,
+                                interval_ms: job_model.interval_ms,
+                                next_scheduled_at: job_model.next_scheduled_at.map(|dt| to_timestamp(dt)),
+                                status: match job_model.status.as_str() {
+                                    "pending" => 1,
+                                    "running" => 2,
+                                    "completed" => 3,
+                                    "failed" => 4,
+                                    _ => 0,
+                                },
+                                error_message: job_model.error_message,
+                                attempts: job_model.attempts as u32,
+                                created_at: Some(to_timestamp(job_model.created_at)),
+                                updated_at: Some(to_timestamp(job_model.updated_at)),
+                                metadata: job_model.metadata.and_then(json_to_prost_struct),
+                                agent_jwt: job_model.agent_jwt,
+                                jwt_expires_at: job_model.jwt_expires_at.map(|dt| to_timestamp(dt)),
+                            };
+
+                            let event = JobEventMessage {
+                                job_sequence: last_sequence,
+                                job: Some(proto_job),
+                                event_time: Some(to_timestamp(Utc::now())),
+                            };
+
+                            if tx.send(event).is_err() {
+                                // Receiver dropped, exit
+                                info!("Event stream closed for app_instance={:?}", app_instance_id);
+                                return;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Error polling for job events in app_instance={:?}: {}", app_instance_id, e);
+                    }
+                }
+            }
+        });
+
+        // Convert broadcast receiver to stream
+        let stream = BroadcastStream::new(rx).map(|result| {
+            result.map_err(|e| Status::internal(format!("Stream error: {}", e)))
+        });
+
+        Ok(Response::new(Box::pin(stream)))
     }
 }
 

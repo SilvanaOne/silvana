@@ -993,6 +993,24 @@ message ListCoordinatorAccessResponse {
 }
 
 // ============================================================================
+// Event Streaming Messages
+// ============================================================================
+
+// Request to subscribe to job creation events
+message SubscribeJobEventsRequest {
+  JWTAuth auth = 1;                            // Must be signed by app instance owner
+  string app_instance_id = 2;
+  optional uint64 from_job_sequence = 3;       // Start from this sequence (backfill)
+}
+
+// Event message for job creation
+message JobEventMessage {
+  uint64 job_sequence = 1;
+  Job job = 2;
+  google.protobuf.Timestamp event_time = 3;
+}
+
+// ============================================================================
 // Service Definition
 // ============================================================================
 
@@ -1069,4 +1087,7 @@ service StateService {
   rpc GrantCoordinatorAccess(GrantCoordinatorAccessRequest) returns (google.protobuf.Empty);
   rpc RevokeCoordinatorAccess(RevokeCoordinatorAccessRequest) returns (google.protobuf.Empty);
   rpc ListCoordinatorAccess(ListCoordinatorAccessRequest) returns (ListCoordinatorAccessResponse);
+
+  // Event Streaming (owner only)
+  rpc SubscribeJobEvents(SubscribeJobEventsRequest) returns (stream JobEventMessage);
 }

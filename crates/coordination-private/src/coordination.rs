@@ -1,9 +1,10 @@
 //! Private Coordination layer implementation (gRPC client)
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use silvana_coordination_trait::{
     AppInstance, Block, BlockSettlement, Coordination, CoordinationLayer, EventStream,
-    Job, MulticallOperations, MulticallResult, ProofCalculation, SequenceState,
+    Job, JobCreatedEvent, MulticallOperations, MulticallResult, ProofCalculation, SequenceState,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -1324,6 +1325,45 @@ impl Coordination for PrivateCoordination {
     // ===== Event Streaming =====
 
     async fn event_stream(&self) -> Result<EventStream> {
-        Err(PrivateCoordinationError::NotImplemented("event_stream - not supported for Private coordination".to_string()))
+        use proto::silvana::state::v1::{SubscribeJobEventsRequest, JwtAuth};
+
+        // TODO: Temporarily using empty JWT and app_instance_id for development
+        // Will add proper JWT auth and app_instance_id filtering later
+        let request = SubscribeJobEventsRequest {
+            auth: Some(JwtAuth {
+                token: String::new(), // Empty JWT - server will skip auth check temporarily
+            }),
+            app_instance_id: String::new(), // Empty = all app instances
+            from_job_sequence: None, // Start from current
+        };
+
+        let mut client = self.client.clone();
+        let response = client
+            .subscribe_job_events(request)
+            .await?  // Will convert tonic::Status to PrivateCoordinationError::Status
+            .into_inner();
+
+        // Convert proto stream to EventStream
+        let stream = response.map(|result| {
+            result
+                .map(|event| {
+                    let job = event.job.unwrap_or_default();
+                    JobCreatedEvent {
+                        job_sequence: event.job_sequence,
+                        developer: job.developer,
+                        agent: job.agent,
+                        agent_method: job.agent_method,
+                        app_instance: job.app_instance_id.clone(),
+                        app_instance_method: String::new(), // Not available in private coordination
+                        block_number: job.block_number.unwrap_or(0),
+                        created_at: job.created_at
+                            .map(|ts| (ts.seconds as u64) * 1000 + (ts.nanos as u64) / 1_000_000)
+                            .unwrap_or(0),
+                    }
+                })
+                .map_err(|e| Box::new(PrivateCoordinationError::Status(e)) as Box<dyn std::error::Error + Send + Sync>)
+        });
+
+        Ok(Box::pin(stream))
     }
 }
