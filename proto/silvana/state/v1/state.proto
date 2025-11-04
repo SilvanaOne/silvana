@@ -244,6 +244,53 @@ message Job {
   optional google.protobuf.Timestamp jwt_expires_at = 22;  // When the agent JWT expires
 }
 
+// Block message
+message Block {
+  string app_instance_id = 1;
+  uint64 block_number = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 start_sequence = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 end_sequence = 4 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional bytes actions_commitment = 5;        // 32 bytes
+  optional bytes state_commitment = 6;          // 32 bytes
+  optional uint64 time_since_last_block = 7 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 number_of_transactions = 8 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional bytes start_actions_commitment = 9;  // 32 bytes
+  optional bytes end_actions_commitment = 10;   // 32 bytes
+  optional string state_data_availability = 11; // S3 key or IPFS CID
+  optional string proof_data_availability = 12; // S3 key or IPFS CID
+  google.protobuf.Timestamp created_at = 13;
+  optional google.protobuf.Timestamp state_calculated_at = 14;
+  optional google.protobuf.Timestamp proved_at = 15;
+}
+
+// Proof in calculation (matches Move Proof struct from prover.move)
+message ProofInCalculation {
+  uint32 status = 1;  // 1=Started, 2=Calculated, 3=Rejected, 4=Reserved, 5=Used
+  optional string da_hash = 2;
+  repeated uint64 sequence1 = 3;  // For merge proofs
+  repeated uint64 sequence2 = 4;  // For merge proofs
+  uint32 rejected_count = 5;
+  uint64 timestamp = 6;  // Milliseconds since epoch
+  string prover = 7;  // Address from JWT
+  optional string user = 8;
+  optional string job_id = 9;
+  repeated uint64 sequences = 10;  // Key for lookup (sorted)
+}
+
+// Proof calculation (matches proof_calculations table schema)
+message ProofCalculation {
+  string app_instance_id = 1;
+  string id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 start_sequence = 4 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional uint64 end_sequence = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  repeated ProofInCalculation proofs = 6;  // From JSON field in database
+  optional string block_proof = 7;
+  bool block_proof_submitted = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
 // ============================================================================
 // Service Request/Response Messages
 // ============================================================================
@@ -822,6 +869,131 @@ message ListProofsResponse {
   bool has_more = 2;                                    // True if more pages available
 }
 
+// Block operations
+message GetBlockRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+}
+
+message GetBlockResponse {
+  optional Block block = 1;
+}
+
+message GetBlocksRangeRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 from_block = 3;
+  uint64 to_block = 4;
+}
+
+message GetBlocksRangeResponse {
+  repeated Block blocks = 1;
+}
+
+message TryCreateBlockRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message TryCreateBlockResponse {
+  optional uint64 block_number = 1;  // None if no new sequences available
+  optional Block block = 2;          // Full block info if created
+}
+
+message UpdateBlockStateDARequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  string state_da = 4;  // S3 key or IPFS CID
+}
+
+message UpdateBlockStateDAResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateBlockProofDARequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  string proof_da = 4;  // S3 key or IPFS CID
+}
+
+message UpdateBlockProofDAResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Proof calculation operations (agent operations with JWT)
+message GetProofCalculationRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+}
+
+message GetProofCalculationResponse {
+  optional ProofCalculation proof_calculation = 1;
+}
+
+message GetProofCalculationsRangeRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 from_block = 3;
+  uint64 to_block = 4;
+}
+
+message GetProofCalculationsRangeResponse {
+  repeated ProofCalculation proof_calculations = 1;
+}
+
+message StartProvingRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  repeated uint64 sequences = 4;
+  repeated uint64 merged_sequences_1 = 5;  // Empty = not merge proof
+  repeated uint64 merged_sequences_2 = 6;  // Empty = not merge proof
+}
+
+message StartProvingResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SubmitCalculatedProofRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  repeated uint64 sequences = 4;
+  repeated uint64 merged_sequences_1 = 5;
+  repeated uint64 merged_sequences_2 = 6;
+  string job_id = 7;
+  string da_hash = 8;
+  uint32 cpu_cores = 9;
+  string prover_architecture = 10;
+  uint64 prover_memory = 11;
+  uint64 cpu_time = 12;
+}
+
+message SubmitCalculatedProofResponse {
+  bool success = 1;
+  string message = 2;
+  bool block_proof_ready = 3;  // True if block proof complete
+}
+
+message RejectProofRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  repeated uint64 sequences = 4;
+}
+
+message RejectProofResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // ============================================================================
 // Coordinator Management Messages
 // ============================================================================
@@ -1079,6 +1251,20 @@ service StateService {
   rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
   rpc GetProof(GetProofRequest) returns (GetProofResponse);
   rpc ListProofs(ListProofsRequest) returns (ListProofsResponse);
+
+  // Block Management (agent operations with JWT)
+  rpc GetBlock(GetBlockRequest) returns (GetBlockResponse);
+  rpc GetBlocksRange(GetBlocksRangeRequest) returns (GetBlocksRangeResponse);
+  rpc TryCreateBlock(TryCreateBlockRequest) returns (TryCreateBlockResponse);
+  rpc UpdateBlockStateDA(UpdateBlockStateDARequest) returns (UpdateBlockStateDAResponse);
+  rpc UpdateBlockProofDA(UpdateBlockProofDARequest) returns (UpdateBlockProofDAResponse);
+
+  // Proof Calculation Management (agent operations with JWT)
+  rpc GetProofCalculation(GetProofCalculationRequest) returns (GetProofCalculationResponse);
+  rpc GetProofCalculationsRange(GetProofCalculationsRangeRequest) returns (GetProofCalculationsRangeResponse);
+  rpc StartProving(StartProvingRequest) returns (StartProvingResponse);
+  rpc SubmitCalculatedProof(SubmitCalculatedProofRequest) returns (SubmitCalculatedProofResponse);
+  rpc RejectProof(RejectProofRequest) returns (RejectProofResponse);
 
   // Coordinator Operations (authenticated with coordinator's Ed25519 key)
   rpc CoordinatorJobOperation(CoordinatorJobRequest) returns (CoordinatorJobResponse);

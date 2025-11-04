@@ -6,6 +6,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, NotSet, PaginatorTrait,
     QueryFilter, QueryOrder, QuerySelect, Set,
 };
+use sea_orm::prelude::Json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,8 +22,8 @@ use crate::{
     coordinator_auth::verify_and_authorize,
     database::Database,
     entity::{
-        app_instance_kv_binary, app_instance_kv_string, app_instances, jobs,
-        object_lock_queue, object_versions, objects, optimistic_state, proofs, state, user_actions,
+        app_instance_kv_binary, app_instance_kv_string, app_instances, blocks, jobs,
+        object_lock_queue, object_versions, objects, optimistic_state, proof_calculations, proofs, state, user_actions,
         lock_request_bundle,
         coordinator_groups, app_instance_coordinator_access,
     },
@@ -145,6 +146,126 @@ fn next_binary_prefix(prefix: &[u8]) -> Option<Vec<u8>> {
 
     // All bytes were 0xFF, cannot increment
     None
+}
+
+// ============================================================================
+// Proof Calculation Helper Types and Functions (matching prover.move logic)
+// ============================================================================
+
+/// Proof data structure matching Move Proof struct from prover.move
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct ProofData {
+    status: u8,  // 1=Started, 2=Calculated, 3=Rejected, 4=Reserved, 5=Used
+    da_hash: Option<String>,
+    sequence1: Option<Vec<u64>>,  // For merge proofs
+    sequence2: Option<Vec<u64>>,  // For merge proofs
+    rejected_count: u16,
+    timestamp: u64,  // Milliseconds since epoch
+    prover: String,  // Address from JWT
+    user: Option<String>,
+    job_id: Option<String>,
+    sequences: Vec<u64>,  // Key for lookup (always sorted)
+}
+
+/// Proof timeout constant from prover.move line 130
+const PROOF_TIMEOUT_MS: u64 = 300_000; // 5 minutes
+
+/// Parse JSON proofs array from database
+fn parse_proofs_json(json_value: Option<Json>) -> Result<Vec<ProofData>, Status> {
+    match json_value {
+        Some(json) => serde_json::from_value(json)
+            .map_err(|e| Status::internal(format!("Failed to parse proofs JSON: {}", e))),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Serialize proofs back to JSON for database storage
+fn serialize_proofs_json(proofs: &[ProofData]) -> Result<Json, Status> {
+    serde_json::to_value(proofs)
+        .map_err(|e| Status::internal(format!("Failed to serialize proofs: {}", e)))
+}
+
+/// Sort and validate sequences (prover.move lines 663-704)
+fn sort_and_validate_sequences(
+    sequences: &[u64],
+    start_sequence: u64,
+    end_sequence: Option<u64>,
+) -> Result<Vec<u64>, Status> {
+    if sequences.is_empty() {
+        return Err(Status::invalid_argument("Sequences cannot be empty"));
+    }
+
+    let mut sorted = sequences.to_vec();
+    sorted.sort_unstable();
+
+    if sorted[0] < start_sequence {
+        return Err(Status::invalid_argument(format!(
+            "Sequence {} is below start_sequence {}",
+            sorted[0], start_sequence
+        )));
+    }
+
+    if let Some(end) = end_sequence {
+        if sorted[sorted.len() - 1] > end {
+            return Err(Status::invalid_argument(format!(
+                "Sequence {} is above end_sequence {}",
+                sorted[sorted.len() - 1], end
+            )));
+        }
+    }
+
+    Ok(sorted)
+}
+
+/// Check if proof can be restarted (prover.move lines 444-462)
+fn can_restart_proof(proof: &ProofData, current_time_ms: u64) -> bool {
+    let is_timed_out = current_time_ms > proof.timestamp + PROOF_TIMEOUT_MS;
+    proof.status == 3 /* REJECTED */ || is_timed_out
+}
+
+/// Check if sub-proof can be reserved (prover.move lines 349-366, 520-530)
+fn can_reserve_proof(proof: &ProofData, current_time_ms: u64, is_block_proof: bool) -> bool {
+    let is_timed_out = current_time_ms > proof.timestamp + PROOF_TIMEOUT_MS;
+    proof.status == 2 /* CALCULATED */ ||
+    is_timed_out ||
+    (is_block_proof && (proof.status == 5 /* USED */ || proof.status == 4 /* RESERVED */))
+}
+
+/// Return sub-proof to calculated status (prover.move lines 334-338)
+fn return_proof_to_calculated(proof: &mut ProofData, current_time_ms: u64) {
+    proof.status = 2; // CALCULATED
+    proof.timestamp = current_time_ms;
+    proof.user = None;
+}
+
+/// Reserve a proof for merge (prover.move lines 340-372)
+fn reserve_proof(proof: &mut ProofData, current_time_ms: u64, user: String) {
+    proof.status = 4; // RESERVED
+    proof.timestamp = current_time_ms;
+    proof.user = Some(user);
+}
+
+/// Mark proof as used (prover.move lines 324-332)
+fn mark_proof_as_used(proof: &mut ProofData, current_time_ms: u64, user: String) {
+    proof.status = 5; // USED
+    proof.timestamp = current_time_ms;
+    proof.user = Some(user);
+}
+
+/// Convert ProofData to proto ProofInCalculation
+fn proof_data_to_proto(proof: &ProofData) -> ProofInCalculation {
+    ProofInCalculation {
+        status: proof.status as u32,
+        da_hash: proof.da_hash.clone(),
+        sequence1: proof.sequence1.clone().unwrap_or_default(),
+        sequence2: proof.sequence2.clone().unwrap_or_default(),
+        rejected_count: proof.rejected_count as u32,
+        timestamp: proof.timestamp,
+        prover: proof.prover.clone(),
+        user: proof.user.clone(),
+        job_id: proof.job_id.clone(),
+        sequences: proof.sequences.clone(),
+    }
 }
 
 /// StateService implementation
@@ -3618,6 +3739,776 @@ impl StateService for StateServiceImpl {
         Ok(Response::new(ListProofsResponse {
             proofs: proto_proofs,
             has_more,
+        }))
+    }
+
+    // ============================================================================
+    // Block Management Methods
+    // ============================================================================
+
+    async fn get_block(
+        &self,
+        request: Request<GetBlockRequest>,
+    ) -> Result<Response<GetBlockResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Query block from database
+        let block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block", e))?;
+
+        // Convert to proto message if found
+        let proto_block = block.map(|b| Block {
+            app_instance_id: b.app_instance_id,
+            block_number: b.block_number,
+            start_sequence: b.start_sequence,
+            end_sequence: b.end_sequence,
+            actions_commitment: b.actions_commitment,
+            state_commitment: b.state_commitment,
+            time_since_last_block: b.time_since_last_block,
+            number_of_transactions: b.number_of_transactions,
+            start_actions_commitment: b.start_actions_commitment,
+            end_actions_commitment: b.end_actions_commitment,
+            state_data_availability: b.state_data_availability,
+            proof_data_availability: b.proof_data_availability,
+            created_at: Some(to_timestamp(b.created_at)),
+            state_calculated_at: b.state_calculated_at.map(to_timestamp),
+            proved_at: b.proved_at.map(to_timestamp),
+        });
+
+        Ok(Response::new(GetBlockResponse {
+            block: proto_block,
+        }))
+    }
+
+    async fn get_blocks_range(
+        &self,
+        request: Request<GetBlocksRangeRequest>,
+    ) -> Result<Response<GetBlocksRangeResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Validate range
+        if req.from_block > req.to_block {
+            return Err(Status::invalid_argument("from_block must be <= to_block"));
+        }
+
+        // Query blocks from database
+        let blocks = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.gte(req.from_block))
+            .filter(blocks::Column::BlockNumber.lte(req.to_block))
+            .order_by_asc(blocks::Column::BlockNumber)
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch blocks range", e))?;
+
+        // Convert to proto messages
+        let proto_blocks = blocks
+            .into_iter()
+            .map(|b| Block {
+                app_instance_id: b.app_instance_id,
+                block_number: b.block_number,
+                start_sequence: b.start_sequence,
+                end_sequence: b.end_sequence,
+                actions_commitment: b.actions_commitment,
+                state_commitment: b.state_commitment,
+                time_since_last_block: b.time_since_last_block,
+                number_of_transactions: b.number_of_transactions,
+                start_actions_commitment: b.start_actions_commitment,
+                end_actions_commitment: b.end_actions_commitment,
+                state_data_availability: b.state_data_availability,
+                proof_data_availability: b.proof_data_availability,
+                created_at: Some(to_timestamp(b.created_at)),
+                state_calculated_at: b.state_calculated_at.map(to_timestamp),
+                proved_at: b.proved_at.map(to_timestamp),
+            })
+            .collect();
+
+        Ok(Response::new(GetBlocksRangeResponse {
+            blocks: proto_blocks,
+        }))
+    }
+
+    async fn try_create_block(
+        &self,
+        request: Request<TryCreateBlockRequest>,
+    ) -> Result<Response<TryCreateBlockResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Verify app instance exists
+        let _app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        // Get the last block to find the end sequence
+        let last_block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .order_by_desc(blocks::Column::BlockNumber)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch last block", e))?;
+
+        let (last_block_number, last_end_sequence, last_block_created_at) = match &last_block {
+            Some(block) => (block.block_number, block.end_sequence, Some(block.created_at)),
+            None => (0, 0, None), // No blocks yet
+        };
+
+        // Check if there are new sequences to include in a block
+        // We need to query the state table to find the highest sequence
+        let latest_state = state::Entity::find()
+            .filter(state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .order_by_desc(state::Column::Sequence)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch latest state", e))?;
+
+        let current_sequence = latest_state.map(|s| s.sequence).unwrap_or(0);
+
+        // If no new sequences, return None
+        if current_sequence <= last_end_sequence {
+            return Ok(Response::new(TryCreateBlockResponse {
+                block_number: None,
+                block: None,
+            }));
+        }
+
+        // Create new block
+        let new_block_number = last_block_number + 1;
+        let start_sequence = last_end_sequence + 1;
+        let end_sequence = current_sequence;
+
+        // Calculate time since last block
+        let time_since_last_block = last_block_created_at
+            .map(|created_at| {
+                let now = Utc::now();
+                let diff = now.signed_duration_since(created_at);
+                diff.num_milliseconds().max(0) as u64
+            });
+
+        // Count transactions in this block
+        let number_of_transactions = end_sequence - start_sequence + 1;
+
+        let new_block = blocks::ActiveModel {
+            app_instance_id: Set(req.app_instance_id.clone()),
+            block_number: Set(new_block_number),
+            start_sequence: Set(start_sequence),
+            end_sequence: Set(end_sequence),
+            actions_commitment: NotSet,
+            state_commitment: NotSet,
+            time_since_last_block: Set(time_since_last_block),
+            number_of_transactions: Set(number_of_transactions),
+            start_actions_commitment: NotSet,
+            end_actions_commitment: NotSet,
+            state_data_availability: NotSet,
+            proof_data_availability: NotSet,
+            created_at: Set(Utc::now()),
+            state_calculated_at: NotSet,
+            proved_at: NotSet,
+        };
+
+        let inserted = new_block
+            .insert(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to create block", e))?;
+
+        // Convert to proto message
+        let proto_block = Block {
+            app_instance_id: inserted.app_instance_id.clone(),
+            block_number: inserted.block_number,
+            start_sequence: inserted.start_sequence,
+            end_sequence: inserted.end_sequence,
+            actions_commitment: inserted.actions_commitment,
+            state_commitment: inserted.state_commitment,
+            time_since_last_block: inserted.time_since_last_block,
+            number_of_transactions: inserted.number_of_transactions,
+            start_actions_commitment: inserted.start_actions_commitment,
+            end_actions_commitment: inserted.end_actions_commitment,
+            state_data_availability: inserted.state_data_availability,
+            proof_data_availability: inserted.proof_data_availability,
+            created_at: Some(to_timestamp(inserted.created_at)),
+            state_calculated_at: inserted.state_calculated_at.map(to_timestamp),
+            proved_at: inserted.proved_at.map(to_timestamp),
+        };
+
+        info!(
+            "Created block #{} for app_instance {} (sequences {}-{})",
+            new_block_number, req.app_instance_id, start_sequence, end_sequence
+        );
+
+        Ok(Response::new(TryCreateBlockResponse {
+            block_number: Some(new_block_number),
+            block: Some(proto_block),
+        }))
+    }
+
+    async fn update_block_state_da(
+        &self,
+        request: Request<UpdateBlockStateDaRequest>,
+    ) -> Result<Response<UpdateBlockStateDaResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find the block
+        let block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block", e))?
+            .ok_or_else(|| Status::not_found("Block not found"))?;
+
+        // Update state_data_availability field
+        let mut block: blocks::ActiveModel = block.into();
+        block.state_data_availability = Set(Some(req.state_da.clone()));
+
+        block
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update block state DA", e))?;
+
+        info!(
+            "Updated state DA for block #{} in app_instance {}: {}",
+            req.block_number, req.app_instance_id, req.state_da
+        );
+
+        Ok(Response::new(UpdateBlockStateDaResponse {
+            success: true,
+            message: "State data availability updated successfully".to_string(),
+        }))
+    }
+
+    async fn update_block_proof_da(
+        &self,
+        request: Request<UpdateBlockProofDaRequest>,
+    ) -> Result<Response<UpdateBlockProofDaResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find the block
+        let block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block", e))?
+            .ok_or_else(|| Status::not_found("Block not found"))?;
+
+        // Update proof_data_availability field
+        let mut block: blocks::ActiveModel = block.into();
+        block.proof_data_availability = Set(Some(req.proof_da.clone()));
+
+        block
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update block proof DA", e))?;
+
+        info!(
+            "Updated proof DA for block #{} in app_instance {}: {}",
+            req.block_number, req.app_instance_id, req.proof_da
+        );
+
+        Ok(Response::new(UpdateBlockProofDaResponse {
+            success: true,
+            message: "Proof data availability updated successfully".to_string(),
+        }))
+    }
+
+    // ============================================================================
+    // Proof Calculation Management Methods
+    // ============================================================================
+
+    async fn get_proof_calculation(
+        &self,
+        request: Request<GetProofCalculationRequest>,
+    ) -> Result<Response<GetProofCalculationResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Query proof_calculations by app_instance_id and block_number
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?;
+
+        // Convert to proto if found
+        let proto_proof_calc = proof_calc.map(|pc| {
+            let proofs_data = parse_proofs_json(pc.proofs).unwrap_or_default();
+            ProofCalculation {
+                app_instance_id: pc.app_instance_id,
+                id: pc.id,
+                block_number: pc.block_number,
+                start_sequence: pc.start_sequence,
+                end_sequence: pc.end_sequence,
+                proofs: proofs_data.iter().map(proof_data_to_proto).collect(),
+                block_proof: pc.block_proof,
+                block_proof_submitted: pc.block_proof_submitted,
+                created_at: Some(to_timestamp(pc.created_at)),
+                updated_at: Some(to_timestamp(pc.updated_at)),
+            }
+        });
+
+        Ok(Response::new(GetProofCalculationResponse {
+            proof_calculation: proto_proof_calc,
+        }))
+    }
+
+    async fn get_proof_calculations_range(
+        &self,
+        request: Request<GetProofCalculationsRangeRequest>,
+    ) -> Result<Response<GetProofCalculationsRangeResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Validate range
+        if req.from_block > req.to_block {
+            return Err(Status::invalid_argument("from_block must be <= to_block"));
+        }
+
+        // Query proof_calculations range
+        let proof_calcs = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.gte(req.from_block))
+            .filter(proof_calculations::Column::BlockNumber.lte(req.to_block))
+            .order_by_asc(proof_calculations::Column::BlockNumber)
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculations range", e))?;
+
+        // Convert to proto messages
+        let proto_proof_calcs = proof_calcs
+            .into_iter()
+            .map(|pc| {
+                let proofs_data = parse_proofs_json(pc.proofs).unwrap_or_default();
+                ProofCalculation {
+                    app_instance_id: pc.app_instance_id,
+                    id: pc.id,
+                    block_number: pc.block_number,
+                    start_sequence: pc.start_sequence,
+                    end_sequence: pc.end_sequence,
+                    proofs: proofs_data.iter().map(proof_data_to_proto).collect(),
+                    block_proof: pc.block_proof,
+                    block_proof_submitted: pc.block_proof_submitted,
+                    created_at: Some(to_timestamp(pc.created_at)),
+                    updated_at: Some(to_timestamp(pc.updated_at)),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(GetProofCalculationsRangeResponse {
+            proof_calculations: proto_proof_calcs,
+        }))
+    }
+
+    async fn start_proving(
+        &self,
+        request: Request<StartProvingRequest>,
+    ) -> Result<Response<StartProvingResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Get current timestamp
+        let current_time_ms = Utc::now().timestamp_millis() as u64;
+
+        // Sort and validate all sequences (prover.move lines 383-413)
+        let sorted_sequences = sort_and_validate_sequences(
+            &req.sequences,
+            0, // We'll get actual start_sequence from proof_calculation
+            None,
+        )?;
+
+        let sorted_sequence1 = if !req.merged_sequences_1.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_1, 0, None)?)
+        } else {
+            None
+        };
+
+        let sorted_sequence2 = if !req.merged_sequences_2.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_2, 0, None)?)
+        } else {
+            None
+        };
+
+        // Find proof_calculations record
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?
+            .ok_or_else(|| Status::not_found("Proof calculation not found"))?;
+
+        // Validate sequences against start/end
+        let _ = sort_and_validate_sequences(
+            &sorted_sequences,
+            proof_calc.start_sequence,
+            proof_calc.end_sequence,
+        )?;
+
+        // Parse proofs JSON array
+        let mut proofs_data = parse_proofs_json(proof_calc.proofs.clone())?;
+
+        // Check if this is a block proof (covers entire range)
+        let is_block_proof = if let Some(end_seq) = proof_calc.end_sequence {
+            sorted_sequences.first() == Some(&proof_calc.start_sequence)
+                && sorted_sequences.last() == Some(&end_seq)
+        } else {
+            false
+        };
+
+        // Check if proof already exists
+        let existing_proof_idx = proofs_data.iter().position(|p| p.sequences == sorted_sequences);
+
+        if let Some(idx) = existing_proof_idx {
+            // Proof exists - check if can restart (prover.move lines 444-462)
+            let existing_proof = &proofs_data[idx];
+
+            if !can_restart_proof(existing_proof, current_time_ms) {
+                return Ok(Response::new(StartProvingResponse {
+                    success: false,
+                    message: format!(
+                        "Proof already exists with status {} and not timed out",
+                        existing_proof.status
+                    ),
+                }));
+            }
+
+            // Preserve rejected_count (prover.move line 471)
+            let rejected_count = existing_proof.rejected_count;
+            let old_sequence1 = existing_proof.sequence1.clone();
+            let old_sequence2 = existing_proof.sequence2.clone();
+
+            // Update existing proof with new values
+            proofs_data[idx] = ProofData {
+                status: 1, // STARTED
+                da_hash: None,
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: None,
+                sequences: sorted_sequences.clone(),
+            };
+
+            // Return old sub-proofs to CALCULATED (prover.move lines 473-502)
+            if let Some(seq1) = old_sequence1 {
+                if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                    return_proof_to_calculated(&mut proofs_data[proof1_idx], current_time_ms);
+                }
+            }
+            if let Some(seq2) = old_sequence2 {
+                if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                    return_proof_to_calculated(&mut proofs_data[proof2_idx], current_time_ms);
+                }
+            }
+        } else {
+            // New proof - check if sub-proofs can be reserved (prover.move lines 505-559)
+            if let Some(ref seq1) = sorted_sequence1 {
+                let proof1_idx = proofs_data.iter().position(|p| &p.sequences == seq1)
+                    .ok_or_else(|| Status::failed_precondition("Sub-proof 1 does not exist"))?;
+
+                if !can_reserve_proof(&proofs_data[proof1_idx], current_time_ms, is_block_proof) {
+                    return Ok(Response::new(StartProvingResponse {
+                        success: false,
+                        message: "Cannot reserve sub-proof 1".to_string(),
+                    }));
+                }
+            }
+
+            if let Some(ref seq2) = sorted_sequence2 {
+                let proof2_idx = proofs_data.iter().position(|p| &p.sequences == seq2)
+                    .ok_or_else(|| Status::failed_precondition("Sub-proof 2 does not exist"))?;
+
+                if !can_reserve_proof(&proofs_data[proof2_idx], current_time_ms, is_block_proof) {
+                    return Ok(Response::new(StartProvingResponse {
+                        success: false,
+                        message: "Cannot reserve sub-proof 2".to_string(),
+                    }));
+                }
+            }
+
+            // All checks passed - insert new proof (prover.move line 562)
+            proofs_data.push(ProofData {
+                status: 1, // STARTED
+                da_hash: None,
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count: 0,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: None,
+                sequences: sorted_sequences.clone(),
+            });
+        }
+
+        // Reserve sub-proofs (prover.move lines 566-593)
+        if let Some(seq1) = sorted_sequence1 {
+            if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                reserve_proof(&mut proofs_data[proof1_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+        if let Some(seq2) = sorted_sequence2 {
+            if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                reserve_proof(&mut proofs_data[proof2_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+
+        // Serialize and save back to database
+        let proofs_json = serialize_proofs_json(&proofs_data)?;
+        let mut proof_calc_active: proof_calculations::ActiveModel = proof_calc.into();
+        proof_calc_active.proofs = Set(Some(proofs_json));
+        proof_calc_active.updated_at = Set(Utc::now());
+
+        proof_calc_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update proof calculation", e))?;
+
+        info!(
+            "Started proving for block #{} in app_instance {}, sequences: {:?}",
+            req.block_number, req.app_instance_id, sorted_sequences
+        );
+
+        Ok(Response::new(StartProvingResponse {
+            success: true,
+            message: "Proof started successfully".to_string(),
+        }))
+    }
+
+    async fn submit_calculated_proof(
+        &self,
+        request: Request<SubmitCalculatedProofRequest>,
+    ) -> Result<Response<SubmitCalculatedProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Get current timestamp
+        let current_time_ms = Utc::now().timestamp_millis() as u64;
+
+        // Sort and validate sequences (prover.move lines 722-752)
+        let sorted_sequences = sort_and_validate_sequences(&req.sequences, 0, None)?;
+        let sorted_sequence1 = if !req.merged_sequences_1.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_1, 0, None)?)
+        } else {
+            None
+        };
+        let sorted_sequence2 = if !req.merged_sequences_2.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_2, 0, None)?)
+        } else {
+            None
+        };
+
+        // Find proof_calculations record
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?
+            .ok_or_else(|| Status::not_found("Proof calculation not found"))?;
+
+        // Parse proofs JSON array
+        let mut proofs_data = parse_proofs_json(proof_calc.proofs.clone())?;
+
+        // Find or create proof
+        let existing_proof_idx = proofs_data.iter().position(|p| p.sequences == sorted_sequences);
+
+        if let Some(idx) = existing_proof_idx {
+            // Update existing proof, preserve rejected_count (prover.move line 782)
+            let rejected_count = proofs_data[idx].rejected_count;
+            proofs_data[idx] = ProofData {
+                status: 2, // CALCULATED
+                da_hash: Some(req.da_hash.clone()),
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: Some(req.job_id.clone()),
+                sequences: sorted_sequences.clone(),
+            };
+        } else {
+            // Insert new proof (prover.move line 783)
+            proofs_data.push(ProofData {
+                status: 2, // CALCULATED
+                da_hash: Some(req.da_hash.clone()),
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count: 0,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: Some(req.job_id.clone()),
+                sequences: sorted_sequences.clone(),
+            });
+        }
+
+        // Mark sub-proofs as USED (prover.move lines 784-811)
+        if let Some(seq1) = sorted_sequence1 {
+            if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                mark_proof_as_used(&mut proofs_data[proof1_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+        if let Some(seq2) = sorted_sequence2 {
+            if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                mark_proof_as_used(&mut proofs_data[proof2_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+
+        // Check if block proof is complete (prover.move lines 812-825)
+        let mut block_proof_ready = false;
+        if let Some(end_seq) = proof_calc.end_sequence {
+            if sorted_sequences.first() == Some(&proof_calc.start_sequence)
+                && sorted_sequences.last() == Some(&end_seq)
+            {
+                // This is the block proof - mark as finished
+                block_proof_ready = true;
+            }
+        }
+
+        // Serialize and save
+        let proofs_json = serialize_proofs_json(&proofs_data)?;
+        let mut proof_calc_active: proof_calculations::ActiveModel = proof_calc.into();
+        proof_calc_active.proofs = Set(Some(proofs_json));
+
+        if block_proof_ready {
+            proof_calc_active.block_proof = Set(Some(req.da_hash.clone()));
+        }
+
+        proof_calc_active.updated_at = Set(Utc::now());
+
+        proof_calc_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update proof calculation", e))?;
+
+        info!(
+            "Submitted proof for block #{} in app_instance {}, sequences: {:?}, block_proof_ready: {}",
+            req.block_number, req.app_instance_id, sorted_sequences, block_proof_ready
+        );
+
+        Ok(Response::new(SubmitCalculatedProofResponse {
+            success: true,
+            message: "Proof submitted successfully".to_string(),
+            block_proof_ready,
+        }))
+    }
+
+    async fn reject_proof(
+        &self,
+        request: Request<RejectProofRequest>,
+    ) -> Result<Response<RejectProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Get current timestamp
+        let current_time_ms = Utc::now().timestamp_millis() as u64;
+
+        // Sort and validate sequences (prover.move lines 610-614)
+        let sorted_sequences = sort_and_validate_sequences(&req.sequences, 0, None)?;
+
+        // Find proof_calculations record
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?
+            .ok_or_else(|| Status::not_found("Proof calculation not found"))?;
+
+        // Parse proofs JSON array
+        let mut proofs_data = parse_proofs_json(proof_calc.proofs.clone())?;
+
+        // Find the proof
+        let proof_idx = proofs_data
+            .iter()
+            .position(|p| p.sequences == sorted_sequences)
+            .ok_or_else(|| Status::not_found("Proof not found"))?;
+
+        // Get sub-proof sequences before updating (prover.move lines 616-627)
+        let sequence1 = proofs_data[proof_idx].sequence1.clone();
+        let sequence2 = proofs_data[proof_idx].sequence2.clone();
+
+        // Update proof status to REJECTED and increment rejected_count (lines 620-621)
+        proofs_data[proof_idx].status = 3; // REJECTED
+        proofs_data[proof_idx].rejected_count += 1;
+        proofs_data[proof_idx].timestamp = current_time_ms;
+
+        // Return sub-proofs to CALCULATED (prover.move lines 629-652)
+        if let Some(seq1) = sequence1 {
+            if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                return_proof_to_calculated(&mut proofs_data[proof1_idx], current_time_ms);
+            }
+        }
+        if let Some(seq2) = sequence2 {
+            if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                return_proof_to_calculated(&mut proofs_data[proof2_idx], current_time_ms);
+            }
+        }
+
+        // Serialize and save
+        let proofs_json = serialize_proofs_json(&proofs_data)?;
+        let mut proof_calc_active: proof_calculations::ActiveModel = proof_calc.into();
+        proof_calc_active.proofs = Set(Some(proofs_json));
+        proof_calc_active.updated_at = Set(Utc::now());
+
+        proof_calc_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update proof calculation", e))?;
+
+        info!(
+            "Rejected proof for block #{} in app_instance {}, sequences: {:?}",
+            req.block_number, req.app_instance_id, sorted_sequences
+        );
+
+        Ok(Response::new(RejectProofResponse {
+            success: true,
+            message: "Proof rejected successfully".to_string(),
         }))
     }
 

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use silvana_coordination_trait::{
     AppInstance, Block, BlockSettlement, Coordination, CoordinationLayer, EventStream,
-    Job, JobCreatedEvent, MulticallOperations, MulticallResult, ProofCalculation, SequenceState,
+    Job, JobCreatedEvent, MulticallOperations, MulticallResult, Proof, ProofCalculation, ProofStatus, SequenceState,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -244,6 +244,90 @@ impl PrivateCoordination {
                     transition_data: Vec::new(),
                 })
             }
+        }
+    }
+
+    /// Convert proto Block to trait Block
+    fn proto_block_to_trait_block(&self, proto_block: proto::silvana::state::v1::Block) -> Block {
+        Block {
+            name: format!("block-{}", proto_block.block_number),
+            block_number: proto_block.block_number,
+            start_sequence: proto_block.start_sequence,
+            end_sequence: proto_block.end_sequence,
+            actions_commitment: proto_block.actions_commitment.unwrap_or_default(),
+            state_commitment: proto_block.state_commitment.unwrap_or_default(),
+            time_since_last_block: proto_block.time_since_last_block.unwrap_or(0),
+            number_of_transactions: proto_block.number_of_transactions,
+            start_actions_commitment: proto_block.start_actions_commitment.unwrap_or_default(),
+            end_actions_commitment: proto_block.end_actions_commitment.unwrap_or_default(),
+            state_data_availability: proto_block.state_data_availability,
+            proof_data_availability: proto_block.proof_data_availability,
+            created_at: proto_block
+                .created_at
+                .map(|ts| (ts.seconds as u64) * 1000 + (ts.nanos as u64) / 1_000_000)
+                .unwrap_or(0),
+            state_calculated_at: proto_block
+                .state_calculated_at
+                .map(|ts| (ts.seconds as u64) * 1000 + (ts.nanos as u64) / 1_000_000),
+            proved_at: proto_block
+                .proved_at
+                .map(|ts| (ts.seconds as u64) * 1000 + (ts.nanos as u64) / 1_000_000),
+        }
+    }
+
+    /// Convert proto ProofCalculation to trait ProofCalculation
+    fn proto_proof_calculation_to_trait(
+        &self,
+        proto_calc: proto::silvana::state::v1::ProofCalculation,
+    ) -> ProofCalculation {
+        ProofCalculation {
+            id: proto_calc.id,
+            block_number: proto_calc.block_number,
+            start_sequence: proto_calc.start_sequence,
+            end_sequence: proto_calc.end_sequence,
+            proofs: proto_calc
+                .proofs
+                .into_iter()
+                .map(|p| self.proto_proof_to_trait(p))
+                .collect(),
+            block_proof: proto_calc.block_proof,
+            block_proof_submitted: proto_calc.block_proof_submitted,
+        }
+    }
+
+    /// Convert proto ProofInCalculation to trait Proof
+    fn proto_proof_to_trait(
+        &self,
+        proto_proof: proto::silvana::state::v1::ProofInCalculation,
+    ) -> Proof {
+        let status = match proto_proof.status {
+            1 => ProofStatus::Started,
+            2 => ProofStatus::Calculated,
+            3 => ProofStatus::Rejected,
+            4 => ProofStatus::Reserved,
+            5 => ProofStatus::Used,
+            _ => ProofStatus::Started, // Default fallback
+        };
+
+        Proof {
+            status,
+            da_hash: proto_proof.da_hash,
+            sequence1: if proto_proof.sequence1.is_empty() {
+                None
+            } else {
+                Some(proto_proof.sequence1)
+            },
+            sequence2: if proto_proof.sequence2.is_empty() {
+                None
+            } else {
+                Some(proto_proof.sequence2)
+            },
+            rejected_count: proto_proof.rejected_count as u16,
+            timestamp: proto_proof.timestamp,
+            prover: proto_proof.prover,
+            user: proto_proof.user,
+            job_id: proto_proof.job_id.unwrap_or_default(),
+            sequences: proto_proof.sequences,
         }
     }
 }
@@ -825,95 +909,306 @@ impl Coordination for PrivateCoordination {
 
     // ===== Block Management =====
 
-    async fn fetch_block(&self, _app_instance: &str, _block_number: u64) -> Result<Option<Block>> {
-        Err(PrivateCoordinationError::NotImplemented("fetch_block - Phase 2".to_string()))
+    async fn fetch_block(&self, app_instance: &str, block_number: u64) -> Result<Option<Block>> {
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetBlockRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_block(request)
+            .await?
+            .into_inner();
+
+        Ok(response.block.map(|b| self.proto_block_to_trait_block(b)))
     }
 
     async fn fetch_blocks_range(
         &self,
-        _app_instance: &str,
-        _from_block: u64,
-        _to_block: u64,
+        app_instance: &str,
+        from_block: u64,
+        to_block: u64,
     ) -> Result<Vec<Block>> {
-        Err(PrivateCoordinationError::NotImplemented("fetch_blocks_range - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetBlocksRangeRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            from_block,
+            to_block,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_blocks_range(request)
+            .await?
+            .into_inner();
+
+        Ok(response
+            .blocks
+            .into_iter()
+            .map(|b| self.proto_block_to_trait_block(b))
+            .collect())
     }
 
-    async fn try_create_block(&self, _app_instance: &str) -> Result<Option<u64>> {
-        Err(PrivateCoordinationError::NotImplemented("try_create_block - Phase 2".to_string()))
+    async fn try_create_block(&self, app_instance: &str) -> Result<Option<u64>> {
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::TryCreateBlockRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .try_create_block(request)
+            .await?
+            .into_inner();
+
+        Ok(response.block_number)
     }
 
     async fn update_block_state_data_availability(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _state_da: String,
+        app_instance: &str,
+        block_number: u64,
+        state_da: String,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("update_block_state_data_availability - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::UpdateBlockStateDaRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            state_da,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .update_block_state_da(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to update block state DA: {}",
+                response.message
+            )))
+        }
     }
 
     async fn update_block_proof_data_availability(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _proof_da: String,
+        app_instance: &str,
+        block_number: u64,
+        proof_da: String,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("update_block_proof_data_availability - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::UpdateBlockProofDaRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            proof_da,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .update_block_proof_da(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to update block proof DA: {}",
+                response.message
+            )))
+        }
     }
 
     // ===== Proof Management =====
 
     async fn fetch_proof_calculation(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
+        app_instance: &str,
+        block_number: u64,
     ) -> Result<Option<ProofCalculation>> {
-        Err(PrivateCoordinationError::NotImplemented("fetch_proof_calculation - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetProofCalculationRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_proof_calculation(request)
+            .await?
+            .into_inner();
+
+        Ok(response
+            .proof_calculation
+            .map(|pc| self.proto_proof_calculation_to_trait(pc)))
     }
 
     async fn fetch_proof_calculations_range(
         &self,
-        _app_instance: &str,
-        _from_block: u64,
-        _to_block: u64,
+        app_instance: &str,
+        from_block: u64,
+        to_block: u64,
     ) -> Result<Vec<ProofCalculation>> {
-        Err(PrivateCoordinationError::NotImplemented("fetch_proof_calculations_range - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetProofCalculationsRangeRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            from_block,
+            to_block,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_proof_calculations_range(request)
+            .await?
+            .into_inner();
+
+        Ok(response
+            .proof_calculations
+            .into_iter()
+            .map(|pc| self.proto_proof_calculation_to_trait(pc))
+            .collect())
     }
 
     async fn start_proving(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _sequences: Vec<u64>,
-        _merged_sequences_1: Option<Vec<u64>>,
-        _merged_sequences_2: Option<Vec<u64>>,
+        app_instance: &str,
+        block_number: u64,
+        sequences: Vec<u64>,
+        merged_sequences_1: Option<Vec<u64>>,
+        merged_sequences_2: Option<Vec<u64>>,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("start_proving - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::StartProvingRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            sequences,
+            merged_sequences_1: merged_sequences_1.unwrap_or_default(),
+            merged_sequences_2: merged_sequences_2.unwrap_or_default(),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .start_proving(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to start proving: {}",
+                response.message
+            )))
+        }
     }
 
     async fn submit_proof(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _sequences: Vec<u64>,
-        _merged_sequences_1: Option<Vec<u64>>,
-        _merged_sequences_2: Option<Vec<u64>>,
-        _job_id: String,
-        _da_hash: String,
-        _cpu_cores: u8,
-        _prover_architecture: String,
-        _prover_memory: u64,
-        _cpu_time: u64,
+        app_instance: &str,
+        block_number: u64,
+        sequences: Vec<u64>,
+        merged_sequences_1: Option<Vec<u64>>,
+        merged_sequences_2: Option<Vec<u64>>,
+        job_id: String,
+        da_hash: String,
+        cpu_cores: u8,
+        prover_architecture: String,
+        prover_memory: u64,
+        cpu_time: u64,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("submit_proof - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::SubmitCalculatedProofRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            sequences,
+            merged_sequences_1: merged_sequences_1.unwrap_or_default(),
+            merged_sequences_2: merged_sequences_2.unwrap_or_default(),
+            job_id,
+            da_hash,
+            cpu_cores: cpu_cores as u32,
+            prover_architecture,
+            prover_memory,
+            cpu_time,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .submit_calculated_proof(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to submit proof: {}",
+                response.message
+            )))
+        }
     }
 
     async fn reject_proof(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _sequences: Vec<u64>,
+        app_instance: &str,
+        block_number: u64,
+        sequences: Vec<u64>,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("reject_proof - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::RejectProofRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            sequences,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .reject_proof(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to reject proof: {}",
+                response.message
+            )))
+        }
     }
 
     // ===== Settlement =====
