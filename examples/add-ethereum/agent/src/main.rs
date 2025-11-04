@@ -10,7 +10,7 @@
 //! similar to the TypeScript agent in examples/add/agent.
 
 use anyhow::{Context, Result};
-use coordinator_client::{CoordinatorClient, LogLevel};
+use silvana_sdk::{agent, get_job, complete_job, fail_job};
 use log::{error, info, warn};
 use serde::Deserialize;
 use std::time::Duration;
@@ -114,18 +114,13 @@ impl AgentConfig {
 
 /// Process a single job
 async fn process_job(
-    client: &mut CoordinatorClient,
     job_id: &str,
     app_instance_method: &str,
 ) -> Result<()> {
     info!("Processing job {}: method={}", job_id, app_instance_method);
 
     // Send log to coordinator
-    client
-        .send_log(
-            LogLevel::Info,
-            &format!("Starting job processing: method={}", app_instance_method),
-        )
+    agent::info(&format!("Starting job processing: method={}", app_instance_method))
         .await
         .ok();
 
@@ -147,8 +142,7 @@ async fn process_job(
         }
         method => {
             warn!("  → Unknown job method: {}, failing job", method);
-            client
-                .fail_job(&format!("Unknown job method: {}", method))
+            fail_job(&format!("Unknown job method: {}", method))
                 .await
                 .context("Failed to fail job")?;
             return Ok(());
@@ -157,11 +151,10 @@ async fn process_job(
 
     // Mark job as completed
     info!("  → Completing job {}", job_id);
-    client.complete_job().await.context("Failed to complete job")?;
+    complete_job().await.context("Failed to complete job")?;
 
     // Send completion log to coordinator
-    client
-        .send_log(LogLevel::Info, &format!("Job {} completed", job_id))
+    agent::info(&format!("Job {} completed", job_id))
         .await
         .ok();
 
@@ -176,7 +169,7 @@ async fn run_agent(config: AgentConfig) -> Result<()> {
         .context("SESSION_ID is required")?;
     let developer = config.developer.as_ref()
         .context("DEVELOPER is required")?;
-    let agent = config.agent.as_ref()
+    let agent_name = config.agent.as_ref()
         .context("AGENT is required")?;
     let agent_method = config.agent_method.as_ref()
         .context("AGENT_METHOD is required")?;
@@ -185,26 +178,20 @@ async fn run_agent(config: AgentConfig) -> Result<()> {
     info!("  Coordinator: {}", config.coordinator_url);
     info!("  Session ID: {}", session_id);
     info!("  Developer: {}", developer);
-    info!("  Agent: {}", agent);
+    info!("  Agent: {}", agent_name);
     info!("  Agent Method: {}", agent_method);
 
+    // Set environment variables for SDK
+    std::env::set_var("SESSION_ID", session_id);
+    std::env::set_var("DEVELOPER", developer);
+    std::env::set_var("AGENT", agent_name);
+    std::env::set_var("AGENT_METHOD", agent_method);
+    std::env::set_var("COORDINATOR_URL", &config.coordinator_url);
 
-    // Initialize coordinator client
-    let mut client = CoordinatorClient::new(
-        &config.coordinator_url,
-        session_id.clone(),
-        developer.clone(),
-        agent.clone(),
-        agent_method.clone(),
-    )
-    .await
-    .context("Failed to initialize coordinator client")?;
-
-    info!("✓ Coordinator client initialized");
+    info!("✓ SDK environment configured");
 
     // Send agent started message
-    client
-        .send_log(LogLevel::Info, "Agent started and ready for jobs")
+    agent::info("Agent started and ready for jobs")
         .await
         .ok();
 
@@ -257,7 +244,7 @@ async fn run_agent(config: AgentConfig) -> Result<()> {
         }
 
         // Fetch pending job
-        match client.get_job().await {
+        match get_job().await {
             Ok(Some(job)) => {
                 job_count += 1;
                 info!("\nJob #{} (ID: {})", job_count, job.job_id);
@@ -267,18 +254,17 @@ async fn run_agent(config: AgentConfig) -> Result<()> {
                 info!("  Sequence: {}", job.job_sequence);
 
                 // Process the job
-                if let Err(e) = process_job(&mut client, &job.job_id, &job.app_instance_method).await
+                if let Err(e) = process_job(&job.job_id, &job.app_instance_method).await
                 {
                     error!("✗ Error processing job {}: {}", job.job_id, e);
 
                     // Try to mark job as failed
-                    if let Err(fail_err) = client.fail_job(&format!("Agent error: {}", e)).await {
+                    if let Err(fail_err) = fail_job(&format!("Agent error: {}", e)).await {
                         error!("Failed to mark job as failed: {}", fail_err);
                     }
 
                     // Send error log to coordinator
-                    client
-                        .send_log(LogLevel::Error, &format!("Job failed: {}", e))
+                    agent::error(&format!("Job failed: {}", e))
                         .await
                         .ok();
                 }
@@ -291,8 +277,7 @@ async fn run_agent(config: AgentConfig) -> Result<()> {
             Err(e) => {
                 error!("Error fetching jobs: {}", e);
                 // Send error log to coordinator
-                client
-                    .send_log(LogLevel::Error, &format!("Error fetching jobs: {}", e))
+                agent::error(&format!("Error fetching jobs: {}", e))
                     .await
                     .ok();
                 // Exit on error
@@ -304,11 +289,7 @@ async fn run_agent(config: AgentConfig) -> Result<()> {
     signal_handle.close();
 
     // Send agent stopped message
-    client
-        .send_log(
-            LogLevel::Info,
-            &format!("Agent stopped. Processed {} job(s)", job_count),
-        )
+    agent::info(&format!("Agent stopped. Processed {} job(s)", job_count))
         .await
         .ok();
 

@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Coordinator gRPC client
-coordinator-client = { path = "./coordinator-client" }
+# Silvana SDK
+silvana-sdk = { path = "../../../crates/sdk" }
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

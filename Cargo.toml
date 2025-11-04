@@ -24,6 +24,7 @@ members = [
     "crates/secrets-client",
     "crates/storage",
     "crates/state",
+    "crates/sdk",
     "xtask",
 ]
 exclude = [
