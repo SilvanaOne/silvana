@@ -496,11 +496,11 @@ fn decode_job_created_event(bcs_data: &[u8]) -> Result<JobCreatedEvent, SilvanaS
         bcs_event.block_number
     );
 
-    // Add "0x" prefix to app_instance if not present (Sui addresses need the prefix)
+    // Remove "0x" prefix from app_instance if present for consistency
     let app_instance = if bcs_event.app_instance.starts_with("0x") {
-        bcs_event.app_instance
+        bcs_event.app_instance[2..].to_string()
     } else {
-        format!("0x{}", bcs_event.app_instance)
+        bcs_event.app_instance
     };
 
     Ok(JobCreatedEvent {
