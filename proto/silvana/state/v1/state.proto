@@ -291,6 +291,30 @@ message ProofCalculation {
   google.protobuf.Timestamp updated_at = 10;
 }
 
+// Settlement message
+message Settlement {
+  string app_instance_id = 1;
+  string chain = 2;
+  uint64 last_settled_block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional string settlement_address = 4;
+  optional uint64 settlement_job = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// Block Settlement message
+message BlockSettlement {
+  string app_instance_id = 1;
+  uint64 block_number = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 3;
+  optional string settlement_tx_hash = 4;
+  optional uint64 settlement_tx_included_in_block = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional google.protobuf.Timestamp sent_to_settlement_at = 6;
+  optional google.protobuf.Timestamp settled_at = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
 // ============================================================================
 // Service Request/Response Messages
 // ============================================================================
@@ -994,6 +1018,87 @@ message RejectProofResponse {
   string message = 2;
 }
 
+// Settlement operations
+message GetBlockSettlementRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 4;
+}
+
+message GetBlockSettlementResponse {
+  BlockSettlement block_settlement = 1;
+}
+
+message GetSettlementChainsRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message GetSettlementChainsResponse {
+  repeated string chains = 1;
+}
+
+message GetSettlementAddressRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string chain = 3;
+}
+
+message GetSettlementAddressResponse {
+  optional string settlement_address = 1;
+}
+
+message GetSettlementJobForChainRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string chain = 3;
+}
+
+message GetSettlementJobForChainResponse {
+  optional uint64 settlement_job = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+message SetSettlementAddressRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string chain = 3;
+  optional string settlement_address = 4;
+}
+
+message SetSettlementAddressResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateBlockSettlementTxHashRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 4;
+  optional string settlement_tx_hash = 5;
+  optional google.protobuf.Timestamp sent_to_settlement_at = 6;
+}
+
+message UpdateBlockSettlementTxHashResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateBlockSettlementTxIncludedInBlockRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 4;
+  optional uint64 settlement_tx_included_in_block = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional google.protobuf.Timestamp settled_at = 6;
+}
+
+message UpdateBlockSettlementTxIncludedInBlockResponse {
+  bool success = 1;
+  string message = 2;
+}
+
 // ============================================================================
 // Coordinator Management Messages
 // ============================================================================
@@ -1265,6 +1370,15 @@ service StateService {
   rpc StartProving(StartProvingRequest) returns (StartProvingResponse);
   rpc SubmitCalculatedProof(SubmitCalculatedProofRequest) returns (SubmitCalculatedProofResponse);
   rpc RejectProof(RejectProofRequest) returns (RejectProofResponse);
+
+  // Settlement Management (agent operations with JWT)
+  rpc GetBlockSettlement(GetBlockSettlementRequest) returns (GetBlockSettlementResponse);
+  rpc GetSettlementChains(GetSettlementChainsRequest) returns (GetSettlementChainsResponse);
+  rpc GetSettlementAddress(GetSettlementAddressRequest) returns (GetSettlementAddressResponse);
+  rpc GetSettlementJobForChain(GetSettlementJobForChainRequest) returns (GetSettlementJobForChainResponse);
+  rpc SetSettlementAddress(SetSettlementAddressRequest) returns (SetSettlementAddressResponse);
+  rpc UpdateBlockSettlementTxHash(UpdateBlockSettlementTxHashRequest) returns (UpdateBlockSettlementTxHashResponse);
+  rpc UpdateBlockSettlementTxIncludedInBlock(UpdateBlockSettlementTxIncludedInBlockRequest) returns (UpdateBlockSettlementTxIncludedInBlockResponse);
 
   // Coordinator Operations (authenticated with coordinator's Ed25519 key)
   rpc CoordinatorJobOperation(CoordinatorJobRequest) returns (CoordinatorJobResponse);

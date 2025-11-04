@@ -22,8 +22,8 @@ use crate::{
     coordinator_auth::verify_and_authorize,
     database::Database,
     entity::{
-        app_instance_kv_binary, app_instance_kv_string, app_instances, blocks, jobs,
-        object_lock_queue, object_versions, objects, optimistic_state, proof_calculations, proofs, state, user_actions,
+        app_instance_kv_binary, app_instance_kv_string, app_instances, block_settlements, blocks, jobs,
+        object_lock_queue, object_versions, objects, optimistic_state, proof_calculations, proofs, settlements, state, user_actions,
         lock_request_bundle,
         coordinator_groups, app_instance_coordinator_access,
     },
@@ -4509,6 +4509,354 @@ impl StateService for StateServiceImpl {
         Ok(Response::new(RejectProofResponse {
             success: true,
             message: "Proof rejected successfully".to_string(),
+        }))
+    }
+
+    // ============================================================================
+    // Settlement Management Methods
+    // ============================================================================
+
+    async fn get_block_settlement(
+        &self,
+        request: Request<GetBlockSettlementRequest>,
+    ) -> Result<Response<GetBlockSettlementResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch block settlement from database
+        let block_settlement = block_settlements::Entity::find()
+            .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(block_settlements::Column::BlockNumber.eq(req.block_number))
+            .filter(block_settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block settlement", e))?
+            .ok_or_else(|| Status::not_found("Block settlement not found"))?;
+
+        // Convert to proto
+        let proto_block_settlement = crate::proto::BlockSettlement {
+            app_instance_id: block_settlement.app_instance_id,
+            block_number: block_settlement.block_number,
+            chain: block_settlement.chain,
+            settlement_tx_hash: block_settlement.settlement_tx_hash,
+            settlement_tx_included_in_block: block_settlement.settlement_tx_included_in_block,
+            sent_to_settlement_at: block_settlement.sent_to_settlement_at.map(|dt| {
+                let timestamp_millis = dt.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+            settled_at: block_settlement.settled_at.map(|dt| {
+                let timestamp_millis = dt.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+            created_at: Some({
+                let timestamp_millis = block_settlement.created_at.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+            updated_at: Some({
+                let timestamp_millis = block_settlement.updated_at.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+        };
+
+        Ok(Response::new(GetBlockSettlementResponse {
+            block_settlement: Some(proto_block_settlement),
+        }))
+    }
+
+    async fn get_settlement_chains(
+        &self,
+        request: Request<GetSettlementChainsRequest>,
+    ) -> Result<Response<GetSettlementChainsResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Query distinct chains from settlements table
+        let chains: Vec<String> = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement chains", e))?
+            .into_iter()
+            .map(|s| s.chain)
+            .collect();
+
+        Ok(Response::new(GetSettlementChainsResponse { chains }))
+    }
+
+    async fn get_settlement_address(
+        &self,
+        request: Request<GetSettlementAddressRequest>,
+    ) -> Result<Response<GetSettlementAddressResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch settlement record
+        let settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        let settlement_address = settlement.and_then(|s| s.settlement_address);
+
+        Ok(Response::new(GetSettlementAddressResponse {
+            settlement_address,
+        }))
+    }
+
+    async fn get_settlement_job_for_chain(
+        &self,
+        request: Request<GetSettlementJobForChainRequest>,
+    ) -> Result<Response<GetSettlementJobForChainResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch settlement record
+        let settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        let settlement_job = settlement.and_then(|s| s.settlement_job);
+
+        Ok(Response::new(GetSettlementJobForChainResponse {
+            settlement_job,
+        }))
+    }
+
+    async fn set_settlement_address(
+        &self,
+        request: Request<SetSettlementAddressRequest>,
+    ) -> Result<Response<SetSettlementAddressResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find or create settlement record
+        let existing_settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        if let Some(settlement) = existing_settlement {
+            // Update existing settlement
+            let mut active: settlements::ActiveModel = settlement.into();
+            active.settlement_address = Set(req.settlement_address.clone());
+            active.updated_at = Set(chrono::Utc::now().into());
+
+            active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update settlement address", e))?;
+        } else {
+            // Create new settlement record
+            let new_settlement = settlements::ActiveModel {
+                app_instance_id: Set(req.app_instance_id.clone()),
+                chain: Set(req.chain.clone()),
+                last_settled_block_number: Set(0),
+                settlement_address: Set(req.settlement_address.clone()),
+                settlement_job: Set(None),
+                created_at: Set(chrono::Utc::now().into()),
+                updated_at: Set(chrono::Utc::now().into()),
+            };
+
+            new_settlement
+                .insert(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to create settlement", e))?;
+        }
+
+        info!(
+            "Set settlement address for app_instance {} chain {} to {:?}",
+            req.app_instance_id, req.chain, req.settlement_address
+        );
+
+        Ok(Response::new(SetSettlementAddressResponse {
+            success: true,
+            message: "Settlement address set successfully".to_string(),
+        }))
+    }
+
+    async fn update_block_settlement_tx_hash(
+        &self,
+        request: Request<UpdateBlockSettlementTxHashRequest>,
+    ) -> Result<Response<UpdateBlockSettlementTxHashResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find or create block settlement
+        let existing_block_settlement = block_settlements::Entity::find()
+            .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(block_settlements::Column::BlockNumber.eq(req.block_number))
+            .filter(block_settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block settlement", e))?;
+
+        if let Some(block_settlement) = existing_block_settlement {
+            // Update existing
+            let mut active: block_settlements::ActiveModel = block_settlement.into();
+            active.settlement_tx_hash = Set(req.settlement_tx_hash.clone());
+            active.sent_to_settlement_at = Set(req.sent_to_settlement_at.map(|ts| {
+                let timestamp_millis = (ts.seconds as i64) * 1000 + (ts.nanos as i64) / 1_000_000;
+                chrono::DateTime::from_timestamp_millis(timestamp_millis)
+                    .expect("Invalid timestamp")
+                    .into()
+            }));
+            active.updated_at = Set(chrono::Utc::now().into());
+
+            active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update block settlement tx hash", e))?;
+        } else {
+            // Create new block settlement
+            let new_block_settlement = block_settlements::ActiveModel {
+                app_instance_id: Set(req.app_instance_id.clone()),
+                block_number: Set(req.block_number),
+                chain: Set(req.chain.clone()),
+                settlement_tx_hash: Set(req.settlement_tx_hash.clone()),
+                settlement_tx_included_in_block: Set(None),
+                sent_to_settlement_at: Set(req.sent_to_settlement_at.map(|ts| {
+                    let timestamp_millis = (ts.seconds as i64) * 1000 + (ts.nanos as i64) / 1_000_000;
+                    chrono::DateTime::from_timestamp_millis(timestamp_millis)
+                        .expect("Invalid timestamp")
+                        .into()
+                })),
+                settled_at: Set(None),
+                created_at: Set(chrono::Utc::now().into()),
+                updated_at: Set(chrono::Utc::now().into()),
+            };
+
+            new_block_settlement
+                .insert(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to create block settlement", e))?;
+        }
+
+        info!(
+            "Updated block settlement tx hash for app_instance {} block #{} chain {} to {:?}",
+            req.app_instance_id, req.block_number, req.chain, req.settlement_tx_hash
+        );
+
+        Ok(Response::new(UpdateBlockSettlementTxHashResponse {
+            success: true,
+            message: "Block settlement tx hash updated successfully".to_string(),
+        }))
+    }
+
+    async fn update_block_settlement_tx_included_in_block(
+        &self,
+        request: Request<UpdateBlockSettlementTxIncludedInBlockRequest>,
+    ) -> Result<Response<UpdateBlockSettlementTxIncludedInBlockResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch block settlement
+        let block_settlement = block_settlements::Entity::find()
+            .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(block_settlements::Column::BlockNumber.eq(req.block_number))
+            .filter(block_settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block settlement", e))?
+            .ok_or_else(|| Status::not_found("Block settlement not found"))?;
+
+        // Update block settlement
+        let mut active: block_settlements::ActiveModel = block_settlement.into();
+        active.settlement_tx_included_in_block = Set(req.settlement_tx_included_in_block);
+        active.settled_at = Set(req.settled_at.map(|ts| {
+            let timestamp_millis = (ts.seconds as i64) * 1000 + (ts.nanos as i64) / 1_000_000;
+            chrono::DateTime::from_timestamp_millis(timestamp_millis)
+                .expect("Invalid timestamp")
+                .into()
+        }));
+        active.updated_at = Set(chrono::Utc::now().into());
+
+        active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update block settlement tx included", e))?;
+
+        // If tx is included, update last_settled_block_number in settlements table
+        // following the logic in settlement.move:106-167
+        if req.settlement_tx_included_in_block.is_some() {
+            let settlement = settlements::Entity::find()
+                .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+                .filter(settlements::Column::Chain.eq(&req.chain))
+                .one(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to fetch settlement", e))?
+                .ok_or_else(|| Status::not_found("Settlement record not found"))?;
+
+            let mut last_settled = settlement.last_settled_block_number;
+
+            // Advance last_settled_block_number to highest consecutive settled block
+            while last_settled < req.block_number {
+                let next_block = last_settled + 1;
+
+                // Check if next block is settled
+                let next_settlement = block_settlements::Entity::find()
+                    .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+                    .filter(block_settlements::Column::BlockNumber.eq(next_block))
+                    .filter(block_settlements::Column::Chain.eq(&req.chain))
+                    .one(self.db.connection())
+                    .await
+                    .map_err(|e| log_internal_error("Failed to check next block settlement", e))?;
+
+                if let Some(next) = next_settlement {
+                    if next.settlement_tx_included_in_block.is_some() {
+                        last_settled = next_block;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Update settlement record
+            let mut settlement_active: settlements::ActiveModel = settlement.into();
+            settlement_active.last_settled_block_number = Set(last_settled);
+            settlement_active.updated_at = Set(chrono::Utc::now().into());
+
+            settlement_active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update last_settled_block_number", e))?;
+
+            info!(
+                "Block #{} settled for app_instance {} chain {}, last_settled_block_number now {}",
+                req.block_number, req.app_instance_id, req.chain, last_settled
+            );
+        }
+
+        Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
+            success: true,
+            message: "Block settlement tx included status updated successfully".to_string(),
         }))
     }
 

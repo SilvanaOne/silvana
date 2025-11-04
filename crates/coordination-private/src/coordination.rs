@@ -330,6 +330,24 @@ impl PrivateCoordination {
             sequences: proto_proof.sequences,
         }
     }
+
+    /// Convert proto BlockSettlement to trait BlockSettlement
+    fn proto_block_settlement_to_trait(
+        &self,
+        proto: proto::silvana::state::v1::BlockSettlement,
+    ) -> BlockSettlement {
+        BlockSettlement {
+            block_number: proto.block_number,
+            settlement_tx_hash: proto.settlement_tx_hash,
+            settlement_tx_included_in_block: proto.settlement_tx_included_in_block.is_some(),
+            sent_to_settlement_at: proto.sent_to_settlement_at.map(|ts| {
+                (ts.seconds as u64) * 1000 + (ts.nanos as u64) / 1_000_000
+            }),
+            settled_at: proto.settled_at.map(|ts| {
+                (ts.seconds as u64) * 1000 + (ts.nanos as u64) / 1_000_000
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -1215,52 +1233,203 @@ impl Coordination for PrivateCoordination {
 
     async fn fetch_block_settlement(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _chain: &str,
+        app_instance: &str,
+        block_number: u64,
+        chain: &str,
     ) -> Result<Option<BlockSettlement>> {
-        Err(PrivateCoordinationError::NotImplemented("fetch_block_settlement - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetBlockSettlementRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            chain: chain.to_string(),
+        };
+
+        match self
+            .client
+            .clone()
+            .get_block_settlement(request)
+            .await
+        {
+            Ok(response) => {
+                let inner = response.into_inner();
+                Ok(inner.block_settlement.map(|bs| self.proto_block_settlement_to_trait(bs)))
+            }
+            Err(status) if status.code() == tonic::Code::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
-    async fn get_settlement_chains(&self, _app_instance: &str) -> Result<Vec<String>> {
-        Err(PrivateCoordinationError::NotImplemented("get_settlement_chains - Phase 2".to_string()))
+    async fn get_settlement_chains(&self, app_instance: &str) -> Result<Vec<String>> {
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetSettlementChainsRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_settlement_chains(request)
+            .await?
+            .into_inner();
+
+        Ok(response.chains)
     }
 
-    async fn get_settlement_address(&self, _app_instance: &str, _chain: &str) -> Result<Option<String>> {
-        Err(PrivateCoordinationError::NotImplemented("get_settlement_address - Phase 2".to_string()))
+    async fn get_settlement_address(&self, app_instance: &str, chain: &str) -> Result<Option<String>> {
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetSettlementAddressRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            chain: chain.to_string(),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_settlement_address(request)
+            .await?
+            .into_inner();
+
+        Ok(response.settlement_address)
     }
 
-    async fn get_settlement_job_for_chain(&self, _app_instance: &str, _chain: &str) -> Result<Option<u64>> {
-        Err(PrivateCoordinationError::NotImplemented("get_settlement_job_for_chain - Phase 2".to_string()))
+    async fn get_settlement_job_for_chain(&self, app_instance: &str, chain: &str) -> Result<Option<u64>> {
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::GetSettlementJobForChainRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            chain: chain.to_string(),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .get_settlement_job_for_chain(request)
+            .await?
+            .into_inner();
+
+        Ok(response.settlement_job)
     }
 
     async fn set_settlement_address(
         &self,
-        _app_instance: &str,
-        _chain: String,
-        _address: Option<String>,
+        app_instance: &str,
+        chain: String,
+        address: Option<String>,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("set_settlement_address - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let request = proto::silvana::state::v1::SetSettlementAddressRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            chain,
+            settlement_address: address,
+        };
+
+        let response = self
+            .client
+            .clone()
+            .set_settlement_address(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to set settlement address: {}",
+                response.message
+            )))
+        }
     }
 
     async fn update_block_settlement_tx_hash(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _chain: String,
-        _settlement_tx_hash: String,
+        app_instance: &str,
+        block_number: u64,
+        chain: String,
+        settlement_tx_hash: String,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("update_block_settlement_tx_hash - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        let sent_to_settlement_at = prost_types::Timestamp {
+            seconds: now.as_secs() as i64,
+            nanos: now.subsec_nanos() as i32,
+        };
+
+        let request = proto::silvana::state::v1::UpdateBlockSettlementTxHashRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            chain,
+            settlement_tx_hash: Some(settlement_tx_hash),
+            sent_to_settlement_at: Some(sent_to_settlement_at),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .update_block_settlement_tx_hash(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to update block settlement tx hash: {}",
+                response.message
+            )))
+        }
     }
 
     async fn update_block_settlement_tx_included_in_block(
         &self,
-        _app_instance: &str,
-        _block_number: u64,
-        _chain: String,
-        _settled_at: u64,
+        app_instance: &str,
+        block_number: u64,
+        chain: String,
+        settled_at: u64,
     ) -> Result<Self::TransactionHash> {
-        Err(PrivateCoordinationError::NotImplemented("update_block_settlement_tx_included_in_block - Phase 2".to_string()))
+        let jwt = self.get_current_job_jwt().await?;
+
+        let settled_at_ts = prost_types::Timestamp {
+            seconds: (settled_at / 1000) as i64,
+            nanos: ((settled_at % 1000) * 1_000_000) as i32,
+        };
+
+        let request = proto::silvana::state::v1::UpdateBlockSettlementTxIncludedInBlockRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth { token: jwt }),
+            app_instance_id: app_instance.to_string(),
+            block_number,
+            chain,
+            settlement_tx_included_in_block: Some(block_number), // Use block_number as the settlement block
+            settled_at: Some(settled_at_ts),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .update_block_settlement_tx_included_in_block(request)
+            .await?
+            .into_inner();
+
+        if response.success {
+            Ok("success".to_string())
+        } else {
+            Err(PrivateCoordinationError::Other(anyhow::anyhow!(
+                "Failed to update block settlement tx included: {}",
+                response.message
+            )))
+        }
     }
 
     // ===== Key-Value Storage =====
