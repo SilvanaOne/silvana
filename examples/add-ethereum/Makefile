@@ -218,5 +218,5 @@ batch:
 	@echo ""
 	@while true; do \
 		$(MAKE) add; \
-		sleep 1; \
+		sleep 5; \
 	done
