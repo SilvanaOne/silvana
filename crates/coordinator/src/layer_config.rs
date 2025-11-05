@@ -67,11 +67,13 @@ pub struct SuiConfig {
     /// Sui RPC URL
     pub rpc_url: String,
 
-    /// Coordination package ID
-    pub package_id: String,
+    /// Coordination package ID (can be set via SUI_PACKAGE_ID env var)
+    #[serde(default)]
+    pub package_id: Option<String>,
 
-    /// Registry package ID
-    pub registry_id: String,
+    /// Registry package ID (can be set via SUI_REGISTRY_ID env var)
+    #[serde(default)]
+    pub registry_id: Option<String>,
 
     /// Operation mode (should be "multicall" for Sui)
     #[serde(default = "default_multicall_mode")]
@@ -262,11 +264,38 @@ fn default_max_gas() -> u64 {
     10_000_000
 }
 
+/// Get package_id from environment variable if not set in config
+fn get_package_id_from_env() -> Option<String> {
+    std::env::var("SILVANA_REGISTRY_PACKAGE").ok().filter(|s| !s.is_empty())
+}
+
+/// Get registry_id from environment variable if not set in config
+fn get_registry_id_from_env() -> Option<String> {
+    std::env::var("SILVANA_REGISTRY").ok().filter(|s| !s.is_empty())
+}
+
 impl CoordinatorConfig {
     /// Load configuration from a TOML file
     pub fn from_file(path: &str) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(path)?;
-        let config: Self = toml::from_str(&contents)?;
+        let mut config: Self = toml::from_str(&contents)?;
+
+        // Populate package_id and registry_id from environment variables if not set in TOML
+        if config.sui.package_id.is_none() {
+            let pkg_id = get_package_id_from_env();
+            if pkg_id.is_some() {
+                tracing::debug!("📦 Loaded package_id from SUI_PACKAGE_ID env var");
+            }
+            config.sui.package_id = pkg_id;
+        }
+        if config.sui.registry_id.is_none() {
+            let reg_id = get_registry_id_from_env();
+            if reg_id.is_some() {
+                tracing::debug!("📦 Loaded registry_id from SUI_REGISTRY_ID env var");
+            }
+            config.sui.registry_id = reg_id;
+        }
+
         Ok(config)
     }
 
@@ -278,10 +307,8 @@ impl CoordinatorConfig {
             layer_id: "sui-mainnet".to_string(),
             rpc_url: std::env::var("SUI_RPC_URL")
                 .unwrap_or_else(|_| "https://fullnode.mainnet.sui.io".to_string()),
-            package_id: std::env::var("SUI_PACKAGE_ID")
-                .unwrap_or_else(|_| "0x0".to_string()),
-            registry_id: std::env::var("SUI_REGISTRY_ID")
-                .unwrap_or_else(|_| "0x0".to_string()),
+            package_id: get_package_id_from_env(),
+            registry_id: get_registry_id_from_env(),
             operation_mode: default_multicall_mode(),
             multicall_interval_secs: default_multicall_interval(),
             multicall_max_operations: default_multicall_max(),
@@ -313,7 +340,9 @@ impl CoordinatorConfig {
         Ok(config)
     }
 
-    /// Validate the configuration
+    /// Validate the configuration structure (layer IDs, enabled layers)
+    /// Note: Does NOT validate that package_id/registry_id values are set,
+    /// as those are validated when actually used
     pub fn validate(&self) -> anyhow::Result<()> {
         // Ensure all layer IDs are unique
         let mut layer_ids = HashMap::new();

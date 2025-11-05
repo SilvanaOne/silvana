@@ -5,8 +5,8 @@ use crate::constants::{
     PROOF_ANALYSIS_INTERVAL_SECS, RECONCILIATION_INTERVAL_SECS, SHUTDOWN_CLEANUP_DELAY_MS,
     SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
 };
-use crate::coordination_manager::CoordinationManager;
 use crate::coordination_layer::CoordinationLayer;
+use crate::coordination_manager::CoordinationManager;
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
 use crate::layer_config::{CoordinatorConfig, GeneralConfig, SuiConfig};
@@ -24,7 +24,9 @@ use tokio::task;
 use tracing::{debug, error, info, warn};
 
 /// Try to load coordinator configuration from file or environment
-async fn try_load_coordinator_config(config_path: Option<&str>) -> Result<Option<CoordinatorConfig>> {
+async fn try_load_coordinator_config(
+    config_path: Option<&str>,
+) -> Result<Option<CoordinatorConfig>> {
     // If explicit path provided, use it
     if let Some(path) = config_path {
         info!("Loading configuration from: {}", path);
@@ -55,8 +57,8 @@ fn create_default_sui_config(rpc_url: String, package_id: String) -> Result<Coor
         sui: SuiConfig {
             layer_id: "sui".to_string(),
             rpc_url,
-            package_id: package_id.clone(),
-            registry_id: package_id, // Use same for registry
+            package_id: Some(package_id.clone()),
+            registry_id: Some(package_id), // Use same for registry
             operation_mode: "multicall".to_string(),
             multicall_interval_secs: 3,
             multicall_max_operations: 100,
@@ -101,11 +103,13 @@ async fn reconcile_layer(
                                 );
 
                                 // Use job_sequence directly (already u64)
-                                state.execute_or_queue_fail_job(
-                                    app_instance.clone(),
-                                    job.job_sequence,
-                                    error_msg,
-                                ).await;
+                                state
+                                    .execute_or_queue_fail_job(
+                                        app_instance.clone(),
+                                        job.job_sequence,
+                                        error_msg,
+                                    )
+                                    .await;
 
                                 info!(
                                     "Found stuck job {} in layer {} for app_instance {}",
@@ -115,7 +119,10 @@ async fn reconcile_layer(
                         }
                     }
                     Err(e) => {
-                        debug!("Failed to fetch jobs for {} in layer {}: {}", app_instance, layer_id, e);
+                        debug!(
+                            "Failed to fetch jobs for {} in layer {}: {}",
+                            app_instance, layer_id, e
+                        );
                     }
                 }
             }
@@ -150,7 +157,6 @@ async fn start_multi_layer_reconciliation(
     manager: Arc<CoordinationManager>,
     state: SharedState,
 ) -> Result<()> {
-
     info!(
         "🔄 Starting multi-layer reconciliation task (runs every {} minutes)...",
         RECONCILIATION_INTERVAL_SECS / 60
@@ -162,7 +168,10 @@ async fn start_multi_layer_reconciliation(
 
     // Perform initial multi-layer reconciliation
     let layer_ids = manager.get_layer_ids();
-    info!("Checking {} coordination layers for stuck jobs", layer_ids.len());
+    info!(
+        "Checking {} coordination layers for stuck jobs",
+        layer_ids.len()
+    );
 
     let mut total_stuck = 0;
     for layer_id in &layer_ids {
@@ -182,7 +191,10 @@ async fn start_multi_layer_reconciliation(
     }
 
     if total_stuck > 0 {
-        info!("✅ Initial reconciliation complete - found {} stuck jobs across all layers", total_stuck);
+        info!(
+            "✅ Initial reconciliation complete - found {} stuck jobs across all layers",
+            total_stuck
+        );
     } else {
         info!("✅ Initial reconciliation complete - no stuck jobs found");
     }
@@ -226,7 +238,10 @@ async fn start_multi_layer_reconciliation(
                         total_stuck += stuck_count;
                         if stuck_count > 0 {
                             has_any_pending = true;
-                            debug!("Layer {} reconciliation: {} stuck jobs", layer_id, stuck_count);
+                            debug!(
+                                "Layer {} reconciliation: {} stuck jobs",
+                                layer_id, stuck_count
+                            );
                         }
                     }
                     Err(e) => {
@@ -237,7 +252,11 @@ async fn start_multi_layer_reconciliation(
         }
 
         if total_stuck > 0 {
-            debug!("Reconciliation complete - found {} stuck jobs across {} layers", total_stuck, layer_ids.len());
+            debug!(
+                "Reconciliation complete - found {} stuck jobs across {} layers",
+                total_stuck,
+                layer_ids.len()
+            );
         } else {
             debug!("Reconciliation complete - no stuck jobs in any layer");
         }
@@ -269,27 +288,50 @@ pub async fn start_coordinator(
     info!("--------------------------------");
 
     // ALWAYS load or create configuration for CoordinationManager
-    let coordinator_config = if let Some(config) = try_load_coordinator_config(config_path.as_deref()).await? {
-        info!("📊 Multi-layer mode: {} layer(s) configured", config.coordinator.enable_layers.len());
-        config
-    } else {
-        info!("📊 Single-layer mode: Using default Sui configuration");
-        create_default_sui_config(rpc_url.clone(), package_id.clone())?
-    };
-
-    // Validate configuration
-    coordinator_config.validate()?;
+    let coordinator_config =
+        if let Some(config) = try_load_coordinator_config(config_path.as_deref()).await? {
+            info!(
+                "📊 Multi-layer mode: {} layer(s) configured",
+                config.coordinator.enable_layers.len()
+            );
+            config
+        } else {
+            info!("📊 Single-layer mode: Using default Sui configuration");
+            create_default_sui_config(rpc_url.clone(), package_id.clone())?
+        };
 
     // ALWAYS initialize CoordinationManager (even for single Sui layer)
-    let coordination_manager = Arc::new(CoordinationManager::from_config(coordinator_config.clone()).await?);
-    info!("✅ Initialized coordination manager with {} layer(s)", coordination_manager.get_layer_ids().len());
+    let coordination_manager =
+        Arc::new(CoordinationManager::from_config(coordinator_config.clone()).await?);
+    info!(
+        "✅ Initialized coordination manager with {} layer(s)",
+        coordination_manager.get_layer_ids().len()
+    );
 
     // Get the Sui layer configuration for backward compatibility
     let sui_rpc_url = coordinator_config.sui.rpc_url.clone();
-    let sui_package_id = coordinator_config.sui.package_id.clone();
+    let sui_package_id = coordinator_config.sui.package_id.clone()
+        .ok_or_else(|| {
+            error!("❌ SUI package_id is required but not set");
+            error!("   Check that:");
+            error!("   1. RPC server returned SILVANA_REGISTRY_PACKAGE in config");
+            error!("   2. Or set SILVANA_REGISTRY_PACKAGE environment variable");
+            error!("   3. Or add package_id in coordinator.toml [sui] section");
+            anyhow::anyhow!("SUI package_id is required")
+        })?;
+    let sui_registry_id = coordinator_config.sui.registry_id.clone()
+        .ok_or_else(|| {
+            error!("❌ SUI registry_id is required but not set");
+            error!("   Check that:");
+            error!("   1. RPC server returned SILVANA_REGISTRY in config");
+            error!("   2. Or set SILVANA_REGISTRY environment variable");
+            error!("   3. Or add registry_id in coordinator.toml [sui] section");
+            anyhow::anyhow!("SUI registry_id is required")
+        })?;
 
     info!("🔗 Primary Sui RPC URL: {}", sui_rpc_url);
-    info!("📦 Registry package: {}", sui_package_id);
+    info!("📦 Package ID: {}", sui_package_id);
+    info!("📦 Registry ID: {}", sui_registry_id);
 
     if let Some(ref instance) = app_instance_filter {
         info!("🎯 Filtering jobs for app instance: {}", instance);
@@ -363,7 +405,7 @@ pub async fn start_coordinator(
     }
 
     let _config = Config {
-        package_id: sui_package_id.clone(),
+        package_id: sui_package_id,
         modules: vec!["jobs".to_string()],
     };
 
@@ -517,7 +559,9 @@ pub async fn start_coordinator(
     let reconciliation_manager = coordination_manager.clone();
 
     let reconciliation_handle = task::spawn(async move {
-        if let Err(e) = start_multi_layer_reconciliation(reconciliation_manager, reconciliation_state).await {
+        if let Err(e) =
+            start_multi_layer_reconciliation(reconciliation_manager, reconciliation_state).await
+        {
             error!("Multi-layer reconciliation task error: {}", e);
         }
     });
@@ -603,7 +647,10 @@ pub async fn start_coordinator(
             if let Some(layer_info) = coordination_manager.get_layer_info(&layer_id) {
                 if let Some(ref layer_filter) = layer_info.app_instance_filter {
                     if !filter.contains(layer_filter) {
-                        info!("Skipping job searcher for layer {} due to app_instance_filter", layer_id);
+                        info!(
+                            "Skipping job searcher for layer {} due to app_instance_filter",
+                            layer_id
+                        );
                         continue;
                     }
                 }
@@ -623,7 +670,10 @@ pub async fn start_coordinator(
             ) {
                 Ok(searcher) => searcher,
                 Err(e) => {
-                    error!("Failed to create job searcher for layer {}: {}", searcher_layer_id, e);
+                    error!(
+                        "Failed to create job searcher for layer {}: {}",
+                        searcher_layer_id, e
+                    );
                     return;
                 }
             };
@@ -632,7 +682,10 @@ pub async fn start_coordinator(
             job_searcher.set_metrics(searcher_metrics);
 
             // Delay job searcher startup by 10 seconds to allow system initialization
-            info!("Job searcher for layer {} waiting 10 seconds before starting...", searcher_layer_id);
+            info!(
+                "Job searcher for layer {} waiting 10 seconds before starting...",
+                searcher_layer_id
+            );
             tokio::time::sleep(Duration::from_secs(10)).await;
             info!("Job searcher for layer {} starting now", searcher_layer_id);
 
@@ -901,7 +954,10 @@ pub async fn start_coordinator(
     // 4. gRPC server stays running until Docker containers complete
 
     // Job searchers should stop immediately
-    info!("  ⏳ Waiting for {} job searcher(s) to stop...", job_searcher_handles.len());
+    info!(
+        "  ⏳ Waiting for {} job searcher(s) to stop...",
+        job_searcher_handles.len()
+    );
     for handle in job_searcher_handles {
         if !handle.is_finished() {
             let _ = tokio::time::timeout(

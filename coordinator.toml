@@ -31,12 +31,6 @@ layer_id = "sui-devnet"
 rpc_url = "https://rpc-devnet-grpc.suiscan.xyz:443"
 
 
-# Silvana coordination package ID on Sui Devnet
-package_id = "0x550610f218c477130ca135659977de4c6f884d0a44e86949cf15d296c92374ce"
-
-# Silvana registry package ID on Sui Devnet
-registry_id = "0xdf768747cb016e015ac9d60dd6420e9d9e6640876d17b3e1e9d61ab5e057262a"
-
 # Operation mode for Sui (multicall for gas optimization)
 operation_mode = "multicall"
 

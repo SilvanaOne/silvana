@@ -41,22 +41,14 @@ const SILVANA_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Helper function to fetch config and inject environment variables for all commands
 async fn fetch_and_inject_config(chain: &str) -> HashMap<String, String> {
-    //println!("🔄 Fetching configuration for chain: {}", chain);
-
     match config::fetch_config(chain).await {
         Ok(config_map) => {
-            // println!(
-            //     "✅ Successfully fetched {} configuration items",
-            //     config_map.len()
-            // );
-
             // Check for new version
             if let Some(last_version) = config_map.get("LAST_VERSION") {
                 check_version_update(last_version);
             }
 
             // Inject configuration as environment variables (without overriding existing ones)
-            //let mut injected_count = 0;
             for (key, value) in config_map.iter() {
                 // Check if the environment variable already exists
                 if std::env::var(key).is_err() {
@@ -65,14 +57,9 @@ async fn fetch_and_inject_config(chain: &str) -> HashMap<String, String> {
                     unsafe {
                         std::env::set_var(key, value);
                     }
-                    //injected_count += 1;
-                    //println!("  ✓ Set env var: {}", key);
-                } else {
-                    //println!("  ⏩ Skipped (already set): {}", key);
                 }
             }
 
-            //println!("📋 Injected {} new environment variables", injected_count);
             config_map
         }
         Err(e) => {
