@@ -68,6 +68,7 @@ pub const PROOF_TIMEOUT_MS: u64 = 5 * 60 * 1000; // 5 minutes
 
 /// Initial delay for retry backoff strategy (in seconds).
 /// After a failure, the first retry will wait this many seconds.
+#[allow(dead_code)]
 pub const RETRY_INITIAL_DELAY_SECS: u64 = 5;
 
 /// Maximum delay cap for exponential backoff (in seconds).
@@ -76,10 +77,12 @@ pub const RETRY_MAX_DELAY_SECS: u64 = 300; // 5 minutes
 
 /// Maximum number of retry attempts for failed operations.
 /// After this many failures, the operation is considered permanently failed.
+#[allow(dead_code)]
 pub const RETRY_MAX_ATTEMPTS: usize = 100;
 
 /// Timeout for gRPC stream operations (in seconds).
 /// If no data is received from a stream within this time, it's considered failed.
+#[allow(dead_code)]
 pub const GRPC_STREAM_TIMEOUT_SECS: u64 = 30;
 
 // =============================================================================
@@ -116,7 +119,7 @@ pub const MULTICALL_INTERVAL_SECS: u64 = 60; // 1 minute
 /// Memory calculation coefficient for job buffer sizing.
 /// Multiplies available memory to allow more jobs to be buffered between multicalls.
 /// Higher coefficient = more jobs in buffer to avoid running out before next multicall.
-pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 2.0;
+pub const JOB_BUFFER_MEMORY_COEFFICIENT: f64 = 3.0;
 
 /// Interval for reconciliation task (in seconds).
 /// The coordinator reconciles its state with the blockchain at this interval.

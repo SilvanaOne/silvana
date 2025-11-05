@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "52E4A561877B0A3ECAA28C65FAEDC61052F6B5FEA9AA98938D993C0718A69175"
+manifest_digest = "BDDBC4F44B3D44D9F09C538159488DC53E7C975877B621ACD298975F2F24929C"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -15,7 +15,7 @@ dependencies = [
 
 [[move.package]]
 id = "Bridge"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "61dcfdbe2ddc7ad05d27fc10cd09d4c6cc151acd", subdir = "crates/sui-framework/packages/bridge" }
+source = { git = "https://github.com/MystenLabs/sui.git", rev = "494fa6ede17f366f1cd850f01ccb9f42dc75c470", subdir = "crates/sui-framework/packages/bridge" }
 
 dependencies = [
   { id = "MoveStdlib", name = "MoveStdlib" },
@@ -25,11 +25,11 @@ dependencies = [
 
 [[move.package]]
 id = "MoveStdlib"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "61dcfdbe2ddc7ad05d27fc10cd09d4c6cc151acd", subdir = "crates/sui-framework/packages/move-stdlib" }
+source = { git = "https://github.com/MystenLabs/sui.git", rev = "494fa6ede17f366f1cd850f01ccb9f42dc75c470", subdir = "crates/sui-framework/packages/move-stdlib" }
 
 [[move.package]]
 id = "Sui"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "61dcfdbe2ddc7ad05d27fc10cd09d4c6cc151acd", subdir = "crates/sui-framework/packages/sui-framework" }
+source = { git = "https://github.com/MystenLabs/sui.git", rev = "494fa6ede17f366f1cd850f01ccb9f42dc75c470", subdir = "crates/sui-framework/packages/sui-framework" }
 
 dependencies = [
   { id = "MoveStdlib", name = "MoveStdlib" },
@@ -37,7 +37,7 @@ dependencies = [
 
 [[move.package]]
 id = "SuiSystem"
-source = { git = "https://github.com/MystenLabs/sui.git", rev = "61dcfdbe2ddc7ad05d27fc10cd09d4c6cc151acd", subdir = "crates/sui-framework/packages/sui-system" }
+source = { git = "https://github.com/MystenLabs/sui.git", rev = "494fa6ede17f366f1cd850f01ccb9f42dc75c470", subdir = "crates/sui-framework/packages/sui-system" }
 
 dependencies = [
   { id = "MoveStdlib", name = "MoveStdlib" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "6eea5e52a59485d4ea9de99854487d3ef556a88a", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "06ff7f54fc9b8728535f6ac5120e27dee1b58d5b", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "6eea5e52a59485d4ea9de99854487d3ef556a88a", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "06ff7f54fc9b8728535f6ac5120e27dee1b58d5b", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "6eea5e52a59485d4ea9de99854487d3ef556a88a", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "06ff7f54fc9b8728535f6ac5120e27dee1b58d5b", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -81,16 +81,16 @@ dependencies = [
 ]
 
 [move.toolchain-version]
-compiler-version = "1.59.0"
+compiler-version = "1.59.1"
 edition = "2024.beta"
 flavor = "sui"
 
 [env]
 
 [env.devnet]
-chain-id = "4e8248fb"
-original-published-id = "0x958d9cdf65995e163c166cfaaa6cede7ecf65082d2460a2f7aa0e531a2897c37"
-latest-published-id = "0x958d9cdf65995e163c166cfaaa6cede7ecf65082d2460a2f7aa0e531a2897c37"
+chain-id = "eaa01338"
+original-published-id = "0x01c04c655f07445a5f5cfc94fd6a2e851813a5f62fbfcd31a9b627e0ddfbe8cc"
+latest-published-id = "0x01c04c655f07445a5f5cfc94fd6a2e851813a5f62fbfcd31a9b627e0ddfbe8cc"
 published-version = "1"
 
 [env.testnet]

@@ -11,7 +11,7 @@ use crate::{
     database::Database,
     handlers::StateServiceImpl,
     proto::state_service_server::StateServiceServer,
-    storage::{HybridStorage, StateStorage},
+    storage::PrivateStateStorage,
 };
 
 /// State service configuration
@@ -26,7 +26,7 @@ pub struct ServiceConfig {
 pub struct StateServiceRunner {
     config: ServiceConfig,
     db: Arc<Database>,
-    storage: HybridStorage,
+    storage: Option<PrivateStateStorage>,
     concurrency: Arc<ConcurrencyController>,
 }
 
@@ -37,13 +37,12 @@ impl StateServiceRunner {
         let db = Arc::new(Database::new(&config.database_url).await?);
 
         // Initialize storage
-        let s3_storage = if let Some(bucket) = &config.s3_bucket {
-            Some(StateStorage::new(bucket.clone()).await?)
+        let storage = if let Some(bucket) = &config.s3_bucket {
+            Some(PrivateStateStorage::new(bucket.clone()).await?)
         } else {
-            info!("S3 bucket not configured, using inline storage only");
+            info!("S3 bucket not configured - blob storage will be unavailable");
             None
         };
-        let storage = HybridStorage::new(s3_storage);
 
         // Initialize concurrency controller
         let concurrency = Arc::new(ConcurrencyController::new(db.connection_arc()));

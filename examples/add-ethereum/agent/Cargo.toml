@@ -1,0 +1,31 @@
+[package]
+name = "add-ethereum-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Silvana SDK
+silvana-sdk = { git = "https://github.com/SilvanaOne/silvana", rev = "93a76e45bf1176f61aac2fad7785e0ae636b830a" }
+
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+futures = "0.3"
+
+# Error handling
+anyhow = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+# Logging
+env_logger = "0.11"
+log = "0.4"
+
+# Signal handling for graceful shutdown
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
+
+[[bin]]
+name = "agent"
+path = "src/main.rs"

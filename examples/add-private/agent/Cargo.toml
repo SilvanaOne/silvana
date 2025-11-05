@@ -1,0 +1,43 @@
+[package]
+name = "add-private-agent"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "agent"
+path = "src/main.rs"
+
+[dependencies]
+# Silvana
+silvana-sdk = { path = "../../../crates/silvana-sdk" }
+state-proto = { path = "../../../crates/state-proto" }
+
+# Crypto
+ed25519-dalek = "2.2"
+rand = "0.8"
+hex = "0.4"
+jsonwebtoken = "9.3"
+base64 = "0.22"
+sha2 = "0.10"
+
+# Async/gRPC
+tokio = { version = "1.40", features = ["full"] }
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Others
+anyhow = "1.0"
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+dotenvy = "0.15"
+log = "0.4"
+env_logger = "0.11"
+signal-hook = "0.3"
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
+futures = "0.3"

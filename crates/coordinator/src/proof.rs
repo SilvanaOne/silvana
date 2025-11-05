@@ -1,6 +1,7 @@
 use crate::merge::analyze_and_create_merge_jobs_with_blockchain_data;
 use crate::settlement;
 use anyhow::Result;
+use silvana_coordination_trait::Coordination;
 use std::collections::{HashMap, HashSet};
 use sui::fetch::{
     AppInstance, Settlement, fetch_block_settlement, fetch_blocks_range,
@@ -376,9 +377,46 @@ pub async fn analyze_proof_completion(
             app_instance.last_settled_sequence
         );
 
+        // Get the coordination manager from state
+        let manager = match state.get_coordination_manager() {
+            Some(mgr) => mgr,
+            None => {
+                warn!("No coordination manager available for purge check");
+                return Ok(());
+            }
+        };
+
+        // Get the correct coordination layer for this app instance
+        let (_layer_id, coordination) = match manager.get_layer_for_app(&app_instance.id).await {
+            Ok(layer) => layer,
+            Err(e) => {
+                warn!("Failed to find coordination layer for purge check: {}", e);
+                return Ok(());
+            }
+        };
+
         // Refetch the app instance to ensure the condition is still valid
-        match sui::fetch::fetch_app_instance(&app_instance.id).await {
-            Ok(fresh_app_instance) => {
+        // For now, still use Sui-specific types for purge operation
+        let fresh_app_instance = match coordination.fetch_app_instance(&app_instance.id).await {
+            Ok(_trait_app_instance) => {
+                // Still need Sui-specific type for purge operations
+                match sui::fetch::fetch_app_instance(&app_instance.id).await {
+                    Ok(sui_app_inst) => sui_app_inst,
+                    Err(_) => {
+                        debug!("Skipping purge for non-Sui app instance {}", app_instance.id);
+                        return Ok(());
+                    }
+                }
+            },
+            Err(e) => {
+                warn!("Failed to refetch app instance for purge: {}", e);
+                return Ok(());
+            }
+        };
+
+        {
+            let fresh_app_instance = fresh_app_instance;
+            {
                 // Re-check the condition with fresh data
                 if fresh_app_instance.last_purged_sequence
                     < fresh_app_instance.last_settled_sequence
@@ -485,12 +523,6 @@ pub async fn analyze_proof_completion(
                         fresh_app_instance.last_settled_sequence
                     );
                 }
-            }
-            Err(e) => {
-                warn!(
-                    "⚠️ Failed to refetch app instance for purge validation: {}",
-                    e
-                );
             }
         }
     } else {

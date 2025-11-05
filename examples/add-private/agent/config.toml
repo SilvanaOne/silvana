@@ -1,0 +1,21 @@
+# Add Private Agent Configuration
+
+# Coordinator gRPC URL
+# Default: Docker host (for running agent in Docker container)
+coordinator_url = "http://host.docker.internal:50051"
+
+# Developer identifier
+# This identifies who owns/operates the agent
+developer = "AddPrivateDeveloper"
+
+# Agent identifier
+# This identifies the agent type/implementation
+agent = "AddPrivateAgent"
+
+# Agent method name
+# The specific method this agent handles
+agent_method = "prove"
+
+# Maximum runtime in seconds (0 = run forever)
+# Useful for testing, set to 600 for production
+max_runtime_secs = 100

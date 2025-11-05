@@ -3,6 +3,7 @@ use crate::proofs_storage::{ProofMetadata, ProofStorage};
 use crate::state::SharedState;
 use monitoring::coordinator_metrics;
 use proto;
+use silvana_coordination_trait::Coordination;
 use std::path::Path;
 use sui::fetch::block::fetch_block_info;
 use tokio::net::UnixListener;
@@ -38,6 +39,38 @@ use coordinator::{
     UpdateBlockStateDataAvailabilityResponse,
     coordinator_service_server::{CoordinatorService, CoordinatorServiceServer},
 };
+
+/// Convert sui::fetch::Job to coordination trait Job
+#[allow(dead_code)]
+fn sui_job_to_coordination_job(job: &sui::fetch::Job) -> silvana_coordination_trait::Job {
+    silvana_coordination_trait::Job {
+        job_sequence: job.job_sequence,
+        description: job.description.clone(),
+        developer: job.developer.clone(),
+        agent: job.agent.clone(),
+        agent_method: job.agent_method.clone(),
+        app: job.app.clone(),
+        app_instance: job.app_instance.clone(),
+        app_instance_method: job.app_instance_method.clone(),
+        block_number: job.block_number,
+        sequences: job.sequences.clone(),
+        sequences1: job.sequences1.clone(),
+        sequences2: job.sequences2.clone(),
+        data: job.data.clone(),
+        status: match &job.status {
+            sui::fetch::JobStatus::Pending => silvana_coordination_trait::JobStatus::Pending,
+            sui::fetch::JobStatus::Running => silvana_coordination_trait::JobStatus::Running,
+            sui::fetch::JobStatus::Failed(err) => silvana_coordination_trait::JobStatus::Failed(err.clone()),
+        },
+        attempts: job.attempts,
+        interval_ms: job.interval_ms,
+        next_scheduled_at: job.next_scheduled_at,
+        created_at: job.created_at,
+        updated_at: job.updated_at,
+        agent_jwt: None, // Sui jobs don't have JWT
+        jwt_expires_at: None,
+    }
+}
 
 #[derive(Clone)]
 pub struct CoordinatorServiceImpl {
@@ -719,14 +752,41 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                 // Determine settlement chain if this is a settlement job
                 let settlement_chain = if agent_job.job.app_instance_method == "settle" {
-                    // Use helper function to get chain by job sequence
-                    match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                        &agent_job.app_instance,
-                        agent_job.job_sequence,
-                    )
-                    .await
+                    // Get coordination layer for this job
+                    let layer = match self.state.get_coordination_manager()
+                        .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
                     {
-                        Ok(chain) => chain,
+                        Some(l) => l,
+                        None => {
+                            error!(
+                                "Failed to get coordination layer {} for settlement job {} - terminating",
+                                agent_job.layer_id, agent_job.job_sequence
+                            );
+
+                            // Terminate the job
+                            self.state
+                                .execute_or_queue_terminate_job(
+                                    agent_job.app_instance.clone(),
+                                    agent_job.job_sequence,
+                                )
+                                .await;
+
+                            self.state
+                                .get_agent_job_db()
+                                .terminate_job(&agent_job.job_id)
+                                .await;
+
+                            continue 'job_search;
+                        }
+                    };
+
+                    // Use layer to get settlement chain by job sequence
+                    match layer.get_settlement_job_sequences(&agent_job.app_instance).await {
+                        Ok(settlement_jobs) => {
+                            settlement_jobs.iter()
+                                .find(|(_, job_id)| **job_id == agent_job.job_sequence)
+                                .map(|(chain, _)| chain.clone())
+                        }
                         Err(e) => {
                             warn!(
                                 "Failed to lookup settlement chain for job {} in app instance {}: {}",
@@ -750,7 +810,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                         // Add terminate request to multicall queue
                         self.state
-                            .add_terminate_job_request(
+                            .execute_or_queue_terminate_job(
                                 agent_job.app_instance.clone(),
                                 agent_job.job_sequence,
                             )
@@ -863,41 +923,26 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 started_job.app_instance, started_job.job_sequence
             );
 
-            // Fetch the app instance to get the jobs table (we know this should work since get_started_job_for_agent already checked)
-            let app_instance = match sui::fetch::fetch_app_instance(&started_job.app_instance).await
+            // Get coordination layer for this job
+            let layer = match self.state.get_coordination_manager()
+                .and_then(|cm| cm.get_layer_by_id(&started_job.layer_id))
             {
-                Ok(instance) => instance,
-                Err(e) => {
-                    error!(
-                        "Failed to fetch app instance {} (this should not happen): {}",
-                        started_job.app_instance, e
-                    );
-                    return Ok(Response::new(GetJobResponse {
-                        success: true,
-                        message: "Failed to fetch app instance".to_string(),
-                        job: None,
-                    }));
-                }
-            };
-
-            // Get the jobs table ID
-            let jobs_table_id = match &app_instance.jobs {
-                Some(jobs) => &jobs.jobs_table_id,
+                Some(l) => l,
                 None => {
                     error!(
-                        "App instance {} has no jobs table (this should not happen)",
-                        started_job.app_instance
+                        "Failed to get coordination layer {} for job {} - skipping",
+                        started_job.layer_id, started_job.job_sequence
                     );
                     return Ok(Response::new(GetJobResponse {
                         success: true,
-                        message: "App instance has no jobs table".to_string(),
+                        message: "No job available".to_string(),
                         job: None,
                     }));
                 }
             };
 
-            // Fetch the full job details from blockchain using the jobs table
-            match sui::fetch::jobs::fetch_job_by_id(jobs_table_id, started_job.job_sequence).await {
+            // Fetch the full job details from coordination layer
+            match layer.fetch_job_by_sequence(&started_job.app_instance, started_job.job_sequence).await {
                 Ok(Some(pending_job)) => {
                     // We already know this job matches the requesting agent (get_started_job_for_agent checked it)
                     // Fetch agent method to get resource requirements
@@ -935,6 +980,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
                         agent_method.min_memory_gb,
                         agent_method.min_cpu_cores,
                         agent_method.requires_tee,
+                        started_job.layer_id.clone(),
                     ) {
                         Ok(job) => job,
                         Err(e) => {
@@ -957,14 +1003,40 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                     // Check if this is a settlement job and get the chain
                     let settlement_chain = if pending_job.app_instance_method == "settle" {
-                        // Use helper function to get chain by job sequence
-                        match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                            &started_job.app_instance,
-                            started_job.job_sequence,
-                        )
-                        .await
+                        // Get coordination layer for this job
+                        let layer = match self.state.get_coordination_manager()
+                            .and_then(|cm| cm.get_layer_by_id(&started_job.layer_id))
                         {
-                            Ok(chain) => chain,
+                            Some(l) => l,
+                            None => {
+                                error!(
+                                    "Failed to get coordination layer {} for settlement job {} - terminating",
+                                    started_job.layer_id, started_job.job_sequence
+                                );
+
+                                // Terminate the job
+                                self.state
+                                    .execute_or_queue_terminate_job(
+                                        started_job.app_instance.clone(),
+                                        started_job.job_sequence,
+                                    )
+                                    .await;
+
+                                return Ok(Response::new(GetJobResponse {
+                                    success: true,
+                                    message: "No job available".to_string(),
+                                    job: None,
+                                }));
+                            }
+                        };
+
+                        // Use layer to get settlement chain by job sequence
+                        match layer.get_settlement_job_sequences(&started_job.app_instance).await {
+                            Ok(settlement_jobs) => {
+                                settlement_jobs.iter()
+                                    .find(|(_, job_id)| **job_id == started_job.job_sequence)
+                                    .map(|(chain, _)| chain.clone())
+                            }
                             Err(e) => {
                                 warn!(
                                     "Failed to lookup settlement chain for job {} in app instance {}: {}",
@@ -986,7 +1058,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
                         // Add terminate request to multicall queue
                         self.state
-                            .add_terminate_job_request(
+                            .execute_or_queue_terminate_job(
                                 started_job.app_instance.clone(),
                                 started_job.job_sequence,
                             )
@@ -1089,6 +1161,290 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         }
 
+        // For Direct mode layers, try to fetch and start pending jobs directly
+        // This bypasses the multicall buffer and immediately starts jobs
+        if let Some(coordination_manager) = self.state.get_coordination_manager() {
+            // Get app_instances for this specific agent/method
+            let app_instances = self
+                .state
+                .get_jobs_tracker()
+                .get_app_instances_for_agent_method(&req.developer, &req.agent, &req.agent_method)
+                .await;
+
+            if !app_instances.is_empty() {
+                debug!(
+                    "Found {} app_instances for agent {}/{}/{}: {:?}",
+                    app_instances.len(),
+                    req.developer,
+                    req.agent,
+                    req.agent_method,
+                    app_instances
+                );
+
+                // Check each app_instance against Direct mode layers
+                for app_instance in app_instances {
+                    // Get the layer for this app_instance
+                    let (layer_id, layer) = match coordination_manager.get_layer_for_app(&app_instance).await {
+                        Ok((id, l)) => (id, l),
+                        Err(e) => {
+                            debug!("No layer found for app_instance {}: {}", app_instance, e);
+                            continue;
+                        }
+                    };
+
+                    // Check if this layer uses Direct operation mode
+                    if coordination_manager.supports_multicall(&layer_id) {
+                        // Skip multicall layers - they use the buffer
+                        continue;
+                    }
+
+                    debug!(
+                        "Checking Direct mode layer {} for pending jobs in app {}: dev={}, agent={}, method={}",
+                        layer_id, app_instance, req.developer, req.agent, req.agent_method
+                    );
+
+                    // Fetch pending job sequences for this specific agent/method
+                    let mut pending_sequences = match layer
+                        .fetch_pending_job_sequences_by_method(
+                            &app_instance,
+                            &req.developer,
+                            &req.agent,
+                            &req.agent_method,
+                        )
+                        .await
+                    {
+                        Ok(sequences) => sequences,
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch pending job sequences for app {} on layer {}: {}",
+                                app_instance, layer_id, e
+                            );
+                            continue;
+                        }
+                    };
+
+                    if pending_sequences.is_empty() {
+                        debug!("No pending jobs for app {} on layer {}", app_instance, layer_id);
+                        continue;
+                    }
+
+                    // Sort by sequence to process oldest jobs first
+                    pending_sequences.sort_unstable();
+
+                    debug!(
+                        "Found {} pending job sequences for app {}: {:?}",
+                        pending_sequences.len(),
+                        app_instance,
+                        &pending_sequences[..pending_sequences.len().min(5)] // Log first 5
+                    );
+
+                    // Try to start up to 3 jobs (retry on concurrency conflicts)
+                    let max_attempts = 3.min(pending_sequences.len());
+                    for job_sequence in pending_sequences.iter().take(max_attempts) {
+                        debug!(
+                            "Attempting to start job {} in app {} on layer {}",
+                            job_sequence, app_instance, layer_id
+                        );
+
+                        // Try to start the job
+                        match layer.start_job(&app_instance, *job_sequence).await {
+                            Ok(true) => {
+                                info!(
+                                    "✅ Successfully started job {} in app {} on Direct mode layer {}",
+                                    job_sequence, app_instance, layer_id
+                                );
+
+                                // Fetch the full job details
+                                let pending_job = match layer
+                                    .fetch_job_by_sequence(&app_instance, *job_sequence)
+                                    .await
+                                {
+                                    Ok(Some(job)) => job,
+                                    Ok(None) => {
+                                        error!(
+                                            "Job {} not found after successful start in app {}",
+                                            job_sequence, app_instance
+                                        );
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to fetch job {} after start in app {}: {}",
+                                            job_sequence, app_instance, e
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                // Fetch agent method to get resource requirements
+                                let agent_method = match sui::fetch_agent_method(
+                                    &pending_job.developer,
+                                    &pending_job.agent,
+                                    &pending_job.agent_method,
+                                )
+                                .await
+                                {
+                                    Ok(method) => method,
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to fetch agent method for job {}: {}",
+                                            pending_job.job_sequence, e
+                                        );
+                                        // Use default values if fetch fails
+                                        sui::fetch::AgentMethod {
+                                            docker_image: String::new(),
+                                            docker_sha256: None,
+                                            min_memory_gb: 1,
+                                            min_cpu_cores: 1,
+                                            requires_tee: false,
+                                        }
+                                    }
+                                };
+
+                                // Create AgentJob and add it to agent database
+                                let agent_job = match crate::agent::AgentJob::new(
+                                    pending_job.clone(),
+                                    req.session_id.clone(),
+                                    &self.state,
+                                    agent_method.min_memory_gb,
+                                    agent_method.min_cpu_cores,
+                                    agent_method.requires_tee,
+                                    layer_id.clone(),
+                                ) {
+                                    Ok(job) => job,
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to create agent job for job {}: {}",
+                                            pending_job.job_sequence, e
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                // Store in agent database
+                                self.state
+                                    .get_agent_job_db()
+                                    .add_to_running(agent_job.clone())
+                                    .await;
+
+                                // Handle settlement chain for settlement jobs
+                                let settlement_chain = if pending_job.app_instance_method == "settle" {
+                                    match layer.get_settlement_job_sequences(&app_instance).await {
+                                        Ok(settlement_jobs) => {
+                                            settlement_jobs.iter()
+                                                .find(|(_, job_id)| **job_id == *job_sequence)
+                                                .map(|(chain, _)| chain.clone())
+                                        }
+                                        Err(e) => {
+                                            warn!(
+                                                "Failed to lookup settlement chain for job {} in app {}: {}",
+                                                job_sequence, app_instance, e
+                                            );
+                                            None
+                                        }
+                                    }
+                                } else {
+                                    None
+                                };
+
+                                // Set current agent for this session
+                                self.state
+                                    .set_current_agent(
+                                        req.session_id.clone(),
+                                        pending_job.developer.clone(),
+                                        pending_job.agent.clone(),
+                                        pending_job.agent_method.clone(),
+                                    )
+                                    .await;
+
+                                // Set settlement chain if this is a settlement job
+                                if pending_job.app_instance_method == "settle" {
+                                    if let Err(e) = self
+                                        .state
+                                        .set_settlement_chain_for_session(
+                                            &req.session_id,
+                                            settlement_chain.clone(),
+                                        )
+                                        .await
+                                    {
+                                        warn!("Failed to set settlement chain for session: {}", e);
+                                    }
+                                }
+
+                                // Convert to protobuf Job
+                                let job = Job {
+                                    job_sequence: *job_sequence,
+                                    description: pending_job.description.clone(),
+                                    developer: pending_job.developer.clone(),
+                                    agent: pending_job.agent.clone(),
+                                    agent_method: pending_job.agent_method.clone(),
+                                    app: pending_job.app.clone(),
+                                    app_instance: app_instance.clone(),
+                                    app_instance_method: pending_job.app_instance_method.clone(),
+                                    block_number: pending_job.block_number,
+                                    sequences: pending_job.sequences.clone().unwrap_or_default(),
+                                    sequences1: pending_job.sequences1.clone().unwrap_or_default(),
+                                    sequences2: pending_job.sequences2.clone().unwrap_or_default(),
+                                    data: pending_job.data.clone(),
+                                    job_id: agent_job.job_id.clone(),
+                                    attempts: pending_job.attempts as u32,
+                                    created_at: pending_job.created_at,
+                                    updated_at: pending_job.updated_at,
+                                    chain: settlement_chain,
+                                };
+
+                                let elapsed = start_time.elapsed();
+                                info!(
+                                    "✅ GetJob: app={}, dev={}, agent={}/{}, job_seq={}, app_method={}, source=direct_start, layer={}, time={:?}",
+                                    app_instance,
+                                    req.developer,
+                                    req.agent,
+                                    req.agent_method,
+                                    job_sequence,
+                                    pending_job.app_instance_method,
+                                    layer_id,
+                                    elapsed
+                                );
+
+                                // Send JobStartedEvent
+                                self.send_job_started_event(
+                                    req.session_id.clone(),
+                                    agent_job.job_id.clone(),
+                                    app_instance.clone(),
+                                )
+                                .await;
+
+                                return Ok(Response::new(GetJobResponse {
+                                    success: true,
+                                    message: format!("Job {} started and retrieved from Direct mode layer", job_sequence),
+                                    job: Some(job),
+                                }));
+                            }
+                            Ok(false) => {
+                                debug!(
+                                    "Failed to start job {} (already started by another worker) - trying next job",
+                                    job_sequence
+                                );
+                                // Continue to next job
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Error starting job {} in app {} on layer {}: {} - trying next job",
+                                    job_sequence, app_instance, layer_id, e
+                                );
+                                // Continue to next job
+                            }
+                        }
+                    }
+
+                    debug!(
+                        "Failed to start any of {} attempted jobs for app {} on layer {}",
+                        max_attempts, app_instance, layer_id
+                    );
+                }
+            }
+        }
+
         // If no session jobs and no buffer jobs, check if system is shutting down
         let elapsed = start_time.elapsed();
         let elapsed_ms = elapsed.as_millis() as f64;
@@ -1184,7 +1540,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Add complete job request to batch instead of executing immediately
         self.state
-            .add_complete_job_request(agent_job.app_instance.clone(), agent_job.job_sequence)
+            .execute_or_queue_complete_job(agent_job.app_instance.clone(), agent_job.job_sequence)
             .await;
 
         // Send JobFinishedEvent before removing from database
@@ -1287,7 +1643,7 @@ impl CoordinatorService for CoordinatorServiceImpl {
 
         // Add fail job request to batch instead of executing immediately
         self.state
-            .add_fail_job_request(
+            .execute_or_queue_fail_job(
                 agent_job.app_instance.clone(),
                 agent_job.job_sequence,
                 req.error_message.clone(),
@@ -1970,10 +2326,34 @@ impl CoordinatorService for CoordinatorServiceImpl {
             return Err(Status::unauthenticated("Invalid session ID"));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                return Err(Status::internal(format!(
+                    "Coordination layer {} not found",
+                    agent_job.layer_id
+                )));
+            }
+        };
+
         // First fetch the AppInstance object
         let app_instance_id = agent_job.app_instance.clone();
-        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
-            Ok(app_inst) => app_inst,
+        let app_instance = match layer.fetch_app_instance(&app_instance_id).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for query_sequence_states
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Err(Status::unimplemented(
+                            "GetSequenceStates is only supported for Sui app instances"
+                        ));
+                    }
+                }
+            }
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 return Err(Status::internal(format!(
@@ -2187,12 +2567,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                return Ok(Response::new(GetProofResponse {
+                    success: false,
+                    proof: None,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                }));
+            }
+        };
+
         // Use the app_instance from the job
         let app_instance_id = agent_job.app_instance.clone();
 
         // First fetch the AppInstance object
-        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
-            Ok(app_inst) => app_inst,
+        let app_instance = match layer.fetch_app_instance(&app_instance_id).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for fetch_proof_calculation
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetProofResponse {
+                            success: false,
+                            proof: None,
+                            message: "GetProof is only supported for Sui app instances".to_string(),
+                        }));
+                    }
+                }
+            }
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 return Ok(Response::new(GetProofResponse {
@@ -2381,12 +2788,39 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                return Ok(Response::new(GetBlockProofResponse {
+                    success: false,
+                    block_proof: None,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                }));
+            }
+        };
+
         // Use the app_instance from the job
         let app_instance_id = agent_job.app_instance.clone();
 
         // First fetch the AppInstance object
-        let app_instance = match sui::fetch::fetch_app_instance(&app_instance_id).await {
-            Ok(app_inst) => app_inst,
+        let app_instance = match layer.fetch_app_instance(&app_instance_id).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for fetch_proof_calculation
+                match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetBlockProofResponse {
+                            success: false,
+                            block_proof: None,
+                            message: "GetBlockProof is only supported for Sui app instances".to_string(),
+                        }));
+                    }
+                }
+            }
             Err(e) => {
                 error!("Failed to fetch AppInstance {}: {}", app_instance_id, e);
                 return Ok(Response::new(GetBlockProofResponse {
@@ -3110,8 +3544,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetKvResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    value: None,
+                }));
+            }
+        };
+
         // Fetch the app instance and get the key-value
-        match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+        match layer.fetch_app_instance(&agent_job.app_instance).await {
             Ok(app_instance) => {
                 if let Some(value) = app_instance.kv.get(&req.key) {
                     info!(
@@ -3383,8 +3832,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }));
         }
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetMetadataResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    metadata: None,
+                }));
+            }
+        };
+
         // Fetch the app instance and get the metadata
-        match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+        match layer.fetch_app_instance(&agent_job.app_instance).await {
             Ok(app_instance) => {
                 // Handle the optional key - if provided, look up the metadata value
                 let metadata_value = if let Some(ref key) = req.key {
@@ -3783,9 +4247,34 @@ impl CoordinatorService for CoordinatorServiceImpl {
                 req.block_number, WALRUS_QUILT_BLOCK_INTERVAL
             );
 
-            // Fetch app_instance to get block data
-            match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
-                Ok(app_instance) => {
+            // Get coordination layer for this job
+            let layer = match self.state.get_coordination_manager()
+                .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+            {
+                Some(l) => l,
+                None => {
+                    error!("Failed to get coordination layer {} for job", agent_job.layer_id);
+                    return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                        success: false,
+                        message: format!("Coordination layer {} not found", agent_job.layer_id),
+                        tx_hash: String::new(),
+                    }));
+                }
+            };
+
+            // Fetch app_instance to get block data - need Sui type for fetch_block_info
+            match layer.fetch_app_instance(&agent_job.app_instance).await {
+                Ok(_trait_app) => {
+                    let app_instance = match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                        Ok(sui_app) => sui_app,
+                        Err(_) => {
+                            return Ok(Response::new(UpdateBlockProofDataAvailabilityResponse {
+                                success: false,
+                                message: "UpdateBlockProofDataAvailability is only supported for Sui app instances".to_string(),
+                                tx_hash: String::new(),
+                            }));
+                        }
+                    };
                     // Fetch the last N blocks including current
                     let start_block = req
                         .block_number
@@ -4348,18 +4837,43 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Fetch app instance
-        let app_instance =
-            match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
-                Ok(ai) => ai,
-                Err(e) => {
-                    return Ok(Response::new(GetBlockResponse {
-                        success: false,
-                        message: format!("Failed to fetch app instance: {}", e),
-                        block: None,
-                    }));
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    block: None,
+                }));
+            }
+        };
+
+        // Fetch app instance - need Sui type for fetch_block_info
+        let app_instance = match layer.fetch_app_instance(&agent_job.app_instance).await {
+            Ok(_trait_app) => {
+                match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetBlockResponse {
+                            success: false,
+                            message: "GetBlock is only supported for Sui app instances".to_string(),
+                            block: None,
+                        }));
+                    }
                 }
-            };
+            }
+            Err(e) => {
+                return Ok(Response::new(GetBlockResponse {
+                    success: false,
+                    message: format!("Failed to fetch app instance: {}", e),
+                    block: None,
+                }));
+            }
+        };
 
         // Fetch block info
         match sui::fetch::block::fetch_block_info(&app_instance, req.block_number).await {
@@ -4447,13 +4961,32 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetBlockSettlementResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    block_settlement: None,
+                    chain: req.chain.clone(),
+                }));
+            }
+        };
+
         // Fetch the app instance and get settlement info for the specific chain
-        match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
-            Ok(app_instance) => {
-                // Get the settlement for the specified chain
-                if let Some(settlement) = app_instance.settlements.get(&req.chain) {
-                    // Fetch the block settlement from the ObjectTable
-                    match sui::fetch::fetch_block_settlement(settlement, req.block_number).await {
+        match layer.fetch_app_instance(&agent_job.app_instance).await {
+            Ok(_trait_app) => {
+                // Need Sui-specific type for fetch_block_settlement
+                match sui::fetch::fetch_app_instance(&agent_job.app_instance).await {
+                    Ok(app_instance) => {
+                        // Get the settlement for the specified chain
+                        if let Some(settlement) = app_instance.settlements.get(&req.chain) {
+                            // Fetch the block settlement from the ObjectTable
+                            match sui::fetch::fetch_block_settlement(settlement, req.block_number).await {
                         Ok(Some(block_settlement)) => {
                             let response_settlement = BlockSettlement {
                                 block_number: block_settlement.block_number,
@@ -4493,13 +5026,23 @@ impl CoordinatorService for CoordinatorServiceImpl {
                             }))
                         }
                     }
-                } else {
-                    Ok(Response::new(GetBlockSettlementResponse {
-                        success: false,
-                        message: format!("Chain {} not found in settlements", req.chain),
-                        block_settlement: None,
-                        chain: req.chain.clone(),
-                    }))
+                        } else {
+                            Ok(Response::new(GetBlockSettlementResponse {
+                                success: false,
+                                message: format!("Chain {} not found in settlements", req.chain),
+                                block_settlement: None,
+                                chain: req.chain.clone(),
+                            }))
+                        }
+                    }
+                    Err(_) => {
+                        Ok(Response::new(GetBlockSettlementResponse {
+                            success: false,
+                            message: "GetBlockSettlement is only supported for Sui app instances".to_string(),
+                            block_settlement: None,
+                            chain: req.chain.clone(),
+                        }))
+                    }
                 }
             }
             Err(e) => {
@@ -4567,9 +5110,36 @@ impl CoordinatorService for CoordinatorServiceImpl {
             }
         };
 
-        // Fetch app instance from blockchain
-        let app_instance = match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
-            Ok(ai) => ai,
+        // Get coordination layer for this job
+        let layer = match self.state.get_coordination_manager()
+            .and_then(|cm| cm.get_layer_by_id(&agent_job.layer_id))
+        {
+            Some(l) => l,
+            None => {
+                error!("Failed to get coordination layer {} for job {}", agent_job.layer_id, req.job_id);
+                return Ok(Response::new(GetAppInstanceResponse {
+                    success: false,
+                    message: format!("Coordination layer {} not found", agent_job.layer_id),
+                    app_instance: None,
+                }));
+            }
+        };
+
+        // Fetch app instance from blockchain - need Sui-specific type for methods field
+        let app_instance = match layer.fetch_app_instance(&agent_job.app_instance).await {
+            Ok(_trait_app) => {
+                // Get Sui-specific type for methods field access
+                match sui::fetch::app_instance::fetch_app_instance(&agent_job.app_instance).await {
+                    Ok(sui_app) => sui_app,
+                    Err(_) => {
+                        return Ok(Response::new(GetAppInstanceResponse {
+                            success: false,
+                            message: "GetAppInstance is only supported for Sui app instances".to_string(),
+                            app_instance: None,
+                        }));
+                    }
+                }
+            }
             Err(e) => {
                 return Ok(Response::new(GetAppInstanceResponse {
                     success: false,

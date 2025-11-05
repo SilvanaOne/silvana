@@ -15,6 +15,20 @@ use crate::registry::{
 use sui_sdk_types as sui;
 use tracing::{debug, error, info, warn};
 
+/// Normalize app_instance by removing 0x prefix if present
+/// Logs an error if 0x prefix is found (all app_instances should be stored without prefix)
+fn normalize_app_instance(app_instance: &str, context: &str) -> String {
+    if app_instance.starts_with("0x") {
+        error!(
+            "⚠️  app_instance with 0x prefix detected in {}: {}. This indicates inconsistent storage. Normalizing by removing prefix.",
+            context, app_instance
+        );
+        app_instance[2..].to_string()
+    } else {
+        app_instance.to_string()
+    }
+}
+
 /// Interface for calling Sui Move functions related to job management
 pub struct SilvanaSuiInterface;
 
@@ -26,10 +40,11 @@ impl SilvanaSuiInterface {
     /// Start a job on the Sui blockchain by calling the start_job Move function
     /// This should be called before starting the actual job processing
     /// Returns true if the transaction was successful, false if it failed
-    pub(crate) async fn start_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
+    pub async fn start_job(&mut self, app_instance: &str, job_sequence: u64) -> bool {
+        let app_instance = normalize_app_instance(app_instance, "start_job");
         debug!("Attempting to start job {} on Sui blockchain", job_sequence);
 
-        match start_job_tx(app_instance, job_sequence).await {
+        match start_job_tx(&app_instance, job_sequence).await {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully started job {} on blockchain, tx: {}",
@@ -115,13 +130,14 @@ impl SilvanaSuiInterface {
         job_sequence: u64,
         gas_budget_sui: f64,
     ) -> Result<String, (String, Option<String>)> {
+        let app_instance = normalize_app_instance(app_instance, "terminate_job");
         debug!(
             "Attempting to terminate job {} on Sui blockchain",
             job_sequence
         );
 
         let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
-        match terminate_job_tx(app_instance, job_sequence, Some(gas_budget_mist)).await {
+        match terminate_job_tx(&app_instance, job_sequence, Some(gas_budget_mist)).await {
             Ok(tx_digest) => {
                 debug!(
                     "Successfully terminated job {} on blockchain, tx: {}",
@@ -167,6 +183,7 @@ impl SilvanaSuiInterface {
         job_sequence: u64,
         gas_budget_sui: f64,
     ) -> Result<String, (String, Option<String>)> {
+        let app_instance = normalize_app_instance(app_instance, "restart_failed_job");
         debug!(
             "Attempting to restart failed job {} on Sui blockchain",
             job_sequence
@@ -175,7 +192,7 @@ impl SilvanaSuiInterface {
         let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
         // Restart a single specific failed job by passing it in the sequences vector
         match restart_failed_jobs_with_sequences_tx(
-            app_instance,
+            &app_instance,
             Some(vec![job_sequence]),
             Some(gas_budget_mist),
         )
@@ -225,11 +242,12 @@ impl SilvanaSuiInterface {
         app_instance: &str,
         gas_budget_sui: f64,
     ) -> Result<String, (String, Option<String>)> {
+        let app_instance = normalize_app_instance(app_instance, "restart_failed_jobs");
         debug!("Attempting to restart all failed jobs on Sui blockchain");
 
         let gas_budget_mist = (gas_budget_sui * 1_000_000_000.0) as u64;
         // Restart all failed jobs by passing None for job_sequences
-        match restart_failed_jobs_with_sequences_tx(app_instance, None, Some(gas_budget_mist)).await
+        match restart_failed_jobs_with_sequences_tx(&app_instance, None, Some(gas_budget_mist)).await
         {
             Ok(tx_digest) => {
                 debug!(
@@ -272,7 +290,7 @@ impl SilvanaSuiInterface {
     /// Returns Ok(MulticallResult) if successful, Err((error_msg, optional_tx_digest)) if failed
     pub async fn multicall_job_operations(
         &mut self,
-        operations: Vec<crate::types::MulticallOperations>,
+        mut operations: Vec<crate::types::MulticallOperations>,
         gas_budget_sui: Option<f64>,
         max_computation_cost: Option<u64>,
     ) -> Result<crate::types::MulticallResult, (String, Option<String>)> {
@@ -280,6 +298,11 @@ impl SilvanaSuiInterface {
 
         if operations.is_empty() {
             return Err(("No operations provided".to_string(), None));
+        }
+
+        // Normalize all app_instance IDs in operations
+        for op in operations.iter_mut() {
+            op.app_instance = normalize_app_instance(&op.app_instance, "multicall_job_operations");
         }
 
         // Validate all operations
@@ -1243,7 +1266,7 @@ impl SilvanaSuiInterface {
         registry_id: &str,
         developer_owner: sui::Address,
         name: String,
-        github: String,
+        github: Option<String>,
         image: Option<String>,
         description: Option<String>,
         site: Option<String>,
@@ -1252,7 +1275,7 @@ impl SilvanaSuiInterface {
 
         match add_developer(
             registry_id,
-            developer_owner,
+            developer_owner.to_string(),
             name.clone(),
             github,
             image,
@@ -1283,7 +1306,7 @@ impl SilvanaSuiInterface {
         &mut self,
         registry_id: &str,
         name: String,
-        github: String,
+        github: Option<String>,
         image: Option<String>,
         description: Option<String>,
         site: Option<String>,
@@ -1469,7 +1492,7 @@ impl SilvanaSuiInterface {
     ) -> Result<String, String> {
         debug!("Adding app '{}' to registry '{}'", name, registry_id);
 
-        match add_app(registry_id, name.clone(), owner, description).await {
+        match add_app(registry_id, name.clone(), owner.to_string(), description).await {
             Ok(tx_digest) => {
                 info!(
                     "Successfully added app '{}' to registry '{}' (tx: {})",
@@ -1548,8 +1571,8 @@ impl SilvanaSuiInterface {
         agent_name: String,
         method_name: String,
         docker_image: String,
-        docker_sha256: String,
-        min_memory_mb: u32,
+        docker_sha256: Option<String>,
+        min_memory_gb: u16,
         min_cpu_cores: u16,
         requires_tee: bool,
     ) -> Result<String, String> {
@@ -1565,7 +1588,7 @@ impl SilvanaSuiInterface {
             method_name.clone(),
             docker_image,
             docker_sha256,
-            min_memory_mb,
+            min_memory_gb,
             min_cpu_cores,
             requires_tee,
         )
@@ -1596,8 +1619,8 @@ impl SilvanaSuiInterface {
         agent_name: String,
         method_name: String,
         docker_image: String,
-        docker_sha256: String,
-        min_memory_mb: u32,
+        docker_sha256: Option<String>,
+        min_memory_gb: u16,
         min_cpu_cores: u16,
         requires_tee: bool,
     ) -> Result<String, String> {
@@ -1613,7 +1636,7 @@ impl SilvanaSuiInterface {
             method_name.clone(),
             docker_image,
             docker_sha256,
-            min_memory_mb,
+            min_memory_gb,
             min_cpu_cores,
             requires_tee,
         )
@@ -1737,6 +1760,30 @@ impl SilvanaSuiInterface {
                     "Failed to remove default method from agent '{}' for developer '{}' in registry '{}': {}",
                     agent_name, developer, registry_id, e
                 );
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// List all contents of a registry
+    pub async fn list_registry(
+        &mut self,
+        registry_id: &str,
+    ) -> Result<crate::registry::RegistryListData, String> {
+        debug!("Listing registry '{}'", registry_id);
+
+        match crate::registry::list_registry(registry_id).await {
+            Ok(data) => {
+                info!(
+                    "Successfully listed registry '{}' ({} developers, {} apps)",
+                    registry_id,
+                    data.developers.len(),
+                    data.apps.len()
+                );
+                Ok(data)
+            }
+            Err(e) => {
+                error!("Failed to list registry '{}': {}", registry_id, e);
                 Err(e.to_string())
             }
         }

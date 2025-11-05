@@ -5,17 +5,273 @@ use crate::constants::{
     PROOF_ANALYSIS_INTERVAL_SECS, RECONCILIATION_INTERVAL_SECS, SHUTDOWN_CLEANUP_DELAY_MS,
     SHUTDOWN_PROGRESS_INTERVAL_SECS, STARTUP_RECONCILIATION_DELAY_SECS,
 };
+use crate::coordination_layer::CoordinationLayer;
+use crate::coordination_manager::CoordinationManager;
 use crate::error::Result;
 use crate::job_searcher::JobSearcher;
+use crate::layer_config::{CoordinatorConfig, GeneralConfig, SuiConfig};
 use crate::merge::{start_periodic_block_creation, start_periodic_proof_analysis};
 use crate::metrics::{CoordinatorMetrics, start_metrics_reporter};
-use crate::processor::EventProcessor;
+use crate::multi_layer_processor::MultiLayerEventProcessor;
 use crate::state::SharedState;
 // use crate::stuck_jobs::StuckJobMonitor; // Removed - reconciliation handles stuck jobs
+use silvana_coordination_trait::Coordination;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 use tokio::task;
 use tracing::{debug, error, info, warn};
+
+/// Try to load coordinator configuration from file or environment
+async fn try_load_coordinator_config(
+    config_path: Option<&str>,
+) -> Result<Option<CoordinatorConfig>> {
+    // If explicit path provided, use it
+    if let Some(path) = config_path {
+        info!("Loading configuration from: {}", path);
+        return Ok(Some(CoordinatorConfig::from_file(path)?));
+    }
+
+    // Check for default config file
+    if Path::new("coordinator.toml").exists() {
+        info!("Found coordinator.toml, loading multi-layer configuration");
+        return Ok(Some(CoordinatorConfig::from_file("coordinator.toml")?));
+    }
+
+    // No config file found
+    debug!("No configuration file found, will use default single-layer Sui configuration");
+    Ok(None)
+}
+
+/// Create default configuration for single Sui layer
+fn create_default_sui_config(rpc_url: String, package_id: String) -> Result<CoordinatorConfig> {
+    Ok(CoordinatorConfig {
+        coordinator: GeneralConfig {
+            enable_layers: vec!["sui".to_string()],
+            max_parallel_jobs: 10,
+            reconciliation_interval: 30,
+            enable_metrics: true,
+            metrics_interval: 60,
+        },
+        sui: SuiConfig {
+            layer_id: "sui".to_string(),
+            rpc_url,
+            package_id: Some(package_id.clone()),
+            registry_id: Some(package_id), // Use same for registry
+            operation_mode: "multicall".to_string(),
+            multicall_interval_secs: 3,
+            multicall_max_operations: 100,
+            app_instance_filter: None,
+        },
+        private: vec![],
+        ethereum: vec![],
+    })
+}
+
+/// Check a single coordination layer for stuck jobs
+async fn reconcile_layer(
+    layer: Arc<CoordinationLayer>,
+    layer_id: &str,
+    state: &SharedState,
+) -> Result<usize> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut stuck_count = 0;
+    let current_time_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    // Get all app instances tracked by the coordinator
+    let app_instances = state.get_app_instances().await;
+
+    for app_instance in app_instances {
+        // Check if this layer owns this app instance
+        match layer.fetch_app_instance(&app_instance).await {
+            Ok(_) => {
+                // Fetch pending jobs for this app instance
+                match layer.fetch_pending_jobs(&app_instance).await {
+                    Ok(jobs) => {
+                        for job in jobs {
+                            if is_job_stuck(&job, current_time_ms) {
+                                stuck_count += 1;
+                                let error_msg = format!(
+                                    "Job timed out after {} minutes in layer {}",
+                                    (current_time_ms - job.updated_at) / 60000,
+                                    layer_id
+                                );
+
+                                // Use job_sequence directly (already u64)
+                                state
+                                    .execute_or_queue_fail_job(
+                                        app_instance.clone(),
+                                        job.job_sequence,
+                                        error_msg,
+                                    )
+                                    .await;
+
+                                info!(
+                                    "Found stuck job {} in layer {} for app_instance {}",
+                                    job.job_sequence, layer_id, app_instance
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!(
+                            "Failed to fetch jobs for {} in layer {}: {}",
+                            app_instance, layer_id, e
+                        );
+                    }
+                }
+            }
+            Err(_) => {
+                // App instance not in this layer, skip
+                continue;
+            }
+        }
+    }
+
+    Ok(stuck_count)
+}
+
+/// Check if a job is stuck (running for too long)
+fn is_job_stuck(job: &silvana_coordination_trait::Job, current_time_ms: u64) -> bool {
+    use silvana_coordination_trait::JobStatus;
+
+    // Only check running jobs
+    if !matches!(job.status, JobStatus::Running) {
+        return false;
+    }
+
+    // Job is stuck if it's been running for more than 10 minutes (600000 ms)
+    const STUCK_TIMEOUT_MS: u64 = 600000;
+    let running_duration_ms = current_time_ms.saturating_sub(job.updated_at);
+
+    running_duration_ms > STUCK_TIMEOUT_MS
+}
+
+/// Multi-layer reconciliation that checks all coordination layers
+async fn start_multi_layer_reconciliation(
+    manager: Arc<CoordinationManager>,
+    state: SharedState,
+) -> Result<()> {
+    info!(
+        "🔄 Starting multi-layer reconciliation task (runs every {} minutes)...",
+        RECONCILIATION_INTERVAL_SECS / 60
+    );
+
+    // Run immediate reconciliation on startup to catch stuck jobs
+    info!("🔍 Running immediate reconciliation check on startup...");
+    tokio::time::sleep(Duration::from_secs(STARTUP_RECONCILIATION_DELAY_SECS)).await; // Small delay to let the system initialize
+
+    // Perform initial multi-layer reconciliation
+    let layer_ids = manager.get_layer_ids();
+    info!(
+        "Checking {} coordination layers for stuck jobs",
+        layer_ids.len()
+    );
+
+    let mut total_stuck = 0;
+    for layer_id in &layer_ids {
+        if let Some(layer) = manager.get_layer(&layer_id) {
+            match reconcile_layer(layer.clone(), &layer_id, &state).await {
+                Ok(stuck_count) => {
+                    total_stuck += stuck_count;
+                    if stuck_count > 0 {
+                        info!("Found {} stuck jobs in layer {}", stuck_count, layer_id);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to reconcile layer {}: {}", layer_id, e);
+                }
+            }
+        }
+    }
+
+    if total_stuck > 0 {
+        info!(
+            "✅ Initial reconciliation complete - found {} stuck jobs across all layers",
+            total_stuck
+        );
+    } else {
+        info!("✅ Initial reconciliation complete - no stuck jobs found");
+    }
+
+    let mut interval = tokio::time::interval(Duration::from_secs(RECONCILIATION_INTERVAL_SECS));
+
+    // Skip the immediate first tick since we just ran reconciliation
+    interval.tick().await;
+
+    loop {
+        // Check for shutdown
+        if state.is_shutting_down() {
+            info!("Multi-layer reconciliation task shutting down...");
+            break;
+        }
+
+        interval.tick().await;
+
+        if state.is_shutting_down() {
+            break;
+        }
+
+        info!("📊 Running periodic multi-layer reconciliation check...");
+
+        // Log current stats before reconciliation
+        let stats = state.get_jobs_tracker().get_stats().await;
+        debug!(
+            "Starting periodic reconciliation (currently tracking {} app_instances, {} agent methods)",
+            stats.app_instances_count, stats.agent_methods_count
+        );
+
+        // Iterate through all layers for reconciliation
+        let layer_ids = manager.get_layer_ids();
+        let mut total_stuck = 0;
+        let mut has_any_pending = false;
+
+        for layer_id in &layer_ids {
+            if let Some(layer) = manager.get_layer(&layer_id) {
+                match reconcile_layer(layer.clone(), &layer_id, &state).await {
+                    Ok(stuck_count) => {
+                        total_stuck += stuck_count;
+                        if stuck_count > 0 {
+                            has_any_pending = true;
+                            debug!(
+                                "Layer {} reconciliation: {} stuck jobs",
+                                layer_id, stuck_count
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to reconcile layer {}: {}", layer_id, e);
+                    }
+                }
+            }
+        }
+
+        if total_stuck > 0 {
+            debug!(
+                "Reconciliation complete - found {} stuck jobs across {} layers",
+                total_stuck,
+                layer_ids.len()
+            );
+        } else {
+            debug!("Reconciliation complete - no stuck jobs in any layer");
+        }
+
+        // Always refresh the has_pending_jobs flag so the job_searcher
+        // is notified when pending jobs exist after reconciliation.
+        if has_any_pending {
+            state.update_pending_jobs_flag().await;
+        }
+
+        info!("✅ Multi-layer reconciliation check complete");
+    }
+
+    Ok(())
+}
 
 pub async fn start_coordinator(
     rpc_url: String,
@@ -25,12 +281,57 @@ pub async fn start_coordinator(
     grpc_socket_path: String,
     app_instance_filter: Option<String>,
     settle_only: bool,
+    config_path: Option<String>,
 ) -> Result<()> {
     info!("--------------------------------");
     info!("🚀 Starting Silvana Coordinator");
     info!("--------------------------------");
-    info!("🔗 Sui RPC URL: {}", rpc_url);
-    info!("📦 Monitoring package: {}", package_id);
+
+    // ALWAYS load or create configuration for CoordinationManager
+    let coordinator_config =
+        if let Some(config) = try_load_coordinator_config(config_path.as_deref()).await? {
+            info!(
+                "📊 Multi-layer mode: {} layer(s) configured",
+                config.coordinator.enable_layers.len()
+            );
+            config
+        } else {
+            info!("📊 Single-layer mode: Using default Sui configuration");
+            create_default_sui_config(rpc_url.clone(), package_id.clone())?
+        };
+
+    // ALWAYS initialize CoordinationManager (even for single Sui layer)
+    let coordination_manager =
+        Arc::new(CoordinationManager::from_config(coordinator_config.clone()).await?);
+    info!(
+        "✅ Initialized coordination manager with {} layer(s)",
+        coordination_manager.get_layer_ids().len()
+    );
+
+    // Get the Sui layer configuration for backward compatibility
+    let sui_rpc_url = coordinator_config.sui.rpc_url.clone();
+    let sui_package_id = coordinator_config.sui.package_id.clone()
+        .ok_or_else(|| {
+            error!("❌ SUI package_id is required but not set");
+            error!("   Check that:");
+            error!("   1. RPC server returned SILVANA_REGISTRY_PACKAGE in config");
+            error!("   2. Or set SILVANA_REGISTRY_PACKAGE environment variable");
+            error!("   3. Or add package_id in coordinator.toml [sui] section");
+            anyhow::anyhow!("SUI package_id is required")
+        })?;
+    let sui_registry_id = coordinator_config.sui.registry_id.clone()
+        .ok_or_else(|| {
+            error!("❌ SUI registry_id is required but not set");
+            error!("   Check that:");
+            error!("   1. RPC server returned SILVANA_REGISTRY in config");
+            error!("   2. Or set SILVANA_REGISTRY environment variable");
+            error!("   3. Or add registry_id in coordinator.toml [sui] section");
+            anyhow::anyhow!("SUI registry_id is required")
+        })?;
+
+    info!("🔗 Primary Sui RPC URL: {}", sui_rpc_url);
+    info!("📦 Package ID: {}", sui_package_id);
+    info!("📦 Registry ID: {}", sui_registry_id);
 
     if let Some(ref instance) = app_instance_filter {
         info!("🎯 Filtering jobs for app instance: {}", instance);
@@ -40,8 +341,8 @@ pub async fn start_coordinator(
         info!("⚖️ Running as dedicated settlement node");
     }
 
-    // Initialize the global SharedSuiState
-    sui::SharedSuiState::initialize(&rpc_url).await?;
+    // Initialize the global SharedSuiState with Sui layer's RPC URL
+    sui::SharedSuiState::initialize(&sui_rpc_url).await?;
 
     // Get network and address info
     let env_network = sui::get_network_name();
@@ -103,20 +404,20 @@ pub async fn start_coordinator(
         ),
     }
 
-    let config = Config {
-        package_id,
+    let _config = Config {
+        package_id: sui_package_id,
         modules: vec!["jobs".to_string()],
     };
 
-    // Create shared state
-    let state = SharedState::new();
+    // Create shared state with coordination manager
+    let state = SharedState::new_with_manager(coordination_manager.clone());
 
     // Set the settle_only flag
     state.set_settle_only(settle_only);
 
     // Set the app instance filter if provided
-    if let Some(instance) = app_instance_filter {
-        state.set_app_instance_filter(Some(instance)).await;
+    if let Some(ref instance) = app_instance_filter {
+        state.set_app_instance_filter(Some(instance.clone())).await;
     }
 
     // Setup signal handlers for graceful shutdown (Ctrl-C and SIGTERM for system reboot)
@@ -253,103 +554,19 @@ pub async fn start_coordinator(
         }
     });
 
-    // 2. Start reconciliation task in a separate thread
+    // 2. Start multi-layer reconciliation task in a separate thread
     let reconciliation_state = state.clone();
+    let reconciliation_manager = coordination_manager.clone();
 
     let reconciliation_handle = task::spawn(async move {
-        info!(
-            "🔄 Starting reconciliation task (runs every {} minutes)...",
-            RECONCILIATION_INTERVAL_SECS / 60
-        );
-
-        // Run immediate reconciliation on startup to catch stuck jobs
-        info!("🔍 Running immediate reconciliation check on startup...");
-        tokio::time::sleep(Duration::from_secs(STARTUP_RECONCILIATION_DELAY_SECS)).await; // Small delay to let the system initialize
-
-        match reconciliation_state
-            .get_jobs_tracker()
-            .reconcile_with_chain(|app_instance: String, job_sequence: u64, error: String| {
-                let state = reconciliation_state.clone();
-                Box::pin(async move {
-                    state
-                        .add_fail_job_request(app_instance, job_sequence, error)
-                        .await;
-                })
-            })
-            .await
+        if let Err(e) =
+            start_multi_layer_reconciliation(reconciliation_manager, reconciliation_state).await
         {
-            Ok(has_pending) => {
-                if has_pending {
-                    info!("✅ Initial reconciliation complete - found pending jobs");
-                } else {
-                    info!("✅ Initial reconciliation complete - no pending jobs");
-                }
-            }
-            Err(e) => {
-                error!("❌ Initial reconciliation failed: {}", e);
-            }
-        }
-
-        let mut interval = tokio::time::interval(Duration::from_secs(RECONCILIATION_INTERVAL_SECS));
-
-        // Skip the immediate first tick since we just ran reconciliation
-        interval.tick().await;
-
-        loop {
-            // Check for shutdown
-            if reconciliation_state.is_shutting_down() {
-                info!("Reconciliation task shutting down...");
-                break;
-            }
-
-            interval.tick().await;
-
-            if reconciliation_state.is_shutting_down() {
-                break;
-            }
-
-            info!("📊 Running periodic reconciliation check...");
-
-            // Log current stats before reconciliation
-            let stats = reconciliation_state.get_jobs_tracker().get_stats().await;
-            debug!(
-                "Starting periodic reconciliation (currently tracking {} app_instances, {} agent methods)",
-                stats.app_instances_count, stats.agent_methods_count
-            );
-
-            // Run reconciliation with chain
-            match reconciliation_state
-                .get_jobs_tracker()
-                .reconcile_with_chain(|app_instance: String, job_sequence: u64, error: String| {
-                    let state = reconciliation_state.clone();
-                    Box::pin(async move {
-                        state
-                            .add_fail_job_request(app_instance, job_sequence, error)
-                            .await;
-                    })
-                })
-                .await
-            {
-                Ok(has_pending) => {
-                    if has_pending {
-                        debug!("Reconciliation complete - still have pending jobs");
-                    } else {
-                        debug!("Reconciliation complete - no pending jobs");
-                    }
-                    // Always refresh the has_pending_jobs flag so the job_searcher
-                    // is notified when pending jobs exist after reconciliation.
-                    reconciliation_state.update_pending_jobs_flag().await;
-                }
-                Err(e) => {
-                    error!("Failed to reconcile with chain: {}", e);
-                }
-            }
-
-            info!("✅ Reconciliation check complete");
+            error!("Multi-layer reconciliation task error: {}", e);
         }
     });
     info!(
-        "🔄 Started reconciliation task (runs every {} minutes)",
+        "🔄 Started multi-layer reconciliation task (runs every {} minutes)",
         RECONCILIATION_INTERVAL_SECS / 60
     );
 
@@ -418,31 +635,68 @@ pub async fn start_coordinator(
     });
     info!("💰 Started periodic balance check task (runs every 30 minutes)");
 
-    // 6. Start job searcher in a separate thread (only collects jobs and adds to multicall queue)
-    let job_searcher_state = state.clone();
-    let job_searcher_metrics = metrics.clone();
-    let job_searcher_handle = task::spawn(async move {
-        let mut job_searcher = match JobSearcher::new(job_searcher_state) {
-            Ok(searcher) => searcher,
-            Err(e) => {
-                error!("Failed to create job searcher: {}", e);
-                return;
+    // 6. Start job searchers - one per coordination layer
+    let layer_ids = coordination_manager.get_layer_ids();
+    info!("🔍 Starting {} job searcher(s)...", layer_ids.len());
+
+    let mut job_searcher_handles = Vec::new();
+    for layer_id in layer_ids {
+        // Apply app_instance_filter if provided
+        if let Some(ref filter) = app_instance_filter {
+            // Check if this layer should be filtered
+            if let Some(layer_info) = coordination_manager.get_layer_info(&layer_id) {
+                if let Some(ref layer_filter) = layer_info.app_instance_filter {
+                    if !filter.contains(layer_filter) {
+                        info!(
+                            "Skipping job searcher for layer {} due to app_instance_filter",
+                            layer_id
+                        );
+                        continue;
+                    }
+                }
             }
-        };
-
-        // Set metrics reference
-        job_searcher.set_metrics(job_searcher_metrics);
-
-        // Delay job searcher startup by 10 seconds to allow system initialization
-        info!("Job searcher waiting 10 seconds before starting...");
-        tokio::time::sleep(Duration::from_secs(10)).await;
-        info!("Job searcher starting now");
-
-        if let Err(e) = job_searcher.run().await {
-            error!("Job searcher error: {}", e);
         }
-    });
-    info!("🔍 Started job searcher thread");
+
+        let searcher_state = state.clone();
+        let searcher_metrics = metrics.clone();
+        let searcher_manager = coordination_manager.clone();
+        let searcher_layer_id = layer_id.clone();
+
+        let handle = task::spawn(async move {
+            let mut job_searcher = match JobSearcher::new_with_layer(
+                searcher_layer_id.clone(),
+                searcher_manager,
+                searcher_state,
+            ) {
+                Ok(searcher) => searcher,
+                Err(e) => {
+                    error!(
+                        "Failed to create job searcher for layer {}: {}",
+                        searcher_layer_id, e
+                    );
+                    return;
+                }
+            };
+
+            // Set metrics reference
+            job_searcher.set_metrics(searcher_metrics);
+
+            // Delay job searcher startup by 10 seconds to allow system initialization
+            info!(
+                "Job searcher for layer {} waiting 10 seconds before starting...",
+                searcher_layer_id
+            );
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            info!("Job searcher for layer {} starting now", searcher_layer_id);
+
+            if let Err(e) = job_searcher.run().await {
+                error!("Job searcher error for layer {}: {}", searcher_layer_id, e);
+            }
+        });
+
+        job_searcher_handles.push(handle);
+        info!("🔍 Started job searcher thread for layer {}", layer_id);
+    }
 
     // 7. Start multicall processor in a separate thread (processes multicall queue and executes batches)
     let multicall_state = state.clone();
@@ -465,11 +719,13 @@ pub async fn start_coordinator(
     // 8. Start docker buffer processor in a separate thread (processes started jobs buffer and launches containers)
     let docker_state = state.clone();
     let docker_metrics = metrics.clone();
+    let docker_coordination_manager = coordination_manager.clone();
     let docker_handle = task::spawn(async move {
         let mut docker_processor = match crate::docker::DockerBufferProcessor::new(
             docker_state,
             use_tee,
             container_timeout,
+            docker_coordination_manager,
         ) {
             Ok(processor) => processor,
             Err(e) => {
@@ -490,10 +746,9 @@ pub async fn start_coordinator(
     });
     info!("🐳 Started docker buffer processor thread");
 
-    // 7. Start event processor in main thread (processes events and updates shared state)
-    let mut processor = EventProcessor::new(config, state.clone()).await?;
-    processor.set_metrics(metrics.clone());
-    info!("👁️ Starting event monitoring...");
+    // 7. Start multi-layer event processor (processes events from all coordination layers)
+    let mut processor = MultiLayerEventProcessor::new(coordination_manager.clone(), state.clone());
+    info!("👁️ Starting multi-layer event monitoring...");
 
     // Run processor in a task so we can monitor shutdown
     let processor_handle = task::spawn(async move { processor.run().await });
@@ -698,16 +953,21 @@ pub async fn start_coordinator(
     // 3. Multicall processor continues until docker is done, then processes final operations
     // 4. gRPC server stays running until Docker containers complete
 
-    // Job searcher should stop immediately
-    if !job_searcher_handle.is_finished() {
-        info!("  ⏳ Waiting for job searcher to stop...");
-        let _ = tokio::time::timeout(
-            Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
-            job_searcher_handle,
-        )
-        .await;
-        info!("  ✅ Job searcher stopped (no new jobs will be searched)");
+    // Job searchers should stop immediately
+    info!(
+        "  ⏳ Waiting for {} job searcher(s) to stop...",
+        job_searcher_handles.len()
+    );
+    for handle in job_searcher_handles {
+        if !handle.is_finished() {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(JOB_SEARCHER_SHUTDOWN_TIMEOUT_SECS),
+                handle,
+            )
+            .await;
+        }
     }
+    info!("  ✅ All job searchers stopped (no new jobs will be searched)");
 
     // Docker and Multicall processors work together
     // Docker processes buffered jobs and waits for containers

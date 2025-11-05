@@ -4,6 +4,10 @@ members = [
     "crates/rpc",
     "crates/rpc-client",
     "crates/coordinator",
+    "crates/coordination-trait",
+    "crates/coordination-sui",
+    "crates/coordination-private",
+    "crates/coordination-ethereum",
     "crates/docker",
     "crates/tidb",
     "crates/monitoring",
@@ -20,11 +24,15 @@ members = [
     "crates/secrets-client",
     "crates/storage",
     "crates/state",
+    "crates/sdk",
     "xtask",
+]
+exclude = [
+    "examples/add-ethereum/agent",
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["DFST"]
 license = "Apache-2.0"
@@ -81,5 +89,17 @@ tonic-prost = "0.14"
 tonic-prost-build = "0.14.2"
 prost-build = "0.14"
 prost-reflect-build = "0.16"
+
+# Alloy for Ethereum interactions
+alloy = { version = "1.0", features = [
+    "contract",
+    "providers",
+    "provider-ws",
+    "rpc-types",
+    "rpc-client",
+    "signers",
+    "network",
+    "sol-types",
+] }
 
 

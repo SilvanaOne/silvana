@@ -58,6 +58,9 @@ COPY proto/ ./proto/
 # Copy all crates
 COPY crates/ ./crates/
 
+# Copy Solidity contract artifacts (needed by coordination-ethereum ABI generation)
+COPY solidity/ ./solidity/
+
 # Copy xtask crate (required by workspace)
 COPY xtask/ ./xtask/
 

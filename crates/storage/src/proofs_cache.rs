@@ -322,7 +322,7 @@ impl ProofsCache {
     pub async fn read_proof(&self, proof_hash: &str) -> Result<ProofData> {
         debug!("Reading proof from cache with hash: {}", proof_hash);
 
-        let (data, metadata) = match self.s3_client.read(proof_hash).await {
+        let result = match self.s3_client.read(proof_hash).await {
             Ok(result) => result,
             Err(e) => {
                 error!("ProofsCache: Failed to read proof - Hash: {}", proof_hash);
@@ -334,7 +334,10 @@ impl ProofsCache {
             "Successfully read proof from cache with hash: {}",
             proof_hash
         );
-        Ok(ProofData { data, metadata })
+        Ok(ProofData {
+            data: result.data,
+            metadata: result.metadata,
+        })
     }
 
     /// Read a quilt from the cache
@@ -355,7 +358,7 @@ impl ProofsCache {
             quilt_hash, block_number
         );
 
-        let (data, metadata) = match self.s3_client.read(quilt_hash).await {
+        let result = match self.s3_client.read(quilt_hash).await {
             Ok(result) => result,
             Err(e) => {
                 error!("ProofsCache: Failed to read quilt - Hash: {}", quilt_hash);
@@ -364,9 +367,12 @@ impl ProofsCache {
         };
 
         // Check if this is actually a quilt
-        if metadata.get("quilts").map(|v| v.as_str()) != Some("true") {
+        if result.metadata.get("quilts").map(|v| v.as_str()) != Some("true") {
             return Err(anyhow!("Hash {} is not a quilt", quilt_hash));
         }
+
+        let data = result.data;
+        let metadata = result.metadata;
 
         // Parse the quilt data
         let quilt_data: QuiltData = serde_json::from_str(&data)?;

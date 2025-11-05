@@ -1,14 +1,16 @@
+use crate::coordination_manager::CoordinationManager;
 use anyhow::Result;
+use silvana_coordination_trait::Coordination;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sui::interface::SilvanaSuiInterface;
-use tracing::{debug, error};
+use tracing::{debug};
 
-/// Try to create a new block for the app instance
+/// Try to create a new block for the app instance using coordination manager
 /// This function checks if the conditions are met to create a new block:
 /// 1. No new sequences pending (sequence != previous_block_last_sequence + 1)
 /// 2. Sufficient time has passed since the last block (current_time - previous_block_timestamp > app_instance.min_time_between_blocks)
 pub async fn try_create_block(
-    sui_interface: &mut SilvanaSuiInterface,
+    manager: &Arc<CoordinationManager>,
     app_instance_id: &str,
 ) -> Result<Option<(String, u64, u64)>> {
     // Returns Some((tx_digest, new_sequences_count, time_since_last_block)) on success
@@ -17,8 +19,11 @@ pub async fn try_create_block(
         app_instance_id
     );
 
-    // Use the fetch_app_instance function from sui crate
-    let app_instance = sui::fetch::fetch_app_instance(app_instance_id)
+    // Get the correct coordination layer for this app instance
+    let (_layer_id, coordination) = manager.get_layer_for_app(app_instance_id).await?;
+
+    // Use the coordination layer to fetch the app instance
+    let app_instance = coordination.fetch_app_instance(app_instance_id)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to fetch AppInstance {}: {}", app_instance_id, e))?;
 
@@ -56,39 +61,32 @@ pub async fn try_create_block(
             time_since_last_block
         );
 
-        // Call the blockchain to try creating the block
-        match sui_interface.try_create_block(app_instance_id).await {
-            Ok(tx_digest) => {
+        // Call the coordination layer to try creating the block
+        match coordination.try_create_block(app_instance_id).await {
+            Ok(Some(new_block_number)) => {
                 debug!(
-                    "Successfully created block for app_instance {}, tx: {}",
-                    app_instance_id, tx_digest
+                    "Successfully created block {} for app_instance {}",
+                    new_block_number, app_instance_id
                 );
                 let new_sequences =
                     app_instance.sequence - app_instance.previous_block_last_sequence - 1;
-                Ok(Some((tx_digest, new_sequences, time_since_last_block)))
+                // Return block number as string for backward compatibility
+                Ok(Some((new_block_number.to_string(), new_sequences, time_since_last_block)))
+            }
+            Ok(None) => {
+                debug!(
+                    "Block not created for app_instance {} (conditions not met or already created)",
+                    app_instance_id
+                );
+                Ok(None)
             }
             Err(e) => {
-                let error_str = e.to_string();
-                if error_str.contains("NonEntryFunctionInvoked")
-                    || error_str.contains("not an entry function")
-                {
-                    // Critical error - function not found
-                    error!(
-                        "CRITICAL: try_create_block function not found in Move contract: {}",
-                        error_str
-                    );
-                    Err(anyhow::anyhow!(
-                        "try_create_block function not found in Move contract: {}",
-                        error_str
-                    ))
-                } else {
-                    // Expected failures (conditions not met, another coordinator created it, etc.)
-                    debug!(
-                        "Block not created for app_instance {} (expected): {}",
-                        app_instance_id, error_str
-                    );
-                    Ok(None)
-                }
+                // Expected failures (conditions not met, another coordinator created it, etc.)
+                debug!(
+                    "Block not created for app_instance {} (expected): {}",
+                    app_instance_id, e
+                );
+                Ok(None)
             }
         }
     } else {

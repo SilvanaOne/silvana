@@ -4,25 +4,32 @@ use anyhow::Result;
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, NotSet, PaginatorTrait,
-    QueryFilter, QueryOrder, Set,
+    QueryFilter, QueryOrder, QuerySelect, Set,
 };
+use sea_orm::prelude::Json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
 use crate::{
     auth::{verify_jwt, AuthInfo},
     concurrency::ConcurrencyController,
+    coordinator_auth::verify_and_authorize,
     database::Database,
     entity::{
-        app_instance_kv_binary, app_instance_kv_string, app_instances, jobs,
-        object_lock_queue, object_versions, objects, optimistic_state, state, user_actions,
+        app_instance_kv_binary, app_instance_kv_string, app_instances, block_settlements, blocks, jobs,
+        object_lock_queue, object_versions, objects, optimistic_state, proof_calculations, proofs, settlements, state, user_actions,
         lock_request_bundle,
+        coordinator_groups, app_instance_coordinator_access,
     },
     proto::state_service_server::StateService,
     proto::*,
-    storage::HybridStorage,
+    storage::PrivateStateStorage,
 };
 
 /// Helper function to log and return internal errors
@@ -141,15 +148,135 @@ fn next_binary_prefix(prefix: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+// ============================================================================
+// Proof Calculation Helper Types and Functions (matching prover.move logic)
+// ============================================================================
+
+/// Proof data structure matching Move Proof struct from prover.move
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct ProofData {
+    status: u8,  // 1=Started, 2=Calculated, 3=Rejected, 4=Reserved, 5=Used
+    da_hash: Option<String>,
+    sequence1: Option<Vec<u64>>,  // For merge proofs
+    sequence2: Option<Vec<u64>>,  // For merge proofs
+    rejected_count: u16,
+    timestamp: u64,  // Milliseconds since epoch
+    prover: String,  // Address from JWT
+    user: Option<String>,
+    job_id: Option<String>,
+    sequences: Vec<u64>,  // Key for lookup (always sorted)
+}
+
+/// Proof timeout constant from prover.move line 130
+const PROOF_TIMEOUT_MS: u64 = 300_000; // 5 minutes
+
+/// Parse JSON proofs array from database
+fn parse_proofs_json(json_value: Option<Json>) -> Result<Vec<ProofData>, Status> {
+    match json_value {
+        Some(json) => serde_json::from_value(json)
+            .map_err(|e| Status::internal(format!("Failed to parse proofs JSON: {}", e))),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Serialize proofs back to JSON for database storage
+fn serialize_proofs_json(proofs: &[ProofData]) -> Result<Json, Status> {
+    serde_json::to_value(proofs)
+        .map_err(|e| Status::internal(format!("Failed to serialize proofs: {}", e)))
+}
+
+/// Sort and validate sequences (prover.move lines 663-704)
+fn sort_and_validate_sequences(
+    sequences: &[u64],
+    start_sequence: u64,
+    end_sequence: Option<u64>,
+) -> Result<Vec<u64>, Status> {
+    if sequences.is_empty() {
+        return Err(Status::invalid_argument("Sequences cannot be empty"));
+    }
+
+    let mut sorted = sequences.to_vec();
+    sorted.sort_unstable();
+
+    if sorted[0] < start_sequence {
+        return Err(Status::invalid_argument(format!(
+            "Sequence {} is below start_sequence {}",
+            sorted[0], start_sequence
+        )));
+    }
+
+    if let Some(end) = end_sequence {
+        if sorted[sorted.len() - 1] > end {
+            return Err(Status::invalid_argument(format!(
+                "Sequence {} is above end_sequence {}",
+                sorted[sorted.len() - 1], end
+            )));
+        }
+    }
+
+    Ok(sorted)
+}
+
+/// Check if proof can be restarted (prover.move lines 444-462)
+fn can_restart_proof(proof: &ProofData, current_time_ms: u64) -> bool {
+    let is_timed_out = current_time_ms > proof.timestamp + PROOF_TIMEOUT_MS;
+    proof.status == 3 /* REJECTED */ || is_timed_out
+}
+
+/// Check if sub-proof can be reserved (prover.move lines 349-366, 520-530)
+fn can_reserve_proof(proof: &ProofData, current_time_ms: u64, is_block_proof: bool) -> bool {
+    let is_timed_out = current_time_ms > proof.timestamp + PROOF_TIMEOUT_MS;
+    proof.status == 2 /* CALCULATED */ ||
+    is_timed_out ||
+    (is_block_proof && (proof.status == 5 /* USED */ || proof.status == 4 /* RESERVED */))
+}
+
+/// Return sub-proof to calculated status (prover.move lines 334-338)
+fn return_proof_to_calculated(proof: &mut ProofData, current_time_ms: u64) {
+    proof.status = 2; // CALCULATED
+    proof.timestamp = current_time_ms;
+    proof.user = None;
+}
+
+/// Reserve a proof for merge (prover.move lines 340-372)
+fn reserve_proof(proof: &mut ProofData, current_time_ms: u64, user: String) {
+    proof.status = 4; // RESERVED
+    proof.timestamp = current_time_ms;
+    proof.user = Some(user);
+}
+
+/// Mark proof as used (prover.move lines 324-332)
+fn mark_proof_as_used(proof: &mut ProofData, current_time_ms: u64, user: String) {
+    proof.status = 5; // USED
+    proof.timestamp = current_time_ms;
+    proof.user = Some(user);
+}
+
+/// Convert ProofData to proto ProofInCalculation
+fn proof_data_to_proto(proof: &ProofData) -> ProofInCalculation {
+    ProofInCalculation {
+        status: proof.status as u32,
+        da_hash: proof.da_hash.clone(),
+        sequence1: proof.sequence1.clone().unwrap_or_default(),
+        sequence2: proof.sequence2.clone().unwrap_or_default(),
+        rejected_count: proof.rejected_count as u32,
+        timestamp: proof.timestamp,
+        prover: proof.prover.clone(),
+        user: proof.user.clone(),
+        job_id: proof.job_id.clone(),
+        sequences: proof.sequences.clone(),
+    }
+}
+
 /// StateService implementation
 pub struct StateServiceImpl {
     db: Arc<Database>,
-    storage: HybridStorage,
+    storage: Option<PrivateStateStorage>,
     concurrency: Arc<ConcurrencyController>,
 }
 
 impl StateServiceImpl {
-    pub fn new(db: Arc<Database>, storage: HybridStorage, concurrency: Arc<ConcurrencyController>) -> Self {
+    pub fn new(db: Arc<Database>, storage: Option<PrivateStateStorage>, concurrency: Arc<ConcurrencyController>) -> Self {
         Self {
             db,
             storage,
@@ -222,12 +349,82 @@ impl StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?;
 
         if !owns {
+            warn!(
+                "Authorization failed: user {} is not owner of app_instance {}",
+                auth.public_key, app_instance_id
+            );
             return Err(Status::permission_denied(
                 "Not authorized for this app instance",
             ));
         }
 
         Ok(())
+    }
+
+    // ===== Coordinator Helper Functions =====
+
+    /// Log coordinator action to audit log
+    async fn log_coordinator_action(
+        &self,
+        coordinator_public_key: &str,
+        app_instance_id: &str,
+        action: &str,
+        job_sequence: Option<u64>,
+        success: bool,
+        error_message: Option<String>,
+    ) -> Result<()> {
+        use crate::entity::coordinator_audit_log;
+
+        let audit_entry = coordinator_audit_log::ActiveModel {
+            id: NotSet,
+            coordinator_public_key: Set(coordinator_public_key.to_string()),
+            app_instance_id: Set(app_instance_id.to_string()),
+            action: Set(action.to_string()),
+            job_sequence: Set(job_sequence),
+            timestamp: Set(Utc::now()),
+            success: Set(success),
+            error_message: Set(error_message),
+        };
+
+        coordinator_audit_log::Entity::insert(audit_entry)
+            .exec(self.db.connection())
+            .await?;
+
+        Ok(())
+    }
+
+    /// Convert proto Job to database jobs::Model for response
+    fn db_job_to_proto(&self, job: jobs::Model) -> Job {
+        Job {
+            job_sequence: job.job_sequence,
+            description: job.description,
+            developer: job.developer,
+            agent: job.agent,
+            agent_method: job.agent_method,
+            app_instance_id: job.app_instance_id,
+            block_number: job.block_number,
+            sequences: job.sequences.and_then(|j| serde_json::from_value(j).ok()).unwrap_or_default(),
+            sequences1: job.sequences1.and_then(|j| serde_json::from_value(j).ok()).unwrap_or_default(),
+            sequences2: job.sequences2.and_then(|j| serde_json::from_value(j).ok()).unwrap_or_default(),
+            data: job.data,
+            data_da: job.data_da,
+            interval_ms: job.interval_ms,
+            next_scheduled_at: job.next_scheduled_at.map(|dt| to_timestamp(dt)),
+            status: match job.status.as_str() {
+                "pending" => 0,
+                "running" => 1,
+                "completed" => 2,
+                "failed" => 3,
+                _ => 0,
+            },
+            error_message: job.error_message,
+            attempts: job.attempts as u32,
+            created_at: Some(to_timestamp(job.created_at)),
+            updated_at: Some(to_timestamp(job.updated_at)),
+            metadata: job.metadata.and_then(json_to_prost_struct),
+            agent_jwt: job.agent_jwt,
+            jwt_expires_at: job.jwt_expires_at.map(|dt| to_timestamp(dt)),
+        }
     }
 
     /// Start background cleanup task for old completed jobs
@@ -262,10 +459,590 @@ impl StateServiceImpl {
         info!("Cleaned up {} old completed jobs", result.rows_affected);
         Ok(result.rows_affected)
     }
+
+    // ===== Individual Job Operation Handlers (Private helpers for coordinator ops) =====
+
+    async fn handle_create_job(
+        &self,
+        app_instance_id: &str,
+        op: CreateJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        // Create job in database
+        let job = jobs::ActiveModel {
+            job_sequence: NotSet,
+            app_instance_id: Set(app_instance_id.to_string()),
+            description: Set(op.description),
+            developer: Set(op.developer),
+            agent: Set(op.agent),
+            agent_method: Set(op.agent_method),
+            block_number: Set(op.block_number),
+            sequences: Set(if op.sequences.is_empty() { None } else { Some(serde_json::to_value(&op.sequences).unwrap()) }),
+            sequences1: Set(if op.sequences1.is_empty() { None } else { Some(serde_json::to_value(&op.sequences1).unwrap()) }),
+            sequences2: Set(if op.sequences2.is_empty() { None } else { Some(serde_json::to_value(&op.sequences2).unwrap()) }),
+            data: Set(op.data),
+            data_da: Set(op.data_da),
+            status: Set("pending".to_string()),
+            error_message: Set(None),
+            attempts: Set(0),
+            interval_ms: Set(op.interval_ms),
+            next_scheduled_at: Set(None),
+            created_at: Set(Utc::now()),
+            updated_at: Set(Utc::now()),
+            metadata: Set(None),  // Coordinator operations don't set metadata
+            agent_jwt: Set(op.agent_jwt),
+            jwt_expires_at: Set(op.jwt_expires_at.map(|ts| {
+                chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_else(Utc::now)
+            })),
+        };
+
+        let inserted = job.insert(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to create job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} created successfully", inserted.job_sequence),
+            job: None,
+            job_sequence: Some(inserted.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_start_job(
+        &self,
+        app_instance_id: &str,
+        op: StartJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .ok_or_else(|| Status::not_found(format!("Job {} not found", op.job_sequence)))?;
+
+        let mut job: jobs::ActiveModel = job.into();
+        job.status = Set("running".to_string());
+        job.updated_at = Set(Utc::now());
+        job.update(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to start job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} started successfully", op.job_sequence),
+            job: None,
+            job_sequence: Some(op.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_complete_job(
+        &self,
+        app_instance_id: &str,
+        op: CompleteJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .ok_or_else(|| Status::not_found(format!("Job {} not found", op.job_sequence)))?;
+
+        let mut job: jobs::ActiveModel = job.into();
+        job.status = Set("completed".to_string());
+        job.updated_at = Set(Utc::now());
+        job.update(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to complete job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} completed successfully", op.job_sequence),
+            job: None,
+            job_sequence: Some(op.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_fail_job(
+        &self,
+        app_instance_id: &str,
+        op: FailJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .ok_or_else(|| Status::not_found(format!("Job {} not found", op.job_sequence)))?;
+
+        let mut job: jobs::ActiveModel = job.into();
+        job.status = Set("failed".to_string());
+        job.error_message = Set(Some(op.error_message));
+        job.attempts = Set(job.attempts.unwrap() + 1);
+        job.updated_at = Set(Utc::now());
+        job.update(self.db.connection()).await
+            .map_err(|e| log_internal_error("Failed to fail job", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Job {} marked as failed", op.job_sequence),
+            job: None,
+            job_sequence: Some(op.job_sequence),
+            job_sequences: vec![],
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_job(
+        &self,
+        app_instance_id: &str,
+        op: GetJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let job = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        match job {
+            Some(job) => Ok(CoordinatorJobResponse {
+                success: true,
+                message: "Job found".to_string(),
+                job: Some(self.db_job_to_proto(job)),
+                job_sequence: Some(op.job_sequence),
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            }),
+            None => Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Job {} not found", op.job_sequence),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            }),
+        }
+    }
+
+    async fn handle_terminate_job(
+        &self,
+        app_instance_id: &str,
+        op: TerminateJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let result = jobs::Entity::delete_many()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.eq(op.job_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to terminate job", e))?;
+
+        if result.rows_affected > 0 {
+            Ok(CoordinatorJobResponse {
+                success: true,
+                message: format!("Job {} terminated successfully", op.job_sequence),
+                job: None,
+                job_sequence: Some(op.job_sequence),
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            })
+        } else {
+            Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Job {} not found", op.job_sequence),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            })
+        }
+    }
+
+    async fn handle_get_pending_sequences(
+        &self,
+        app_instance_id: &str,
+        op: GetPendingJobSequencesOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let mut query = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("pending"));
+
+        if let Some(dev) = op.developer {
+            query = query.filter(jobs::Column::Developer.eq(dev));
+        }
+        if let Some(agent) = op.agent {
+            query = query.filter(jobs::Column::Agent.eq(agent));
+        }
+        if let Some(method) = op.agent_method {
+            query = query.filter(jobs::Column::AgentMethod.eq(method));
+        }
+
+        let jobs = query
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let sequences: Vec<u64> = jobs.iter().map(|j| j.job_sequence).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} pending jobs", sequences.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: sequences,
+            count: None,
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_pending_count(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let count = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("pending"))
+            .count(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Pending jobs count: {}", count),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(count),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_failed_count(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let count = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"))
+            .count(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Failed jobs count: {}", count),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(count),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_total_count(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let count = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .count(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Total jobs count: {}", count),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(count),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_get_pending_jobs(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let jobs_list = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("pending"))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let proto_jobs: Vec<Job> = jobs_list.into_iter().map(|j| self.db_job_to_proto(j)).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} pending jobs", proto_jobs.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: None,
+            jobs: proto_jobs,
+        })
+    }
+
+    async fn handle_get_failed_jobs(
+        &self,
+        app_instance_id: &str,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let jobs_list = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let proto_jobs: Vec<Job> = jobs_list.into_iter().map(|j| self.db_job_to_proto(j)).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} failed jobs", proto_jobs.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: None,
+            jobs: proto_jobs,
+        })
+    }
+
+    async fn handle_get_jobs_batch(
+        &self,
+        app_instance_id: &str,
+        op: GetJobsBatchOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let jobs_list = jobs::Entity::find()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::JobSequence.is_in(op.job_sequences))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        let proto_jobs: Vec<Job> = jobs_list.into_iter().map(|j| self.db_job_to_proto(j)).collect();
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Found {} jobs", proto_jobs.len()),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: None,
+            jobs: proto_jobs,
+        })
+    }
+
+    async fn handle_restart_failed_jobs(
+        &self,
+        app_instance_id: &str,
+        op: RestartFailedJobsOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let mut query = jobs::Entity::update_many()
+            .col_expr(jobs::Column::Status, sea_orm::sea_query::Expr::value("pending"))
+            .col_expr(jobs::Column::ErrorMessage, sea_orm::sea_query::Expr::value(None::<String>))
+            .col_expr(jobs::Column::UpdatedAt, sea_orm::sea_query::Expr::value(Utc::now()))
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"));
+
+        if !op.job_sequences.is_empty() {
+            query = query.filter(jobs::Column::JobSequence.is_in(op.job_sequences));
+        }
+
+        let result = query
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to restart failed jobs", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Restarted {} failed jobs", result.rows_affected),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(result.rows_affected),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_remove_failed_jobs(
+        &self,
+        app_instance_id: &str,
+        op: RemoveFailedJobsOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        let mut query = jobs::Entity::delete_many()
+            .filter(jobs::Column::AppInstanceId.eq(app_instance_id))
+            .filter(jobs::Column::Status.eq("failed"));
+
+        if !op.job_sequences.is_empty() {
+            query = query.filter(jobs::Column::JobSequence.is_in(op.job_sequences));
+        }
+
+        let result = query
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to remove failed jobs", e))?;
+
+        Ok(CoordinatorJobResponse {
+            success: true,
+            message: format!("Removed {} failed jobs", result.rows_affected),
+            job: None,
+            job_sequence: None,
+            job_sequences: vec![],
+            count: Some(result.rows_affected),
+            jobs: vec![],
+        })
+    }
+
+    async fn handle_create_merge_job(
+        &self,
+        app_instance_id: &str,
+        op: CreateMergeJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        // Step 1: Verify proof calculation exists (matching app_instance.move:1211-1219)
+        // For simplicity, we'll check if proofs can be reserved by querying the proof_calculations table
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(op.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?;
+
+        if proof_calc.is_none() {
+            return Ok(CoordinatorJobResponse {
+                success: false,
+                message: "Failed to reserve proofs for merge: proof calculation not found".to_string(),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            });
+        }
+
+        // Step 2: Create the merge job (matching app_instance.move:1238-1250)
+        let create_job_op = CreateJobOperation {
+            description: op.job_description,
+            developer: "system".to_string(),
+            agent: "merge".to_string(),
+            agent_method: "merge_proofs".to_string(),
+            block_number: Some(op.block_number),
+            sequences: op.sequences,
+            sequences1: op.sequences1,
+            sequences2: op.sequences2,
+            data: None,
+            data_da: None,
+            interval_ms: None,
+            agent_jwt: None,
+            jwt_expires_at: None,
+        };
+
+        // Reuse the handle_create_job method
+        self.handle_create_job(app_instance_id, create_job_op).await
+    }
+
+    async fn handle_create_settle_job(
+        &self,
+        app_instance_id: &str,
+        op: CreateSettleJobOperation,
+    ) -> Result<CoordinatorJobResponse, Status> {
+        // Step 1: Verify chain exists in settlements table
+        let settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(app_instance_id))
+            .filter(settlements::Column::Chain.eq(&op.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        if settlement.is_none() {
+            return Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Settlement chain '{}' not found for app instance", op.chain),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            });
+        }
+
+        let settlement = settlement.unwrap();
+
+        // Step 2: Check if there's already an active settlement job for this chain
+        if settlement.settlement_job.is_some() {
+            return Ok(CoordinatorJobResponse {
+                success: false,
+                message: format!("Settlement job already exists for chain '{}'", op.chain),
+                job: None,
+                job_sequence: None,
+                job_sequences: vec![],
+                count: None,
+                jobs: vec![],
+            });
+        }
+
+        // Step 3: Create the settlement job
+        // Encode chain in the data field
+        let chain_data = op.chain.as_bytes().to_vec();
+
+        let create_job_op = CreateJobOperation {
+            description: op.job_description,
+            developer: "system".to_string(),
+            agent: "settlement".to_string(),
+            agent_method: "settle_block".to_string(),
+            block_number: Some(op.block_number),
+            sequences: vec![],
+            sequences1: vec![],
+            sequences2: vec![],
+            data: Some(chain_data),
+            data_da: None,
+            interval_ms: None,
+            agent_jwt: None,
+            jwt_expires_at: None,
+        };
+
+        // Create the job
+        let job_result = self.handle_create_job(app_instance_id, create_job_op).await?;
+
+        // Step 4: Update settlements.settlement_job with the new job_sequence
+        if let Some(job_sequence) = job_result.job_sequence {
+            let mut settlement_active: settlements::ActiveModel = settlement.into();
+            settlement_active.settlement_job = Set(Some(job_sequence));
+            settlement_active.updated_at = Set(chrono::Utc::now().into());
+
+            settlement_active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update settlement_job", e))?;
+
+            info!(
+                "Created settlement job {} for chain '{}' in app_instance {}",
+                job_sequence, op.chain, app_instance_id
+            );
+        }
+
+        Ok(job_result)
+    }
 }
 
 #[tonic::async_trait]
 impl StateService for StateServiceImpl {
+    type SubscribeJobEventsStream = std::pin::Pin<
+        Box<dyn Stream<Item = Result<JobEventMessage, Status>> + Send>
+    >;
+
     async fn create_app_instance(
         &self,
         request: Request<CreateAppInstanceRequest>,
@@ -287,6 +1064,16 @@ impl StateService for StateServiceImpl {
             created_at: Set(Utc::now()),
             updated_at: Set(Utc::now()),
             metadata: Set(req.metadata.map(prost_struct_to_json)),
+            // Coordination layer support fields - default values
+            admin: Set(None),
+            is_paused: Set(false),
+            min_time_between_blocks: Set(60),
+            block_number: Set(0),
+            sequence: Set(0),
+            last_proved_block_number: Set(0),
+            last_settled_block_number: Set(0),
+            last_settled_sequence: Set(0),
+            last_purged_sequence: Set(0),
         };
 
         // Insert to database
@@ -316,6 +1103,15 @@ impl StateService for StateServiceImpl {
                 created_at: Some(to_timestamp(result.created_at)),
                 updated_at: Some(to_timestamp(result.updated_at)),
                 metadata: result.metadata.and_then(json_to_prost_struct),
+                admin: result.admin,
+                is_paused: result.is_paused,
+                min_time_between_blocks: result.min_time_between_blocks,
+                block_number: result.block_number,
+                sequence: result.sequence,
+                last_proved_block_number: result.last_proved_block_number,
+                last_settled_block_number: result.last_settled_block_number,
+                last_settled_sequence: result.last_settled_sequence,
+                last_purged_sequence: result.last_purged_sequence,
             }),
         }))
     }
@@ -340,7 +1136,10 @@ impl StateService for StateServiceImpl {
                 warn!("Database error fetching app instance: {}", e);
                 Status::internal("Failed to fetch app instance")
             })?
-            .ok_or_else(|| Status::not_found("App instance not found"))?;
+            .ok_or_else(|| {
+                debug!("App instance not found: app_instance_id={}", req.app_instance_id);
+                Status::not_found("App instance not found")
+            })?;
 
         debug!("Retrieved app instance {}", app_instance.app_instance_id);
 
@@ -354,6 +1153,15 @@ impl StateService for StateServiceImpl {
                 created_at: Some(to_timestamp(app_instance.created_at)),
                 updated_at: Some(to_timestamp(app_instance.updated_at)),
                 metadata: app_instance.metadata.and_then(json_to_prost_struct),
+                admin: app_instance.admin,
+                is_paused: app_instance.is_paused,
+                min_time_between_blocks: app_instance.min_time_between_blocks,
+                block_number: app_instance.block_number,
+                sequence: app_instance.sequence,
+                last_proved_block_number: app_instance.last_proved_block_number,
+                last_settled_block_number: app_instance.last_settled_block_number,
+                last_settled_sequence: app_instance.last_settled_sequence,
+                last_purged_sequence: app_instance.last_purged_sequence,
             }),
         }))
     }
@@ -406,6 +1214,15 @@ impl StateService for StateServiceImpl {
                 created_at: Some(to_timestamp(instance.created_at)),
                 updated_at: Some(to_timestamp(instance.updated_at)),
                 metadata: instance.metadata.and_then(json_to_prost_struct),
+                admin: instance.admin,
+                is_paused: instance.is_paused,
+                min_time_between_blocks: instance.min_time_between_blocks,
+                block_number: instance.block_number,
+                sequence: instance.sequence,
+                last_proved_block_number: instance.last_proved_block_number,
+                last_settled_block_number: instance.last_settled_block_number,
+                last_settled_sequence: instance.last_settled_sequence,
+                last_purged_sequence: instance.last_purged_sequence,
             })
             .collect();
 
@@ -433,17 +1250,9 @@ impl StateService for StateServiceImpl {
         hasher.update(&req.action_data);
         let action_hash = hasher.finalize().to_vec();
 
-        // Check if action data needs S3 storage
-        let (inline_data, s3_key) = self.storage
-            .store(&req.action_data, &format!("actions/{}", req.app_instance_id))
-            .await
-            .map_err(|e| {
-                warn!("Failed to store action data: {}", e);
-                Status::internal("Failed to store action data")
-            })?;
-
-        let action_data = inline_data.unwrap_or_default();
-        let action_da = s3_key.or(req.action_da);
+        // Store action data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let action_data = req.action_data.clone();
+        let action_da = req.action_da;
 
         // Start transaction with pessimistic locking for gapless sequence generation
         use sea_orm::{TransactionTrait, DatabaseBackend, Statement};
@@ -558,19 +1367,8 @@ impl StateService for StateServiceImpl {
         let mut user_actions = Vec::new();
         for action in actions {
             // Retrieve data from inline or S3
-            let inline_data = if action.action_data.is_empty() {
-                None
-            } else {
-                Some(action.action_data.clone())
-            };
-
-            let action_data = self.storage
-                .retrieve(&inline_data, &action.action_da)
-                .await
-                .map_err(|e| {
-                    warn!("Failed to retrieve action data: {}", e);
-                    Status::internal("Failed to retrieve action data")
-                })?;
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let action_data = action.action_data.clone();
 
             user_actions.push(UserAction {
                 app_instance_id: action.app_instance_id,
@@ -604,23 +1402,22 @@ impl StateService for StateServiceImpl {
         let computed_hash = hasher.finalize().to_vec();
 
         if req.state_hash != computed_hash {
+            warn!(
+                "State hash mismatch for app_instance_id={}, sequence={}: client_hash={}, computed_hash={}",
+                req.app_instance_id,
+                req.sequence,
+                hex::encode(&req.state_hash),
+                hex::encode(&computed_hash)
+            );
             return Err(Status::invalid_argument("State hash mismatch"));
         }
 
-        let (state_data, state_da) = self.storage
-            .store(&req.state_data, &format!("optimistic/{}", req.app_instance_id))
-            .await
-            .map_err(|e| {
-                warn!("Failed to store optimistic state: {}", e);
-                Status::internal("Failed to store optimistic state")
-            })?;
+        // Store data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = req.state_data.clone();
+        let state_da = req.state_da;
 
         let (transition_data, transition_da) = if let Some(td) = req.transition_data {
-            let (d, k) = self.storage
-                .store(&td, &format!("transitions/{}", req.app_instance_id))
-                .await
-                .map_err(|e| log_internal_error("Failed to store transition data", e))?;
-            (d, k.or(req.transition_da))
+            (Some(td), req.transition_da)
         } else {
             (None, req.transition_da)
         };
@@ -630,8 +1427,8 @@ impl StateService for StateServiceImpl {
             app_instance_id: Set(req.app_instance_id.clone()),
             sequence: Set(req.sequence),
             state_hash: Set(req.state_hash.clone()),
-            state_data: Set(state_data.clone().unwrap_or_default()), // Vec<u8>
-            state_da: Set(state_da.or(req.state_da)),
+            state_data: Set(state_data.clone()), // Vec<u8>
+            state_da: Set(state_da),
             transition_data: Set(transition_data.clone()), // Option<Vec<u8>>
             transition_da: Set(transition_da),
             commitment: Set(req.commitment),
@@ -657,7 +1454,7 @@ impl StateService for StateServiceImpl {
                 app_instance_id: result.app_instance_id,
                 sequence: result.sequence as u64,
                 state_hash: result.state_hash,
-                state_data: state_data.unwrap_or_default(),
+                state_data: state_data.clone(),
                 state_da: result.state_da,
                 transition_data,
                 transition_da: result.transition_da,
@@ -721,20 +1518,9 @@ impl StateService for StateServiceImpl {
             }
         };
 
-        let inline_state = if opt_state.state_data.is_empty() { None } else { Some(opt_state.state_data.clone()) };
-        let state_data = self.storage
-            .retrieve(&inline_state, &opt_state.state_da)
-            .await
-            .map_err(|e| log_internal_error("Failed to retrieve state data", e))?;
-
-        let transition_data = if opt_state.transition_da.is_some() || opt_state.transition_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-            Some(self.storage
-                .retrieve(&opt_state.transition_data, &opt_state.transition_da)
-                .await
-                .map_err(|e| log_internal_error("Failed to retrieve transition data", e))?)
-        } else {
-            None
-        };
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = opt_state.state_data.clone();
+        let transition_data = opt_state.transition_data.clone();
 
         Ok(Response::new(GetOptimisticStateResponse {
             success: true,
@@ -762,22 +1548,15 @@ impl StateService for StateServiceImpl {
         let auth = self.extract_auth_from_body(&req.auth)?;
         self.verify_ownership(&req.app_instance_id, &auth).await?;
 
+        // Store data inline (S3 offloading removed - use explicit blob storage API if needed)
         let (state_data, state_da) = if let Some(sd) = req.state_data {
-            let (d, k) = self.storage
-                .store(&sd, &format!("state/{}", req.app_instance_id))
-                .await
-                .map_err(|e| log_internal_error("Failed to store state", e))?;
-            (d, k.or(req.state_da))
+            (Some(sd), req.state_da)
         } else {
             (None, req.state_da)
         };
 
         let (proof_data, proof_da) = if let Some(pd) = req.proof_data {
-            let (d, k) = self.storage
-                .store(&pd, &format!("proofs/{}", req.app_instance_id))
-                .await
-                .map_err(|e| log_internal_error("Failed to store proof", e))?;
-            (d, k.or(req.proof_da))
+            (Some(pd), req.proof_da)
         } else {
             (None, req.proof_da)
         };
@@ -843,14 +1622,8 @@ impl StateService for StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?
             .ok_or_else(|| Status::not_found("Proved state not found"))?;
 
-        let state_data = if proved_state.state_da.is_some() || proved_state.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-            Some(self.storage
-                .retrieve(&proved_state.state_data, &proved_state.state_da)
-                .await
-                .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
-        } else {
-            None
-        };
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = proved_state.state_data.clone();
 
         use crate::proto::get_state_response;
         Ok(Response::new(GetStateResponse {
@@ -897,14 +1670,8 @@ impl StateService for StateServiceImpl {
             }
         };
 
-        let state_data = if latest.state_da.is_some() || latest.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-            Some(self.storage
-                .retrieve(&latest.state_data, &latest.state_da)
-                .await
-                .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
-        } else {
-            None
-        };
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let state_data = latest.state_data.clone();
 
         Ok(Response::new(GetLatestStateResponse {
             success: true,
@@ -945,9 +1712,8 @@ impl StateService for StateServiceImpl {
 
         let mut user_actions_result = Vec::new();
         for action in actions {
-            let inline_data = if action.action_data.is_empty() { None } else { Some(action.action_data.clone()) };
-            let action_data = self.storage.retrieve(&inline_data, &action.action_da).await
-                .map_err(|e| log_internal_error("Failed to retrieve action data", e))?;
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let action_data = action.action_data.clone();
 
             user_actions_result.push(UserAction {
                 app_instance_id: action.app_instance_id,
@@ -974,16 +1740,9 @@ impl StateService for StateServiceImpl {
 
         let mut optimistic_states_result = Vec::new();
         for opt in opt_states {
-            let inline_state = if opt.state_data.is_empty() { None } else { Some(opt.state_data.clone()) };
-            let state_data = self.storage.retrieve(&inline_state, &opt.state_da).await
-                .map_err(|e| log_internal_error("Failed to retrieve state", e))?;
-
-            let transition_data = if opt.transition_da.is_some() || opt.transition_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-                Some(self.storage.retrieve(&opt.transition_data, &opt.transition_da).await
-                    .map_err(|e| log_internal_error("Failed to retrieve transition", e))?)
-            } else {
-                None
-            };
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let state_data = opt.state_data.clone();
+            let transition_data = opt.transition_data.clone();
 
             optimistic_states_result.push(OptimisticState {
                 app_instance_id: opt.app_instance_id,
@@ -1011,16 +1770,10 @@ impl StateService for StateServiceImpl {
 
         let mut proved_states_result = Vec::new();
         for s in states {
-            let state_data = if s.state_da.is_some() || s.state_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false) {
-                Some(self.storage.retrieve(&s.state_data, &s.state_da).await
-                    .map_err(|e| log_internal_error("Failed to retrieve state", e))?)
-            } else {
-                None
-            };
-
-            let proof_data = if req.include_proofs && (s.proof_da.is_some() || s.proof_data.as_ref().map(|d| !d.is_empty()).unwrap_or(false)) {
-                Some(self.storage.retrieve(&s.proof_data, &s.proof_da).await
-                    .map_err(|e| log_internal_error("Failed to retrieve proof", e))?)
+            // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+            let state_data = s.state_data.clone();
+            let proof_data = if req.include_proofs {
+                s.proof_data.clone()
             } else {
                 None
             };
@@ -1137,6 +1890,10 @@ impl StateService for StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?;
 
         if result.rows_affected == 0 {
+            debug!(
+                "KV string key not found for deletion: app_instance_id={}, key={}",
+                req.app_instance_id, req.key
+            );
             return Err(Status::not_found("Key not found"));
         }
 
@@ -1338,6 +2095,10 @@ impl StateService for StateServiceImpl {
             .map_err(|e| log_internal_error("Database error", e))?;
 
         if result.rows_affected == 0 {
+            debug!(
+                "KV binary key not found for deletion: app_instance_id={}, key={}",
+                req.app_instance_id, hex::encode(&req.key)
+            );
             return Err(Status::not_found("Key not found"));
         }
 
@@ -1470,17 +2231,9 @@ impl StateService for StateServiceImpl {
         hasher.update(&object_data_bytes);
         let object_hash = hasher.finalize().to_vec();
 
-        // Store object data using hybrid storage
-        let (inline_data, s3_key) = self.storage
-            .store(&object_data_bytes, &format!("objects/{}", req.object_id))
-            .await
-            .map_err(|e| {
-                warn!("Failed to store object data: {}", e);
-                Status::internal("Failed to store object data")
-            })?;
-
-        let object_data = inline_data;
-        let object_da = s3_key.or(req.object_da);
+        // Store object data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let object_data = Some(object_data_bytes.clone());
+        let object_da = req.object_da;
 
         // Create object entity with initial version 1
         let object = objects::ActiveModel {
@@ -1565,7 +2318,13 @@ impl StateService for StateServiceImpl {
 
         // Get primary app instance from scope for concurrency control
         let app_instance_id = auth.get_primary_app_instance()
-            .ok_or_else(|| Status::permission_denied("No app_instance permission in scope"))?;
+            .ok_or_else(|| {
+                warn!(
+                    "No app_instance permission in JWT scope for update_object (requester: {})",
+                    auth.public_key
+                );
+                Status::permission_denied("No app_instance permission in scope")
+            })?;
 
         let object_data_bytes = req.object_data.unwrap_or_default();
         let object_id_clone = req.object_id.clone();
@@ -1595,14 +2354,12 @@ impl StateService for StateServiceImpl {
 
         // Verify ownership
         if object.owner != auth.public_key {
+            warn!(
+                "Object ownership check failed: object_id={}, owner={}, requester={}",
+                object.object_id, object.owner, auth.public_key
+            );
             return Err(Status::permission_denied("Not the object owner"));
         }
-
-        // Store new object data
-        let (inline_data, s3_key) = self.storage
-            .store(&object_data_bytes, &format!("objects/{}", req.object_id))
-            .await
-            .map_err(|e| log_internal_error("Failed to store object data", e))?;
 
         // Calculate new hash
         use sha2::{Digest, Sha256};
@@ -1610,8 +2367,9 @@ impl StateService for StateServiceImpl {
         hasher.update(&object_data_bytes);
         let object_hash = hasher.finalize().to_vec();
 
-        // Store combined s3_key/object_da for reuse
-        let final_object_da = s3_key.clone().or(req.object_da);
+        // Store object data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let inline_data = Some(object_data_bytes.clone());
+        let final_object_da = req.object_da;
 
         // Update object
         let mut active_model: objects::ActiveModel = object.clone().into();
@@ -1726,11 +2484,8 @@ impl StateService for StateServiceImpl {
             }
         };
 
-        // Retrieve data from hybrid storage
-        let object_data = self.storage
-            .retrieve(&object.object_data, &object.object_da)
-            .await
-            .map_err(|e| log_internal_error("Failed to retrieve object data", e))?;
+        // Use inline data directly (S3 offloading removed - use explicit blob storage API if needed)
+        let object_data = object.object_data.clone();
 
         Ok(Response::new(GetObjectResponse {
             success: true,
@@ -1741,7 +2496,7 @@ impl StateService for StateServiceImpl {
                 owner: object.owner,
                 object_type: object.object_type,
                 shared: object.shared,
-                object_data: Some(object_data),
+                object_data,
                 object_da: object.object_da,
                 object_hash: object.object_hash,
                 previous_tx: object.previous_tx,
@@ -1767,6 +2522,10 @@ impl StateService for StateServiceImpl {
             .ok_or_else(|| Status::not_found("Object not found"))?;
 
         if obj.owner != auth.public_key && !obj.shared {
+            warn!(
+                "Access denied to object versions: object_id={}, owner={}, requester={}, shared={}",
+                obj.object_id, obj.owner, auth.public_key, obj.shared
+            );
             return Err(Status::permission_denied("Access denied"));
         }
 
@@ -1822,6 +2581,10 @@ impl StateService for StateServiceImpl {
 
         // Verify current owner
         if object.owner != auth.public_key {
+            warn!(
+                "Transfer object failed: object_id={}, owner={}, requester={}",
+                object.object_id, object.owner, auth.public_key
+            );
             return Err(Status::permission_denied("Only the owner can transfer this object"));
         }
 
@@ -1883,7 +2646,13 @@ impl StateService for StateServiceImpl {
 
         // Get primary app instance from scope
         let app_instance_id = auth.get_primary_app_instance()
-            .ok_or_else(|| Status::permission_denied("No app_instance permission in scope"))?;
+            .ok_or_else(|| {
+                warn!(
+                    "No app_instance permission in JWT scope for request_locks (requester: {})",
+                    auth.public_key
+                );
+                Status::permission_denied("No app_instance permission in scope")
+            })?;
 
         // Sort object IDs for canonical ordering (deadlock prevention)
         let mut object_ids = req.object_ids.clone();
@@ -1972,7 +2741,7 @@ impl StateService for StateServiceImpl {
             granted_at: updated_bundle.granted_at.map(to_timestamp),
             released_at: None,
             status: BundleStatus::Granted.into(),
-            wait_time_ms: updated_bundle.wait_time_ms.map(|ms| ms as i64),
+            wait_time_ms: updated_bundle.wait_time_ms,
             hold_time_ms: None,
         };
 
@@ -2237,6 +3006,12 @@ impl StateService for StateServiceImpl {
             sequences2: Set(sequences2_json.clone()),
             data: Set(req.data.clone()),
             data_da: Set(req.data_da.clone()),
+            agent_jwt: Set(req.agent_jwt.clone()),
+            jwt_expires_at: Set(req.jwt_expires_at.as_ref().map(|ts| {
+                chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
+                    .expect("Invalid timestamp")
+                    .with_timezone(&chrono::Utc)
+            })),
             status: Set("PENDING".to_string()),
             error_message: NotSet,
             attempts: Set(0),
@@ -2282,6 +3057,8 @@ impl StateService for StateServiceImpl {
             sequences2: req.sequences2,
             data: result.data,
             data_da: result.data_da,
+            agent_jwt: result.agent_jwt,
+            jwt_expires_at: result.jwt_expires_at.map(to_timestamp),
             status: JobStatus::Pending.into(),
             error_message: None,
             attempts: result.attempts as u32,
@@ -2353,6 +3130,8 @@ impl StateService for StateServiceImpl {
             sequences2,
             data: result.data,
             data_da: result.data_da,
+            agent_jwt: result.agent_jwt,
+            jwt_expires_at: result.jwt_expires_at.map(to_timestamp),
             status: JobStatus::Running.into(),
             error_message: result.error_message,
             attempts: result.attempts as u32,
@@ -2482,6 +3261,8 @@ impl StateService for StateServiceImpl {
             sequences2,
             data: result.data,
             data_da: result.data_da,
+            agent_jwt: result.agent_jwt,
+            jwt_expires_at: result.jwt_expires_at.map(to_timestamp),
             status: JobStatus::Failed.into(),
             error_message: result.error_message,
             attempts: result.attempts as u32,
@@ -2561,6 +3342,8 @@ impl StateService for StateServiceImpl {
             sequences2,
             data: job.data,
             data_da: job.data_da,
+            agent_jwt: job.agent_jwt,
+            jwt_expires_at: job.jwt_expires_at.map(to_timestamp),
             status: job_status.into(),
             error_message: job.error_message,
             attempts: job.attempts as u32,
@@ -2601,7 +3384,10 @@ impl StateService for StateServiceImpl {
                 Ok(JobStatus::Running) => "RUNNING",
                 Ok(JobStatus::Completed) => "COMPLETED",
                 Ok(JobStatus::Failed) => "FAILED",
-                _ => return Err(Status::invalid_argument("Invalid job status")),
+                _ => {
+                    warn!("Invalid job status value provided: {}", status);
+                    return Err(Status::invalid_argument("Invalid job status"));
+                }
             };
             query = query.filter(jobs::Column::Status.eq(status_str));
         }
@@ -2656,6 +3442,8 @@ impl StateService for StateServiceImpl {
                     sequences2,
                     data: job.data,
                     data_da: job.data_da,
+                    agent_jwt: job.agent_jwt,
+                    jwt_expires_at: job.jwt_expires_at.map(to_timestamp),
                     status: job_status.into(),
                     error_message: job.error_message,
                     attempts: job.attempts as u32,
@@ -2745,6 +3533,8 @@ impl StateService for StateServiceImpl {
                     sequences2,
                     data: job.data,
                     data_da: job.data_da,
+                    agent_jwt: job.agent_jwt,
+                    jwt_expires_at: job.jwt_expires_at.map(to_timestamp),
                     status: JobStatus::Pending.into(),
                     error_message: job.error_message,
                     attempts: job.attempts as u32,
@@ -2760,6 +3550,2129 @@ impl StateService for StateServiceImpl {
         Ok(Response::new(GetPendingJobsResponse {
             jobs,
         }))
+    }
+
+    async fn store_private_blob(
+        &self,
+        request: Request<StorePrivateBlobRequest>,
+    ) -> Result<Response<StorePrivateBlobResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Check if S3 storage is configured
+        let storage = self.storage.as_ref()
+            .ok_or_else(|| Status::unavailable("Blob storage is not configured"))?;
+
+        // Verify scope permission for the resource
+        match req.resource_type.as_str() {
+            "app_instance" => {
+                self.require_app_instance_permission(&auth, &req.resource_id)?;
+            }
+            "object" => {
+                if !auth.has_object_permission(&req.resource_id) {
+                    return Err(Status::permission_denied(
+                        format!("Missing object permission for {}", req.resource_id)
+                    ));
+                }
+            }
+            _ => {
+                warn!(
+                    "Invalid resource_type for blob storage: provided='{}', expected='app_instance' or 'object'",
+                    req.resource_type
+                );
+                return Err(Status::invalid_argument(
+                    "resource_type must be 'app_instance' or 'object'"
+                ));
+            }
+        }
+
+        // Store blob with owner metadata - key format: resource_type/resource_id/hash
+        let key = storage
+            .store(
+                &req.data,
+                &auth.public_key,
+                &req.resource_type,
+                &req.resource_id,
+            )
+            .await
+            .map_err(|e| log_internal_error("Failed to store blob", e))?;
+
+        // Calculate hash for response
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(&req.data);
+        let content_hash = hex::encode(hash);
+
+        info!(
+            "Stored private blob: {} ({} bytes, owner: {})",
+            key,
+            req.data.len(),
+            auth.public_key
+        );
+
+        Ok(Response::new(StorePrivateBlobResponse {
+            success: true,
+            message: "Blob stored successfully".to_string(),
+            key,
+            size_bytes: req.data.len() as u64,
+            content_hash,
+        }))
+    }
+
+    async fn retrieve_private_blob(
+        &self,
+        request: Request<RetrievePrivateBlobRequest>,
+    ) -> Result<Response<RetrievePrivateBlobResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Check if S3 storage is configured
+        let storage = self.storage.as_ref()
+            .ok_or_else(|| Status::unavailable("Blob storage is not configured"))?;
+
+        // Retrieve blob with authentication
+        let data = storage
+            .retrieve(
+                &req.key,
+                &auth.public_key,
+                &auth.scope_permissions,
+            )
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("Access denied") {
+                    Status::permission_denied(e.to_string())
+                } else {
+                    log_internal_error("Failed to retrieve blob", e)
+                }
+            })?;
+
+        info!(
+            "Retrieved private blob: {} ({} bytes, requester: {})",
+            req.key,
+            data.len(),
+            auth.public_key
+        );
+
+        Ok(Response::new(RetrievePrivateBlobResponse {
+            success: true,
+            message: "Blob retrieved successfully".to_string(),
+            data,
+        }))
+    }
+
+    async fn delete_private_blob(
+        &self,
+        request: Request<DeletePrivateBlobRequest>,
+    ) -> Result<Response<DeletePrivateBlobResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Check if S3 storage is configured
+        let storage = self.storage.as_ref()
+            .ok_or_else(|| Status::unavailable("Blob storage is not configured"))?;
+
+        // Delete blob (owner only)
+        storage
+            .delete(&req.key, &auth.public_key)
+            .await
+            .map_err(|e| {
+                if e.to_string().contains("Access denied") {
+                    Status::permission_denied(e.to_string())
+                } else {
+                    log_internal_error("Failed to delete blob", e)
+                }
+            })?;
+
+        info!(
+            "Deleted private blob: {} (requester: {})",
+            req.key,
+            auth.public_key
+        );
+
+        Ok(Response::new(DeletePrivateBlobResponse {
+            success: true,
+            message: "Blob deleted successfully".to_string(),
+        }))
+    }
+
+    // =========================================================================
+    // Proof Management
+    // =========================================================================
+
+    async fn submit_proof(
+        &self,
+        request: Request<SubmitProofRequest>,
+    ) -> Result<Response<SubmitProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Store data inline (S3 offloading removed - use explicit blob storage API if needed)
+        let (claim_data, claim_da) = if let Some(cd) = req.claim_data {
+            (Some(cd), req.claim_da)
+        } else {
+            (None, req.claim_da)
+        };
+
+        let (proof_data, proof_da) = if let Some(pd) = req.proof_data {
+            (Some(pd), req.proof_da)
+        } else {
+            (None, req.proof_da)
+        };
+
+        let proof = proofs::ActiveModel {
+            id: NotSet,
+            app_instance_id: Set(req.app_instance_id.clone()),
+            proof_type: Set(req.proof_type.clone()),
+            claim_json: Set(prost_struct_to_json(req.claim_json.unwrap_or_default())),
+            claim_hash: Set(req.claim_hash),
+            claim_data: Set(claim_data.clone()),
+            claim_da: Set(claim_da.clone()),
+            proof_data: Set(proof_data.clone()),
+            proof_da: Set(proof_da.clone()),
+            proof_hash: Set(req.proof_hash),
+            proof_time: Set(req.proof_time.map(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap())),
+            metadata: Set(req.metadata.map(prost_struct_to_json)),
+            proved_at: Set(Utc::now()),
+        };
+
+        let result = proof.insert(self.db.connection()).await.map_err(|e| {
+            warn!("Database error inserting proof: {}", e);
+            log_internal_error("Failed to insert proof", e)
+        })?;
+
+        info!(
+            "Submitted proof: id={}, app_instance={}, type={}",
+            result.id, result.app_instance_id, result.proof_type
+        );
+
+        Ok(Response::new(SubmitProofResponse {
+            success: true,
+            message: "Proof submitted successfully".to_string(),
+            proof: Some(Proof {
+                id: result.id,
+                app_instance_id: result.app_instance_id,
+                proof_type: result.proof_type,
+                claim_json: Some(json_to_prost_struct(result.claim_json).unwrap_or_default()),
+                claim_hash: result.claim_hash,
+                claim_data: result.claim_data,
+                claim_da: result.claim_da,
+                proof_data: result.proof_data,
+                proof_da: result.proof_da,
+                proof_hash: result.proof_hash,
+                proof_time: result.proof_time.map(to_timestamp),
+                proved_at: Some(to_timestamp(result.proved_at)),
+                metadata: result.metadata.and_then(json_to_prost_struct),
+            }),
+        }))
+    }
+
+    async fn get_proof(
+        &self,
+        request: Request<GetProofRequest>,
+    ) -> Result<Response<GetProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Find the proof
+        let proof = proofs::Entity::find_by_id(req.proof_id)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to query proof", e))?
+            .ok_or_else(|| Status::not_found(format!("Proof {} not found", req.proof_id)))?;
+
+        // Verify ownership via app_instance
+        self.verify_ownership(&proof.app_instance_id, &auth).await?;
+
+        Ok(Response::new(GetProofResponse {
+            success: true,
+            message: "Proof retrieved successfully".to_string(),
+            proof: Some(Proof {
+                id: proof.id,
+                app_instance_id: proof.app_instance_id,
+                proof_type: proof.proof_type,
+                claim_json: Some(json_to_prost_struct(proof.claim_json).unwrap_or_default()),
+                claim_hash: proof.claim_hash,
+                claim_data: proof.claim_data,
+                claim_da: proof.claim_da,
+                proof_data: proof.proof_data,
+                proof_da: proof.proof_da,
+                proof_hash: proof.proof_hash,
+                proof_time: proof.proof_time.map(to_timestamp),
+                proved_at: Some(to_timestamp(proof.proved_at)),
+                metadata: proof.metadata.and_then(json_to_prost_struct),
+            }),
+        }))
+    }
+
+    async fn list_proofs(
+        &self,
+        request: Request<ListProofsRequest>,
+    ) -> Result<Response<ListProofsResponse>, Status> {
+        use sea_orm::Condition;
+
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app_instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        let limit = req.limit.unwrap_or(100).min(1000) as u64;
+
+        // Build keyset pagination condition
+        let mut condition = Condition::all()
+            .add(proofs::Column::AppInstanceId.eq(&req.app_instance_id));
+
+        // Add proof_type filter if specified
+        if let Some(proof_type) = &req.proof_type {
+            condition = condition.add(proofs::Column::ProofType.eq(proof_type));
+        }
+
+        // Add keyset pagination (proved_at, app_instance_id, id) > (last_proved_at, last_app_instance_id, last_id)
+        if let (Some(last_proved_at), Some(last_app_instance_id), Some(last_id)) =
+            (req.last_proved_at, req.last_app_instance_id, req.last_id) {
+
+            let last_ts = chrono::DateTime::from_timestamp(last_proved_at.seconds, last_proved_at.nanos as u32)
+                .ok_or_else(|| Status::invalid_argument("Invalid last_proved_at timestamp"))?;
+
+            // Keyset pagination: (proved_at, app_instance_id, id) > (last_proved_at, last_app_instance_id, last_id)
+            condition = condition.add(
+                Condition::any()
+                    .add(proofs::Column::ProvedAt.gt(last_ts))
+                    .add(
+                        Condition::all()
+                            .add(proofs::Column::ProvedAt.eq(last_ts))
+                            .add(proofs::Column::AppInstanceId.gt(last_app_instance_id.clone()))
+                    )
+                    .add(
+                        Condition::all()
+                            .add(proofs::Column::ProvedAt.eq(last_ts))
+                            .add(proofs::Column::AppInstanceId.eq(last_app_instance_id))
+                            .add(proofs::Column::Id.gt(last_id))
+                    )
+            );
+        }
+
+        // Query with limit + 1 to check if there are more pages
+        let paginator = proofs::Entity::find()
+            .filter(condition)
+            .order_by_asc(proofs::Column::ProvedAt)
+            .order_by_asc(proofs::Column::AppInstanceId)
+            .order_by_asc(proofs::Column::Id)
+            .paginate(self.db.connection(), limit + 1);
+
+        let proofs = paginator
+            .fetch_page(0)
+            .await
+            .map_err(|e| log_internal_error("Failed to list proofs", e))?;
+
+        // Check if there are more pages
+        let has_more = proofs.len() > limit as usize;
+        let proofs = if has_more {
+            &proofs[..limit as usize]
+        } else {
+            &proofs[..]
+        };
+
+        // Convert to proto messages
+        let proto_proofs = proofs
+            .iter()
+            .map(|proof| Proof {
+                id: proof.id,
+                app_instance_id: proof.app_instance_id.clone(),
+                proof_type: proof.proof_type.clone(),
+                claim_json: Some(json_to_prost_struct(proof.claim_json.clone()).unwrap_or_default()),
+                claim_hash: proof.claim_hash.clone(),
+                claim_data: proof.claim_data.clone(),
+                claim_da: proof.claim_da.clone(),
+                proof_data: proof.proof_data.clone(),
+                proof_da: proof.proof_da.clone(),
+                proof_hash: proof.proof_hash.clone(),
+                proof_time: proof.proof_time.map(to_timestamp),
+                proved_at: Some(to_timestamp(proof.proved_at)),
+                metadata: proof.metadata.as_ref().and_then(|m| json_to_prost_struct(m.clone())),
+            })
+            .collect();
+
+        Ok(Response::new(ListProofsResponse {
+            proofs: proto_proofs,
+            has_more,
+        }))
+    }
+
+    // ============================================================================
+    // Block Management Methods
+    // ============================================================================
+
+    async fn get_block(
+        &self,
+        request: Request<GetBlockRequest>,
+    ) -> Result<Response<GetBlockResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Query block from database
+        let block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block", e))?;
+
+        // Convert to proto message if found
+        let proto_block = block.map(|b| Block {
+            app_instance_id: b.app_instance_id,
+            block_number: b.block_number,
+            start_sequence: b.start_sequence,
+            end_sequence: b.end_sequence,
+            actions_commitment: b.actions_commitment,
+            state_commitment: b.state_commitment,
+            time_since_last_block: b.time_since_last_block,
+            number_of_transactions: b.number_of_transactions,
+            start_actions_commitment: b.start_actions_commitment,
+            end_actions_commitment: b.end_actions_commitment,
+            state_data_availability: b.state_data_availability,
+            proof_data_availability: b.proof_data_availability,
+            created_at: Some(to_timestamp(b.created_at)),
+            state_calculated_at: b.state_calculated_at.map(to_timestamp),
+            proved_at: b.proved_at.map(to_timestamp),
+        });
+
+        Ok(Response::new(GetBlockResponse {
+            block: proto_block,
+        }))
+    }
+
+    async fn get_blocks_range(
+        &self,
+        request: Request<GetBlocksRangeRequest>,
+    ) -> Result<Response<GetBlocksRangeResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Validate range
+        if req.from_block > req.to_block {
+            return Err(Status::invalid_argument("from_block must be <= to_block"));
+        }
+
+        // Query blocks from database
+        let blocks = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.gte(req.from_block))
+            .filter(blocks::Column::BlockNumber.lte(req.to_block))
+            .order_by_asc(blocks::Column::BlockNumber)
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch blocks range", e))?;
+
+        // Convert to proto messages
+        let proto_blocks = blocks
+            .into_iter()
+            .map(|b| Block {
+                app_instance_id: b.app_instance_id,
+                block_number: b.block_number,
+                start_sequence: b.start_sequence,
+                end_sequence: b.end_sequence,
+                actions_commitment: b.actions_commitment,
+                state_commitment: b.state_commitment,
+                time_since_last_block: b.time_since_last_block,
+                number_of_transactions: b.number_of_transactions,
+                start_actions_commitment: b.start_actions_commitment,
+                end_actions_commitment: b.end_actions_commitment,
+                state_data_availability: b.state_data_availability,
+                proof_data_availability: b.proof_data_availability,
+                created_at: Some(to_timestamp(b.created_at)),
+                state_calculated_at: b.state_calculated_at.map(to_timestamp),
+                proved_at: b.proved_at.map(to_timestamp),
+            })
+            .collect();
+
+        Ok(Response::new(GetBlocksRangeResponse {
+            blocks: proto_blocks,
+        }))
+    }
+
+    async fn try_create_block(
+        &self,
+        request: Request<TryCreateBlockRequest>,
+    ) -> Result<Response<TryCreateBlockResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Verify app instance exists
+        let _app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        // Get the last block to find the end sequence
+        let last_block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .order_by_desc(blocks::Column::BlockNumber)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch last block", e))?;
+
+        let (last_block_number, last_end_sequence, last_block_created_at) = match &last_block {
+            Some(block) => (block.block_number, block.end_sequence, Some(block.created_at)),
+            None => (0, 0, None), // No blocks yet
+        };
+
+        // Check if there are new sequences to include in a block
+        // We need to query the state table to find the highest sequence
+        let latest_state = state::Entity::find()
+            .filter(state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .order_by_desc(state::Column::Sequence)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch latest state", e))?;
+
+        let current_sequence = latest_state.map(|s| s.sequence).unwrap_or(0);
+
+        // If no new sequences, return None
+        if current_sequence <= last_end_sequence {
+            return Ok(Response::new(TryCreateBlockResponse {
+                block_number: None,
+                block: None,
+            }));
+        }
+
+        // Create new block
+        let new_block_number = last_block_number + 1;
+        let start_sequence = last_end_sequence + 1;
+        let end_sequence = current_sequence;
+
+        // Calculate time since last block
+        let time_since_last_block = last_block_created_at
+            .map(|created_at| {
+                let now = Utc::now();
+                let diff = now.signed_duration_since(created_at);
+                diff.num_milliseconds().max(0) as u64
+            });
+
+        // Count transactions in this block
+        let number_of_transactions = end_sequence - start_sequence + 1;
+
+        let new_block = blocks::ActiveModel {
+            app_instance_id: Set(req.app_instance_id.clone()),
+            block_number: Set(new_block_number),
+            start_sequence: Set(start_sequence),
+            end_sequence: Set(end_sequence),
+            actions_commitment: NotSet,
+            state_commitment: NotSet,
+            time_since_last_block: Set(time_since_last_block),
+            number_of_transactions: Set(number_of_transactions),
+            start_actions_commitment: NotSet,
+            end_actions_commitment: NotSet,
+            state_data_availability: NotSet,
+            proof_data_availability: NotSet,
+            created_at: Set(Utc::now()),
+            state_calculated_at: NotSet,
+            proved_at: NotSet,
+        };
+
+        let inserted = new_block
+            .insert(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to create block", e))?;
+
+        // Convert to proto message
+        let proto_block = Block {
+            app_instance_id: inserted.app_instance_id.clone(),
+            block_number: inserted.block_number,
+            start_sequence: inserted.start_sequence,
+            end_sequence: inserted.end_sequence,
+            actions_commitment: inserted.actions_commitment,
+            state_commitment: inserted.state_commitment,
+            time_since_last_block: inserted.time_since_last_block,
+            number_of_transactions: inserted.number_of_transactions,
+            start_actions_commitment: inserted.start_actions_commitment,
+            end_actions_commitment: inserted.end_actions_commitment,
+            state_data_availability: inserted.state_data_availability,
+            proof_data_availability: inserted.proof_data_availability,
+            created_at: Some(to_timestamp(inserted.created_at)),
+            state_calculated_at: inserted.state_calculated_at.map(to_timestamp),
+            proved_at: inserted.proved_at.map(to_timestamp),
+        };
+
+        info!(
+            "Created block #{} for app_instance {} (sequences {}-{})",
+            new_block_number, req.app_instance_id, start_sequence, end_sequence
+        );
+
+        Ok(Response::new(TryCreateBlockResponse {
+            block_number: Some(new_block_number),
+            block: Some(proto_block),
+        }))
+    }
+
+    async fn update_block_state_da(
+        &self,
+        request: Request<UpdateBlockStateDaRequest>,
+    ) -> Result<Response<UpdateBlockStateDaResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find the block
+        let block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block", e))?
+            .ok_or_else(|| Status::not_found("Block not found"))?;
+
+        // Update state_data_availability field
+        let mut block: blocks::ActiveModel = block.into();
+        block.state_data_availability = Set(Some(req.state_da.clone()));
+
+        block
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update block state DA", e))?;
+
+        info!(
+            "Updated state DA for block #{} in app_instance {}: {}",
+            req.block_number, req.app_instance_id, req.state_da
+        );
+
+        Ok(Response::new(UpdateBlockStateDaResponse {
+            success: true,
+            message: "State data availability updated successfully".to_string(),
+        }))
+    }
+
+    async fn update_block_proof_da(
+        &self,
+        request: Request<UpdateBlockProofDaRequest>,
+    ) -> Result<Response<UpdateBlockProofDaResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find the block
+        let block = blocks::Entity::find()
+            .filter(blocks::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(blocks::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block", e))?
+            .ok_or_else(|| Status::not_found("Block not found"))?;
+
+        // Update proof_data_availability field
+        let mut block: blocks::ActiveModel = block.into();
+        block.proof_data_availability = Set(Some(req.proof_da.clone()));
+
+        block
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update block proof DA", e))?;
+
+        info!(
+            "Updated proof DA for block #{} in app_instance {}: {}",
+            req.block_number, req.app_instance_id, req.proof_da
+        );
+
+        Ok(Response::new(UpdateBlockProofDaResponse {
+            success: true,
+            message: "Proof data availability updated successfully".to_string(),
+        }))
+    }
+
+    // ============================================================================
+    // Proof Calculation Management Methods
+    // ============================================================================
+
+    async fn get_proof_calculation(
+        &self,
+        request: Request<GetProofCalculationRequest>,
+    ) -> Result<Response<GetProofCalculationResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Query proof_calculations by app_instance_id and block_number
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?;
+
+        // Convert to proto if found
+        let proto_proof_calc = proof_calc.map(|pc| {
+            let proofs_data = parse_proofs_json(pc.proofs).unwrap_or_default();
+            ProofCalculation {
+                app_instance_id: pc.app_instance_id,
+                id: pc.id,
+                block_number: pc.block_number,
+                start_sequence: pc.start_sequence,
+                end_sequence: pc.end_sequence,
+                proofs: proofs_data.iter().map(proof_data_to_proto).collect(),
+                block_proof: pc.block_proof,
+                block_proof_submitted: pc.block_proof_submitted,
+                created_at: Some(to_timestamp(pc.created_at)),
+                updated_at: Some(to_timestamp(pc.updated_at)),
+            }
+        });
+
+        Ok(Response::new(GetProofCalculationResponse {
+            proof_calculation: proto_proof_calc,
+        }))
+    }
+
+    async fn get_proof_calculations_range(
+        &self,
+        request: Request<GetProofCalculationsRangeRequest>,
+    ) -> Result<Response<GetProofCalculationsRangeResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Validate range
+        if req.from_block > req.to_block {
+            return Err(Status::invalid_argument("from_block must be <= to_block"));
+        }
+
+        // Query proof_calculations range
+        let proof_calcs = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.gte(req.from_block))
+            .filter(proof_calculations::Column::BlockNumber.lte(req.to_block))
+            .order_by_asc(proof_calculations::Column::BlockNumber)
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculations range", e))?;
+
+        // Convert to proto messages
+        let proto_proof_calcs = proof_calcs
+            .into_iter()
+            .map(|pc| {
+                let proofs_data = parse_proofs_json(pc.proofs).unwrap_or_default();
+                ProofCalculation {
+                    app_instance_id: pc.app_instance_id,
+                    id: pc.id,
+                    block_number: pc.block_number,
+                    start_sequence: pc.start_sequence,
+                    end_sequence: pc.end_sequence,
+                    proofs: proofs_data.iter().map(proof_data_to_proto).collect(),
+                    block_proof: pc.block_proof,
+                    block_proof_submitted: pc.block_proof_submitted,
+                    created_at: Some(to_timestamp(pc.created_at)),
+                    updated_at: Some(to_timestamp(pc.updated_at)),
+                }
+            })
+            .collect();
+
+        Ok(Response::new(GetProofCalculationsRangeResponse {
+            proof_calculations: proto_proof_calcs,
+        }))
+    }
+
+    async fn start_proving(
+        &self,
+        request: Request<StartProvingRequest>,
+    ) -> Result<Response<StartProvingResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Get current timestamp
+        let current_time_ms = Utc::now().timestamp_millis() as u64;
+
+        // Sort and validate all sequences (prover.move lines 383-413)
+        let sorted_sequences = sort_and_validate_sequences(
+            &req.sequences,
+            0, // We'll get actual start_sequence from proof_calculation
+            None,
+        )?;
+
+        let sorted_sequence1 = if !req.merged_sequences_1.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_1, 0, None)?)
+        } else {
+            None
+        };
+
+        let sorted_sequence2 = if !req.merged_sequences_2.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_2, 0, None)?)
+        } else {
+            None
+        };
+
+        // Find proof_calculations record
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?
+            .ok_or_else(|| Status::not_found("Proof calculation not found"))?;
+
+        // Validate sequences against start/end
+        let _ = sort_and_validate_sequences(
+            &sorted_sequences,
+            proof_calc.start_sequence,
+            proof_calc.end_sequence,
+        )?;
+
+        // Parse proofs JSON array
+        let mut proofs_data = parse_proofs_json(proof_calc.proofs.clone())?;
+
+        // Check if this is a block proof (covers entire range)
+        let is_block_proof = if let Some(end_seq) = proof_calc.end_sequence {
+            sorted_sequences.first() == Some(&proof_calc.start_sequence)
+                && sorted_sequences.last() == Some(&end_seq)
+        } else {
+            false
+        };
+
+        // Check if proof already exists
+        let existing_proof_idx = proofs_data.iter().position(|p| p.sequences == sorted_sequences);
+
+        if let Some(idx) = existing_proof_idx {
+            // Proof exists - check if can restart (prover.move lines 444-462)
+            let existing_proof = &proofs_data[idx];
+
+            if !can_restart_proof(existing_proof, current_time_ms) {
+                return Ok(Response::new(StartProvingResponse {
+                    success: false,
+                    message: format!(
+                        "Proof already exists with status {} and not timed out",
+                        existing_proof.status
+                    ),
+                }));
+            }
+
+            // Preserve rejected_count (prover.move line 471)
+            let rejected_count = existing_proof.rejected_count;
+            let old_sequence1 = existing_proof.sequence1.clone();
+            let old_sequence2 = existing_proof.sequence2.clone();
+
+            // Update existing proof with new values
+            proofs_data[idx] = ProofData {
+                status: 1, // STARTED
+                da_hash: None,
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: None,
+                sequences: sorted_sequences.clone(),
+            };
+
+            // Return old sub-proofs to CALCULATED (prover.move lines 473-502)
+            if let Some(seq1) = old_sequence1 {
+                if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                    return_proof_to_calculated(&mut proofs_data[proof1_idx], current_time_ms);
+                }
+            }
+            if let Some(seq2) = old_sequence2 {
+                if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                    return_proof_to_calculated(&mut proofs_data[proof2_idx], current_time_ms);
+                }
+            }
+        } else {
+            // New proof - check if sub-proofs can be reserved (prover.move lines 505-559)
+            if let Some(ref seq1) = sorted_sequence1 {
+                let proof1_idx = proofs_data.iter().position(|p| &p.sequences == seq1)
+                    .ok_or_else(|| Status::failed_precondition("Sub-proof 1 does not exist"))?;
+
+                if !can_reserve_proof(&proofs_data[proof1_idx], current_time_ms, is_block_proof) {
+                    return Ok(Response::new(StartProvingResponse {
+                        success: false,
+                        message: "Cannot reserve sub-proof 1".to_string(),
+                    }));
+                }
+            }
+
+            if let Some(ref seq2) = sorted_sequence2 {
+                let proof2_idx = proofs_data.iter().position(|p| &p.sequences == seq2)
+                    .ok_or_else(|| Status::failed_precondition("Sub-proof 2 does not exist"))?;
+
+                if !can_reserve_proof(&proofs_data[proof2_idx], current_time_ms, is_block_proof) {
+                    return Ok(Response::new(StartProvingResponse {
+                        success: false,
+                        message: "Cannot reserve sub-proof 2".to_string(),
+                    }));
+                }
+            }
+
+            // All checks passed - insert new proof (prover.move line 562)
+            proofs_data.push(ProofData {
+                status: 1, // STARTED
+                da_hash: None,
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count: 0,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: None,
+                sequences: sorted_sequences.clone(),
+            });
+        }
+
+        // Reserve sub-proofs (prover.move lines 566-593)
+        if let Some(seq1) = sorted_sequence1 {
+            if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                reserve_proof(&mut proofs_data[proof1_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+        if let Some(seq2) = sorted_sequence2 {
+            if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                reserve_proof(&mut proofs_data[proof2_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+
+        // Serialize and save back to database
+        let proofs_json = serialize_proofs_json(&proofs_data)?;
+        let mut proof_calc_active: proof_calculations::ActiveModel = proof_calc.into();
+        proof_calc_active.proofs = Set(Some(proofs_json));
+        proof_calc_active.updated_at = Set(Utc::now());
+
+        proof_calc_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update proof calculation", e))?;
+
+        info!(
+            "Started proving for block #{} in app_instance {}, sequences: {:?}",
+            req.block_number, req.app_instance_id, sorted_sequences
+        );
+
+        Ok(Response::new(StartProvingResponse {
+            success: true,
+            message: "Proof started successfully".to_string(),
+        }))
+    }
+
+    async fn submit_calculated_proof(
+        &self,
+        request: Request<SubmitCalculatedProofRequest>,
+    ) -> Result<Response<SubmitCalculatedProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Get current timestamp
+        let current_time_ms = Utc::now().timestamp_millis() as u64;
+
+        // Sort and validate sequences (prover.move lines 722-752)
+        let sorted_sequences = sort_and_validate_sequences(&req.sequences, 0, None)?;
+        let sorted_sequence1 = if !req.merged_sequences_1.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_1, 0, None)?)
+        } else {
+            None
+        };
+        let sorted_sequence2 = if !req.merged_sequences_2.is_empty() {
+            Some(sort_and_validate_sequences(&req.merged_sequences_2, 0, None)?)
+        } else {
+            None
+        };
+
+        // Find proof_calculations record
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?
+            .ok_or_else(|| Status::not_found("Proof calculation not found"))?;
+
+        // Parse proofs JSON array
+        let mut proofs_data = parse_proofs_json(proof_calc.proofs.clone())?;
+
+        // Find or create proof
+        let existing_proof_idx = proofs_data.iter().position(|p| p.sequences == sorted_sequences);
+
+        if let Some(idx) = existing_proof_idx {
+            // Update existing proof, preserve rejected_count (prover.move line 782)
+            let rejected_count = proofs_data[idx].rejected_count;
+            proofs_data[idx] = ProofData {
+                status: 2, // CALCULATED
+                da_hash: Some(req.da_hash.clone()),
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: Some(req.job_id.clone()),
+                sequences: sorted_sequences.clone(),
+            };
+        } else {
+            // Insert new proof (prover.move line 783)
+            proofs_data.push(ProofData {
+                status: 2, // CALCULATED
+                da_hash: Some(req.da_hash.clone()),
+                sequence1: sorted_sequence1.clone(),
+                sequence2: sorted_sequence2.clone(),
+                rejected_count: 0,
+                timestamp: current_time_ms,
+                prover: auth.public_key.clone(),
+                user: None,
+                job_id: Some(req.job_id.clone()),
+                sequences: sorted_sequences.clone(),
+            });
+        }
+
+        // Mark sub-proofs as USED (prover.move lines 784-811)
+        if let Some(seq1) = sorted_sequence1 {
+            if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                mark_proof_as_used(&mut proofs_data[proof1_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+        if let Some(seq2) = sorted_sequence2 {
+            if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                mark_proof_as_used(&mut proofs_data[proof2_idx], current_time_ms, auth.public_key.clone());
+            }
+        }
+
+        // Check if block proof is complete (prover.move lines 812-825)
+        let mut block_proof_ready = false;
+        if let Some(end_seq) = proof_calc.end_sequence {
+            if sorted_sequences.first() == Some(&proof_calc.start_sequence)
+                && sorted_sequences.last() == Some(&end_seq)
+            {
+                // This is the block proof - mark as finished
+                block_proof_ready = true;
+            }
+        }
+
+        // Serialize and save
+        let proofs_json = serialize_proofs_json(&proofs_data)?;
+        let mut proof_calc_active: proof_calculations::ActiveModel = proof_calc.into();
+        proof_calc_active.proofs = Set(Some(proofs_json));
+
+        if block_proof_ready {
+            proof_calc_active.block_proof = Set(Some(req.da_hash.clone()));
+        }
+
+        proof_calc_active.updated_at = Set(Utc::now());
+
+        proof_calc_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update proof calculation", e))?;
+
+        info!(
+            "Submitted proof for block #{} in app_instance {}, sequences: {:?}, block_proof_ready: {}",
+            req.block_number, req.app_instance_id, sorted_sequences, block_proof_ready
+        );
+
+        Ok(Response::new(SubmitCalculatedProofResponse {
+            success: true,
+            message: "Proof submitted successfully".to_string(),
+            block_proof_ready,
+        }))
+    }
+
+    async fn reject_proof(
+        &self,
+        request: Request<RejectProofRequest>,
+    ) -> Result<Response<RejectProofResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify JWT has access to this app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Get current timestamp
+        let current_time_ms = Utc::now().timestamp_millis() as u64;
+
+        // Sort and validate sequences (prover.move lines 610-614)
+        let sorted_sequences = sort_and_validate_sequences(&req.sequences, 0, None)?;
+
+        // Find proof_calculations record
+        let proof_calc = proof_calculations::Entity::find()
+            .filter(proof_calculations::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(proof_calculations::Column::BlockNumber.eq(req.block_number))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch proof calculation", e))?
+            .ok_or_else(|| Status::not_found("Proof calculation not found"))?;
+
+        // Parse proofs JSON array
+        let mut proofs_data = parse_proofs_json(proof_calc.proofs.clone())?;
+
+        // Find the proof
+        let proof_idx = proofs_data
+            .iter()
+            .position(|p| p.sequences == sorted_sequences)
+            .ok_or_else(|| Status::not_found("Proof not found"))?;
+
+        // Get sub-proof sequences before updating (prover.move lines 616-627)
+        let sequence1 = proofs_data[proof_idx].sequence1.clone();
+        let sequence2 = proofs_data[proof_idx].sequence2.clone();
+
+        // Update proof status to REJECTED and increment rejected_count (lines 620-621)
+        proofs_data[proof_idx].status = 3; // REJECTED
+        proofs_data[proof_idx].rejected_count += 1;
+        proofs_data[proof_idx].timestamp = current_time_ms;
+
+        // Return sub-proofs to CALCULATED (prover.move lines 629-652)
+        if let Some(seq1) = sequence1 {
+            if let Some(proof1_idx) = proofs_data.iter().position(|p| p.sequences == seq1) {
+                return_proof_to_calculated(&mut proofs_data[proof1_idx], current_time_ms);
+            }
+        }
+        if let Some(seq2) = sequence2 {
+            if let Some(proof2_idx) = proofs_data.iter().position(|p| p.sequences == seq2) {
+                return_proof_to_calculated(&mut proofs_data[proof2_idx], current_time_ms);
+            }
+        }
+
+        // Serialize and save
+        let proofs_json = serialize_proofs_json(&proofs_data)?;
+        let mut proof_calc_active: proof_calculations::ActiveModel = proof_calc.into();
+        proof_calc_active.proofs = Set(Some(proofs_json));
+        proof_calc_active.updated_at = Set(Utc::now());
+
+        proof_calc_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update proof calculation", e))?;
+
+        info!(
+            "Rejected proof for block #{} in app_instance {}, sequences: {:?}",
+            req.block_number, req.app_instance_id, sorted_sequences
+        );
+
+        Ok(Response::new(RejectProofResponse {
+            success: true,
+            message: "Proof rejected successfully".to_string(),
+        }))
+    }
+
+    // ============================================================================
+    // Settlement Management Methods
+    // ============================================================================
+
+    async fn get_block_settlement(
+        &self,
+        request: Request<GetBlockSettlementRequest>,
+    ) -> Result<Response<GetBlockSettlementResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch block settlement from database
+        let block_settlement = block_settlements::Entity::find()
+            .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(block_settlements::Column::BlockNumber.eq(req.block_number))
+            .filter(block_settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block settlement", e))?
+            .ok_or_else(|| Status::not_found("Block settlement not found"))?;
+
+        // Convert to proto
+        let proto_block_settlement = crate::proto::BlockSettlement {
+            app_instance_id: block_settlement.app_instance_id,
+            block_number: block_settlement.block_number,
+            chain: block_settlement.chain,
+            settlement_tx_hash: block_settlement.settlement_tx_hash,
+            settlement_tx_included_in_block: block_settlement.settlement_tx_included_in_block,
+            sent_to_settlement_at: block_settlement.sent_to_settlement_at.map(|dt| {
+                let timestamp_millis = dt.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+            settled_at: block_settlement.settled_at.map(|dt| {
+                let timestamp_millis = dt.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+            created_at: Some({
+                let timestamp_millis = block_settlement.created_at.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+            updated_at: Some({
+                let timestamp_millis = block_settlement.updated_at.timestamp_millis();
+                prost_types::Timestamp {
+                    seconds: timestamp_millis / 1000,
+                    nanos: ((timestamp_millis % 1000) * 1_000_000) as i32,
+                }
+            }),
+        };
+
+        Ok(Response::new(GetBlockSettlementResponse {
+            block_settlement: Some(proto_block_settlement),
+        }))
+    }
+
+    async fn get_settlement_chains(
+        &self,
+        request: Request<GetSettlementChainsRequest>,
+    ) -> Result<Response<GetSettlementChainsResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Query distinct chains from settlements table
+        let chains: Vec<String> = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement chains", e))?
+            .into_iter()
+            .map(|s| s.chain)
+            .collect();
+
+        Ok(Response::new(GetSettlementChainsResponse { chains }))
+    }
+
+    async fn get_settlement_address(
+        &self,
+        request: Request<GetSettlementAddressRequest>,
+    ) -> Result<Response<GetSettlementAddressResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch settlement record
+        let settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        let settlement_address = settlement.and_then(|s| s.settlement_address);
+
+        Ok(Response::new(GetSettlementAddressResponse {
+            settlement_address,
+        }))
+    }
+
+    async fn get_settlement_job_for_chain(
+        &self,
+        request: Request<GetSettlementJobForChainRequest>,
+    ) -> Result<Response<GetSettlementJobForChainResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch settlement record
+        let settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        let settlement_job = settlement.and_then(|s| s.settlement_job);
+
+        Ok(Response::new(GetSettlementJobForChainResponse {
+            settlement_job,
+        }))
+    }
+
+    async fn set_settlement_address(
+        &self,
+        request: Request<SetSettlementAddressRequest>,
+    ) -> Result<Response<SetSettlementAddressResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find or create settlement record
+        let existing_settlement = settlements::Entity::find()
+            .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch settlement", e))?;
+
+        if let Some(settlement) = existing_settlement {
+            // Update existing settlement
+            let mut active: settlements::ActiveModel = settlement.into();
+            active.settlement_address = Set(req.settlement_address.clone());
+            active.updated_at = Set(chrono::Utc::now().into());
+
+            active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update settlement address", e))?;
+        } else {
+            // Create new settlement record
+            let new_settlement = settlements::ActiveModel {
+                app_instance_id: Set(req.app_instance_id.clone()),
+                chain: Set(req.chain.clone()),
+                last_settled_block_number: Set(0),
+                settlement_address: Set(req.settlement_address.clone()),
+                settlement_job: Set(None),
+                created_at: Set(chrono::Utc::now().into()),
+                updated_at: Set(chrono::Utc::now().into()),
+            };
+
+            new_settlement
+                .insert(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to create settlement", e))?;
+        }
+
+        info!(
+            "Set settlement address for app_instance {} chain {} to {:?}",
+            req.app_instance_id, req.chain, req.settlement_address
+        );
+
+        Ok(Response::new(SetSettlementAddressResponse {
+            success: true,
+            message: "Settlement address set successfully".to_string(),
+        }))
+    }
+
+    async fn update_block_settlement_tx_hash(
+        &self,
+        request: Request<UpdateBlockSettlementTxHashRequest>,
+    ) -> Result<Response<UpdateBlockSettlementTxHashResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Find or create block settlement
+        let existing_block_settlement = block_settlements::Entity::find()
+            .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(block_settlements::Column::BlockNumber.eq(req.block_number))
+            .filter(block_settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block settlement", e))?;
+
+        if let Some(block_settlement) = existing_block_settlement {
+            // Update existing
+            let mut active: block_settlements::ActiveModel = block_settlement.into();
+            active.settlement_tx_hash = Set(req.settlement_tx_hash.clone());
+            active.sent_to_settlement_at = Set(req.sent_to_settlement_at.map(|ts| {
+                let timestamp_millis = (ts.seconds as i64) * 1000 + (ts.nanos as i64) / 1_000_000;
+                chrono::DateTime::from_timestamp_millis(timestamp_millis)
+                    .expect("Invalid timestamp")
+                    .into()
+            }));
+            active.updated_at = Set(chrono::Utc::now().into());
+
+            active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update block settlement tx hash", e))?;
+        } else {
+            // Create new block settlement
+            let new_block_settlement = block_settlements::ActiveModel {
+                app_instance_id: Set(req.app_instance_id.clone()),
+                block_number: Set(req.block_number),
+                chain: Set(req.chain.clone()),
+                settlement_tx_hash: Set(req.settlement_tx_hash.clone()),
+                settlement_tx_included_in_block: Set(None),
+                sent_to_settlement_at: Set(req.sent_to_settlement_at.map(|ts| {
+                    let timestamp_millis = (ts.seconds as i64) * 1000 + (ts.nanos as i64) / 1_000_000;
+                    chrono::DateTime::from_timestamp_millis(timestamp_millis)
+                        .expect("Invalid timestamp")
+                        .into()
+                })),
+                settled_at: Set(None),
+                created_at: Set(chrono::Utc::now().into()),
+                updated_at: Set(chrono::Utc::now().into()),
+            };
+
+            new_block_settlement
+                .insert(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to create block settlement", e))?;
+        }
+
+        info!(
+            "Updated block settlement tx hash for app_instance {} block #{} chain {} to {:?}",
+            req.app_instance_id, req.block_number, req.chain, req.settlement_tx_hash
+        );
+
+        Ok(Response::new(UpdateBlockSettlementTxHashResponse {
+            success: true,
+            message: "Block settlement tx hash updated successfully".to_string(),
+        }))
+    }
+
+    async fn update_block_settlement_tx_included_in_block(
+        &self,
+        request: Request<UpdateBlockSettlementTxIncludedInBlockRequest>,
+    ) -> Result<Response<UpdateBlockSettlementTxIncludedInBlockResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch block settlement
+        let block_settlement = block_settlements::Entity::find()
+            .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(block_settlements::Column::BlockNumber.eq(req.block_number))
+            .filter(block_settlements::Column::Chain.eq(&req.chain))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch block settlement", e))?
+            .ok_or_else(|| Status::not_found("Block settlement not found"))?;
+
+        // Update block settlement
+        let mut active: block_settlements::ActiveModel = block_settlement.into();
+        active.settlement_tx_included_in_block = Set(req.settlement_tx_included_in_block);
+        active.settled_at = Set(req.settled_at.map(|ts| {
+            let timestamp_millis = (ts.seconds as i64) * 1000 + (ts.nanos as i64) / 1_000_000;
+            chrono::DateTime::from_timestamp_millis(timestamp_millis)
+                .expect("Invalid timestamp")
+                .into()
+        }));
+        active.updated_at = Set(chrono::Utc::now().into());
+
+        active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update block settlement tx included", e))?;
+
+        // If tx is included, update last_settled_block_number in settlements table
+        // following the logic in settlement.move:106-167
+        if req.settlement_tx_included_in_block.is_some() {
+            let settlement = settlements::Entity::find()
+                .filter(settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+                .filter(settlements::Column::Chain.eq(&req.chain))
+                .one(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to fetch settlement", e))?
+                .ok_or_else(|| Status::not_found("Settlement record not found"))?;
+
+            let mut last_settled = settlement.last_settled_block_number;
+
+            // Advance last_settled_block_number to highest consecutive settled block
+            while last_settled < req.block_number {
+                let next_block = last_settled + 1;
+
+                // Check if next block is settled
+                let next_settlement = block_settlements::Entity::find()
+                    .filter(block_settlements::Column::AppInstanceId.eq(&req.app_instance_id))
+                    .filter(block_settlements::Column::BlockNumber.eq(next_block))
+                    .filter(block_settlements::Column::Chain.eq(&req.chain))
+                    .one(self.db.connection())
+                    .await
+                    .map_err(|e| log_internal_error("Failed to check next block settlement", e))?;
+
+                if let Some(next) = next_settlement {
+                    if next.settlement_tx_included_in_block.is_some() {
+                        last_settled = next_block;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Update settlement record
+            let mut settlement_active: settlements::ActiveModel = settlement.into();
+            settlement_active.last_settled_block_number = Set(last_settled);
+            settlement_active.updated_at = Set(chrono::Utc::now().into());
+
+            settlement_active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update last_settled_block_number", e))?;
+
+            info!(
+                "Block #{} settled for app_instance {} chain {}, last_settled_block_number now {}",
+                req.block_number, req.app_instance_id, req.chain, last_settled
+            );
+        }
+
+        Ok(Response::new(UpdateBlockSettlementTxIncludedInBlockResponse {
+            success: true,
+            message: "Block settlement tx included status updated successfully".to_string(),
+        }))
+    }
+
+    // ============================================================================
+    // State Update & Configuration Methods
+    // ============================================================================
+
+    async fn update_state_for_sequence(
+        &self,
+        request: Request<UpdateStateForSequenceRequest>,
+    ) -> Result<Response<UpdateStateForSequenceResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Calculate state hash if state data is provided
+        let state_hash = if let Some(ref state_data) = req.new_state_data {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(state_data);
+            hasher.finalize().to_vec()
+        } else {
+            vec![] // Empty hash if only DA hash provided
+        };
+
+        // Find existing state record
+        let existing_state = state::Entity::find()
+            .filter(state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(state::Column::Sequence.eq(req.sequence))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch state", e))?;
+
+        if let Some(state_record) = existing_state {
+            // Update existing state
+            let mut active: state::ActiveModel = state_record.into();
+
+            if let Some(state_data) = req.new_state_data {
+                active.state_data = Set(Some(state_data));
+                active.state_hash = Set(state_hash);
+            }
+
+            if let Some(da_hash) = req.new_data_availability_hash {
+                active.state_da = Set(Some(da_hash));
+            }
+
+            active
+                .update(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to update state", e))?;
+        } else {
+            // Create new state record
+            let new_state = state::ActiveModel {
+                app_instance_id: Set(req.app_instance_id.clone()),
+                sequence: Set(req.sequence),
+                state_hash: Set(state_hash),
+                state_data: Set(req.new_state_data),
+                state_da: Set(req.new_data_availability_hash),
+                proof_data: Set(None),
+                proof_da: Set(None),
+                proof_hash: Set(None),
+                commitment: Set(None),
+                metadata: Set(None),
+                proved_at: Set(chrono::Utc::now().into()),
+                id: NotSet,
+            };
+
+            new_state
+                .insert(self.db.connection())
+                .await
+                .map_err(|e| log_internal_error("Failed to create state", e))?;
+        }
+
+        info!(
+            "Updated state for sequence {} in app_instance {}",
+            req.sequence, req.app_instance_id
+        );
+
+        Ok(Response::new(UpdateStateForSequenceResponse {
+            success: true,
+            message: "State updated successfully".to_string(),
+        }))
+    }
+
+    async fn is_app_paused(
+        &self,
+        request: Request<IsAppPausedRequest>,
+    ) -> Result<Response<IsAppPausedResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch app instance
+        let app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        Ok(Response::new(IsAppPausedResponse {
+            is_paused: app.is_paused,
+        }))
+    }
+
+    async fn get_min_time_between_blocks(
+        &self,
+        request: Request<GetMinTimeBetweenBlocksRequest>,
+    ) -> Result<Response<GetMinTimeBetweenBlocksResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch app instance
+        let app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        // Return the value in seconds (as stored in database)
+        let min_time_seconds = app.min_time_between_blocks;
+
+        Ok(Response::new(GetMinTimeBetweenBlocksResponse {
+            min_time_seconds,
+        }))
+    }
+
+    async fn purge(
+        &self,
+        request: Request<PurgeRequest>,
+    ) -> Result<Response<PurgeResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Validate sequences_to_purge > 0
+        if req.sequences_to_purge == 0 {
+            return Err(Status::invalid_argument("sequences_to_purge must be greater than 0"));
+        }
+
+        // Fetch app instance
+        let app = app_instances::Entity::find()
+            .filter(app_instances::Column::AppInstanceId.eq(&req.app_instance_id))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch app instance", e))?
+            .ok_or_else(|| Status::not_found("App instance not found"))?;
+
+        // Calculate target purge sequence (capped at last_settled_sequence)
+        let mut target_sequence = app.last_purged_sequence + req.sequences_to_purge;
+        if target_sequence > app.last_settled_sequence {
+            target_sequence = app.last_settled_sequence;
+        }
+
+        // If no sequences to purge, return early
+        if target_sequence <= app.last_purged_sequence {
+            return Ok(Response::new(PurgeResponse {
+                success: true,
+                message: "No sequences to purge".to_string(),
+                last_purged_sequence: app.last_purged_sequence,
+            }));
+        }
+
+        // Delete old records from state table
+        state::Entity::delete_many()
+            .filter(state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(state::Column::Sequence.lte(target_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to purge state records", e))?;
+
+        // Delete old records from optimistic_state table
+        optimistic_state::Entity::delete_many()
+            .filter(optimistic_state::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(optimistic_state::Column::Sequence.lte(target_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to purge optimistic_state records", e))?;
+
+        // Delete old records from user_actions table
+        user_actions::Entity::delete_many()
+            .filter(user_actions::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(user_actions::Column::Sequence.lte(target_sequence))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to purge user_actions records", e))?;
+
+        // Update app instance last_purged_sequence
+        let mut app_active: app_instances::ActiveModel = app.into();
+        app_active.last_purged_sequence = Set(target_sequence);
+        app_active.updated_at = Set(chrono::Utc::now().into());
+
+        app_active
+            .update(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to update last_purged_sequence", e))?;
+
+        info!(
+            "Purged sequences up to {} for app_instance {}",
+            target_sequence, req.app_instance_id
+        );
+
+        Ok(Response::new(PurgeResponse {
+            success: true,
+            message: format!("Purged sequences up to {}", target_sequence),
+            last_purged_sequence: target_sequence,
+        }))
+    }
+
+    async fn get_metadata(
+        &self,
+        request: Request<GetMetadataRequest>,
+    ) -> Result<Response<GetMetadataResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        use crate::entity::app_instance_metadata;
+
+        let metadata = app_instance_metadata::Entity::find()
+            .filter(app_instance_metadata::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(app_instance_metadata::Column::Key.eq(&req.key))
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to fetch metadata", e))?;
+
+        Ok(Response::new(GetMetadataResponse {
+            metadata: metadata.map(|m| AppInstanceMetadata {
+                app_instance_id: m.app_instance_id,
+                key: m.key,
+                value: m.value,
+                created_at: Some(to_timestamp(m.created_at)),
+                updated_at: Some(to_timestamp(m.updated_at)),
+            }),
+        }))
+    }
+
+    async fn add_metadata(
+        &self,
+        request: Request<AddMetadataRequest>,
+    ) -> Result<Response<AddMetadataResponse>, Status> {
+        let req = request.into_inner();
+        let auth = self.extract_auth_from_body(&req.auth)?;
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        use crate::entity::app_instance_metadata;
+
+        let metadata = app_instance_metadata::ActiveModel {
+            app_instance_id: Set(req.app_instance_id.clone()),
+            key: Set(req.key.clone()),
+            value: Set(req.value),
+            created_at: Set(chrono::Utc::now().into()),
+            updated_at: Set(chrono::Utc::now().into()),
+        };
+
+        metadata
+            .insert(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to insert metadata", e))?;
+
+        Ok(Response::new(AddMetadataResponse {
+            success: true,
+            message: format!("Metadata added for key '{}'", req.key),
+        }))
+    }
+
+    // ============================================================================
+    // Coordinator Authentication Methods
+    // ============================================================================
+
+    async fn coordinator_job_operation(
+        &self,
+        request: Request<CoordinatorJobRequest>,
+    ) -> Result<Response<CoordinatorJobResponse>, Status> {
+        let req = request.into_inner();
+
+        // Extract coordinator auth
+        let coordinator_auth = req
+            .coordinator_auth
+            .ok_or_else(|| Status::unauthenticated("Missing coordinator authentication"))?;
+
+        let app_instance_id = &req.app_instance_id;
+        let coordinator_public_key = &coordinator_auth.coordinator_public_key;
+
+        // Extract operation
+        let operation = req
+            .operation
+            .ok_or_else(|| Status::invalid_argument("Missing operation"))?;
+
+        // Determine operation name for auth
+        let operation_name = match &operation {
+            coordinator_job_request::Operation::Create(_) => "create_job",
+            coordinator_job_request::Operation::Start(_) => "start_job",
+            coordinator_job_request::Operation::Complete(_) => "complete_job",
+            coordinator_job_request::Operation::Fail(_) => "fail_job",
+            coordinator_job_request::Operation::Get(_) => "get_job",
+            coordinator_job_request::Operation::Terminate(_) => "terminate_job",
+            coordinator_job_request::Operation::GetPendingSequences(_) => "get_pending_sequences",
+            coordinator_job_request::Operation::GetPendingCount(_) => "get_pending_count",
+            coordinator_job_request::Operation::GetFailedCount(_) => "get_failed_count",
+            coordinator_job_request::Operation::GetTotalCount(_) => "get_total_count",
+            coordinator_job_request::Operation::GetPendingJobs(_) => "get_pending_jobs",
+            coordinator_job_request::Operation::GetFailedJobs(_) => "get_failed_jobs",
+            coordinator_job_request::Operation::GetJobsBatch(_) => "get_jobs_batch",
+            coordinator_job_request::Operation::RestartFailedJobs(_) => "restart_failed_jobs",
+            coordinator_job_request::Operation::RemoveFailedJobs(_) => "remove_failed_jobs",
+            coordinator_job_request::Operation::CreateMergeJob(_) => "create_merge_job",
+            coordinator_job_request::Operation::CreateSettleJob(_) => "create_settle_job",
+        };
+
+        // Verify signature and access
+        verify_and_authorize(
+            self.db.connection(),
+            &coordinator_auth,
+            app_instance_id,
+            operation_name,
+        )
+        .await?;
+
+        // Execute operation
+        let result = match operation {
+            coordinator_job_request::Operation::Create(op) => {
+                self.handle_create_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Start(op) => {
+                self.handle_start_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Complete(op) => {
+                self.handle_complete_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Fail(op) => {
+                self.handle_fail_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Get(op) => {
+                self.handle_get_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::Terminate(op) => {
+                self.handle_terminate_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::GetPendingSequences(op) => {
+                self.handle_get_pending_sequences(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::GetPendingCount(_) => {
+                self.handle_get_pending_count(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetFailedCount(_) => {
+                self.handle_get_failed_count(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetTotalCount(_) => {
+                self.handle_get_total_count(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetPendingJobs(_) => {
+                self.handle_get_pending_jobs(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetFailedJobs(_) => {
+                self.handle_get_failed_jobs(app_instance_id).await
+            }
+            coordinator_job_request::Operation::GetJobsBatch(op) => {
+                self.handle_get_jobs_batch(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::RestartFailedJobs(op) => {
+                self.handle_restart_failed_jobs(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::RemoveFailedJobs(op) => {
+                self.handle_remove_failed_jobs(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::CreateMergeJob(op) => {
+                self.handle_create_merge_job(app_instance_id, op).await
+            }
+            coordinator_job_request::Operation::CreateSettleJob(op) => {
+                self.handle_create_settle_job(app_instance_id, op).await
+            }
+        };
+
+        // Log result to audit log
+        let (success, error_msg, job_seq) = match &result {
+            Ok(resp) => (resp.success, None, resp.job_sequence),
+            Err(e) => (false, Some(e.to_string()), None),
+        };
+
+        if let Err(e) = self
+            .log_coordinator_action(
+                coordinator_public_key,
+                app_instance_id,
+                operation_name,
+                job_seq,
+                success,
+                error_msg,
+            )
+            .await
+        {
+            warn!("Failed to log coordinator action: {}", e);
+        }
+
+        result.map(Response::new)
+    }
+
+
+    async fn grant_coordinator_access(
+        &self,
+        request: Request<GrantCoordinatorAccessRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+
+        // Verify JWT authentication
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Verify group exists
+        let group_exists = coordinator_groups::Entity::find_by_id(&req.group_id)
+            .one(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?
+            .is_some();
+
+        if !group_exists {
+            return Err(Status::not_found(format!(
+                "Coordinator group {} not found",
+                req.group_id
+            )));
+        }
+
+        // Insert or update access grant
+        let access_grant = app_instance_coordinator_access::ActiveModel {
+            app_instance_id: Set(req.app_instance_id.clone()),
+            group_id: Set(req.group_id.clone()),
+            granted_at: Set(Utc::now()),
+            granted_by: Set(auth.public_key.clone()),
+            expires_at: Set(req.expires_at.map(|ts| {
+                chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_else(Utc::now)
+            })),
+            access_level: Set(req.access_level.clone()),
+        };
+
+        // Use ON DUPLICATE KEY UPDATE logic via insert with on_conflict
+        app_instance_coordinator_access::Entity::insert(access_grant)
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::columns(vec![
+                    app_instance_coordinator_access::Column::AppInstanceId,
+                    app_instance_coordinator_access::Column::GroupId,
+                ])
+                .update_columns(vec![
+                    app_instance_coordinator_access::Column::GrantedAt,
+                    app_instance_coordinator_access::Column::GrantedBy,
+                    app_instance_coordinator_access::Column::ExpiresAt,
+                    app_instance_coordinator_access::Column::AccessLevel,
+                ])
+                .to_owned(),
+            )
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to grant coordinator access", e))?;
+
+        info!(
+            "Granted {} access to group {} for app instance {} by {}",
+            req.access_level, req.group_id, req.app_instance_id, auth.public_key
+        );
+
+        Ok(Response::new(()))
+    }
+
+    async fn revoke_coordinator_access(
+        &self,
+        request: Request<RevokeCoordinatorAccessRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+
+        // Verify JWT authentication
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Delete access grant
+        let result = app_instance_coordinator_access::Entity::delete_many()
+            .filter(app_instance_coordinator_access::Column::AppInstanceId.eq(&req.app_instance_id))
+            .filter(app_instance_coordinator_access::Column::GroupId.eq(&req.group_id))
+            .exec(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Failed to revoke coordinator access", e))?;
+
+        if result.rows_affected > 0 {
+            info!(
+                "Revoked access for group {} from app instance {} by {}",
+                req.group_id, req.app_instance_id, auth.public_key
+            );
+            Ok(Response::new(()))
+        } else {
+            Err(Status::not_found(format!(
+                "No access grant found for group {} on app instance {}",
+                req.group_id, req.app_instance_id
+            )))
+        }
+    }
+
+    async fn list_coordinator_access(
+        &self,
+        request: Request<ListCoordinatorAccessRequest>,
+    ) -> Result<Response<ListCoordinatorAccessResponse>, Status> {
+        let req = request.into_inner();
+
+        // Verify JWT authentication
+        let auth = self.extract_auth_from_body(&req.auth)?;
+
+        // Verify ownership of app instance
+        self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Fetch all access grants for this app instance
+        let access_grants = app_instance_coordinator_access::Entity::find()
+            .filter(app_instance_coordinator_access::Column::AppInstanceId.eq(&req.app_instance_id))
+            .all(self.db.connection())
+            .await
+            .map_err(|e| log_internal_error("Database error", e))?;
+
+        // Convert to proto format
+        let proto_grants: Vec<AppInstanceAccess> = access_grants
+            .into_iter()
+            .map(|grant| AppInstanceAccess {
+                app_instance_id: grant.app_instance_id,
+                group_id: grant.group_id,
+                access_level: grant.access_level,
+                granted_at: Some(to_timestamp(grant.granted_at)),
+                expires_at: grant.expires_at.map(|dt| to_timestamp(dt)),
+            })
+            .collect();
+
+        Ok(Response::new(ListCoordinatorAccessResponse {
+            access_grants: proto_grants,
+        }))
+    }
+
+    /// Subscribe to job creation events for an app instance
+    /// Uses database polling with SeaORM to detect new jobs
+    async fn subscribe_job_events(
+        &self,
+        request: Request<SubscribeJobEventsRequest>,
+    ) -> Result<Response<Self::SubscribeJobEventsStream>, Status> {
+        let req = request.into_inner();
+
+        // TODO: Temporarily skip auth check - will add proper JWT auth later
+        // let auth = self.extract_auth_from_body(&req.auth)?;
+        // self.verify_ownership(&req.app_instance_id, &auth).await?;
+
+        // Use provided app_instance_id, or empty string to stream from all app instances
+        let app_instance_id = if req.app_instance_id.is_empty() {
+            warn!("Event stream requested without app_instance_id - streaming all jobs (temp development mode)");
+            None
+        } else {
+            Some(req.app_instance_id.clone())
+        };
+
+        info!(
+            "Starting event stream for app_instance={:?}, from_sequence={:?}",
+            app_instance_id, req.from_job_sequence
+        );
+
+        // Create broadcast channel for this subscription
+        let (tx, rx) = broadcast::channel::<JobEventMessage>(100);
+
+        // Clone what we need for the spawned task
+        let db = self.db.clone();
+        let from_sequence = req.from_job_sequence.unwrap_or(0);
+
+        // Spawn background task to monitor database for new jobs
+        tokio::spawn(async move {
+            let mut last_sequence = from_sequence;
+
+            loop {
+                // Poll database every 1 second for new jobs
+                tokio::time::sleep(Duration::from_secs(1)).await;
+
+                // Use SeaORM to query new jobs
+                let mut query = jobs::Entity::find()
+                    .filter(jobs::Column::JobSequence.gt(last_sequence))
+                    .order_by_asc(jobs::Column::JobSequence);
+
+                // Optionally filter by app_instance_id
+                if let Some(ref app_id) = app_instance_id {
+                    query = query.filter(jobs::Column::AppInstanceId.eq(app_id));
+                }
+
+                let result = query
+                    .limit(100)
+                    .all(db.connection())
+                    .await;
+
+                match result {
+                    Ok(job_models) => {
+                        for job_model in job_models {
+                            last_sequence = job_model.job_sequence;
+
+                            // Convert SeaORM model to proto Job using existing helper
+                            let proto_job = Job {
+                                job_sequence: job_model.job_sequence,
+                                description: job_model.description,
+                                developer: job_model.developer,
+                                agent: job_model.agent,
+                                agent_method: job_model.agent_method,
+                                app_instance_id: job_model.app_instance_id,
+                                block_number: job_model.block_number,
+                                sequences: job_model.sequences
+                                    .and_then(|j| serde_json::from_value(j).ok())
+                                    .unwrap_or_default(),
+                                sequences1: job_model.sequences1
+                                    .and_then(|j| serde_json::from_value(j).ok())
+                                    .unwrap_or_default(),
+                                sequences2: job_model.sequences2
+                                    .and_then(|j| serde_json::from_value(j).ok())
+                                    .unwrap_or_default(),
+                                data: job_model.data,
+                                data_da: job_model.data_da,
+                                interval_ms: job_model.interval_ms,
+                                next_scheduled_at: job_model.next_scheduled_at.map(|dt| to_timestamp(dt)),
+                                status: match job_model.status.as_str() {
+                                    "pending" => 1,
+                                    "running" => 2,
+                                    "completed" => 3,
+                                    "failed" => 4,
+                                    _ => 0,
+                                },
+                                error_message: job_model.error_message,
+                                attempts: job_model.attempts as u32,
+                                created_at: Some(to_timestamp(job_model.created_at)),
+                                updated_at: Some(to_timestamp(job_model.updated_at)),
+                                metadata: job_model.metadata.and_then(json_to_prost_struct),
+                                agent_jwt: job_model.agent_jwt,
+                                jwt_expires_at: job_model.jwt_expires_at.map(|dt| to_timestamp(dt)),
+                            };
+
+                            let event = JobEventMessage {
+                                job_sequence: last_sequence,
+                                job: Some(proto_job),
+                                event_time: Some(to_timestamp(Utc::now())),
+                            };
+
+                            if tx.send(event).is_err() {
+                                // Receiver dropped, exit
+                                info!("Event stream closed for app_instance={:?}", app_instance_id);
+                                return;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Error polling for job events in app_instance={:?}: {}", app_instance_id, e);
+                    }
+                }
+            }
+        });
+
+        // Convert broadcast receiver to stream
+        let stream = BroadcastStream::new(rx).map(|result| {
+            result.map_err(|e| Status::internal(format!("Stream error: {}", e)))
+        });
+
+        Ok(Response::new(Box::pin(stream)))
     }
 }
 

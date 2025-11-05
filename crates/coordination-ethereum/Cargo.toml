@@ -1,0 +1,29 @@
+[package]
+name = "silvana-coordination-ethereum"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+description = "Ethereum coordination layer implementation for Silvana"
+
+[dependencies]
+silvana-coordination-trait = { path = "../coordination-trait" }
+ethereum = { path = "../ethereum" }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+toml = "0.8"
+
+# Alloy for Ethereum interactions
+alloy = { workspace = true }
+async-stream = "0.3"
+futures = "0.3"
+
+[dev-dependencies]
+tokio-test = "0.4"

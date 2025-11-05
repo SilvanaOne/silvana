@@ -95,16 +95,23 @@ pub async fn fetch_app_instance(instance_id: &str) -> Result<AppInstance> {
     let mut client = SharedSuiState::get_instance().get_sui_client();
     debug!("Fetching AppInstance with ID: {}", instance_id);
 
-    // Ensure the instance_id has 0x prefix
-    let formatted_id = if instance_id.starts_with("0x") {
+    // Normalize instance_id by ensuring it has 0x prefix for Sui RPC call
+    let formatted_id_for_rpc = if instance_id.starts_with("0x") {
         instance_id.to_string()
     } else {
         format!("0x{}", instance_id)
     };
 
+    // But store without 0x prefix for consistency
+    let normalized_id = if instance_id.starts_with("0x") {
+        instance_id[2..].to_string()
+    } else {
+        instance_id.to_string()
+    };
+
     // Create request to fetch just the AppInstance object
     let mut request = GetObjectRequest::default();
-    request.object_id = Some(formatted_id.clone());
+    request.object_id = Some(formatted_id_for_rpc.clone());
     request.version = None;
     request.read_mask = Some(FieldMask::from_paths([
         "json",
@@ -130,7 +137,7 @@ pub async fn fetch_app_instance(instance_id: &str) -> Result<AppInstance> {
         if let Some(json_value) = &proto_object.json {
             // Debug: Show the raw AppInstance struct from Sui
             if let Some(prost_types::value::Kind::StructValue(struct_value)) = &json_value.kind {
-                return parse_app_instance_from_struct(struct_value, &formatted_id);
+                return parse_app_instance_from_struct(struct_value, &normalized_id);
             }
         }
     }

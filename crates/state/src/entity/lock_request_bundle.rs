@@ -13,17 +13,17 @@ pub struct Model {
     pub object_ids: Json,  // Array of object IDs
     pub object_count: i32,  // Number of objects
     pub transaction_type: Option<String>,  // Type of operation
-    #[sea_orm(column_type = "Timestamp")]
+    #[sea_orm(column_type = "TimestampWithTimeZone")]
     pub created_at: DateTimeUtc,
-    #[sea_orm(column_type = "Timestamp", nullable)]
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
     pub started_at: Option<DateTimeUtc>,  // When lock acquisition started
-    #[sea_orm(column_type = "Timestamp", nullable)]
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
     pub granted_at: Option<DateTimeUtc>,  // When all locks granted
-    #[sea_orm(column_type = "Timestamp", nullable)]
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
     pub released_at: Option<DateTimeUtc>,  // When locks released
     pub status: String,  // QUEUED, ACQUIRING, GRANTED, RELEASED, TIMEOUT, FAILED
-    pub wait_time_ms: Option<i64>,  // Total wait time
-    pub hold_time_ms: Option<i64>,  // Total hold time
+    pub wait_time_ms: Option<u64>,  // Total wait time
+    pub hold_time_ms: Option<u64>,  // Total hold time
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

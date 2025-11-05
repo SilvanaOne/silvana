@@ -26,7 +26,7 @@ impl Database {
     pub fn connection_arc(&self) -> std::sync::Arc<DatabaseConnection> {
         std::sync::Arc::new(self.connection.clone())
     }
-    /// Create a new database connection
+    /// Create a new database connection with optimized pool settings
     pub async fn new(database_url: &str) -> Result<Self> {
         info!("Connecting to TiDB for state management...");
 
@@ -36,9 +36,25 @@ impl Database {
 
         loop {
             attempts += 1;
-            match SeaOrmDatabase::connect(database_url).await {
+
+            // Configure connection pool for high concurrency
+            let mut opt = sea_orm::ConnectOptions::new(database_url.to_string());
+            opt
+                .max_connections(100)                          // Handle concurrent load (default ~10)
+                .min_connections(10)                           // Keep connections warm
+                .connect_timeout(Duration::from_secs(10))      // Connection establishment timeout
+                .acquire_timeout(Duration::from_secs(60))      // Allow time for busy systems (was ~30s)
+                .idle_timeout(Duration::from_secs(300))        // Close idle connections after 5min
+                .max_lifetime(Duration::from_secs(3600))       // Recreate connections hourly
+                .sqlx_logging(true)                            // Enable query logging
+                .sqlx_slow_statements_logging_settings(
+                    tracing::log::LevelFilter::Warn,
+                    Duration::from_millis(500)
+                );  // Only log queries that take >500ms
+
+            match SeaOrmDatabase::connect(opt).await {
                 Ok(connection) => {
-                    info!("Successfully connected to TiDB");
+                    info!("Successfully connected to TiDB with connection pool (max: 100, min: 10)");
                     return Ok(Self { connection });
                 }
                 Err(e) if attempts < MAX_ATTEMPTS => {
@@ -164,8 +180,8 @@ impl Database {
 pub async fn check_and_update_version<C>(
     txn: &C,
     object_id: &str,
-    expected_version: i64,
-    new_version: i64,
+    expected_version: u64,
+    new_version: u64,
     update_fn: impl FnOnce() -> objects::ActiveModel,
 ) -> Result<bool>
 where
@@ -203,7 +219,7 @@ mod tests {
     async fn test_database_connection() {
         // This test requires STATE_DATABASE_URL to be set
         if let Ok(url) = env::var("STATE_DATABASE_URL") {
-            let db = StateDatabase::new(&url).await;
+            let db = Database::new(&url).await;
             assert!(db.is_ok());
 
             let db = db.unwrap();

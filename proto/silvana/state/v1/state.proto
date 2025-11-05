@@ -68,6 +68,17 @@ message AppInstance {
   google.protobuf.Timestamp created_at = 5;
   google.protobuf.Timestamp updated_at = 6;
   optional google.protobuf.Struct metadata = 7;  // Optional metadata
+
+  // Coordination layer support fields
+  optional string admin = 8;                                                     // Administrator public key
+  bool is_paused = 9;                                                           // Pause functionality
+  uint64 min_time_between_blocks = 10 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];  // Block timing in seconds
+  uint64 block_number = 11 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];              // Current block number
+  uint64 sequence = 12 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];                  // Current sequence number
+  uint64 last_proved_block_number = 13 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];  // Last proved block
+  uint64 last_settled_block_number = 14 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"]; // Last settled block
+  uint64 last_settled_sequence = 15 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];     // Last settled sequence
+  uint64 last_purged_sequence = 16 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];      // Last purged sequence
 }
 
 // User Action message
@@ -110,6 +121,23 @@ message State {
   optional bytes commitment = 9;            // State commitment
   google.protobuf.Timestamp proved_at = 10;
   optional google.protobuf.Struct metadata = 11;  // Optional application metadata
+}
+
+// Proof message (ZK proof with claim data)
+message Proof {
+  uint64 id = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string app_instance_id = 2;
+  string proof_type = 3;                      // Type/category of proof
+  google.protobuf.Struct claim_json = 4;      // JSON representation of the claim
+  optional bytes claim_hash = 5;
+  optional bytes claim_data = 6;              // Claim data (if small)
+  optional string claim_da = 7;               // S3 key for large claim
+  optional bytes proof_data = 8;              // ZK proof (if small)
+  optional string proof_da = 9;               // S3 key for large proof
+  optional bytes proof_hash = 10;             // Hash of proof
+  optional google.protobuf.Timestamp proof_time = 11;  // Timestamp at which proof is valid
+  google.protobuf.Timestamp proved_at = 12;
+  optional google.protobuf.Struct metadata = 13;  // Optional application metadata
 }
 
 // Object message
@@ -185,8 +213,8 @@ message LockRequestBundle {
   optional google.protobuf.Timestamp granted_at = 8;
   optional google.protobuf.Timestamp released_at = 9;
   BundleStatus status = 10;
-  optional int64 wait_time_ms = 11;
-  optional int64 hold_time_ms = 12;
+  optional uint64 wait_time_ms = 11 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional uint64 hold_time_ms = 12 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
 }
 
 // Job message
@@ -221,6 +249,90 @@ message Job {
   google.protobuf.Timestamp created_at = 18;
   google.protobuf.Timestamp updated_at = 19;
   optional google.protobuf.Struct metadata = 20;  // Optional metadata
+
+  // Agent authentication (for Private coordination layer)
+  optional string agent_jwt = 21;  // JWT for agent to access private state
+  optional google.protobuf.Timestamp jwt_expires_at = 22;  // When the agent JWT expires
+}
+
+// Block message
+message Block {
+  string app_instance_id = 1;
+  uint64 block_number = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 start_sequence = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 end_sequence = 4 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional bytes actions_commitment = 5;        // 32 bytes
+  optional bytes state_commitment = 6;          // 32 bytes
+  optional uint64 time_since_last_block = 7 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 number_of_transactions = 8 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional bytes start_actions_commitment = 9;  // 32 bytes
+  optional bytes end_actions_commitment = 10;   // 32 bytes
+  optional string state_data_availability = 11; // S3 key or IPFS CID
+  optional string proof_data_availability = 12; // S3 key or IPFS CID
+  google.protobuf.Timestamp created_at = 13;
+  optional google.protobuf.Timestamp state_calculated_at = 14;
+  optional google.protobuf.Timestamp proved_at = 15;
+}
+
+// Proof in calculation (matches Move Proof struct from prover.move)
+message ProofInCalculation {
+  uint32 status = 1;  // 1=Started, 2=Calculated, 3=Rejected, 4=Reserved, 5=Used
+  optional string da_hash = 2;
+  repeated uint64 sequence1 = 3;  // For merge proofs
+  repeated uint64 sequence2 = 4;  // For merge proofs
+  uint32 rejected_count = 5;
+  uint64 timestamp = 6;  // Milliseconds since epoch
+  string prover = 7;  // Address from JWT
+  optional string user = 8;
+  optional string job_id = 9;
+  repeated uint64 sequences = 10;  // Key for lookup (sorted)
+}
+
+// Proof calculation (matches proof_calculations table schema)
+message ProofCalculation {
+  string app_instance_id = 1;
+  string id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  uint64 start_sequence = 4 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional uint64 end_sequence = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  repeated ProofInCalculation proofs = 6;  // From JSON field in database
+  optional string block_proof = 7;
+  bool block_proof_submitted = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// Settlement message
+message Settlement {
+  string app_instance_id = 1;
+  string chain = 2;
+  uint64 last_settled_block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional string settlement_address = 4;
+  optional uint64 settlement_job = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// Block Settlement message
+message BlockSettlement {
+  string app_instance_id = 1;
+  uint64 block_number = 2 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 3;
+  optional string settlement_tx_hash = 4;
+  optional uint64 settlement_tx_included_in_block = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional google.protobuf.Timestamp sent_to_settlement_at = 6;
+  optional google.protobuf.Timestamp settled_at = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+// App Instance Metadata message
+message AppInstanceMetadata {
+  string app_instance_id = 1;
+  string key = 2;
+  string value = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
 }
 
 // ============================================================================
@@ -630,6 +742,8 @@ message CreateJobRequest {
   optional string data_da = 12;      // Renumbered from 13
   optional uint64 interval_ms = 13;   // Renumbered from 14 - For periodic jobs
   optional google.protobuf.Struct metadata = 14;  // Optional metadata
+  optional string agent_jwt = 15;    // JWT for agent to access private state
+  optional google.protobuf.Timestamp jwt_expires_at = 16;  // When the agent JWT expires
 }
 
 message CreateJobResponse {
@@ -713,6 +827,571 @@ message GetPendingJobsResponse {
   repeated Job jobs = 1;
 }
 
+// Private Blob Storage operations
+message StorePrivateBlobRequest {
+  JWTAuth auth = 1;
+  bytes data = 2;
+  string resource_type = 3;                 // "app_instance" or "object" for scope checking
+  string resource_id = 4;                   // app_instance_id or object_id
+}
+
+message StorePrivateBlobResponse {
+  bool success = 1;
+  string message = 2;
+  string key = 3;                           // Storage key: resource_type/resource_id/hash
+  uint64 size_bytes = 4;
+  string content_hash = 5;                  // SHA256 hash
+}
+
+message RetrievePrivateBlobRequest {
+  JWTAuth auth = 1;
+  string key = 2;                           // Storage key
+}
+
+message RetrievePrivateBlobResponse {
+  bool success = 1;
+  string message = 2;
+  bytes data = 3;
+}
+
+message DeletePrivateBlobRequest {
+  JWTAuth auth = 1;
+  string key = 2;                           // Storage key
+}
+
+message DeletePrivateBlobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Proof operations
+message SubmitProofRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string proof_type = 3;
+  google.protobuf.Struct claim_json = 4;      // JSON representation of the claim
+  optional bytes claim_hash = 5;
+  optional bytes claim_data = 6;
+  optional string claim_da = 7;
+  optional bytes proof_data = 8;
+  optional string proof_da = 9;
+  optional bytes proof_hash = 10;
+  optional google.protobuf.Timestamp proof_time = 11;
+  optional google.protobuf.Struct metadata = 12;
+}
+
+message SubmitProofResponse {
+  bool success = 1;
+  string message = 2;
+  Proof proof = 3;
+}
+
+message GetProofRequest {
+  JWTAuth auth = 1;
+  uint64 proof_id = 2;
+}
+
+message GetProofResponse {
+  bool success = 1;
+  string message = 2;
+  optional Proof proof = 3;
+}
+
+// Keyset pagination for reliable pagination with concurrent inserts
+message ListProofsRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  optional string proof_type = 3;                       // Filter by proof type
+  optional google.protobuf.Timestamp last_proved_at = 4; // Resume from last row (keyset)
+  optional string last_app_instance_id = 5;             // Part of composite key
+  optional uint64 last_id = 6;                          // Part of composite key
+  optional int32 limit = 7;                             // Default 100, max ~1000 without blobs
+}
+
+message ListProofsResponse {
+  repeated Proof proofs = 1;
+  bool has_more = 2;                                    // True if more pages available
+}
+
+// Block operations
+message GetBlockRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+}
+
+message GetBlockResponse {
+  optional Block block = 1;
+}
+
+message GetBlocksRangeRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 from_block = 3;
+  uint64 to_block = 4;
+}
+
+message GetBlocksRangeResponse {
+  repeated Block blocks = 1;
+}
+
+message TryCreateBlockRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message TryCreateBlockResponse {
+  optional uint64 block_number = 1;  // None if no new sequences available
+  optional Block block = 2;          // Full block info if created
+}
+
+message UpdateBlockStateDARequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  string state_da = 4;  // S3 key or IPFS CID
+}
+
+message UpdateBlockStateDAResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateBlockProofDARequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  string proof_da = 4;  // S3 key or IPFS CID
+}
+
+message UpdateBlockProofDAResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Proof calculation operations (agent operations with JWT)
+message GetProofCalculationRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+}
+
+message GetProofCalculationResponse {
+  optional ProofCalculation proof_calculation = 1;
+}
+
+message GetProofCalculationsRangeRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 from_block = 3;
+  uint64 to_block = 4;
+}
+
+message GetProofCalculationsRangeResponse {
+  repeated ProofCalculation proof_calculations = 1;
+}
+
+message StartProvingRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  repeated uint64 sequences = 4;
+  repeated uint64 merged_sequences_1 = 5;  // Empty = not merge proof
+  repeated uint64 merged_sequences_2 = 6;  // Empty = not merge proof
+}
+
+message StartProvingResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message SubmitCalculatedProofRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  repeated uint64 sequences = 4;
+  repeated uint64 merged_sequences_1 = 5;
+  repeated uint64 merged_sequences_2 = 6;
+  string job_id = 7;
+  string da_hash = 8;
+  uint32 cpu_cores = 9;
+  string prover_architecture = 10;
+  uint64 prover_memory = 11;
+  uint64 cpu_time = 12;
+}
+
+message SubmitCalculatedProofResponse {
+  bool success = 1;
+  string message = 2;
+  bool block_proof_ready = 3;  // True if block proof complete
+}
+
+message RejectProofRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3;
+  repeated uint64 sequences = 4;
+}
+
+message RejectProofResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Settlement operations
+message GetBlockSettlementRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 4;
+}
+
+message GetBlockSettlementResponse {
+  BlockSettlement block_settlement = 1;
+}
+
+message GetSettlementChainsRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message GetSettlementChainsResponse {
+  repeated string chains = 1;
+}
+
+message GetSettlementAddressRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string chain = 3;
+}
+
+message GetSettlementAddressResponse {
+  optional string settlement_address = 1;
+}
+
+message GetSettlementJobForChainRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string chain = 3;
+}
+
+message GetSettlementJobForChainResponse {
+  optional uint64 settlement_job = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+message SetSettlementAddressRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string chain = 3;
+  optional string settlement_address = 4;
+}
+
+message SetSettlementAddressResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateBlockSettlementTxHashRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 4;
+  optional string settlement_tx_hash = 5;
+  optional google.protobuf.Timestamp sent_to_settlement_at = 6;
+}
+
+message UpdateBlockSettlementTxHashResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdateBlockSettlementTxIncludedInBlockRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 block_number = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 4;
+  optional uint64 settlement_tx_included_in_block = 5 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional google.protobuf.Timestamp settled_at = 6;
+}
+
+message UpdateBlockSettlementTxIncludedInBlockResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// State update operations
+message UpdateStateForSequenceRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 sequence = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  optional bytes new_state_data = 4;
+  optional string new_data_availability_hash = 5;
+}
+
+message UpdateStateForSequenceResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// App configuration queries
+message IsAppPausedRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message IsAppPausedResponse {
+  bool is_paused = 1;
+}
+
+message GetMinTimeBetweenBlocksRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+}
+
+message GetMinTimeBetweenBlocksResponse {
+  uint64 min_time_seconds = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+// State purge operation
+message PurgeRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  uint64 sequences_to_purge = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+message PurgeResponse {
+  bool success = 1;
+  string message = 2;
+  uint64 last_purged_sequence = 3 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+}
+
+// Metadata operations
+message GetMetadataRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string key = 3;
+}
+
+message GetMetadataResponse {
+  optional AppInstanceMetadata metadata = 1;
+}
+
+message AddMetadataRequest {
+  JWTAuth auth = 1;
+  string app_instance_id = 2;
+  string key = 3;
+  string value = 4;
+}
+
+message AddMetadataResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ============================================================================
+// Coordinator Management Messages
+// ============================================================================
+
+// Coordinator authentication using its own Ed25519 key
+message CoordinatorAuth {
+  string coordinator_public_key = 1;  // Ed25519 public key (hex)
+  string signature = 2;                // Ed25519 signature of request hash
+  int64 timestamp = 3;                 // Unix timestamp for replay protection
+  string nonce = 4;                    // Random nonce for uniqueness
+}
+
+// Coordinator group management
+message CoordinatorGroup {
+  string group_id = 1;
+  string group_name = 2;
+  optional string description = 3;
+  repeated string coordinator_public_keys = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// App instance access grant
+message AppInstanceAccess {
+  string app_instance_id = 1;
+  string group_id = 2;
+  string access_level = 3;  // READ_ONLY, JOB_MANAGE, FULL
+  google.protobuf.Timestamp granted_at = 4;
+  optional google.protobuf.Timestamp expires_at = 5;
+}
+
+// ============================================================================
+// Coordinator Job Operations
+// ============================================================================
+
+// Coordinator creates/manages jobs with limited access
+message CoordinatorJobRequest {
+  CoordinatorAuth coordinator_auth = 1;  // Coordinator's own auth
+  string app_instance_id = 2;
+
+  oneof operation {
+    CreateJobOperation create = 3;
+    StartJobOperation start = 4;
+    CompleteJobOperation complete = 5;
+    FailJobOperation fail = 6;
+    GetJobOperation get = 7;
+    TerminateJobOperation terminate = 8;
+    GetPendingJobSequencesOperation get_pending_sequences = 9;
+    GetPendingJobsCountOperation get_pending_count = 10;
+    GetFailedJobsCountOperation get_failed_count = 11;
+    GetTotalJobsCountOperation get_total_count = 12;
+    GetPendingJobsOperation get_pending_jobs = 13;
+    GetFailedJobsOperation get_failed_jobs = 14;
+    GetJobsBatchOperation get_jobs_batch = 15;
+    RestartFailedJobsOperation restart_failed_jobs = 16;
+    RemoveFailedJobsOperation remove_failed_jobs = 17;
+    CreateMergeJobOperation create_merge_job = 18;
+    CreateSettleJobOperation create_settle_job = 19;
+  }
+}
+
+message CreateJobOperation {
+  optional string description = 1;
+  string developer = 2;
+  string agent = 3;
+  string agent_method = 4;
+  optional uint64 block_number = 5;
+  repeated uint64 sequences = 6;
+  repeated uint64 sequences1 = 7;
+  repeated uint64 sequences2 = 8;
+  optional bytes data = 9;
+  optional string data_da = 10;
+  optional uint64 interval_ms = 11;
+  optional string agent_jwt = 12;  // Owner-provided JWT for agent
+  optional google.protobuf.Timestamp jwt_expires_at = 13;
+}
+
+message StartJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message CompleteJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message FailJobOperation {
+  uint64 job_sequence = 1;
+  string error_message = 2;
+}
+
+message GetJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message TerminateJobOperation {
+  uint64 job_sequence = 1;
+}
+
+message GetPendingJobSequencesOperation {
+  optional string developer = 1;
+  optional string agent = 2;
+  optional string agent_method = 3;
+}
+
+message GetPendingJobsCountOperation {
+  // No fields needed - count all pending for app_instance
+}
+
+message GetFailedJobsCountOperation {
+  // No fields needed - count all failed for app_instance
+}
+
+message GetTotalJobsCountOperation {
+  // No fields needed - count all jobs for app_instance
+}
+
+message GetPendingJobsOperation {
+  // Returns full Job objects for all pending jobs
+}
+
+message GetFailedJobsOperation {
+  // Returns full Job objects for all failed jobs
+}
+
+message GetJobsBatchOperation {
+  repeated uint64 job_sequences = 1;
+}
+
+message RestartFailedJobsOperation {
+  repeated uint64 job_sequences = 1;  // Empty = restart all failed jobs
+}
+
+message RemoveFailedJobsOperation {
+  repeated uint64 job_sequences = 1;  // Empty = remove all failed jobs
+}
+
+message CreateMergeJobOperation {
+  uint64 block_number = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  repeated uint64 sequences = 2;   // Combined sequences to merge
+  repeated uint64 sequences1 = 3;  // First proof sequences
+  repeated uint64 sequences2 = 4;  // Second proof sequences
+  optional string job_description = 5;
+}
+
+message CreateSettleJobOperation {
+  uint64 block_number = 1 [(silvana.options.v1.sql_type) = "BIGINT UNSIGNED"];
+  string chain = 2;  // Settlement chain (e.g., "ethereum", "polygon")
+  optional string job_description = 3;
+}
+
+message CoordinatorJobResponse {
+  bool success = 1;
+  string message = 2;
+  optional Job job = 3;
+  optional uint64 job_sequence = 4;  // For create operation
+  repeated uint64 job_sequences = 5;  // For list operations
+  optional uint64 count = 6;  // For count operations
+  repeated Job jobs = 7;  // For get_pending_jobs, get_failed_jobs, get_jobs_batch operations
+}
+
+// ============================================================================
+// Access Management Operations (Owner Only)
+// ============================================================================
+
+message GrantCoordinatorAccessRequest {
+  JWTAuth auth = 1;  // Must be signed by app instance owner
+  string app_instance_id = 2;
+  string group_id = 3;
+  string access_level = 4;  // READ_ONLY, JOB_MANAGE, FULL
+  optional google.protobuf.Timestamp expires_at = 5;
+}
+
+message RevokeCoordinatorAccessRequest {
+  JWTAuth auth = 1;  // Must be signed by app instance owner
+  string app_instance_id = 2;
+  string group_id = 3;
+}
+
+message ListCoordinatorAccessRequest {
+  JWTAuth auth = 1;  // Must be signed by app instance owner
+  string app_instance_id = 2;
+}
+
+message ListCoordinatorAccessResponse {
+  repeated AppInstanceAccess access_grants = 1;
+}
+
+// ============================================================================
+// Event Streaming Messages
+// ============================================================================
+
+// Request to subscribe to job creation events
+message SubscribeJobEventsRequest {
+  JWTAuth auth = 1;                            // Must be signed by app instance owner
+  string app_instance_id = 2;
+  optional uint64 from_job_sequence = 3;       // Start from this sequence (backfill)
+}
+
+// Event message for job creation
+message JobEventMessage {
+  uint64 job_sequence = 1;
+  Job job = 2;
+  google.protobuf.Timestamp event_time = 3;
+}
+
 // ============================================================================
 // Service Definition
 // ============================================================================
@@ -772,4 +1451,60 @@ service StateService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   rpc GetPendingJobs(GetPendingJobsRequest) returns (GetPendingJobsResponse);
+
+  // Private Blob Storage (S3 only, no database)
+  rpc StorePrivateBlob(StorePrivateBlobRequest) returns (StorePrivateBlobResponse);
+  rpc RetrievePrivateBlob(RetrievePrivateBlobRequest) returns (RetrievePrivateBlobResponse);
+  rpc DeletePrivateBlob(DeletePrivateBlobRequest) returns (DeletePrivateBlobResponse);
+
+  // Proof Management
+  rpc SubmitProof(SubmitProofRequest) returns (SubmitProofResponse);
+  rpc GetProof(GetProofRequest) returns (GetProofResponse);
+  rpc ListProofs(ListProofsRequest) returns (ListProofsResponse);
+
+  // Block Management (agent operations with JWT)
+  rpc GetBlock(GetBlockRequest) returns (GetBlockResponse);
+  rpc GetBlocksRange(GetBlocksRangeRequest) returns (GetBlocksRangeResponse);
+  rpc TryCreateBlock(TryCreateBlockRequest) returns (TryCreateBlockResponse);
+  rpc UpdateBlockStateDA(UpdateBlockStateDARequest) returns (UpdateBlockStateDAResponse);
+  rpc UpdateBlockProofDA(UpdateBlockProofDARequest) returns (UpdateBlockProofDAResponse);
+
+  // Proof Calculation Management (agent operations with JWT)
+  rpc GetProofCalculation(GetProofCalculationRequest) returns (GetProofCalculationResponse);
+  rpc GetProofCalculationsRange(GetProofCalculationsRangeRequest) returns (GetProofCalculationsRangeResponse);
+  rpc StartProving(StartProvingRequest) returns (StartProvingResponse);
+  rpc SubmitCalculatedProof(SubmitCalculatedProofRequest) returns (SubmitCalculatedProofResponse);
+  rpc RejectProof(RejectProofRequest) returns (RejectProofResponse);
+
+  // Settlement Management (agent operations with JWT)
+  rpc GetBlockSettlement(GetBlockSettlementRequest) returns (GetBlockSettlementResponse);
+  rpc GetSettlementChains(GetSettlementChainsRequest) returns (GetSettlementChainsResponse);
+  rpc GetSettlementAddress(GetSettlementAddressRequest) returns (GetSettlementAddressResponse);
+  rpc GetSettlementJobForChain(GetSettlementJobForChainRequest) returns (GetSettlementJobForChainResponse);
+  rpc SetSettlementAddress(SetSettlementAddressRequest) returns (SetSettlementAddressResponse);
+  rpc UpdateBlockSettlementTxHash(UpdateBlockSettlementTxHashRequest) returns (UpdateBlockSettlementTxHashResponse);
+  rpc UpdateBlockSettlementTxIncludedInBlock(UpdateBlockSettlementTxIncludedInBlockRequest) returns (UpdateBlockSettlementTxIncludedInBlockResponse);
+
+  // State Update & Configuration (agent operations with JWT)
+  rpc UpdateStateForSequence(UpdateStateForSequenceRequest) returns (UpdateStateForSequenceResponse);
+  rpc IsAppPaused(IsAppPausedRequest) returns (IsAppPausedResponse);
+  rpc GetMinTimeBetweenBlocks(GetMinTimeBetweenBlocksRequest) returns (GetMinTimeBetweenBlocksResponse);
+
+  // State Cleanup (agent operations with JWT)
+  rpc Purge(PurgeRequest) returns (PurgeResponse);
+
+  // Metadata operations (agent operations with JWT)
+  rpc GetMetadata(GetMetadataRequest) returns (GetMetadataResponse);
+  rpc AddMetadata(AddMetadataRequest) returns (AddMetadataResponse);
+
+  // Coordinator Operations (authenticated with coordinator's Ed25519 key)
+  rpc CoordinatorJobOperation(CoordinatorJobRequest) returns (CoordinatorJobResponse);
+
+  // Access Management (owner only)
+  rpc GrantCoordinatorAccess(GrantCoordinatorAccessRequest) returns (google.protobuf.Empty);
+  rpc RevokeCoordinatorAccess(RevokeCoordinatorAccessRequest) returns (google.protobuf.Empty);
+  rpc ListCoordinatorAccess(ListCoordinatorAccessRequest) returns (ListCoordinatorAccessResponse);
+
+  // Event Streaming (owner only)
+  rpc SubscribeJobEvents(SubscribeJobEventsRequest) returns (stream JobEventMessage);
 }

@@ -15,6 +15,16 @@ pub struct Model {
     pub updated_at: DateTimeUtc,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub metadata: Option<Json>,
+    // Coordination layer support fields
+    pub admin: Option<String>,
+    pub is_paused: bool,
+    pub min_time_between_blocks: u64,
+    pub block_number: u64,
+    pub sequence: u64,
+    pub last_proved_block_number: u64,
+    pub last_settled_block_number: u64,
+    pub last_settled_sequence: u64,
+    pub last_purged_sequence: u64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -35,6 +45,16 @@ pub enum Relation {
     LockBundle,
     #[sea_orm(has_many = "super::jobs::Entity")]
     Jobs,
+    #[sea_orm(has_many = "super::blocks::Entity")]
+    Blocks,
+    #[sea_orm(has_many = "super::proof_calculations::Entity")]
+    ProofCalculations,
+    #[sea_orm(has_many = "super::settlements::Entity")]
+    Settlements,
+    #[sea_orm(has_many = "super::block_settlements::Entity")]
+    BlockSettlements,
+    #[sea_orm(has_many = "super::app_instance_metadata::Entity")]
+    Metadata,
 }
 
 impl Related<super::user_actions::Entity> for Entity {
@@ -82,6 +102,36 @@ impl Related<super::lock_request_bundle::Entity> for Entity {
 impl Related<super::jobs::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Jobs.def()
+    }
+}
+
+impl Related<super::blocks::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Blocks.def()
+    }
+}
+
+impl Related<super::proof_calculations::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ProofCalculations.def()
+    }
+}
+
+impl Related<super::settlements::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Settlements.def()
+    }
+}
+
+impl Related<super::block_settlements::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::BlockSettlements.def()
+    }
+}
+
+impl Related<super::app_instance_metadata::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Metadata.def()
     }
 }
 

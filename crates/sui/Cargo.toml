@@ -6,6 +6,8 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+silvana-coordination-trait = { path = "../coordination-trait" }
+async-trait.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 serde.workspace = true

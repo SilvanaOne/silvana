@@ -1,4 +1,6 @@
 use crate::constants::{JOB_BUFFER_MEMORY_COEFFICIENT, JOB_SELECTION_POOL_SIZE};
+use crate::coordination_layer::CoordinationLayer;
+use crate::coordination_manager::CoordinationManager;
 use crate::error::{CoordinatorError, Result};
 use crate::hardware::{get_available_memory_gb, get_total_memory_gb};
 use crate::job_lock::get_job_lock_manager;
@@ -8,23 +10,58 @@ use crate::proof::analyze_proof_completion;
 use crate::settlement::{can_remove_app_instance, fetch_all_pending_jobs};
 use crate::state::SharedState;
 use futures::future;
+use silvana_coordination_trait::{Coordination, Job};
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use sui::fetch::Job;
-use sui::fetch_agent_method;
+use sui::fetch_agent_method; // Keep this - registry is always on Sui
 use tokio::time::{Duration, sleep};
 use tracing::{debug, error, info, warn};
 
 /// Job searcher that monitors for pending jobs and adds them to the multicall queue
 pub struct JobSearcher {
+    /// Coordination layer ID (e.g., "sui-mainnet", "private-1")
+    layer_id: Option<String>,
+    /// Coordination layer for this searcher
+    #[allow(dead_code)]
+    layer: Option<Arc<CoordinationLayer>>,
+    /// Coordination manager reference
+    manager: Option<Arc<CoordinationManager>>,
+    /// Shared state
     state: SharedState,
+    /// Cache for failed jobs to avoid retrying
     jobs_cache: JobsCache,
+    /// Metrics reporter
     metrics: Option<Arc<CoordinatorMetrics>>,
 }
 
 impl JobSearcher {
+    /// Create a new job searcher (backward compatibility - no layer support)
+    #[allow(dead_code)]
     pub fn new(state: SharedState) -> Result<Self> {
         Ok(Self {
+            layer_id: None,
+            layer: None,
+            manager: None,
+            state,
+            jobs_cache: JobsCache::new(),
+            metrics: None,
+        })
+    }
+
+    /// Create a new job searcher for a specific coordination layer
+    pub fn new_with_layer(
+        layer_id: String,
+        manager: Arc<CoordinationManager>,
+        state: SharedState,
+    ) -> Result<Self> {
+        let layer = manager.get_layer(&layer_id).ok_or_else(|| {
+            CoordinatorError::Other(anyhow::anyhow!("Layer {} not found", layer_id))
+        })?;
+
+        Ok(Self {
+            layer_id: Some(layer_id),
+            layer: Some(layer),
+            manager: Some(manager),
             state,
             jobs_cache: JobsCache::new(),
             metrics: None,
@@ -38,41 +75,102 @@ impl JobSearcher {
 
     /// Main loop for the job searcher
     pub async fn run(&mut self) -> Result<()> {
-        info!("🔍 Job searcher started");
+        let layer_info = if let Some(ref layer_id) = self.layer_id {
+            format!(" for layer {}", layer_id)
+        } else {
+            String::new()
+        };
+        info!("🔍 Job searcher started{}", layer_info);
 
         loop {
             // Check for shutdown request
             if self.state.is_shutting_down() {
-                info!("🛑 Job searcher received shutdown signal");
+                info!("🛑 Job searcher{} received shutdown signal", layer_info);
                 return Ok(());
             }
 
-            debug!("Starting job searcher cycle");
+            debug!("Starting job searcher{} cycle", layer_info);
+
+            // Get app instances for this layer (or all if no layer)
+            let app_instances = if let Some(ref layer_id) = self.layer_id {
+                let result = self.state.get_app_instances_for_layer(layer_id).await;
+                info!(
+                    "🟢 app_instances for layer '{}': {} instances: {:?}",
+                    layer_id,
+                    result.len(),
+                    result
+                );
+                result
+            } else {
+                self.state.get_app_instances().await
+            };
 
             // Analyze proof completion for all app instances
-            let app_instances = self.state.get_app_instances().await;
-            for app_instance_id in app_instances {
-                match sui::fetch::fetch_app_instance(&app_instance_id).await {
-                    Ok(app_instance) => {
-                        if let Err(analysis_err) =
-                            analyze_proof_completion(&app_instance, &self.state.clone()).await
-                        {
-                            warn!(
-                                "Failed to analyze failed proof for merge opportunities: {}",
-                                analysis_err
+            // TODO: analyze_proof_completion uses Sui-specific types, need to adapt for multi-layer
+            // For now, only do proof analysis for Sui layers
+            let is_sui_layer = self
+                .layer_id
+                .as_ref()
+                .map(|id| id.contains("sui"))
+                .unwrap_or(true);
+            if is_sui_layer {
+                for app_instance_id in app_instances {
+                    // Get the correct coordination layer for this app instance
+                    let manager = match &self.manager {
+                        Some(mgr) => mgr,
+                        None => {
+                            error!("No coordination manager available for merge analysis");
+                            continue;
+                        }
+                    };
+
+                    let (_layer_id, coordination) = match manager.get_layer_for_app(&app_instance_id).await {
+                        Ok(layer) => layer,
+                        Err(e) => {
+                            error!(
+                                "Failed to find coordination layer for AppInstance {} for merge analysis: {}",
+                                app_instance_id, e
                             );
-                        } else {
-                            debug!(
-                                "✅ Background merge analysis completed for app instance {}",
-                                app_instance_id
+                            continue;
+                        }
+                    };
+
+                    // For Sui layers, use Sui-specific fetch to get the right type
+                    // This is temporary until analyze_proof_completion is refactored to use trait types
+                    match coordination.fetch_app_instance(&app_instance_id).await {
+                        Ok(_trait_app_instance) => {
+                            // Still need Sui-specific type for analyze_proof_completion
+                            match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                                Ok(app_instance) => {
+                                    if let Err(analysis_err) =
+                                        analyze_proof_completion(&app_instance, &self.state.clone()).await
+                                    {
+                                        warn!(
+                                            "Failed to analyze failed proof for merge opportunities: {}",
+                                            analysis_err
+                                        );
+                                    } else {
+                                        debug!(
+                                            "✅ Background merge analysis completed for app instance {}",
+                                            app_instance_id
+                                        );
+                                    }
+                                }
+                                Err(_) => {
+                                    // Not a Sui app instance, skip proof analysis
+                                    debug!(
+                                        "Skipping proof analysis for non-Sui app instance {}",
+                                        app_instance_id
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch AppInstance {} for merge analysis: {}",
+                                app_instance_id, e
                             );
                         }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to fetch AppInstance {} for merge analysis: {}",
-                            app_instance_id, e
-                        );
                     }
                 }
             }
@@ -239,13 +337,16 @@ impl JobSearcher {
                             }
 
                             self.state
-                                .add_start_job_request(
+                                .execute_or_queue_start_job(
                                     job.app_instance.clone(),
                                     job.job_sequence,
                                     memory_requirement,
                                     job.app_instance_method.clone(),
                                     job.block_number,
                                     job.sequences.clone(),
+                                    self.layer_id
+                                        .clone()
+                                        .expect("JobSearcher must have layer_id"),
                                 )
                                 .await;
 
@@ -325,7 +426,12 @@ impl JobSearcher {
     /// This combines job searching with cleanup that reconciliation would do
     /// Collects all viable jobs for batching instead of selecting one randomly
     async fn check_and_clean_pending_jobs(&self) -> Result<Vec<Job>> {
-        let app_instances = self.state.get_app_instances().await;
+        // Get app instances for this layer (or all if no layer)
+        let app_instances = if let Some(ref layer_id) = self.layer_id {
+            self.state.get_app_instances_for_layer(layer_id).await
+        } else {
+            self.state.get_app_instances().await
+        };
 
         if app_instances.is_empty() {
             return Ok(Vec::new());
@@ -337,24 +443,66 @@ impl JobSearcher {
         );
 
         // Check which app_instances can be removed (completely caught up with no work)
+        // TODO: can_remove_app_instance uses Sui-specific types, need to adapt for multi-layer
+        // For now, only do removal checks for Sui layers
         let mut instances_to_remove = Vec::new();
-        for app_instance_id in &app_instances {
-            // Fetch the full AppInstance object to check removal conditions
-            match sui::fetch::fetch_app_instance(app_instance_id).await {
-                Ok(app_instance) => {
-                    if can_remove_app_instance(&app_instance) {
-                        info!(
-                            "App instance {} is fully caught up and can be removed",
-                            app_instance_id
+        let manager = self
+            .manager
+            .as_ref()
+            .expect("JobSearcher requires coordination manager");
+
+        let is_sui_layer = self
+            .layer_id
+            .as_ref()
+            .map(|id| id.contains("sui"))
+            .unwrap_or(true);
+        if is_sui_layer {
+            for app_instance_id in &app_instances {
+                // Get the correct coordination layer for this app instance
+                let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance_id).await {
+                    Ok(layer) => layer,
+                    Err(e) => {
+                        warn!(
+                            "Failed to find coordination layer for app_instance {} for removal check: {}",
+                            app_instance_id, e
                         );
-                        instances_to_remove.push(app_instance_id.clone());
+                        continue;
                     }
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to fetch app_instance {} for removal check: {}",
-                        app_instance_id, e
-                    );
+                };
+
+                // For Sui layers, use Sui-specific fetch to get the right type
+                // This is temporary until can_remove_app_instance is fully refactored
+                match coordination.fetch_app_instance(app_instance_id).await {
+                    Ok(_trait_app_instance) => {
+                        // Still need Sui-specific type for can_remove_app_instance
+                        match sui::fetch::fetch_app_instance(app_instance_id).await {
+                            Ok(app_instance) => {
+                                if can_remove_app_instance(manager, &app_instance)
+                                    .await
+                                    .unwrap_or(false)
+                                {
+                                    info!(
+                                        "App instance {} is fully caught up and can be removed",
+                                        app_instance_id
+                                    );
+                                    instances_to_remove.push(app_instance_id.clone());
+                                }
+                            }
+                            Err(_) => {
+                                // Not a Sui app instance, skip removal check for now
+                                debug!(
+                                    "Skipping removal check for non-Sui app instance {}",
+                                    app_instance_id
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to fetch app_instance {} for removal check: {}",
+                            app_instance_id, e
+                        );
+                    }
                 }
             }
         }
@@ -365,8 +513,12 @@ impl JobSearcher {
             debug!("Removed fully caught up app_instance: {}", instance_id);
         }
 
-        // Now fetch actual pending jobs from remaining app_instances
-        let remaining_instances = self.state.get_app_instances().await;
+        // Now fetch actual pending jobs from remaining app_instances (layer-filtered)
+        let remaining_instances = if let Some(ref layer_id) = self.layer_id {
+            self.state.get_app_instances_for_layer(layer_id).await
+        } else {
+            self.state.get_app_instances().await
+        };
         if remaining_instances.is_empty() {
             debug!("No app_instances with pending jobs remaining after cleanup");
             return Ok(Vec::new());
@@ -377,7 +529,13 @@ impl JobSearcher {
             remaining_instances.len()
         );
 
-        match fetch_all_pending_jobs(&remaining_instances, false, self.state.is_settle_only()).await
+        match fetch_all_pending_jobs(
+            manager,
+            &remaining_instances,
+            false,
+            self.state.is_settle_only(),
+        )
+        .await
         {
             Ok(pending_jobs) => {
                 if pending_jobs.is_empty() {

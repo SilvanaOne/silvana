@@ -71,6 +71,7 @@ pub async fn pack_folder_to_s3(
             archive_data,
             s3_key,
             ARCHIVE_MIME_TYPE,
+            None,
             Some(archive_hash.clone()),
         )
         .await?;
@@ -99,7 +100,9 @@ pub async fn unpack_from_s3(
     debug!("Downloading archive: {}", s3_key);
 
     // Download from S3
-    let (archive_data, downloaded_hash) = s3_client.read_binary(s3_key).await?;
+    let result = s3_client.read_binary(s3_key).await?;
+    let archive_data = result.data;
+    let downloaded_hash = result.sha256;
 
     // Verify hash if provided
     if let Some(expected_hash) = verify_hash {

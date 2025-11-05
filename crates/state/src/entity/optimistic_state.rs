@@ -7,7 +7,7 @@ use sea_orm::entity::prelude::*;
 #[sea_orm(table_name = "optimistic_state")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i64,
+    pub id: u64,
     pub app_instance_id: String,
     pub sequence: u64,
     #[sea_orm(column_type = "Binary(32)")]

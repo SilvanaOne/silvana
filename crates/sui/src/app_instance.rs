@@ -36,7 +36,7 @@ pub(crate) async fn start_job_tx(app_instance_str: &str, job_sequence: u64) -> R
 }
 
 /// Create and submit a transaction to complete a job
-pub(crate) async fn complete_job_tx(app_instance_str: &str, job_sequence: u64) -> Result<String> {
+pub async fn complete_job_tx(app_instance_str: &str, job_sequence: u64) -> Result<String> {
     debug!(
         "Creating complete_app_job transaction for job_sequence: {}",
         job_sequence
@@ -55,7 +55,7 @@ pub(crate) async fn complete_job_tx(app_instance_str: &str, job_sequence: u64) -
 }
 
 /// Create and submit a transaction to fail a job
-pub(crate) async fn fail_job_tx(
+pub async fn fail_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
     error_message: &str,
@@ -101,7 +101,7 @@ pub(crate) async fn fail_job_tx(
 }
 
 /// Create and submit a transaction to terminate a job
-pub(crate) async fn terminate_job_tx(
+pub async fn terminate_job_tx(
     app_instance_str: &str,
     job_sequence: u64,
     gas_budget: Option<u64>,
@@ -128,7 +128,7 @@ pub(crate) async fn terminate_job_tx(
 /// Create and submit a multicall transaction for batch job operations
 /// Executes operations in order: complete, fail, terminate, start, update_state_for_sequences, submit_proofs, create_jobs and create_merge_jobs
 /// update_state_for_sequences, submit_proofs, create_jobs and create_merge_jobs are executed as separate move calls (one per operation)
-pub(crate) async fn multicall_job_operations_tx(
+pub async fn multicall_job_operations_tx(
     operations: Vec<crate::types::MulticallOperations>,
     gas_budget: Option<u64>,
     max_computation_cost: Option<u64>,
@@ -535,7 +535,7 @@ pub async fn remove_failed_jobs_tx(
 
 /// Create and submit a transaction to submit a proof
 #[allow(dead_code)]
-pub(crate) async fn submit_proof_tx(
+pub async fn submit_proof_tx(
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,
@@ -593,7 +593,7 @@ pub(crate) async fn submit_proof_tx(
 
 /// Create and submit a transaction to update state for a sequence
 #[allow(dead_code)]
-pub(crate) async fn update_state_for_sequence_tx(
+pub async fn update_state_for_sequence_tx(
     app_instance_str: &str,
     sequence: u64,
     new_state_data: Option<Vec<u8>>,
@@ -722,7 +722,7 @@ pub async fn reject_proof_tx(
 /// Create and submit a transaction to start proving (reserve proofs)
 /// DEPRECATED: Use create_merge_job_with_proving_tx instead
 #[allow(dead_code)]
-pub(crate) async fn start_proving_tx(
+pub async fn start_proving_tx(
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,
@@ -816,7 +816,7 @@ pub(crate) async fn create_merge_job_tx(
 /// This function first calls start_proving to reserve the proofs, then creates the job
 /// Returns the transaction digest on success
 #[allow(dead_code)]
-pub(crate) async fn create_merge_job_with_proving_tx(
+pub async fn create_merge_job_with_proving_tx(
     app_instance_str: &str,
     block_number: u64,
     sequences: Vec<u64>,  // Combined sequences

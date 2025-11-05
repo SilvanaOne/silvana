@@ -14,6 +14,21 @@ use crate::constants::{S3_AVAILABILITY_MAX_RETRIES, S3_AVAILABILITY_RETRY_DELAY_
 
 static AWS_S3_CLIENT: OnceCell<Arc<Client>> = OnceCell::new();
 
+/// Result of reading string data from S3
+#[derive(Debug, Clone)]
+pub struct S3ReadResult {
+    pub data: String,
+    pub metadata: HashMap<String, String>,
+}
+
+/// Result of reading binary data from S3
+#[derive(Debug, Clone)]
+pub struct S3BinaryReadResult {
+    pub data: Vec<u8>,
+    pub sha256: String,
+    pub metadata: HashMap<String, String>,
+}
+
 pub struct S3Client {
     client: Arc<Client>,
     bucket_name: String,
@@ -240,7 +255,7 @@ impl S3Client {
         Ok(())
     }
 
-    pub async fn read(&self, key: &str) -> Result<(String, HashMap<String, String>)> {
+    pub async fn read(&self, key: &str) -> Result<S3ReadResult> {
         debug!(
             "Reading from S3 bucket {} with key: {}",
             self.bucket_name, key
@@ -297,7 +312,7 @@ impl S3Client {
             self.bucket_name, key
         );
 
-        Ok((data, metadata))
+        Ok(S3ReadResult { data, metadata })
     }
 
     pub async fn delete(&self, key: &str) -> Result<()> {
@@ -357,6 +372,7 @@ impl S3Client {
     /// * `data` - The binary data to store
     /// * `file_name` - The S3 object key/filename
     /// * `mime_type` - The MIME type of the content
+    /// * `metadata` - Optional metadata as key-value pairs (stored as S3 tags)
     /// * `expected_sha256` - Optional expected SHA256 hash for verification
     ///
     /// # Returns
@@ -366,6 +382,7 @@ impl S3Client {
         data: Vec<u8>,
         file_name: &str,
         mime_type: &str,
+        metadata: Option<Vec<(String, String)>>,
         expected_sha256: Option<String>,
     ) -> Result<String> {
         debug!(
@@ -391,24 +408,122 @@ impl S3Client {
             }
         }
 
+        // Build tags from metadata
+        const MAX_S3_TAGS: usize = 10;
+        let mut tags = Vec::new();
+
+        if let Some(metadata) = metadata {
+            if metadata.len() > MAX_S3_TAGS {
+                warn!(
+                    "S3 tag limit exceeded: {} tags provided, but S3 allows max {}. Truncating.",
+                    metadata.len(),
+                    MAX_S3_TAGS
+                );
+            }
+
+            for (key, value) in metadata.iter().take(MAX_S3_TAGS) {
+                let tag_key = if key.len() > 128 {
+                    warn!("S3 tag key '{}' exceeds 128 chars, truncating", key);
+                    &key[..128]
+                } else {
+                    key.as_str()
+                };
+
+                // Sanitize tag value - replace invalid characters with underscores
+                let sanitized_value = value
+                    .chars()
+                    .map(|c| {
+                        if c.is_alphanumeric()
+                            || c == ' '
+                            || c == '+'
+                            || c == '-'
+                            || c == '='
+                            || c == '.'
+                            || c == '_'
+                            || c == ':'
+                            || c == '/'
+                            || c == '@'
+                        {
+                            c
+                        } else {
+                            '_'
+                        }
+                    })
+                    .collect::<String>();
+
+                let tag_value = if sanitized_value.len() > 256 {
+                    warn!(
+                        "S3 tag value for key '{}' exceeds 256 chars ({}), truncating",
+                        key,
+                        sanitized_value.len()
+                    );
+                    sanitized_value[..256].to_string()
+                } else {
+                    sanitized_value
+                };
+
+                tags.push(
+                    Tag::builder()
+                        .key(tag_key.to_string())
+                        .value(tag_value)
+                        .build()?,
+                );
+            }
+        }
+
+        let data_size = data.len();
+        let tags_count = tags.len();
+
         // Upload to S3
-        match self
+        let mut put_request = self
             .client
             .put_object()
             .bucket(&self.bucket_name)
             .key(file_name)
             .body(data.into())
             .content_type(mime_type)
-            .metadata("sha256", calculated_hash.clone())
-            .send()
-            .await
-        {
+            .metadata("sha256", calculated_hash.clone());
+
+        if !tags.is_empty() {
+            let tagging = Tagging::builder().set_tag_set(Some(tags.clone())).build()?;
+            let tagging_string = tagging
+                .tag_set()
+                .iter()
+                .map(|tag| format!("{}={}", tag.key(), tag.value()))
+                .collect::<Vec<_>>()
+                .join("&");
+            put_request = put_request.tagging(tagging_string);
+        }
+
+        match put_request.send().await {
             Ok(_) => {}
             Err(e) => {
                 error!(
                     "S3 PUT failed - Bucket: {}, Key: {}, Error: {:?}",
                     self.bucket_name, file_name, e
                 );
+
+                if let Some(service_error) = e.as_service_error() {
+                    error!("S3 Service Error Details: {:?}", service_error);
+                    error!(
+                        "S3 Request - Data size: {} bytes, Tags count: {}",
+                        data_size, tags_count
+                    );
+
+                    if !tags.is_empty() {
+                        error!("S3 Tags being sent:");
+                        for tag in &tags {
+                            error!(
+                                "  Tag: {}={} (key_len={}, val_len={})",
+                                tag.key(),
+                                tag.value(),
+                                tag.key().len(),
+                                tag.value().len()
+                            );
+                        }
+                    }
+                }
+
                 return Err(anyhow!("Failed to write binary to S3: {}", e));
             }
         }
@@ -449,20 +564,20 @@ impl S3Client {
         }
 
         // Read back and verify
-        let (read_data, read_hash) = self.read_binary(file_name).await?;
+        let result = self.read_binary(file_name).await?;
 
         // Verify the stored data matches
-        if read_hash != calculated_hash {
+        if result.sha256 != calculated_hash {
             return Err(anyhow!(
                 "Verification failed: stored file hash {} doesn't match original {}",
-                read_hash,
+                result.sha256,
                 calculated_hash
             ));
         }
 
         // Additional verification: check data integrity
         let mut verify_hasher = Sha256::new();
-        verify_hasher.update(&read_data);
+        verify_hasher.update(&result.data);
         let verify_hash = format!("{:x}", verify_hasher.finalize());
 
         if verify_hash != calculated_hash {
@@ -487,8 +602,8 @@ impl S3Client {
     /// * `file_name` - The S3 object key/filename to read
     ///
     /// # Returns
-    /// A tuple of (binary data, SHA256 hash)
-    pub async fn read_binary(&self, file_name: &str) -> Result<(Vec<u8>, String)> {
+    /// S3BinaryReadResult containing binary data, SHA256 hash, and metadata
+    pub async fn read_binary(&self, file_name: &str) -> Result<S3BinaryReadResult> {
         debug!(
             "Reading binary from S3 bucket {} with key: {}",
             self.bucket_name, file_name
@@ -528,6 +643,24 @@ impl S3Client {
         hasher.update(&data);
         let calculated_hash = format!("{:x}", hasher.finalize());
 
+        // Get metadata from tags
+        let tagging_output = self
+            .client
+            .get_object_tagging()
+            .bucket(&self.bucket_name)
+            .key(file_name)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to get tags from S3: {}", e))?;
+
+        let mut metadata = HashMap::new();
+
+        for tag in tagging_output.tag_set() {
+            let key = tag.key().to_string();
+            let value = tag.value().to_string();
+            metadata.insert(key, value);
+        }
+
         debug!(
             "Successfully read binary from S3 bucket {} with key: {}, size: {} bytes, SHA256: {}",
             self.bucket_name,
@@ -536,6 +669,55 @@ impl S3Client {
             calculated_hash
         );
 
-        Ok((data, calculated_hash))
+        Ok(S3BinaryReadResult {
+            data,
+            sha256: calculated_hash,
+            metadata,
+        })
+    }
+
+    /// Read only metadata from S3 object without downloading the data
+    ///
+    /// # Arguments
+    /// * `file_name` - The S3 object key/filename
+    ///
+    /// # Returns
+    /// HashMap of metadata (S3 tags)
+    ///
+    /// # Note
+    /// This is much more efficient than read_binary() when you only need metadata,
+    /// as it doesn't download the object body. Useful for authentication checks.
+    pub async fn read_metadata(&self, file_name: &str) -> Result<HashMap<String, String>> {
+        debug!(
+            "Reading metadata from S3 bucket {} with key: {}",
+            self.bucket_name, file_name
+        );
+
+        // Get metadata from tags without downloading the object
+        let tagging_output = self
+            .client
+            .get_object_tagging()
+            .bucket(&self.bucket_name)
+            .key(file_name)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to get tags from S3: {}", e))?;
+
+        let mut metadata = HashMap::new();
+
+        for tag in tagging_output.tag_set() {
+            let key = tag.key().to_string();
+            let value = tag.value().to_string();
+            metadata.insert(key, value);
+        }
+
+        debug!(
+            "Successfully read metadata from S3 bucket {} with key: {} ({} tags)",
+            self.bucket_name,
+            file_name,
+            metadata.len()
+        );
+
+        Ok(metadata)
     }
 }

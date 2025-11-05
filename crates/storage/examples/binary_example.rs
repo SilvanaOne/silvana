@@ -13,14 +13,14 @@ async fn main() -> Result<()> {
     
     println!("Writing binary data to S3...");
     let stored_hash = s3_client
-        .write_binary(data.clone(), file_name, mime_type, None)
+        .write_binary(data.clone(), file_name, mime_type, None, None)
         .await?;
     println!("File stored with SHA256: {}", stored_hash);
-    
+
     // Example 2: Write binary data with expected hash verification
     let expected_hash = stored_hash.clone(); // Use the hash from previous write
     let result = s3_client
-        .write_binary(data.clone(), "test-file-2.bin", mime_type, Some(expected_hash))
+        .write_binary(data.clone(), "test-file-2.bin", mime_type, None, Some(expected_hash))
         .await;
     
     match result {
@@ -30,25 +30,25 @@ async fn main() -> Result<()> {
     
     // Example 3: Read binary data back
     println!("\nReading binary data from S3...");
-    let (read_data, read_hash) = s3_client.read_binary(file_name).await?;
-    println!("Read {} bytes with SHA256: {}", read_data.len(), read_hash);
-    
+    let result = s3_client.read_binary(file_name).await?;
+    println!("Read {} bytes with SHA256: {}", result.data.len(), result.sha256);
+
     // Verify the data matches
-    assert_eq!(data, read_data);
-    assert_eq!(stored_hash, read_hash);
+    assert_eq!(data, result.data);
+    assert_eq!(stored_hash, result.sha256);
     println!("Data integrity verified!");
-    
+
     // Example 4: Working with image files
     let image_data = std::fs::read("path/to/image.png")?;
     let image_hash = s3_client
-        .write_binary(image_data, "images/test.png", "image/png", None)
+        .write_binary(image_data, "images/test.png", "image/png", None, None)
         .await?;
     println!("Image stored with SHA256: {}", image_hash);
-    
+
     // Read the image back
-    let (image_bytes, hash) = s3_client.read_binary("images/test.png").await?;
-    std::fs::write("downloaded_image.png", image_bytes)?;
-    println!("Image downloaded and saved locally with SHA256: {}", hash);
+    let image_result = s3_client.read_binary("images/test.png").await?;
+    std::fs::write("downloaded_image.png", image_result.data)?;
+    println!("Image downloaded and saved locally with SHA256: {}", image_result.sha256);
     
     Ok(())
 }
