@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Config {
     pub package_id: String,
     pub modules: Vec<String>,

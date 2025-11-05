@@ -12,6 +12,7 @@ pub async fn handle_start_command(
     grpc_socket_path: String,
     instance: Option<String>,
     settle: bool,
+    config: Option<String>,
     chain: &str,
     chain_override: Option<String>,
 ) -> Result<()> {
@@ -200,6 +201,7 @@ pub async fn handle_start_command(
         grpc_socket_path,
         instance,
         settle,
+        config,
     )
     .await
 }

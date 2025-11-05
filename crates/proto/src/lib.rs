@@ -14,6 +14,14 @@ pub mod events {
     pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("rpc_descriptor");
 }
 
+pub mod silvana {
+    pub mod state {
+        pub mod v1 {
+            tonic::include_proto!("silvana.state.v1");
+        }
+    }
+}
+
 // Descriptor pool for prost-reflect
 pub static DESCRIPTOR_POOL: Lazy<DescriptorPool> =
     Lazy::new(|| DescriptorPool::decode(events::FILE_DESCRIPTOR_SET.as_ref()).unwrap());

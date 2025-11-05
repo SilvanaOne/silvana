@@ -2,6 +2,7 @@ use crate::constants::{
     BLOCK_CREATION_CHECK_INTERVAL_SECS, PROOF_ANALYSIS_INTERVAL_SECS, PROOF_TIMEOUT_MS,
 };
 use anyhow::Result;
+use silvana_coordination_trait::Coordination;
 use sui::fetch::fetch_proof_calculation;
 use sui::fetch::{Proof, ProofCalculation, ProofStatus};
 use tracing::{debug, error, info, warn};
@@ -21,9 +22,37 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
             .unwrap_or(&vec![])
     );
 
+    // Get the coordination manager from state
+    let manager = match state.get_coordination_manager() {
+        Some(mgr) => mgr,
+        None => {
+            error!("❌ No coordination manager available for merge job creation");
+            return Err(anyhow::anyhow!("No coordination manager available"));
+        }
+    };
+
+    // Get the correct coordination layer for this app instance
+    let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance).await {
+        Ok(layer) => layer,
+        Err(e) => {
+            error!("❌ Failed to find coordination layer for AppInstance {}: {}", app_instance, e);
+            return Err(anyhow::anyhow!("Failed to find coordination layer: {}", e));
+        }
+    };
+
     // First fetch the AppInstance to get the AppInstance object
-    let app_instance_obj = match sui::fetch::fetch_app_instance(app_instance).await {
-        Ok(app_inst) => app_inst,
+    // For now, still use Sui-specific types for merge operations
+    let app_instance_obj = match coordination.fetch_app_instance(app_instance).await {
+        Ok(_trait_app_instance) => {
+            // Still need Sui-specific type for merge operations
+            match sui::fetch::fetch_app_instance(app_instance).await {
+                Ok(sui_app_inst) => sui_app_inst,
+                Err(_) => {
+                    debug!("Skipping merge job creation for non-Sui app instance {}", app_instance);
+                    return Ok(());
+                }
+            }
+        },
         Err(e) => {
             error!("❌ Failed to fetch AppInstance {}: {}", app_instance, e);
             return Err(anyhow::anyhow!("Failed to fetch AppInstance: {}", e));
@@ -284,9 +313,6 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                 }
                 Err(e) => {
                     let error_str = e.to_string();
-                    if proof_calc.block_number == 180 {
-                        info!("❌ Block 180: Failed to create merge job: {}", e);
-                    }
 
                     // Log based on error type
                     if error_str.contains("already reserved")
@@ -305,7 +331,7 @@ pub async fn analyze_and_create_merge_jobs_with_blockchain_data(
                             e
                         );
                     } else {
-                        warn!(
+                        info!(
                             "⚠️ Failed to create merge job #{} for block {}: {}",
                             idx + 1,
                             proof_calc.block_number,
@@ -515,9 +541,10 @@ fn find_proofs_to_merge_excluding(
                 let right_range: Vec<u64> = (split..=end_seq).collect();
 
                 // Check if this merge is excluded
-                if !excluded.iter().any(|(s1, s2)| {
-                    arrays_equal(s1, &left_range) && arrays_equal(s2, &right_range)
-                }) {
+                if !excluded
+                    .iter()
+                    .any(|(s1, s2)| arrays_equal(s1, &left_range) && arrays_equal(s2, &right_range))
+                {
                     // Check if both halves exist and are available
                     let left_proof = block_proofs
                         .proofs
@@ -1044,14 +1071,42 @@ async fn create_merge_job(
     }
 
     // Step 2: Check if proofs can be reserved before attempting
+    // Get the coordination manager from state
+    let manager = match state.get_coordination_manager() {
+        Some(mgr) => mgr,
+        None => {
+            error!("❌ No coordination manager available for merge job creation");
+            return Err(anyhow::anyhow!("No coordination manager available"));
+        }
+    };
+
+    // Get the correct coordination layer for this app instance
+    let (_layer_id, coordination) = match manager.get_layer_for_app(app_instance).await {
+        Ok(layer) => layer,
+        Err(e) => {
+            warn!("Failed to find coordination layer for merge job: {}", e);
+            return Err(anyhow::anyhow!("Failed to find coordination layer: {}", e));
+        }
+    };
+
     // Fetch fresh proof calculation state to check if proofs are available
     debug!("🔍 Fetching fresh proof calculation state before reservation attempt");
-    let fresh_app_instance = match sui::fetch::app_instance::fetch_app_instance(app_instance).await
-    {
-        Ok(instance) => instance,
-        Err(e) => {
-            warn!("Failed to fetch fresh app instance: {}", e);
-            return Err(anyhow::anyhow!("Failed to fetch app instance: {}", e));
+    // For now, still use Sui-specific types for merge operations
+    let fresh_app_instance = match coordination.fetch_app_instance(app_instance).await {
+        Ok(_trait_app_instance) => {
+            // Still need Sui-specific type for merge operations
+            match sui::fetch::app_instance::fetch_app_instance(app_instance).await {
+                Ok(sui_app_inst) => sui_app_inst,
+                Err(_) => {
+                    debug!("Skipping merge job reservation for non-Sui app instance {}", app_instance);
+                    return Ok(());
+                }
+            }
+        },
+        Err(_e) => {
+            // App instance not found - likely non-Sui instance
+            debug!("Skipping merge job reservation - app instance {} not found in this coordination layer", app_instance);
+            return Ok(());
         }
     };
 
@@ -1097,6 +1152,58 @@ async fn create_merge_job(
         debug!("✅ Combined proof exists but is REJECTED - can proceed");
     } else {
         debug!("✅ Combined proof does not exist yet - can create new");
+    }
+
+    // Step 2.5: Check if there's already a pending merge job for these sequences
+    // This prevents duplicate job creation when analyze_proof_completion runs multiple times
+    if let Some(ref jobs_obj) = fresh_app_instance.jobs {
+        let pending_job_ids = &jobs_obj.pending_jobs;
+
+        for job_seq in pending_job_ids {
+            // Fetch the job to check its details
+            if let Ok(Some(job)) =
+                sui::fetch::jobs::fetch_job_by_id(&jobs_obj.jobs_table_id, *job_seq).await
+            {
+                // Check if this is a merge job with matching sequences
+                if job.app_instance_method == "merge" && job.block_number == Some(block_number) {
+                    // Check if sequences match (in either order since merge is commutative)
+                    let matches_forward = job
+                        .sequences1
+                        .as_ref()
+                        .map(|s1| arrays_equal(s1, &sequences1))
+                        .unwrap_or(false)
+                        && job
+                            .sequences2
+                            .as_ref()
+                            .map(|s2| arrays_equal(s2, &sequences2))
+                            .unwrap_or(false);
+                    let matches_reverse = job
+                        .sequences1
+                        .as_ref()
+                        .map(|s1| arrays_equal(s1, &sequences2))
+                        .unwrap_or(false)
+                        && job
+                            .sequences2
+                            .as_ref()
+                            .map(|s2| arrays_equal(s2, &sequences1))
+                            .unwrap_or(false);
+
+                    if matches_forward || matches_reverse {
+                        debug!(
+                            "✋ Pending merge job #{} already exists for block {} with sequences {:?} + {:?} - skipping duplicate",
+                            job_seq, block_number, sequences1, sequences2
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Merge job already pending: job #{} for sequences {:?} + {:?}",
+                            job_seq,
+                            sequences1,
+                            sequences2
+                        ));
+                    }
+                }
+            }
+        }
+        debug!("✅ No duplicate pending merge jobs found - proceeding with creation");
     }
 
     // Check that sequence1 and sequence2 proofs exist and are CALCULATED
@@ -1347,9 +1454,15 @@ pub async fn start_periodic_block_creation(state: crate::state::SharedState) {
                     break;
                 }
 
-                // Try to create a block for this app instance
-                let mut sui_interface = sui::interface::SilvanaSuiInterface::new();
-                match crate::block::try_create_block(&mut sui_interface, &app_instance_id).await {
+                // Try to create a block for this app instance using coordination manager
+                let manager = match state.get_coordination_manager() {
+                    Some(m) => m,
+                    None => {
+                        error!("Coordination manager not available for block creation");
+                        continue;
+                    }
+                };
+                match crate::block::try_create_block(&manager, &app_instance_id).await {
                     Ok(Some((tx_digest, sequences, time_since))) => {
                         info!(
                             "✅ Created block for app instance {} - tx: {}, sequences: {}, time since last: {}s",
@@ -1412,8 +1525,8 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
 
         debug!("Running periodic proof completion analysis...");
 
-        // Get all app instances
-        let app_instances = state.get_app_instances().await;
+        // Get all app instances with their layer_ids
+        let app_instances = state.get_jobs_tracker().get_all_app_instances_with_layer().await;
 
         if !app_instances.is_empty() {
             debug!(
@@ -1423,16 +1536,33 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
 
             let mut analyzed_count = 0;
 
-            for app_instance_id in app_instances {
+            for (app_instance_id, layer_id) in app_instances {
                 if state.is_shutting_down() {
                     break;
                 }
 
-                // Fetch the app instance first
-                match sui::fetch::fetch_app_instance(&app_instance_id).await {
-                    Ok(app_instance) => {
-                        // Analyze proof completion for this app instance
-                        match crate::proof::analyze_proof_completion(&app_instance, &state).await {
+                // Get coordination layer for this app instance
+                let layer = match state.get_coordination_manager()
+                    .and_then(|cm| cm.get_layer_by_id(&layer_id))
+                {
+                    Some(l) => l,
+                    None => {
+                        error!(
+                            "Failed to get coordination layer {} for app instance {} - skipping",
+                            layer_id, app_instance_id
+                        );
+                        continue;
+                    }
+                };
+
+                // Fetch the app instance from the coordination layer
+                match layer.fetch_app_instance(&app_instance_id).await {
+                    Ok(_trait_app) => {
+                        // Need Sui-specific type for analyze_proof_completion
+                        match sui::fetch::fetch_app_instance(&app_instance_id).await {
+                            Ok(app_instance) => {
+                                // Analyze proof completion for this app instance (Sui-only operation)
+                                match crate::proof::analyze_proof_completion(&app_instance, &state).await {
                             Ok(()) => {
                                 analyzed_count += 1;
                                 debug!(
@@ -1447,9 +1577,15 @@ pub async fn start_periodic_proof_analysis(state: crate::state::SharedState) {
                                 );
                             }
                         }
+                            }
+                            Err(_) => {
+                                // Not a Sui app instance, skip proof analysis (Sui-only)
+                                debug!("Skipping proof analysis for non-Sui app instance {}", app_instance_id);
+                            }
+                        }
                     }
                     Err(e) => {
-                        error!("Failed to fetch app instance {}: {}", app_instance_id, e);
+                        error!("Failed to fetch app instance {} from layer {}: {}", app_instance_id, layer_id, e);
                     }
                 }
             }

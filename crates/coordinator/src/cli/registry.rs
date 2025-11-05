@@ -63,14 +63,18 @@ pub async fn handle_registry_command(
             description,
             site,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
             println!("👤 Adding developer to registry...\n");
             println!("   Registry: {}", registry_id);
             println!("   Name: {}", name);
-            println!("   GitHub: {}", github);
+            if let Some(ref gh) = github {
+                println!("   GitHub: {}", gh);
+            }
             if let Some(ref img) = image {
                 println!("   Image: {}", img);
             }
@@ -113,14 +117,18 @@ pub async fn handle_registry_command(
             description,
             site,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
             println!("📝 Updating developer in registry...\n");
             println!("   Registry: {}", registry_id);
             println!("   Name: {}", name);
-            println!("   GitHub: {}", github);
+            if let Some(ref gh) = github {
+                println!("   GitHub: {}", gh);
+            }
             println!();
 
             match interface
@@ -150,7 +158,9 @@ pub async fn handle_registry_command(
             name,
             agents,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -186,7 +196,9 @@ pub async fn handle_registry_command(
             site,
             chains,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -240,7 +252,9 @@ pub async fn handle_registry_command(
             site,
             chains,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -281,7 +295,9 @@ pub async fn handle_registry_command(
             developer,
             name,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -311,7 +327,9 @@ pub async fn handle_registry_command(
             name,
             description,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -343,7 +361,9 @@ pub async fn handle_registry_command(
             name,
             description,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -371,7 +391,9 @@ pub async fn handle_registry_command(
         }
 
         RegistryCommands::RemoveApp { registry, name } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -399,11 +421,13 @@ pub async fn handle_registry_command(
             method,
             docker_image,
             docker_sha256,
-            min_memory_mb,
+            min_memory_gb,
             min_cpu_cores,
             requires_tee,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -413,8 +437,10 @@ pub async fn handle_registry_command(
             println!("   Agent: {}", agent);
             println!("   Method: {}", method);
             println!("   Docker Image: {}", docker_image);
-            println!("   Docker SHA256: {}", docker_sha256);
-            println!("   Min Memory: {} MB", min_memory_mb);
+            if let Some(ref sha) = docker_sha256 {
+                println!("   Docker SHA256: {}", sha);
+            }
+            println!("   Min Memory: {} GB", min_memory_gb);
             println!("   Min CPU Cores: {}", min_cpu_cores);
             println!("   Requires TEE: {}", requires_tee);
             println!();
@@ -427,7 +453,7 @@ pub async fn handle_registry_command(
                     method,
                     docker_image,
                     docker_sha256,
-                    min_memory_mb,
+                    min_memory_gb,
                     min_cpu_cores,
                     requires_tee,
                 )
@@ -451,11 +477,13 @@ pub async fn handle_registry_command(
             method,
             docker_image,
             docker_sha256,
-            min_memory_mb,
+            min_memory_gb,
             min_cpu_cores,
             requires_tee,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -465,8 +493,10 @@ pub async fn handle_registry_command(
             println!("   Agent: {}", agent);
             println!("   Method: {}", method);
             println!("   Docker Image: {}", docker_image);
-            println!("   Docker SHA256: {}", docker_sha256);
-            println!("   Min Memory: {} MB", min_memory_mb);
+            if let Some(ref sha) = docker_sha256 {
+                println!("   Docker SHA256: {}", sha);
+            }
+            println!("   Min Memory: {} GB", min_memory_gb);
             println!("   Min CPU Cores: {}", min_cpu_cores);
             println!("   Requires TEE: {}", requires_tee);
             println!();
@@ -479,7 +509,7 @@ pub async fn handle_registry_command(
                     method,
                     docker_image,
                     docker_sha256,
-                    min_memory_mb,
+                    min_memory_gb,
                     min_cpu_cores,
                     requires_tee,
                 )
@@ -502,7 +532,9 @@ pub async fn handle_registry_command(
             agent,
             method,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -534,7 +566,9 @@ pub async fn handle_registry_command(
             agent,
             method,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -565,7 +599,9 @@ pub async fn handle_registry_command(
             developer,
             agent,
         } => {
-            let registry_id = registry.ok_or_else(|| {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
                 anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
             })?;
 
@@ -585,6 +621,110 @@ pub async fn handle_registry_command(
                 }
                 Err(e) => {
                     eprintln!("❌ Failed to remove default method: {}", e);
+                    return Err(anyhow!(e).into());
+                }
+            }
+        }
+
+        RegistryCommands::List { registry, json } => {
+            let registry_id = registry.or_else(|| {
+                std::env::var("SILVANA_REGISTRY").ok()
+            }).ok_or_else(|| {
+                anyhow!("Registry ID not provided. Set SILVANA_REGISTRY environment variable or use --registry")
+            })?;
+
+            match interface.list_registry(&registry_id).await {
+                Ok(registry_data) => {
+                    if json {
+                        // Output as JSON
+                        let json_str = serde_json::to_string_pretty(&registry_data)
+                            .map_err(|e| anyhow!("Failed to serialize to JSON: {}", e))?;
+                        println!("{}", json_str);
+                    } else {
+                        // Formatted output
+                        println!("📋 Registry: {}\n", registry_data.name);
+                        println!("   ID: {}", registry_data.registry_id);
+                        println!("   Version: {}", registry_data.version);
+                        println!("   Admin: {}", registry_data.admin);
+                        println!();
+
+                        // Developers
+                        println!("👥 Developers ({})", registry_data.developers.len());
+                        for developer in &registry_data.developers {
+                            println!();
+                            println!("   📦 {} ({})", developer.name, developer.owner);
+                            println!("      GitHub: {}", developer.github);
+                            if let Some(ref image) = developer.image {
+                                println!("      Image: {}", image);
+                            }
+                            if let Some(ref description) = developer.description {
+                                println!("      Description: {}", description);
+                            }
+                            if let Some(ref site) = developer.site {
+                                println!("      Site: {}", site);
+                            }
+
+                            // Agents
+                            if !developer.agents.is_empty() {
+                                println!();
+                                println!("      🤖 Agents ({})", developer.agents.len());
+                                for agent in &developer.agents {
+                                    println!("         • {}", agent.name);
+                                    if !agent.chains.is_empty() {
+                                        println!("           Chains: {}", agent.chains.join(", "));
+                                    }
+                                    if let Some(ref image) = agent.image {
+                                        println!("           Image: {}", image);
+                                    }
+                                    if let Some(ref description) = agent.description {
+                                        println!("           Description: {}", description);
+                                    }
+                                    if let Some(ref site) = agent.site {
+                                        println!("           Site: {}", site);
+                                    }
+                                    if let Some(ref default_method) = agent.default_method {
+                                        println!("           Default Method: {}", default_method);
+                                    }
+
+                                    // Methods
+                                    if !agent.methods.is_empty() {
+                                        println!();
+                                        println!("           📝 Methods ({})", agent.methods.len());
+                                        for method in &agent.methods {
+                                            println!("              • {}", method.name);
+                                            println!("                Docker: {}", method.docker_image);
+                                            if let Some(ref sha) = method.docker_sha256 {
+                                                println!("                SHA256: {}", sha);
+                                            }
+                                            println!(
+                                                "                Resources: {} GB RAM, {} CPU cores{}",
+                                                method.min_memory_gb,
+                                                method.min_cpu_cores,
+                                                if method.requires_tee { ", TEE required" } else { "" }
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Apps
+                        if !registry_data.apps.is_empty() {
+                            println!();
+                            println!("📱 Apps ({})", registry_data.apps.len());
+                            for app in &registry_data.apps {
+                                println!("   • {} ({})", app.name, app.owner);
+                                if let Some(ref description) = app.description {
+                                    println!("     Description: {}", description);
+                                }
+                            }
+                        }
+
+                        println!();
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to list registry: {}", e);
                     return Err(anyhow!(e).into());
                 }
             }

@@ -12,10 +12,11 @@ pub struct Model {
     pub req_id: String,  // Request identifier UUID (VARCHAR(64))
     pub app_instance_id: String,  // Which app instance requested
     pub retry_count: i32,  // Number of retries before queuing
+    #[sea_orm(column_type = "TimestampWithTimeZone")]
     pub queued_at: DateTimeUtc,
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
     pub lease_until: Option<DateTimeUtc>,  // When lease expires
-    #[sea_orm(nullable)]
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
     pub lease_granted_at: Option<DateTimeUtc>,  // When lease was granted
     pub status: String,  // WAITING, GRANTED, EXPIRED, RELEASED
 }

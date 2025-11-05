@@ -1,19 +1,66 @@
 use crate::agent::AgentJob;
 use crate::constants::{JOB_ACQUISITION_DELAY_PER_CONTAINER_MS, JOB_ACQUISITION_MAX_DELAY_MS};
+use crate::coordination_manager::CoordinationManager;
 use crate::error::Result;
 use crate::job_lock::JobLockGuard;
+use crate::layer_config::LayerType;
 use crate::metrics::CoordinatorMetrics;
 use crate::session::{calculate_cost, generate_docker_session};
 use crate::state::SharedState;
 use docker::{ContainerConfig, DockerManager};
 use proto;
 use secrets_client::SecretsClient;
+use silvana_coordination_trait::{AgentMethod, Coordination, Job};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use sui::fetch::{AgentMethod, Job};
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
+
+/// Add layer-specific environment variables to the container configuration
+/// Only adds non-sensitive identification information, not connection details
+fn add_layer_environment_variables(
+    env_vars: &mut HashMap<String, String>,
+    layer_id: &str,
+    coordination_manager: &Arc<CoordinationManager>,
+) {
+    // Get layer information
+    if let Some(layer_info) = coordination_manager.get_layer_info(layer_id) {
+        // Add layer identification (non-sensitive)
+        env_vars.insert(
+            "COORDINATION_LAYER_ID".to_string(),
+            layer_id.to_string(),
+        );
+
+        // Add layer type
+        let layer_type_str = match layer_info.layer_type {
+            LayerType::Sui => "sui",
+            LayerType::Private => "private",
+            LayerType::Ethereum => "ethereum",
+        };
+        env_vars.insert(
+            "COORDINATION_LAYER_TYPE".to_string(),
+            layer_type_str.to_string(),
+        );
+
+        // Add operation mode (affects agent behavior)
+        let operation_mode = match layer_info.operation_mode {
+            crate::layer_config::OperationMode::Multicall => "multicall",
+            crate::layer_config::OperationMode::Direct => "direct",
+        };
+        env_vars.insert(
+            "OPERATION_MODE".to_string(),
+            operation_mode.to_string(),
+        );
+
+        debug!(
+            "Added layer environment variables: layer_id={}, type={}, mode={}",
+            layer_id, layer_type_str, operation_mode
+        );
+    } else {
+        warn!("Layer {} not found in coordination manager", layer_id);
+    }
+}
 
 /// Guard that ensures AgentSessionFinishedEvent is sent when dropped
 struct SessionFinishedGuard {
@@ -250,8 +297,10 @@ pub async fn run_docker_container_task(
     docker_manager: Arc<DockerManager>,
     container_timeout_secs: u64,
     mut secrets_client: Option<SecretsClient>,
-    job_lock: JobLockGuard, // Hold the lock for the duration of the task
+    job_lock: JobLockGuard, // Hold the lock for the duration of this task
     metrics: Option<Arc<CoordinatorMetrics>>,
+    layer_id: String,
+    coordination_manager: Arc<CoordinationManager>,
 ) {
     let job_start = Instant::now();
     let session_start_time = std::time::SystemTime::now();
@@ -419,10 +468,35 @@ pub async fn run_docker_container_task(
     // Fetch fresh AppInstance data to ensure job is still pending
     // This is critical to avoid EJobNotPending errors
     debug!(
-        "Fetching fresh AppInstance data for job {} after delay",
-        job.job_sequence
+        "Fetching fresh AppInstance data for job {} from layer {} after delay",
+        job.job_sequence, layer_id
     );
-    let fresh_app_instance = match sui::fetch::fetch_app_instance(&job.app_instance).await {
+
+    // Get coordination layer for this app instance
+    let layer = match coordination_manager.get_layer_by_id(&layer_id) {
+        Some(l) => l,
+        None => {
+            warn!(
+                "Failed to get coordination layer {} for job {} - skipping",
+                layer_id, job.job_sequence
+            );
+            ensure_job_failed_if_not_completed(
+                &docker_session.session_id,
+                "Failed to get coordination layer",
+                &state,
+            )
+            .await;
+            session_guard.set_logs(format!("Error: Coordination layer {} not found", layer_id));
+            debug!(
+                "🔓 Releasing lock for job {} from app_instance {} (layer not found)",
+                job.job_sequence, job.app_instance
+            );
+            drop(job_lock);
+            return;
+        }
+    };
+
+    let _fresh_app_instance = match layer.fetch_app_instance(&job.app_instance).await {
         Ok(app_inst) => app_inst,
         Err(e) => {
             warn!(
@@ -451,29 +525,9 @@ pub async fn run_docker_container_task(
         }
     };
 
-    // For buffered jobs that were started via multicall, they won't be in pending_jobs anymore
-    // We've already verified the job exists and is in a processable state earlier
-    // So we just log and continue
-    let job_in_pending = if let Some(jobs) = &fresh_app_instance.jobs {
-        jobs.pending_jobs.contains(&job.job_sequence)
-    } else {
-        false
-    };
-
-    if job_in_pending {
-        // This shouldn't happen for buffered jobs that were started via multicall
-        warn!(
-            "Buffered job {} is still in pending_jobs list - multicall may have failed to start it",
-            job.job_sequence
-        );
-        // Continue anyway since we need to process it
-    } else {
-        debug!(
-            "Job {} is not in pending_jobs (expected for buffered job started via multicall)",
-            job.job_sequence
-        );
-    }
-
+    // For buffered jobs that were started via direct execution or multicall,
+    // they should already be in Running state on the blockchain
+    // We've fetched the app instance to verify it exists
     debug!(
         "Job {} proceeding with Docker container execution",
         job.job_sequence
@@ -501,6 +555,7 @@ pub async fn run_docker_container_task(
         agent_method.min_memory_gb,
         agent_method.min_cpu_cores,
         agent_method.requires_tee,
+        layer_id.clone(),
     ) {
         Ok(job) => job,
         Err(e) => {
@@ -637,6 +692,9 @@ pub async fn run_docker_container_task(
             }
         }
     }
+
+    // Add layer-specific environment variables (identification only, no sensitive config)
+    add_layer_environment_variables(&mut env_vars, &layer_id, &coordination_manager);
 
     let config = ContainerConfig {
         image_name: agent_method.docker_image.clone(),
@@ -778,7 +836,7 @@ pub async fn ensure_job_failed_if_not_completed(
         );
 
         state
-            .add_fail_job_request(
+            .execute_or_queue_fail_job(
                 failed_job.app_instance.clone(),
                 failed_job.job_sequence,
                 format!("{}", reason),
@@ -932,10 +990,16 @@ pub struct DockerBufferProcessor {
     container_timeout_secs: u64,
     secrets_client: Option<SecretsClient>,
     metrics: Option<Arc<CoordinatorMetrics>>,
+    coordination_manager: Arc<CoordinationManager>,
 }
 
 impl DockerBufferProcessor {
-    pub fn new(state: SharedState, use_tee: bool, container_timeout_secs: u64) -> Result<Self> {
+    pub fn new(
+        state: SharedState,
+        use_tee: bool,
+        container_timeout_secs: u64,
+        coordination_manager: Arc<CoordinationManager>,
+    ) -> Result<Self> {
         let docker_manager = DockerManager::new(use_tee)
             .map_err(|e| crate::error::CoordinatorError::DockerError(e))?;
 
@@ -945,6 +1009,7 @@ impl DockerBufferProcessor {
             container_timeout_secs,
             secrets_client: None,
             metrics: None,
+            coordination_manager,
         })
     }
     
@@ -982,33 +1047,30 @@ impl DockerBufferProcessor {
                         // Continue processing during shutdown - don't exit yet
                         // The loop will continue and process buffered jobs
                     } else {
-                        // Everything appears done - but we need to check if multicall has pending operations
-                        // that might add jobs to the buffer
-                        let pending_ops = self.state.get_total_operations_count().await;
-                        if pending_ops > 0 {
+                        // Everything appears done - but we need to check if multicall is still running
+                        // The multicall processor might be in the middle of an operation that will add jobs to the buffer
+                        if !self.state.is_multicall_completed() {
                             debug!(
-                                "Docker buffer empty but {} multicall operations pending - waiting...",
-                                pending_ops
+                                "Docker buffer empty but multicall processor still running - waiting for it to complete..."
                             );
-                            sleep(Duration::from_secs(2)).await;
+                            sleep(Duration::from_secs(1)).await;
                             continue; // Go back to check again
                         }
 
-                        // No pending multicall operations - wait 1 second and double-check
-                        // in case multicall just picked up something
-                        info!("Docker buffer appears empty, waiting 1 second to verify...");
+                        // Multicall is done - wait 1 second and double-check buffer one final time
+                        // in case multicall just added something right before completing
+                        info!("Multicall completed, checking buffer one final time...");
                         sleep(Duration::from_secs(1)).await;
 
                         // Final check after delay
                         let (final_loading, final_running) = self.docker_manager.get_container_counts().await;
                         let final_buffer_size = self.state.get_started_jobs_buffer_size().await;
-                        let final_pending_ops = self.state.get_total_operations_count().await;
 
-                        if final_buffer_size > 0 || final_loading > 0 || final_running > 0 || final_pending_ops > 0 {
-                            // Race condition detected - new work appeared
+                        if final_buffer_size > 0 || final_loading > 0 || final_running > 0 {
+                            // Race condition detected - new work appeared right at the end
                             debug!(
-                                "Race condition detected: {} new buffered jobs, {} loading, {} running, {} pending ops - continuing",
-                                final_buffer_size, final_loading, final_running, final_pending_ops
+                                "Race condition detected: {} new buffered jobs, {} loading, {} running - continuing",
+                                final_buffer_size, final_loading, final_running
                             );
                             continue; // Go back to processing
                         }
@@ -1066,70 +1128,37 @@ impl DockerBufferProcessor {
                 metrics.increment_docker_jobs_processed();
             }
 
-            // First fetch the app instance to get the jobs table ID
-            let job_result: std::result::Result<Option<sui::fetch::Job>, ()> =
-                match sui::fetch::fetch_app_instance(&started_job.app_instance).await {
-                    Ok(app_inst) => {
-                        if let Some(jobs_obj) = app_inst.jobs {
-                            // Try to fetch the job from the jobs table
-                            match sui::fetch::fetch_job_by_id(
-                                &jobs_obj.jobs_table_id,
-                                started_job.job_sequence,
-                            )
-                            .await
-                            {
-                                Ok(job) => Ok(job),
-                                Err(e) => {
-                                    error!("Failed to fetch job by ID: {}", e);
-                                    // During shutdown, fail the job after logging the error
-                                    if self.state.is_shutting_down() {
-                                        warn!(
-                                            "Failing job {} during shutdown due to fetch error: {}",
-                                            started_job.job_sequence, e
-                                        );
-                                        self.state.add_fail_job_request(
-                                            started_job.app_instance.clone(),
-                                            started_job.job_sequence,
-                                            format!("Failed to fetch job during shutdown: {}", e),
-                                        ).await;
-                                    }
-                                    Ok(None)
-                                }
-                            }
-                        } else {
-                            // No jobs object - job likely doesn't exist
-                            Ok(None)
-                        }
+            // Get coordination layer for this app instance using stored layer_id
+            let layer = match self.coordination_manager.get_layer_by_id(&started_job.layer_id) {
+                Some(l) => l,
+                None => {
+                    error!("Failed to get coordination layer for layer_id: {}", started_job.layer_id);
+                    if self.state.is_shutting_down() {
+                        warn!(
+                            "Failing job {} during shutdown due to layer lookup failure",
+                            started_job.job_sequence
+                        );
+                        self.state.execute_or_queue_fail_job(
+                            started_job.app_instance.clone(),
+                            started_job.job_sequence,
+                            "Failed to find coordination layer during shutdown".to_string(),
+                        ).await;
                     }
-                    Err(e) => {
-                        error!("Failed to fetch app instance: {}", e);
-                        // During shutdown, fail the job after logging the error
-                        if self.state.is_shutting_down() {
-                            warn!(
-                                "Failing job {} during shutdown due to app instance fetch error: {}",
-                                started_job.job_sequence, e
-                            );
-                            self.state.add_fail_job_request(
-                                started_job.app_instance.clone(),
-                                started_job.job_sequence,
-                                format!("Failed to fetch app instance during shutdown: {}", e),
-                            ).await;
-                        }
-                        Ok(None)
-                    }
-                };
+                    continue;
+                }
+            };
 
-            match job_result {
+            // Fetch the job using coordination trait method
+            let job_from_layer = match layer.fetch_job_by_sequence(&started_job.app_instance, started_job.job_sequence).await {
                 Ok(Some(job)) => {
-                    // Check if job is still in a state we can process
-                    let can_process = matches!(job.status, sui::fetch::JobStatus::Running);
-
+                    // Check if job is in Running state
+                    let is_running = matches!(job.status, silvana_coordination_trait::JobStatus::Running);
                     debug!(
-                        "Buffered job {} status: {:?}, can_process: {}",
-                        started_job.job_sequence, job.status, can_process
+                        "Buffered job {} status: {:?}, is_running: {}",
+                        started_job.job_sequence, job.status, is_running
                     );
 
-                    if !can_process {
+                    if !is_running {
                         warn!(
                             "Buffered job {} from app_instance {} is in '{:?}' status, skipping",
                             started_job.job_sequence, started_job.app_instance, job.status
@@ -1141,164 +1170,171 @@ impl DockerBufferProcessor {
                         continue;
                     }
 
-                    // Fetch agent method configuration
-                    let agent_method = match sui::fetch_agent_method(
-                        &job.developer,
-                        &job.agent,
-                        &job.agent_method,
-                    )
-                    .await
-                    {
-                        Ok(method) => method,
-                        Err(e) => {
-                            error!(
-                                "Failed to fetch agent method for buffered job {}: {}",
-                                job.job_sequence, e
-                            );
-                            
-                            // Return job to buffer for retry on any error
-                            self.state.add_started_jobs(vec![started_job]).await;
-                            info!(
-                                "Returned job {} to buffer due to agent method fetch error",
-                                job.job_sequence
-                            );
-                            
-                            // Increment metrics
-                            if let Some(ref metrics) = self.metrics {
-                                metrics.increment_docker_agent_method_fetch_failures();
-                                metrics.increment_docker_jobs_returned_to_buffer();
-                            }
-                            
-                            // Wait before retrying
-                            sleep(Duration::from_secs(5)).await;
-                            continue;
-                        }
-                    };
-
-                    // Check if we have sufficient resources
-                    match self.can_run_agent(&agent_method).await {
-                        Ok(true) => {
-                            // Resources available, continue
-                        }
-                        Ok(false) => {
-                            // Put job back in buffer (at the front) and wait
-                            self.state.add_started_jobs(vec![started_job]).await;
-                            info!(
-                                "Insufficient resources for job {}, returned to buffer",
-                                job.job_sequence
-                            );
-                            // Increment jobs returned to buffer metric
-                            if let Some(ref metrics) = self.metrics {
-                                metrics.increment_docker_jobs_returned_to_buffer();
-                            }
-                            sleep(Duration::from_secs(5)).await;
-                            continue;
-                        }
-                        Err(e) => {
-                            error!("Error checking resources: {}", e);
-                            // Put job back in buffer
-                            self.state.add_started_jobs(vec![started_job]).await;
-                            // Increment resource check failures metric
-                            if let Some(ref metrics) = self.metrics {
-                                metrics.increment_docker_resource_check_failures();
-                            }
-                            sleep(Duration::from_secs(5)).await;
-                            continue;
-                        }
-                    }
-
-                    // Try to acquire a lock for this job
-                    let lock_manager = crate::job_lock::get_job_lock_manager();
-                    let job_lock =
-                        match lock_manager.try_lock_job(&job.app_instance, job.job_sequence) {
-                            Some(lock) => lock,
-                            None => {
-                                warn!("Job {} already locked, skipping", job.job_sequence);
-                                // Increment job lock conflicts metric
-                                if let Some(ref metrics) = self.metrics {
-                                    metrics.increment_docker_job_lock_conflicts();
-                                }
-                                continue;
-                            }
-                        };
-
-                    info!(
-                        "🐳 Starting Docker container for buffered job {}: {}/{}/{}",
-                        job.job_sequence, job.developer, job.agent, job.agent_method
-                    );
-                    
-                    // Increment containers started metric
-                    if let Some(ref metrics) = self.metrics {
-                        metrics.increment_docker_containers_started();
-                    }
-
-                    // Clone necessary data for the spawned task
-                    let state_clone = self.state.clone();
-                    let docker_manager_clone = self.docker_manager.clone();
-                    let container_timeout_secs = self.container_timeout_secs;
-                    let secrets_client_clone = self.secrets_client.clone();
-                    let metrics_clone = self.metrics.clone();
-
-                    // Spawn task to run Docker container
-                    tokio::spawn(async move {
-                        run_docker_container_task(
-                            job,
-                            agent_method,
-                            state_clone,
-                            docker_manager_clone,
-                            container_timeout_secs,
-                            secrets_client_clone,
-                            job_lock,
-                            metrics_clone,
-                        )
-                        .await;
-                    });
+                    job
                 }
                 Ok(None) => {
                     warn!(
                         "Buffered job {} from app_instance {} not found in blockchain (may have been deleted or completed)",
                         started_job.job_sequence, started_job.app_instance
                     );
-                    
-                    // During shutdown, fail the job to ensure clean shutdown
+                    continue;
+                }
+                Err(e) => {
+                    error!("Failed to fetch job from layer {}: {}", started_job.layer_id, e);
                     if self.state.is_shutting_down() {
                         warn!(
-                            "Failing job {} during shutdown as it cannot be fetched from blockchain",
-                            started_job.job_sequence
+                            "Failing job {} during shutdown due to fetch error: {}",
+                            started_job.job_sequence, e
                         );
-                        self.state.add_fail_job_request(
+                        self.state.execute_or_queue_fail_job(
                             started_job.app_instance.clone(),
                             started_job.job_sequence,
-                            "Job could not be fetched during shutdown".to_string(),
+                            format!("Failed to fetch job during shutdown: {}", e),
                         ).await;
                     }
-                    
-                    // Job doesn't exist or can't be fetched, don't put it back in buffer
-                    // Increment jobs skipped metric
-                    if let Some(ref metrics) = self.metrics {
-                        metrics.increment_docker_jobs_skipped();
-                    }
+                    continue;
                 }
-                _ => {
-                    // This shouldn't happen with our current logic
-                    error!(
-                        "Unexpected error fetching buffered job {} from blockchain",
-                        started_job.job_sequence
+            };
+
+            // Fetch agent method configuration from registry (Sui)
+            // Registry is always on Sui, regardless of which coordination layer is active
+            let agent_method = match sui::fetch_agent_method(
+                &job_from_layer.developer,
+                &job_from_layer.agent,
+                &job_from_layer.agent_method,
+            )
+                .await
+                {
+                    Ok(method) => {
+                        // Convert from sui::fetch::AgentMethod to coordination trait AgentMethod
+                        AgentMethod {
+                            docker_image: method.docker_image,
+                            docker_sha256: method.docker_sha256,
+                            min_memory_gb: method.min_memory_gb,
+                            min_cpu_cores: method.min_cpu_cores,
+                            requires_tee: method.requires_tee,
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to fetch agent method for buffered job {}: {}",
+                            started_job.job_sequence, e
+                        );
+
+                        // Return job to buffer for retry on any error
+                        self.state.add_started_jobs(vec![started_job.clone()]).await;
+                        info!(
+                            "Returned job {} to buffer due to agent method fetch error",
+                            started_job.job_sequence
+                        );
+
+                        // Increment metrics
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.increment_docker_agent_method_fetch_failures();
+                            metrics.increment_docker_jobs_returned_to_buffer();
+                        }
+
+                        // Wait before retrying
+                        sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+
+            // Check if we have sufficient resources
+            match self.can_run_agent(&agent_method).await {
+                Ok(None) => {
+                    // Resources available, continue
+                }
+                Ok(Some(reason)) => {
+                    // Insufficient resources - put job back in buffer
+                    info!(
+                        "Insufficient resources for job {}: {} - returned to buffer",
+                        started_job.job_sequence, reason
                     );
+                    self.state.add_started_jobs(vec![started_job]).await;
+                    // Increment jobs returned to buffer metric
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.increment_docker_jobs_returned_to_buffer();
+                    }
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+                Err(e) => {
+                    error!("Error checking resources for job {}: {}", started_job.job_sequence, e);
+                    // Put job back in buffer
+                    self.state.add_started_jobs(vec![started_job]).await;
+                    // Increment resource check failures metric
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.increment_docker_resource_check_failures();
+                    }
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
                 }
             }
+
+            // Try to acquire a lock for this job
+            let lock_manager = crate::job_lock::get_job_lock_manager();
+            let job_lock =
+                match lock_manager.try_lock_job(&job_from_layer.app_instance, job_from_layer.job_sequence) {
+                    Some(lock) => lock,
+                    None => {
+                        warn!("Job {} already locked, skipping", job_from_layer.job_sequence);
+                        // Increment job lock conflicts metric
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.increment_docker_job_lock_conflicts();
+                        }
+                        continue;
+                    }
+                };
+
+            info!(
+                "🐳 Starting Docker container for buffered job {}: {}/{}/{}",
+                job_from_layer.job_sequence, job_from_layer.developer, job_from_layer.agent, job_from_layer.agent_method
+            );
+
+            // Increment containers started metric
+            if let Some(ref metrics) = self.metrics {
+                metrics.increment_docker_containers_started();
+            }
+
+            // Clone necessary data for the spawned task
+            let state_clone = self.state.clone();
+            let docker_manager_clone = self.docker_manager.clone();
+            let container_timeout_secs = self.container_timeout_secs;
+            let secrets_client_clone = self.secrets_client.clone();
+            let metrics_clone = self.metrics.clone();
+            let layer_id = started_job.layer_id.clone();
+            let coordination_manager_clone = self.coordination_manager.clone();
+
+            // Spawn task to run Docker container
+            tokio::spawn(async move {
+                run_docker_container_task(
+                    job_from_layer,
+                    agent_method,
+                    state_clone,
+                    docker_manager_clone,
+                    container_timeout_secs,
+                    secrets_client_clone,
+                    job_lock,
+                    metrics_clone,
+                    layer_id,
+                    coordination_manager_clone,
+                )
+                .await;
+            });
         }
     }
 
     /// Check if system has sufficient resources to run an agent
-    async fn can_run_agent(&self, agent_method: &sui::fetch::AgentMethod) -> Result<bool> {
+    /// Returns Ok(Some(reason)) if resources are insufficient (with reason string)
+    /// Returns Ok(None) if resources are sufficient
+    async fn can_run_agent(&self, agent_method: &AgentMethod) -> Result<Option<String>> {
         use crate::constants::AGENT_MIN_MEMORY_REQUIREMENT_GB;
         use crate::hardware::{get_available_memory_gb, get_hardware_info, get_total_memory_gb};
 
         // Check TEE requirement
         if agent_method.requires_tee {
-            debug!("Agent requires TEE but we don't run on TEE");
-            return Ok(false);
+            return Ok(Some("TEE required but not available".to_string()));
         }
 
         // Get hardware info
@@ -1306,21 +1342,19 @@ impl DockerBufferProcessor {
 
         // Check CPU cores
         if (hardware.cpu_cores as u16) < agent_method.min_cpu_cores {
-            debug!(
-                "Insufficient CPU cores: have {}, need {}",
-                hardware.cpu_cores, agent_method.min_cpu_cores
-            );
-            return Ok(false);
+            return Ok(Some(format!(
+                "Insufficient CPU cores: required {} cores, available {} cores",
+                agent_method.min_cpu_cores, hardware.cpu_cores
+            )));
         }
 
         // Check concurrent agent limit
         let current_agents = self.state.get_current_agent_count().await;
         if current_agents >= MAX_CONCURRENT_AGENT_CONTAINERS {
-            debug!(
-                "Maximum concurrent agents ({}) reached",
-                MAX_CONCURRENT_AGENT_CONTAINERS
-            );
-            return Ok(false);
+            return Ok(Some(format!(
+                "Maximum concurrent agents limit reached: {}/{} agents running",
+                current_agents, MAX_CONCURRENT_AGENT_CONTAINERS
+            )));
         }
 
         // Calculate total memory required by currently running agents
@@ -1347,26 +1381,27 @@ impl DockerBufferProcessor {
         let total_memory_gb = get_total_memory_gb();
         if total_memory_needed_gb > total_memory_gb.saturating_sub(AGENT_MIN_MEMORY_REQUIREMENT_GB)
         {
-            debug!(
-                "Insufficient total memory: need {} GB (including {} GB for new agent), have {} GB (minus {} GB reserved)",
+            return Ok(Some(format!(
+                "Insufficient total memory: required {} GB (including {} GB for new agent + {} GB already used), available {} GB total ({} GB reserved for system)",
                 total_memory_needed_gb,
                 agent_method.min_memory_gb,
+                total_memory_used_gb,
                 total_memory_gb,
                 AGENT_MIN_MEMORY_REQUIREMENT_GB
-            );
-            return Ok(false);
+            )));
         }
 
         // Check against available memory
+        // Allow starting if available memory is at least half of required, since jobs typically don't use full allocation
         let available_memory_gb = get_available_memory_gb();
-        if (agent_method.min_memory_gb as u64) > available_memory_gb {
-            debug!(
-                "Insufficient available memory: need {} GB, have {} GB available",
-                agent_method.min_memory_gb, available_memory_gb
-            );
-            return Ok(false);
+        let required_available_memory_gb = (agent_method.min_memory_gb as u64 + 1) / 2; // Round up for half
+        if required_available_memory_gb > available_memory_gb {
+            return Ok(Some(format!(
+                "Insufficient available memory: required {} GB ({} GB min allocation, jobs typically use ~50%), available {} GB",
+                required_available_memory_gb, agent_method.min_memory_gb, available_memory_gb
+            )));
         }
 
-        Ok(true)
+        Ok(None)
     }
 }

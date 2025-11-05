@@ -3,12 +3,14 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum CoordinatorError {
     #[error("RPC connection failed: {0}")]
+    #[allow(dead_code)]
     RpcConnectionError(String),
 
     #[error("Docker error: {0}")]
     DockerError(#[from] docker::DockerError),
 
     #[error("Stream error: {0}")]
+    #[allow(dead_code)]
     StreamError(String),
 
     #[error("Configuration error: {0}")]
@@ -16,6 +18,9 @@ pub enum CoordinatorError {
 
     #[error("Tonic/gRPC error: {0}")]
     TonicError(#[from] tonic::Status),
+
+    #[error("Coordination error: {0}")]
+    Coordination(#[from] crate::coordination_layer::CoordinationError),
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),

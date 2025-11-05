@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-11-03T12:24:55Z",
+  "network": "anvil-local",
+  "chainId": 31337,
+  "admin": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "coordinator1": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+  "coordinator2": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+  "operator": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+  "contracts": {
+    "SilvanaCoordination": "0xb185E9f6531BA9877741022C92CE858cDCc5760E",
+    "JobManager": "0xC1e0A9DB9eA830c52603798481045688c8AE99C2",
+    "AppInstanceManager": "0x683d9CDD3239E0e01E8dC6315fA50AD92aB71D2d",
+    "ProofManager": "0x1c9fD50dF7a4f066884b58A05D91e4b55005876A",
+    "SettlementManager": "0x0fe4223AD99dF788A6Dcad148eB4086E6389cEB6",
+    "StorageManager": "0x71a0b8A2245A9770A4D887cE1E4eCc6C1d4FF28c"
+  }
+}

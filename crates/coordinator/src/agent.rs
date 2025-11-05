@@ -1,10 +1,10 @@
 use crate::job_id::generate_job_id;
 use crate::state::SharedState;
 use proto;
+use silvana_coordination_trait::Job;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use sui::fetch::Job;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -23,6 +23,7 @@ pub struct AgentJob {
     pub min_cpu_cores: u16,
     pub requires_tee: bool,
     pub job_start_time: std::time::SystemTime,
+    pub layer_id: String,
 }
 
 impl AgentJob {
@@ -33,6 +34,7 @@ impl AgentJob {
         min_memory_gb: u16,
         min_cpu_cores: u16,
         requires_tee: bool,
+        layer_id: String,
     ) -> Result<Self, String> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -70,6 +72,7 @@ impl AgentJob {
             min_cpu_cores,
             requires_tee,
             job_start_time: SystemTime::now(),
+            layer_id,
         })
     }
 

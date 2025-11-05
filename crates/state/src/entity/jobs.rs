@@ -6,10 +6,9 @@ use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "jobs")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub app_instance_id: String,
-    #[sea_orm(primary_key, auto_increment = false)]
+    #[sea_orm(primary_key)]
     pub job_sequence: u64,
+    pub app_instance_id: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub description: Option<String>,
 
@@ -30,6 +29,14 @@ pub struct Model {
     pub data: Option<Vec<u8>>,  // vector<u8> as BLOB
     pub data_da: Option<String>,  // S3 reference for large job data
 
+    /// JWT for agent to access private state (only used in Private coordination)
+    #[sea_orm(column_type = "Text", nullable)]
+    pub agent_jwt: Option<String>,
+
+    /// When the agent JWT expires
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
+    pub jwt_expires_at: Option<DateTimeUtc>,
+
     // Status (matching Move enum and SQL ENUM)
     pub status: String,  // PENDING, RUNNING, COMPLETED, FAILED (maps to SQL ENUM)
     #[sea_orm(column_type = "Text", nullable)]
@@ -38,13 +45,13 @@ pub struct Model {
 
     // Periodic scheduling fields (NULL for one-time jobs)
     pub interval_ms: Option<u64>,  // NULL for one-time jobs
-    #[sea_orm(column_type = "Timestamp", nullable)]
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
     pub next_scheduled_at: Option<DateTimeUtc>,  // Absolute timestamp for next run
 
     // Metadata timestamps
-    #[sea_orm(column_type = "Timestamp")]
+    #[sea_orm(column_type = "TimestampWithTimeZone")]
     pub created_at: DateTimeUtc,
-    #[sea_orm(column_type = "Timestamp")]
+    #[sea_orm(column_type = "TimestampWithTimeZone")]
     pub updated_at: DateTimeUtc,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub metadata: Option<Json>,

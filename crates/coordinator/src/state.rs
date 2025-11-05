@@ -1,6 +1,8 @@
 use crate::agent::AgentJobDatabase;
+use crate::coordination_manager::CoordinationManager;
 use crate::jobs::JobsTracker;
 use proto::silvana_rpc_service_client::SilvanaRpcServiceClient;
+use silvana_coordination_trait::Coordination;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,13 +11,10 @@ use tokio::time::Instant;
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 
-/// Normalize app instance ID to always have 0x prefix
+/// Normalize app instance ID - pass through unchanged
+/// Each coordination layer handles its own ID format (Sui uses 0x prefix, Ethereum uses strings)
 pub fn normalize_app_instance_id(app_instance: &str) -> String {
-    if app_instance.starts_with("0x") {
-        app_instance.to_string()
-    } else {
-        format!("0x{}", app_instance)
-    }
+    app_instance.to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +38,8 @@ pub struct StartedJob {
     pub block_number: Option<u64>,
     /// Sequences array (helpful for debugging and prioritization)
     pub sequences: Option<Vec<u64>>,
+    /// Coordination layer ID this job belongs to
+    pub layer_id: String,
 }
 
 /// Request to create a new job
@@ -70,6 +71,7 @@ pub struct StartJobRequest {
     pub job_type: String,
     pub block_number: Option<u64>,
     pub sequences: Option<Vec<u64>>,
+    pub layer_id: String,
     pub _timestamp: Instant,
 }
 
@@ -173,14 +175,19 @@ pub struct SharedState {
     rpc_client: Arc<RwLock<Option<SilvanaRpcServiceClient<Channel>>>>, // Silvana RPC service client
     shutdown_flag: Arc<AtomicBool>, // Global shutdown flag for graceful shutdown
     force_shutdown_flag: Arc<AtomicBool>, // Force shutdown flag for immediate termination
+    multicall_completed: Arc<AtomicBool>, // Flag set when multicall processor has exited
     app_instance_filter: Arc<RwLock<Option<String>>>, // Optional filter to only process jobs from a specific app instance
     settle_only: Arc<AtomicBool>,                     // Flag to run as a dedicated settlement node
     multicall_requests: Arc<Mutex<HashMap<String, MulticallRequests>>>, // Batched job operation requests per app instance
     started_jobs_buffer: Arc<Mutex<VecDeque<StartedJob>>>, // Buffer of jobs started on blockchain
     last_multicall_timestamp: Arc<Mutex<Instant>>,         // Timestamp of last multicall execution
+
+    // Optional coordination manager for multi-layer support
+    coordination_manager: Option<Arc<CoordinationManager>>,
 }
 
 impl SharedState {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         // Initialize the Silvana RPC client asynchronously using shared client
         let rpc_client = Arc::new(RwLock::new(None));
@@ -206,12 +213,55 @@ impl SharedState {
             rpc_client,
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             force_shutdown_flag: Arc::new(AtomicBool::new(false)),
+            multicall_completed: Arc::new(AtomicBool::new(false)),
             app_instance_filter: Arc::new(RwLock::new(None)),
             settle_only: Arc::new(AtomicBool::new(false)),
             multicall_requests: Arc::new(Mutex::new(HashMap::new())),
             started_jobs_buffer: Arc::new(Mutex::new(VecDeque::new())),
             last_multicall_timestamp: Arc::new(Mutex::new(Instant::now())),
+            coordination_manager: None,
         }
+    }
+
+    /// Create new SharedState with CoordinationManager for multi-layer support
+    pub fn new_with_manager(manager: Arc<CoordinationManager>) -> Self {
+        // Initialize the Silvana RPC client asynchronously using shared client
+        let rpc_client = Arc::new(RwLock::new(None));
+        let rpc_client_clone = rpc_client.clone();
+        tokio::spawn(async move {
+            match rpc_client::shared::get_shared_client().await {
+                Ok(client) => {
+                    let mut lock = rpc_client_clone.write().await;
+                    *lock = Some(client);
+                    info!("Silvana RPC client initialized successfully using shared connection");
+                }
+                Err(e) => {
+                    error!("Failed to initialize Silvana RPC client: {}", e);
+                }
+            }
+        });
+
+        Self {
+            current_agents: Arc::new(RwLock::new(HashMap::new())),
+            jobs_tracker: JobsTracker::new_with_manager(manager.clone()),
+            agent_job_db: AgentJobDatabase::new(),
+            has_pending_jobs: Arc::new(AtomicBool::new(false)),
+            rpc_client,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            force_shutdown_flag: Arc::new(AtomicBool::new(false)),
+            multicall_completed: Arc::new(AtomicBool::new(false)),
+            app_instance_filter: Arc::new(RwLock::new(None)),
+            settle_only: Arc::new(AtomicBool::new(false)),
+            multicall_requests: Arc::new(Mutex::new(HashMap::new())),
+            started_jobs_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            last_multicall_timestamp: Arc::new(Mutex::new(Instant::now())),
+            coordination_manager: Some(manager),
+        }
+    }
+
+    /// Get the coordination manager if available
+    pub fn get_coordination_manager(&self) -> Option<Arc<CoordinationManager>> {
+        self.coordination_manager.clone()
     }
 
     /// Get the coordinator ID (returns None if not available for read-only operations)
@@ -376,6 +426,16 @@ impl SharedState {
         self.is_force_shutdown()
     }
 
+    /// Set the multicall completed flag to signal that multicall processor has exited
+    pub fn set_multicall_completed(&self) {
+        self.multicall_completed.store(true, Ordering::SeqCst);
+    }
+
+    /// Check if multicall processor has completed
+    pub fn is_multicall_completed(&self) -> bool {
+        self.multicall_completed.load(Ordering::SeqCst)
+    }
+
     /// Get the count of current agents
     pub async fn get_current_agents_count(&self) -> usize {
         let current_agents = self.current_agents.read().await;
@@ -394,6 +454,7 @@ impl SharedState {
         agent: String,
         agent_method: String,
         app_instance: String,
+        layer_id: String,
     ) {
         self.jobs_tracker
             .add_job(
@@ -401,6 +462,7 @@ impl SharedState {
                 developer.clone(),
                 agent.clone(),
                 agent_method.clone(),
+                layer_id.clone(),
             )
             .await;
 
@@ -408,8 +470,8 @@ impl SharedState {
         self.has_pending_jobs.store(true, Ordering::Release);
 
         debug!(
-            "Added app_instance {} for {}/{}/{}",
-            app_instance, developer, agent, agent_method
+            "Added app_instance {} for {}/{}/{} on layer {}",
+            app_instance, developer, agent, agent_method, layer_id
         );
     }
 
@@ -436,6 +498,11 @@ impl SharedState {
     /// Get all app_instances with pending jobs
     pub async fn get_app_instances(&self) -> Vec<String> {
         self.jobs_tracker.get_all_app_instances().await
+    }
+
+    /// Get app_instances with pending jobs for a specific coordination layer
+    pub async fn get_app_instances_for_layer(&self, layer_id: &str) -> Vec<String> {
+        self.jobs_tracker.get_app_instances_for_layer(layer_id).await
     }
 
     /// Get app_instances with pending jobs for the current agent
@@ -579,6 +646,7 @@ impl SharedState {
         job_type: String,
         block_number: Option<u64>,
         sequences: Option<Vec<u64>>,
+        layer_id: String,
     ) {
         let app_instance = normalize_app_instance_id(&app_instance);
         let mut requests = self.multicall_requests.lock().await;
@@ -613,6 +681,7 @@ impl SharedState {
                 job_type,
                 block_number,
                 sequences,
+                layer_id: layer_id.clone(),
                 _timestamp: Instant::now(),
             };
         } else {
@@ -622,6 +691,7 @@ impl SharedState {
                 job_type,
                 block_number,
                 sequences,
+                layer_id,
                 _timestamp: Instant::now(),
             });
         }
@@ -931,6 +1001,194 @@ impl SharedState {
         );
     }
 
+    // ===== Execute or Queue Methods (Immediate execution for non-multicall layers) =====
+
+    /// Execute start_job immediately for non-multicall layers, or queue for multicall layers
+    pub async fn execute_or_queue_start_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+        memory_requirement: u64,
+        job_type: String,
+        block_number: Option<u64>,
+        sequences: Option<Vec<u64>>,
+        layer_id: String,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        // Check if this layer supports multicall
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // DIRECT EXECUTION - Execute immediately without queuing
+                    info!(
+                        "🚀 Direct execution: start_job {} for {} on non-multicall layer {}",
+                        job_sequence, app_instance, layer_id
+                    );
+
+                    match layer.start_job(&app_instance, job_sequence).await {
+                        Ok(_) => {
+                            info!(
+                                "✅ Direct start_job succeeded: {} seq {}",
+                                app_instance, job_sequence
+                            );
+
+                            // Add to buffer for Docker launching
+                            self.add_started_jobs(vec![StartedJob {
+                                app_instance,
+                                job_sequence,
+                                memory_requirement,
+                                job_type,
+                                block_number,
+                                sequences,
+                                layer_id,
+                            }]).await;
+                        }
+                        Err(e) => {
+                            info!(
+                                "⚠️  Direct start_job failed (likely concurrency): {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return; // Done - no queuing
+                }
+            }
+        }
+
+        // MULTICALL LAYER - Queue for batching (existing behavior)
+        self.add_start_job_request(
+            app_instance,
+            job_sequence,
+            memory_requirement,
+            job_type,
+            block_number,
+            sequences,
+            layer_id,
+        ).await;
+    }
+
+    /// Execute complete_job immediately for non-multicall layers, or queue for multicall
+    pub async fn execute_or_queue_complete_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // Direct execution
+                    info!(
+                        "🚀 Direct execution: complete_job {} for {}",
+                        job_sequence, app_instance
+                    );
+
+                    match layer.complete_job(&app_instance, job_sequence).await {
+                        Ok(tx_hash) => {
+                            info!(
+                                "✅ Direct complete_job succeeded: {} seq {} (tx: {})",
+                                app_instance, job_sequence, tx_hash
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Direct complete_job failed: {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Queue for multicall
+        self.add_complete_job_request(app_instance, job_sequence).await;
+    }
+
+    /// Execute fail_job immediately for non-multicall layers, or queue for multicall
+    pub async fn execute_or_queue_fail_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+        error: String,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // Direct execution
+                    info!(
+                        "🚀 Direct execution: fail_job {} for {}",
+                        job_sequence, app_instance
+                    );
+
+                    match layer.fail_job(&app_instance, job_sequence, &error).await {
+                        Ok(tx_hash) => {
+                            info!(
+                                "✅ Direct fail_job succeeded: {} seq {} (tx: {})",
+                                app_instance, job_sequence, tx_hash
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Direct fail_job failed: {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Queue for multicall
+        self.add_fail_job_request(app_instance, job_sequence, error).await;
+    }
+
+    /// Execute terminate_job immediately for non-multicall layers, or queue for multicall
+    pub async fn execute_or_queue_terminate_job(
+        &self,
+        app_instance: String,
+        job_sequence: u64,
+    ) {
+        let app_instance = normalize_app_instance_id(&app_instance);
+
+        if let Some(manager) = self.get_coordination_manager() {
+            if let Ok((_layer_id, layer)) = manager.get_layer_for_app(&app_instance).await {
+                if !layer.supports_multicall() {
+                    // Direct execution
+                    info!(
+                        "🚀 Direct execution: terminate_job {} for {}",
+                        job_sequence, app_instance
+                    );
+
+                    match layer.terminate_job(&app_instance, job_sequence).await {
+                        Ok(tx_hash) => {
+                            info!(
+                                "✅ Direct terminate_job succeeded: {} seq {} (tx: {})",
+                                app_instance, job_sequence, tx_hash
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "❌ Direct terminate_job failed: {} seq {}: {}",
+                                app_instance, job_sequence, e
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Queue for multicall
+        self.add_terminate_job_request(app_instance, job_sequence).await;
+    }
+
     /// Check if any app instance has pending requests ready for execution
     pub async fn has_pending_multicall_requests(&self) -> Vec<String> {
         let requests = self.multicall_requests.lock().await;
@@ -1082,114 +1340,103 @@ impl SharedState {
 
         // Search through buffer for a matching job
         while let Some(started_job) = buffer.pop_front() {
-            // Fetch app instance to get jobs table
-            match sui::fetch::fetch_app_instance(&started_job.app_instance).await {
-                Ok(app_instance) => {
-                    if let Some(ref jobs) = app_instance.jobs {
-                        // Fetch job details from blockchain
-                        match sui::fetch::jobs::fetch_job_by_id(
-                            &jobs.jobs_table_id,
-                            started_job.job_sequence,
-                        )
-                        .await
-                        {
-                            Ok(Some(pending_job)) => {
-                                // Check if this job matches the requested agent
-                                if pending_job.developer == developer
-                                    && pending_job.agent == agent
-                                    && pending_job.agent_method == agent_method
+            // Get coordination layer for this job
+            let layer = match self.coordination_manager.as_ref().and_then(|cm| cm.get_layer_by_id(&started_job.layer_id)) {
+                Some(l) => l,
+                None => {
+                    error!(
+                        "Failed to get coordination layer {} for buffered job {}, skipping",
+                        started_job.layer_id, started_job.job_sequence
+                    );
+                    checked_jobs.push(started_job);
+                    continue;
+                }
+            };
+
+            // Fetch job details from the coordination layer
+            match layer.fetch_job_by_sequence(&started_job.app_instance, started_job.job_sequence).await {
+                Ok(Some(pending_job)) => {
+                    // Check if this job matches the requested agent
+                    if pending_job.developer == developer
+                        && pending_job.agent == agent
+                        && pending_job.agent_method == agent_method
+                    {
+                        // For settlement jobs, check chain consistency
+                        if pending_job.app_instance_method == "settle" {
+                            // Get the settlement chain for this job from settlement job IDs
+                            let job_chain = match layer.get_settlement_job_sequences(&started_job.app_instance).await {
+                                Ok(settlement_jobs) => {
+                                    // Find which chain this job sequence belongs to
+                                    settlement_jobs.iter()
+                                        .find(|(_, job_id)| **job_id == started_job.job_sequence)
+                                        .map(|(chain, _)| chain.clone())
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to get settlement job IDs for app instance {}: {}",
+                                        started_job.app_instance, e
+                                    );
+                                    None
+                                }
+                            };
+
+                            // Check if session already has a settlement chain
+                            let current_agents = self.current_agents.read().await;
+                            if let Some(current_agent) = current_agents.get(session_id)
+                            {
+                                if let Some(session_chain) =
+                                    &current_agent.settlement_chain
                                 {
-                                    // For settlement jobs, check chain consistency
-                                    if pending_job.app_instance_method == "settle" {
-                                        // Get the settlement chain for this job
-                                        let job_chain = match sui::fetch::app_instance::get_settlement_chain_by_job_sequence(
-                                            &started_job.app_instance,
+                                    // Session is locked to a chain, only accept jobs for that chain
+                                    if job_chain.as_ref() != Some(session_chain) {
+                                        debug!(
+                                            "Settlement job {} for chain {:?} doesn't match session chain {}, skipping",
                                             started_job.job_sequence,
-                                        ).await {
-                                            Ok(chain) => chain,
-                                            Err(e) => {
-                                                warn!(
-                                                    "Failed to get settlement chain for job {}: {}",
-                                                    started_job.job_sequence, e
-                                                );
-                                                None
-                                            }
-                                        };
-
-                                        // Check if session already has a settlement chain
-                                        let current_agents = self.current_agents.read().await;
-                                        if let Some(current_agent) = current_agents.get(session_id)
-                                        {
-                                            if let Some(session_chain) =
-                                                &current_agent.settlement_chain
-                                            {
-                                                // Session is locked to a chain, only accept jobs for that chain
-                                                if job_chain.as_ref() != Some(session_chain) {
-                                                    debug!(
-                                                        "Settlement job {} for chain {:?} doesn't match session chain {}, skipping",
-                                                        started_job.job_sequence,
-                                                        job_chain,
-                                                        session_chain
-                                                    );
-                                                    checked_jobs.push(started_job);
-                                                    continue;
-                                                }
-                                            }
-                                        }
+                                            job_chain,
+                                            session_chain
+                                        );
+                                        checked_jobs.push(started_job);
+                                        continue;
                                     }
-
-                                    debug!(
-                                        "Found matching buffer job: app_instance={}, sequence={}, dev={}, agent={}, method={}",
-                                        started_job.app_instance,
-                                        started_job.job_sequence,
-                                        pending_job.developer,
-                                        pending_job.agent,
-                                        pending_job.agent_method
-                                    );
-                                    matching_job = Some(started_job);
-                                    break;
-                                } else {
-                                    debug!(
-                                        "Buffer job doesn't match: job(dev={}, agent={}, method={}) vs request(dev={}, agent={}, method={})",
-                                        pending_job.developer,
-                                        pending_job.agent,
-                                        pending_job.agent_method,
-                                        developer,
-                                        agent,
-                                        agent_method
-                                    );
-                                    // Keep this job to put back in buffer
-                                    checked_jobs.push(started_job);
                                 }
                             }
-                            Ok(None) => {
-                                error!(
-                                    "Job {} not found in app instance {}",
-                                    started_job.job_sequence, started_job.app_instance
-                                );
-                                checked_jobs.push(started_job);
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to fetch job {} from app instance {}: {}",
-                                    started_job.job_sequence, started_job.app_instance, e
-                                );
-                                // Put back jobs we couldn't fetch (might be temporary issue)
-                                checked_jobs.push(started_job);
-                            }
                         }
-                    } else {
-                        error!(
-                            "App instance {} has no jobs table",
-                            started_job.app_instance
+
+                        debug!(
+                            "Found matching buffer job: app_instance={}, sequence={}, dev={}, agent={}, method={}",
+                            started_job.app_instance,
+                            started_job.job_sequence,
+                            pending_job.developer,
+                            pending_job.agent,
+                            pending_job.agent_method
                         );
+                        matching_job = Some(started_job);
+                        break;
+                    } else {
+                        debug!(
+                            "Buffer job doesn't match: job(dev={}, agent={}, method={}) vs request(dev={}, agent={}, method={})",
+                            pending_job.developer,
+                            pending_job.agent,
+                            pending_job.agent_method,
+                            developer,
+                            agent,
+                            agent_method
+                        );
+                        // Keep this job to put back in buffer
                         checked_jobs.push(started_job);
                     }
                 }
+                Ok(None) => {
+                    error!(
+                        "Job {} not found in app instance {} on layer {}",
+                        started_job.job_sequence, started_job.app_instance, started_job.layer_id
+                    );
+                    checked_jobs.push(started_job);
+                }
                 Err(e) => {
                     warn!(
-                        "Failed to fetch app instance {}: {}",
-                        started_job.app_instance, e
+                        "Failed to fetch job {} from app instance {} on layer {}: {}",
+                        started_job.job_sequence, started_job.app_instance, started_job.layer_id, e
                     );
                     // Put back jobs we couldn't fetch (might be temporary issue)
                     checked_jobs.push(started_job);
@@ -1225,7 +1472,12 @@ impl SharedState {
     }
 
     /// Return operations back to the multicall queue (used when multicall fails)
-    pub async fn return_operations_to_queue(&self, operations: sui::MulticallOperations) {
+    /// Also accepts start job metadata to preserve layer_id and other fields
+    pub async fn return_operations_to_queue(
+        &self,
+        operations: sui::MulticallOperations,
+        start_job_metadata: Vec<(String, u64, u64, String, Option<u64>, Option<Vec<u64>>, String)>, // (app_instance, job_sequence, memory_requirement, job_type, block_number, sequences, layer_id)
+    ) {
         let app_instance = normalize_app_instance_id(&operations.app_instance);
         let mut requests = self.multicall_requests.lock().await;
 
@@ -1331,19 +1583,31 @@ impl SharedState {
                 });
         }
 
-        // Return start jobs - we only have sequences and memory requirements, not full metadata
+        // Return start jobs - use provided metadata to preserve layer_id and other fields
         for (i, job_sequence) in operations.start_job_sequences.iter().enumerate() {
-            let memory_requirement = operations
-                .start_job_memory_requirements
-                .get(i)
-                .copied()
-                .unwrap_or(0);
+            // Try to find matching metadata
+            let metadata = start_job_metadata.iter().find(|(_, seq, _, _, _, _, _)| seq == job_sequence);
+
+            let (memory_requirement, job_type, block_number, sequences, layer_id) = if let Some((_, _, mem, jtype, block, seqs, lid)) = metadata {
+                (*mem, jtype.clone(), *block, seqs.clone(), lid.clone())
+            } else {
+                // Fallback to basic data if metadata not found
+                let memory_requirement = operations
+                    .start_job_memory_requirements
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0);
+                warn!("No metadata found for job_sequence {} when returning to queue - using fallback", job_sequence);
+                (memory_requirement, String::new(), None, None, String::from("unknown"))
+            };
+
             entry.start_jobs.push(StartJobRequest {
                 job_sequence: *job_sequence,
                 memory_requirement,
-                job_type: String::new(), // Lost metadata
-                block_number: None,      // Lost metadata
-                sequences: None,         // Lost metadata
+                job_type,
+                block_number,
+                sequences,
+                layer_id,
                 _timestamp: Instant::now(),
             });
         }

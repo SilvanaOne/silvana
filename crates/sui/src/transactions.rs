@@ -316,6 +316,15 @@ where
 
     // Parse and collect all unique object IDs
     let mut unique_object_ids: Vec<String> = all_object_ids.clone();
+
+    // Normalize all object IDs to remove 0x prefix before deduplication
+    // This prevents duplicate ObjectRef errors when the same object is referenced with and without 0x
+    for object_id_str in &mut unique_object_ids {
+        if object_id_str.starts_with("0x") {
+            *object_id_str = object_id_str.trim_start_matches("0x").to_string();
+        }
+    }
+
     unique_object_ids.sort();
     unique_object_ids.dedup();
 
@@ -1058,6 +1067,37 @@ where
                         retry_count + 1,
                         clean_error
                     );
+                } else if clean_error.contains("duplicated ObjectRef") {
+                    // Special handling for duplicate object reference errors
+                    error!(
+                        "Batch transaction [{}] failed with duplicated ObjectRef's: {}",
+                        functions_str, clean_error
+                    );
+
+                    // Log all object IDs used in the transaction
+                    error!("DEBUG: All object IDs used ({} total): {:?}", all_object_ids.len(), all_object_ids);
+                    error!("DEBUG: Unique object IDs ({} total): {:?}", unique_object_ids.len(), unique_object_ids);
+
+                    // Find and log duplicates
+                    let mut object_counts = std::collections::HashMap::new();
+                    for obj_id in &all_object_ids {
+                        *object_counts.entry(obj_id.clone()).or_insert(0) += 1;
+                    }
+                    let duplicates: Vec<_> = object_counts.iter()
+                        .filter(|(_, count)| **count > 1)
+                        .collect();
+                    if !duplicates.is_empty() {
+                        error!("DEBUG: Duplicated object IDs:");
+                        for (obj_id, count) in duplicates {
+                            error!("  {} used {} times", obj_id, count);
+                        }
+                    }
+
+                    // Log per-operation breakdown
+                    error!("DEBUG: Per-operation object usage:");
+                    for (i, (obj_ids, module, func, _)) in operations.iter().enumerate() {
+                        error!("  Operation {}: {}::{} uses {} objects: {:?}", i, module, func, obj_ids.len(), obj_ids);
+                    }
                 } else {
                     error!(
                         "Batch transaction [{}] failed: {}",

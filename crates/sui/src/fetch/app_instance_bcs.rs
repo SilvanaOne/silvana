@@ -430,7 +430,7 @@ pub async fn fetch_app_instance_bcs(
 
     // Map MoveString and ids into your high-level AppInstance used elsewhere
     let to_utf8 = |s: &MoveString| String::from_utf8_lossy(&s.bytes).to_string();
-    let id_hex = format!("0x{}", hex::encode(raw.id.id));
+    let id_hex = hex::encode(raw.id.id);  // No 0x prefix for consistency
     let admin_hex = format!("0x{}", hex::encode(raw.admin));
 
     // Helper to extract table id from ObjectTable<K,V>

@@ -89,3 +89,5 @@ pub use fetch::fetch_agent_method;
 pub use constants::get_max_operations_per_multicall;
 // Re-export types
 pub use types::{MulticallOperations, MulticallResult};
+// Re-export registry types
+pub use registry::{RegistryListData, DeveloperData, AgentData, MethodData, AppData};

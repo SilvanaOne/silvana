@@ -694,7 +694,7 @@ impl ConcurrencyController {
                     }
 
                     // Update bundle status
-                    let wait_time = (now - created_at).num_milliseconds();
+                    let wait_time = (now - created_at).num_milliseconds() as u64;
                     let mut active: lock_request_bundle::ActiveModel = bundle.into();
                     active.status = Set("GRANTED".to_string());
                     active.granted_at = Set(Some(now));

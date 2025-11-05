@@ -17,17 +17,13 @@ pub async fn handle_keypair_command(subcommand: KeypairCommands) -> Result<()> {
             match sui::keypair::generate_ed25519() {
                 Ok(keypair) => {
                     println!("✅ Sui Keypair Generated Successfully!\n");
-                    println!(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    );
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     println!("🔐 PRIVATE KEY (Keep this secret!):");
                     println!("   {}", keypair.sui_private_key);
                     println!();
                     println!("📍 ADDRESS:");
                     println!("   {}", keypair.address);
-                    println!(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    );
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     println!();
                     println!("⚠️  IMPORTANT:");
                     println!("   • Save your private key in a secure location");
@@ -53,17 +49,13 @@ pub async fn handle_keypair_command(subcommand: KeypairCommands) -> Result<()> {
                 Ok(keypair) => {
                     println!("✅ Mina Keypair Generated Successfully!");
                     println!();
-                    println!(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    );
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     println!("🔐 PRIVATE KEY (Keep this secret!):");
                     println!("   {}", keypair.private_key);
                     println!();
                     println!("📍 PUBLIC KEY (Address):");
                     println!("   {}", keypair.public_key);
-                    println!(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    );
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     println!();
                     println!("⚠️  IMPORTANT:");
                     println!("   • Save your private key in a secure location");
@@ -89,17 +81,13 @@ pub async fn handle_keypair_command(subcommand: KeypairCommands) -> Result<()> {
                 Ok(keypair) => {
                     println!("✅ Ethereum Keypair Generated Successfully!");
                     println!();
-                    println!(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    );
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     println!("🔐 PRIVATE KEY (Keep this secret!):");
                     println!("   {}", keypair.private_key);
                     println!();
                     println!("📍 ADDRESS:");
                     println!("   {}", keypair.address);
-                    println!(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    );
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     println!();
                     println!("⚠️  IMPORTANT:");
                     println!("   • Save your private key in a secure location");
@@ -107,8 +95,8 @@ pub async fn handle_keypair_command(subcommand: KeypairCommands) -> Result<()> {
                     println!("   • You will need this key to sign transactions");
                     println!();
                     println!("💡 To use this keypair:");
-                    println!("   export ETH_PRIVATE_KEY={}", keypair.private_key);
-                    println!("   export ETH_ADDRESS={}", keypair.address);
+                    println!("   export ETHEREUM_PRIVATE_KEY={}", keypair.private_key);
+                    println!("   export ETHEREUM_ADDRESS={}", keypair.address);
                 }
                 Err(e) => {
                     eprintln!("❌ Failed to generate Ethereum keypair: {}", e);
