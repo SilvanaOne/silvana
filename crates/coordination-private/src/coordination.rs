@@ -518,6 +518,37 @@ impl Coordination for PrivateCoordination {
         Ok(response.jobs.into_iter().map(|j| self.proto_job_to_trait_job(j)).collect())
     }
 
+    async fn fetch_running_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
+        // Use ListJobs with Running status filter for efficient fetching
+        let jwt_token = self.get_or_create_jwt(app_instance).await?;
+
+        let request = proto::silvana::state::v1::ListJobsRequest {
+            auth: Some(proto::silvana::state::v1::JwtAuth {
+                token: jwt_token,
+            }),
+            app_instance_id: app_instance.to_string(),
+            status: Some(proto::silvana::state::v1::JobStatus::Running as i32),
+            limit: Some(1000),  // Get up to 1000 running jobs
+            offset: Some(0),
+        };
+
+        let response = self
+            .client
+            .clone()
+            .list_jobs(request)
+            .await?
+            .into_inner();
+
+        // Convert proto jobs to trait jobs
+        let running_jobs: Vec<Job> = response
+            .jobs
+            .into_iter()
+            .map(|j| self.proto_job_to_trait_job(j))
+            .collect();
+
+        Ok(running_jobs)
+    }
+
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64> {
         let request = proto::silvana::state::v1::CoordinatorJobRequest {
             coordinator_auth: Some(self.auth.sign_request(app_instance, "get_failed_count")),

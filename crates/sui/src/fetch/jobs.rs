@@ -1102,3 +1102,20 @@ pub async fn get_failed_jobs_count(app_instance: &AppInstance) -> u64 {
     }
     0
 }
+
+/// Fetch running jobs from an app instance
+pub async fn fetch_running_jobs_from_app_instance(
+    app_instance: &AppInstance,
+) -> Result<Vec<Job>> {
+    debug!("Fetching running jobs from app_instance {}", app_instance.id);
+
+    // Fetch all jobs and filter for Running status
+    let all_jobs = fetch_all_jobs_from_app_instance(app_instance).await?;
+    let running_jobs: Vec<Job> = all_jobs
+        .into_iter()
+        .filter(|job| matches!(job.status, JobStatus::Running))
+        .collect();
+
+    debug!("Found {} running jobs in app_instance {}", running_jobs.len(), app_instance.id);
+    Ok(running_jobs)
+}

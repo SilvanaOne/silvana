@@ -90,8 +90,8 @@ async fn reconcile_layer(
         // Check if this layer owns this app instance
         match layer.fetch_app_instance(&app_instance).await {
             Ok(_) => {
-                // Fetch pending jobs for this app instance
-                match layer.fetch_pending_jobs(&app_instance).await {
+                // Fetch running jobs to check for stuck jobs
+                match layer.fetch_running_jobs(&app_instance).await {
                     Ok(jobs) => {
                         for job in jobs {
                             if is_job_stuck(&job, current_time_ms) {
@@ -139,17 +139,18 @@ async fn reconcile_layer(
 /// Check if a job is stuck (running for too long)
 fn is_job_stuck(job: &silvana_coordination_trait::Job, current_time_ms: u64) -> bool {
     use silvana_coordination_trait::JobStatus;
+    use crate::constants::STUCK_JOB_TIMEOUT_SECS;
 
     // Only check running jobs
     if !matches!(job.status, JobStatus::Running) {
         return false;
     }
 
-    // Job is stuck if it's been running for more than 10 minutes (600000 ms)
-    const STUCK_TIMEOUT_MS: u64 = 600000;
+    // Job is stuck if it's been running for more than STUCK_JOB_TIMEOUT_SECS
+    let stuck_timeout_ms = STUCK_JOB_TIMEOUT_SECS * 1000;
     let running_duration_ms = current_time_ms.saturating_sub(job.updated_at);
 
-    running_duration_ms > STUCK_TIMEOUT_MS
+    running_duration_ms > stuck_timeout_ms
 }
 
 /// Multi-layer reconciliation that checks all coordination layers

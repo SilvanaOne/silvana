@@ -500,17 +500,31 @@ pub async fn run_docker_container_task(
         Ok(app_inst) => app_inst,
         Err(e) => {
             warn!(
-                "Failed to fetch fresh AppInstance for job {}: {} - skipping",
+                "Failed to fetch fresh AppInstance for job {}: {}",
                 job.job_sequence, e
             );
-            // Don't add to failed cache - this is a network/fetch error, not a job failure
-            // We'll retry this job on the next iteration
+
+            // Fail the job immediately to prevent it from being stuck
+            // This handles cases where the RPC connection is cancelled or network errors occur
+            error!(
+                "Failing job {} due to AppInstance fetch error: {}",
+                job.job_sequence, e
+            );
+
+            // Ensure the job is failed on blockchain
             ensure_job_failed_if_not_completed(
                 &docker_session.session_id,
-                "Failed to fetch fresh AppInstance",
+                &format!("Failed to fetch AppInstance: {}", e),
                 &state,
             )
             .await;
+
+            // Also queue a direct fail request to ensure it's processed
+            state.execute_or_queue_fail_job(
+                job.app_instance.clone(),
+                job.job_sequence,
+                format!("Failed to fetch AppInstance: {}", e),
+            ).await;
 
             // Set error log in guard before returning
             session_guard.set_logs(format!("Error: Failed to fetch AppInstance: {}", e));
@@ -1181,17 +1195,63 @@ impl DockerBufferProcessor {
                 }
                 Err(e) => {
                     error!("Failed to fetch job from layer {}: {}", started_job.layer_id, e);
-                    if self.state.is_shutting_down() {
+
+                    // Implement exponential backoff retry logic
+                    const MAX_RETRIES: u32 = 3;
+                    const BASE_RETRY_DELAY_SECS: u64 = 5;
+
+                    let mut updated_job = started_job.clone();
+                    updated_job.retry_count += 1;
+
+                    if updated_job.retry_count <= MAX_RETRIES {
+                        // Calculate exponential backoff delay
+                        let retry_delay_secs = BASE_RETRY_DELAY_SECS * (2_u64.pow(updated_job.retry_count - 1));
+
+                        // Check if enough time has passed since last retry
+                        let should_retry = match updated_job.last_retry_at {
+                            Some(last_retry) => {
+                                last_retry.elapsed() >= Duration::from_secs(retry_delay_secs)
+                            }
+                            None => true,
+                        };
+
+                        if should_retry {
+                            warn!(
+                                "Retrying job {} (attempt {}/{}) after {} seconds due to fetch error: {}",
+                                updated_job.job_sequence, updated_job.retry_count, MAX_RETRIES, retry_delay_secs, e
+                            );
+                            updated_job.last_retry_at = Some(std::time::Instant::now());
+
+                            // Return job to buffer for retry
+                            self.state.add_started_jobs(vec![updated_job]).await;
+
+                            // Increment retry metrics
+                            if let Some(ref metrics) = self.metrics {
+                                metrics.increment_docker_jobs_returned_to_buffer();
+                            }
+                        } else {
+                            // Not yet time for retry, return to buffer
+                            self.state.add_started_jobs(vec![updated_job]).await;
+                        }
+                    } else {
+                        // Max retries exceeded, fail the job
                         warn!(
-                            "Failing job {} during shutdown due to fetch error: {}",
-                            started_job.job_sequence, e
+                            "Max retries ({}) exceeded for job {}, failing job due to persistent fetch error: {}",
+                            MAX_RETRIES, started_job.job_sequence, e
                         );
+
                         self.state.execute_or_queue_fail_job(
                             started_job.app_instance.clone(),
                             started_job.job_sequence,
-                            format!("Failed to fetch job during shutdown: {}", e),
+                            format!("Failed to fetch job after {} retries: {}", MAX_RETRIES, e),
                         ).await;
+
+                        // Increment metrics for fetch failures
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.increment_docker_jobs_skipped();
+                        }
                     }
+
                     continue;
                 }
             };

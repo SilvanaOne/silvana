@@ -52,6 +52,9 @@ pub trait Coordination: Send + Sync {
     /// Fetch all failed jobs for an app instance
     async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error>;
 
+    /// Fetch all running jobs for an app instance
+    async fn fetch_running_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error>;
+
     /// Get the count of failed jobs
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error>;
 

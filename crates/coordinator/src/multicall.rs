@@ -305,6 +305,8 @@ impl MulticallProcessor {
                                 block_number,
                                 sequences,
                                 layer_id,
+                                retry_count: 0,
+                                last_retry_at: None,
                             },
                         )
                         .collect();

@@ -34,7 +34,7 @@ use sui::{
         app_instance::{fetch_app_instance, fetch_block_settlement},
         block::{fetch_block_info, fetch_blocks_range},
         jobs::{
-            fetch_failed_jobs_from_app_instance, fetch_job_by_id, get_failed_jobs_count,
+            fetch_failed_jobs_from_app_instance, fetch_job_by_id, fetch_running_jobs_from_app_instance, get_failed_jobs_count,
         },
         prover::{fetch_proof_calculation, fetch_proof_calculations_range},
         sequence_state::fetch_sequence_state_by_id,
@@ -575,6 +575,12 @@ impl Coordination for SuiCoordination {
     async fn fetch_failed_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error> {
         let app = fetch_app_instance(app_instance).await?;
         let jobs = fetch_failed_jobs_from_app_instance(&app).await?;
+        Ok(jobs.into_iter().map(|j| self.convert_job(j)).collect())
+    }
+
+    async fn fetch_running_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error> {
+        let app = fetch_app_instance(app_instance).await?;
+        let jobs = fetch_running_jobs_from_app_instance(&app).await?;
         Ok(jobs.into_iter().map(|j| self.convert_job(j)).collect())
     }
 

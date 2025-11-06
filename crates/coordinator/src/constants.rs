@@ -27,11 +27,6 @@ pub const MAX_BLOCK_LOOKAHEAD: u64 = 4;
 // Delays and Intervals (in milliseconds)
 // =============================================================================
 
-/// Maximum random delay before starting a job (in milliseconds).
-/// A random delay between 0 and this value is added before starting each job
-/// to prevent thundering herd problems when multiple coordinators start simultaneously.
-pub const JOB_START_JITTER_MAX_MS: u64 = 10000; // 10 seconds
-
 /// Base delay per running container for job acquisition (in milliseconds).
 /// Each running/loading container adds this delay to prioritize coordinators with fewer containers.
 /// For example, with 500ms per container:
