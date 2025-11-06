@@ -1,0 +1,49 @@
+# Silvana Coordinator Configuration - Sui Devnet Only
+#
+# This configuration uses only the Sui devnet coordination layer
+# for development and testing purposes.
+
+# General coordinator settings
+[coordinator]
+# Enable Sui devnet and Ethereum Anvil layers
+enable_layers = ["sui-testnet"]
+
+# Maximum number of parallel jobs
+max_parallel_jobs = 10
+
+# Reconciliation interval in seconds (for stuck job detection)
+reconciliation_interval = 30
+
+# Enable metrics reporting
+enable_metrics = true
+
+# Metrics reporting interval in seconds
+metrics_interval = 60
+
+# =============================================================================
+# Sui Coordination Layer (Devnet)
+# =============================================================================
+[sui]
+# Unique identifier for this layer
+layer_id = "sui-testnet"
+
+# Sui Testnet RPC endpoint
+rpc_url = "https://rpc-testnet-pruned-grpc.suiscan.xyz"
+
+
+# Operation mode for Sui (multicall for gas optimization)
+operation_mode = "multicall"
+
+# Optional: Filter to only process specific app instances
+# Uncomment and set if you want to filter by app instance
+# app_instance_filter = "0xabcd"
+
+# =============================================================================
+# Private Coordination Layers (empty - not used)
+# =============================================================================
+# No private layers configured for devnet-only setup
+
+# =============================================================================
+# Ethereum Coordination Layers
+# =============================================================================
+

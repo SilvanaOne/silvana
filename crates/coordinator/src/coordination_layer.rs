@@ -190,6 +190,23 @@ impl Coordination for CoordinationLayer {
         }
     }
 
+    async fn fetch_running_jobs(&self, app_instance: &str) -> Result<Vec<Job>, Self::Error> {
+        match self {
+            Self::Sui(sui) => sui
+                .fetch_running_jobs(app_instance)
+                .await
+                .map_err(Into::into),
+            Self::Private(private) => private
+                .fetch_running_jobs(app_instance)
+                .await
+                .map_err(Into::into),
+            Self::Ethereum(eth) => eth
+                .fetch_running_jobs(app_instance)
+                .await
+                .map_err(Into::into),
+        }
+    }
+
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64, Self::Error> {
         match self {
             Self::Sui(sui) => sui

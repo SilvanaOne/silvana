@@ -309,6 +309,57 @@ impl Coordination for EthereumCoordination {
         Ok(jobs)
     }
 
+    async fn fetch_running_jobs(&self, app_instance: &str) -> Result<Vec<Job>> {
+        debug!("Fetching running jobs for app_instance: {}", app_instance);
+
+        let provider = self.contract.create_provider()?;
+        let contract = JobManager::new(*self.contract.contract_address(), &provider);
+
+        // Use getActiveJobs which should return Running jobs
+        let active_jobs = contract
+            .getActiveJobs(app_instance.to_string(), U256::from(1000u64), U256::from(0u64))
+            .call()
+            .await
+            .map_err(|e| EthereumCoordinationError::ContractCall(e.to_string()))?;
+
+        // Convert to our Job type - active jobs are Running status
+        let running_jobs: Vec<Job> = active_jobs
+            .into_iter()
+            .map(|solidity_job| {
+                Job {
+                    job_sequence: solidity_job.jobSequence,
+                    description: optional_string(solidity_job.description),
+                    developer: solidity_job.developer,
+                    agent: solidity_job.agent,
+                    agent_method: solidity_job.agentMethod,
+                    app: solidity_job.app,
+                    app_instance: app_instance.to_string(),
+                    app_instance_method: solidity_job.appInstanceMethod,
+                    block_number: if solidity_job.blockNumber == 0 {
+                        None
+                    } else {
+                        Some(solidity_job.blockNumber)
+                    },
+                    sequences: optional_u64_vec(solidity_job.sequences.clone()),
+                    sequences1: optional_u64_vec(solidity_job.sequences1.clone()),
+                    sequences2: optional_u64_vec(solidity_job.sequences2.clone()),
+                    data: solidity_job.data.to_vec(),
+                    status: JobStatus::Running, // We know it's Running from the filter
+                    attempts: solidity_job.attempts,
+                    interval_ms: optional_u64(solidity_job.intervalMs),
+                    next_scheduled_at: optional_u64(solidity_job.nextScheduledAt),
+                    created_at: timestamp_to_u64(solidity_job.createdAt),
+                    updated_at: timestamp_to_u64(solidity_job.updatedAt),
+                    agent_jwt: None, // Ethereum layer doesn't support JWT
+                    jwt_expires_at: None,
+                }
+            })
+            .collect();
+
+        debug!("Fetched {} running jobs", running_jobs.len());
+        Ok(running_jobs)
+    }
+
     async fn get_failed_jobs_count(&self, app_instance: &str) -> Result<u64> {
         debug!("Getting failed jobs count for app_instance: {}", app_instance);
 

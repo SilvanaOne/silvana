@@ -40,6 +40,10 @@ pub struct StartedJob {
     pub sequences: Option<Vec<u64>>,
     /// Coordination layer ID this job belongs to
     pub layer_id: String,
+    /// Number of times this job has been retried due to fetch errors
+    pub retry_count: u32,
+    /// Last retry timestamp
+    pub last_retry_at: Option<std::time::Instant>,
 }
 
 /// Request to create a new job
@@ -1042,6 +1046,8 @@ impl SharedState {
                                 block_number,
                                 sequences,
                                 layer_id,
+                                retry_count: 0,
+                                last_retry_at: None,
                             }]).await;
                         }
                         Err(e) => {
