@@ -11,6 +11,7 @@ members = [
     "crates/docker",
     "crates/tidb",
     "crates/monitoring",
+    "crates/health",
     "crates/buffer",
     "crates/proto",
     "crates/nats",
