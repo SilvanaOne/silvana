@@ -76,9 +76,7 @@ async fn main() -> Result<()> {
         .init();
 
     // Display startup banner
-    info!("╔════════════════════════════════════════════════════════════╗");
-    info!("║  Silvana Health Metrics Exporter v{}                    ║", env!("CARGO_PKG_VERSION"));
-    info!("╚════════════════════════════════════════════════════════════╝");
+    info!("Silvana Health Metrics Exporter v{}", env!("CARGO_PKG_VERSION"));
 
     // Validate JWT token is provided
     if args.jwt.is_none() {
@@ -116,26 +114,31 @@ async fn main() -> Result<()> {
             e
         })?;
 
-    info!("Health metrics exporter started successfully");
-    info!("Press CTRL+C to stop");
+    if let Some(handle) = handle {
+        info!("Health metrics exporter started successfully");
+        info!("Press CTRL+C to stop");
 
-    // Wait for the task to complete or handle shutdown signal
-    tokio::select! {
-        result = handle => {
-            match result {
-                Ok(()) => {
-                    info!("Health exporter task completed normally");
-                }
-                Err(e) => {
-                    error!("Health exporter task panicked: {}", e);
-                    return Err(anyhow!("Task panic: {}", e));
+        // Wait for the task to complete or handle shutdown signal
+        tokio::select! {
+            result = handle => {
+                match result {
+                    Ok(()) => {
+                        info!("Health exporter task completed normally");
+                    }
+                    Err(e) => {
+                        error!("Health exporter task panicked: {}", e);
+                        return Err(anyhow!("Task panic: {}", e));
+                    }
                 }
             }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received CTRL+C signal");
+                info!("Shutting down gracefully...");
+            }
         }
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received CTRL+C signal");
-            info!("Shutting down gracefully...");
-        }
+    } else {
+        error!("Health exporter not started - JWT_HEALTH not configured");
+        return Err(anyhow!("JWT_HEALTH not set"));
     }
 
     info!("Health metrics exporter stopped");

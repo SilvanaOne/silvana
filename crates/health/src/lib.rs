@@ -67,11 +67,12 @@ pub use metrics::{CpuMetrics, DiskMetrics, HealthMetrics, MemoryMetrics, collect
 /// * `interval_secs` - Collection interval in seconds. If None, defaults to 600 seconds (10 minutes)
 ///
 /// # Returns
-/// A JoinHandle for the spawned task, allowing the caller to manage the task lifecycle
+/// An Option containing a JoinHandle for the spawned task if JWT_HEALTH is set,
+/// or None if JWT_HEALTH is not configured. This allows the caller to manage
+/// the task lifecycle when health reporting is enabled.
 ///
 /// # Errors
 /// Returns an error if:
-/// - `JWT_HEALTH` environment variable is not set
 /// - JWT token cannot be decoded
 /// - JWT signature verification fails
 /// - Public key cannot be extracted from JWT
@@ -82,24 +83,31 @@ pub use metrics::{CpuMetrics, DiskMetrics, HealthMetrics, MemoryMetrics, collect
 ///
 /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Start with default 10 minute interval
-/// let handle = start_health_exporter(None)?;
+/// if let Some(handle) = start_health_exporter(None)? {
+///     // Health exporter started successfully
+/// }
 ///
 /// // Or with custom 5 minute interval
-/// let handle = start_health_exporter(Some(300))?;
-///
-/// // The task runs in the background. To wait for it:
-/// // tokio::spawn(async move {
-/// //     if let Err(e) = handle.await {
-/// //         eprintln!("Health exporter task panicked: {}", e);
-/// //     }
-/// // });
+/// if let Some(handle) = start_health_exporter(Some(300))? {
+///     // The task runs in the background. To wait for it:
+///     // tokio::spawn(async move {
+///     //     if let Err(e) = handle.await {
+///     //         eprintln!("Health exporter task panicked: {}", e);
+///     //     }
+///     // });
+/// }
 /// # Ok(())
 /// # }
 /// ```
-pub fn start_health_exporter(interval_secs: Option<u64>) -> Result<tokio::task::JoinHandle<()>> {
+pub fn start_health_exporter(interval_secs: Option<u64>) -> Result<Option<tokio::task::JoinHandle<()>>> {
     // Read JWT_HEALTH environment variable
-    let jwt_token = std::env::var("JWT_HEALTH")
-        .map_err(|_| anyhow!("JWT_HEALTH environment variable not set"))?;
+    let jwt_token = match std::env::var("JWT_HEALTH") {
+        Ok(token) => token,
+        Err(_) => {
+            warn!("JWT_HEALTH environment variable not set, health reporting disabled");
+            return Ok(None);
+        }
+    };
 
     if jwt_token.is_empty() {
         return Err(anyhow!("JWT_HEALTH environment variable is empty"));
@@ -260,7 +268,7 @@ pub fn start_health_exporter(interval_secs: Option<u64>) -> Result<tokio::task::
         info!("Health metrics exporter stopped for id={}", id);
     });
 
-    Ok(handle)
+    Ok(Some(handle))
 }
 
 #[cfg(test)]

@@ -57,6 +57,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 monitoring = { path = "../monitoring" }
+health = { path = "../health", default-features = false }
 
 # Serialization
 serde.workspace = true

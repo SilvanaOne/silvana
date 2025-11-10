@@ -18,7 +18,7 @@ pub struct ExporterConfig {
 impl Default for ExporterConfig {
     fn default() -> Self {
         Self {
-            interval_secs: 600, // 10 minutes
+            interval_secs: 300, // 5 minutes
             max_retries: 3,
             initial_backoff_secs: 1,
             max_backoff_secs: 30,
