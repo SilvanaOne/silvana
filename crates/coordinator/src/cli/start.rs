@@ -190,6 +190,20 @@ pub async fn handle_start_command(
     // Initialize monitoring system
     monitoring::init_monitoring().map_err(CoordinatorError::Other)?;
 
+    // Start health metrics exporter if JWT_HEALTH is configured
+    match health::start_health_exporter(None) {
+        Ok(Some(_handle)) => {
+            info!("✅ Health metrics exporter started");
+        }
+        Ok(None) => {
+            warn!("⚠️  Health metrics exporter not started - JWT_HEALTH not configured");
+        }
+        Err(e) => {
+            warn!("⚠️  Failed to start health metrics exporter: {}", e);
+            warn!("   Continuing without health reporting");
+        }
+    }
+
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     // Start the coordinator

@@ -11,6 +11,7 @@ members = [
     "crates/docker",
     "crates/tidb",
     "crates/monitoring",
+    "crates/health",
     "crates/buffer",
     "crates/proto",
     "crates/nats",
@@ -32,7 +33,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.2"
 edition = "2024"
 authors = ["DFST"]
 license = "Apache-2.0"

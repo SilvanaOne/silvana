@@ -2,7 +2,7 @@
 
 [move]
 version = 3
-manifest_digest = "90192F0B8D6FD6C2863BD951DE068809CA1DAFBFD80EA9B53F2E85CA7DBBDD38"
+manifest_digest = "E83DCD1CB13AD0102E98FE1798CA97274263A2F4C5012604B1A5952BE6180DBC"
 deps_digest = "52B406A7A21811BEF51751CF88DA0E76DAEFFEAC888D4F4060B1A72BBE7D8D35"
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -46,7 +46,7 @@ dependencies = [
 
 [[move.package]]
 id = "commitment"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "0d0613b14af47d1ecfe0e78d3e028854a87ad62d", subdir = "move/commitment" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "5b54bdb3f096a948fd02fa0fb8fec8fb9aacb03a", subdir = "move/commitment" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -58,7 +58,7 @@ dependencies = [
 
 [[move.package]]
 id = "constants"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "0d0613b14af47d1ecfe0e78d3e028854a87ad62d", subdir = "move/constants" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "5b54bdb3f096a948fd02fa0fb8fec8fb9aacb03a", subdir = "move/constants" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -69,7 +69,7 @@ dependencies = [
 
 [[move.package]]
 id = "coordination"
-source = { git = "https://github.com/SilvanaOne/silvana", rev = "0d0613b14af47d1ecfe0e78d3e028854a87ad62d", subdir = "move/coordination" }
+source = { git = "https://github.com/SilvanaOne/silvana", rev = "5b54bdb3f096a948fd02fa0fb8fec8fb9aacb03a", subdir = "move/coordination" }
 
 dependencies = [
   { id = "Bridge", name = "Bridge" },
@@ -88,9 +88,9 @@ flavor = "sui"
 [env]
 
 [env.devnet]
-chain-id = "eaa01338"
-original-published-id = "0x01c04c655f07445a5f5cfc94fd6a2e851813a5f62fbfcd31a9b627e0ddfbe8cc"
-latest-published-id = "0x01c04c655f07445a5f5cfc94fd6a2e851813a5f62fbfcd31a9b627e0ddfbe8cc"
+chain-id = "cffbbc89"
+original-published-id = "0x8be3e71828f90789d211b0df2180077f2f0d1839cb608cbd8494245f038e2663"
+latest-published-id = "0x8be3e71828f90789d211b0df2180077f2f0d1839cb608cbd8494245f038e2663"
 published-version = "1"
 
 [env.testnet]
