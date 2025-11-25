@@ -33,7 +33,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.3.2"
+version = "0.3.4"
 edition = "2024"
 authors = ["DFST"]
 license = "Apache-2.0"
