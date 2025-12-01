@@ -5,8 +5,8 @@ edition = "2024.beta"
 license = "Apache 2.0"   
 
 [dependencies]
-commitment = { git = "https://github.com/SilvanaOne/silvana", rev = "7e3abb9552f7f9e5ac2e053df0bf1a9df507a81e", subdir = "move/commitment" }
-coordination = { git = "https://github.com/SilvanaOne/silvana", rev = "7e3abb9552f7f9e5ac2e053df0bf1a9df507a81e",  subdir = "move/coordination" }
+commitment = { git = "https://github.com/SilvanaOne/silvana", rev = "cdeae774f2c2d01212c6db0b66686bf7893f2126", subdir = "move/commitment" }
+coordination = { git = "https://github.com/SilvanaOne/silvana", rev = "cdeae774f2c2d01212c6db0b66686bf7893f2126",  subdir = "move/coordination" }
 
 [addresses]
 add = "0x0"
