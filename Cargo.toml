@@ -26,6 +26,13 @@ members = [
     "crates/storage",
     "crates/state",
     "crates/sdk",
+    "crates/canton-ledger-api",
+    "crates/canton-scan-api",
+    "crates/canton-token-allocation-api",
+    "crates/canton-token-allocation-instruction-api",
+    "crates/canton-token-metadata-api",
+    "crates/canton-token-transfer-instruction-api",
+    "crates/canton-utility-api",
     "xtask",
 ]
 exclude = [
@@ -71,6 +78,9 @@ clap = { version = "4", features = ["derive", "env"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
+serde_repr = "0.1"
+serde_with = { version = "3.8", default-features = false, features = ["base64", "std", "macros"] }
+url = "2.5"
 
 # Sui git dependencies
 sui-rpc = { git = "https://github.com/MystenLabs/sui-rust-sdk.git" }
