@@ -130,7 +130,7 @@ check-ethereum-private-key:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry deploy-ethereum-local test-ethereum-coordination
+.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry deploy-ethereum-local test-ethereum-coordination canton-ledger-api-generate canton-utility-api-generate canton-scan-api-generate canton-token-allocation-api-generate canton-token-allocation-instruction-api-generate canton-token-transfer-instruction-api-generate canton-token-metadata-api-generate canton-token-apis-generate canton-apis-generate
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -160,6 +160,9 @@ help: ## Show this help message
 	@echo ""
 	@echo "📚 EXAMPLES:"
 	@grep -E '^(example-archive):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "🔄 CANTON API GENERATION:"
+	@grep -E '^(canton-.*-generate):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-45s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "💡 USAGE EXAMPLES:"
 	@echo ""
@@ -826,3 +829,83 @@ run-state: check-state-database-url ## Run state service locally (reads STATE_DA
 	@echo "🔍 gRPC reflection: enabled"
 	@echo ""
 	cargo run --release --features binary -p state -- --enable-reflection
+
+# ============================================================================
+# Canton API Code Generation (OpenAPI)
+# ============================================================================
+
+canton-ledger-api-generate: ## Generate Canton Ledger API client from OpenAPI spec
+	@echo "Generating Canton Ledger API client..."
+	openapi-generator generate \
+		-i crates/canton-ledger-api/api/ledger-openapi.yaml \
+		-g rust \
+		-o ./crates/canton-ledger-api \
+		--additional-properties=packageName=canton_ledger_api,packageVersion=0.1.0 \
+		--global-property=models,supportingFiles
+	@echo "Generated Canton Ledger API client"
+
+canton-utility-api-generate: ## Generate Canton Utility API client from OpenAPI spec
+	@echo "Generating Canton Utility API client..."
+	openapi-generator generate \
+		-i crates/canton-utility-api/api/utilities-openapi.yaml \
+		-g rust \
+		-o ./crates/canton-utility-api \
+		--additional-properties=packageName=canton_utility_api,packageVersion=0.1.0 \
+		--global-property=models,supportingFiles
+	@echo "Generated Canton Utility API client"
+
+canton-scan-api-generate: ## Generate Canton Scan API client from OpenAPI spec
+	@echo "Generating Canton Scan API client..."
+	openapi-generator generate \
+		-i crates/canton-scan-api/api/scan.yaml \
+		-g rust \
+		-o ./crates/canton-scan-api \
+		--additional-properties=packageName=canton_scan_api,packageVersion=0.1.0 \
+		--global-property=models,supportingFiles
+	@echo "Generated Canton Scan API client"
+
+canton-token-allocation-api-generate: ## Generate Canton Token Allocation API client
+	@echo "Generating Canton Token Allocation API client..."
+	openapi-generator generate \
+		-i crates/canton-token-allocation-api/api/allocation-v1.yaml \
+		-g rust \
+		-o ./crates/canton-token-allocation-api \
+		--additional-properties=packageName=canton_token_allocation_api,packageVersion=0.1.0 \
+		--global-property=models,supportingFiles
+	@echo "Generated Canton Token Allocation API client"
+
+canton-token-allocation-instruction-api-generate: ## Generate Canton Token Allocation Instruction API client
+	@echo "Generating Canton Token Allocation Instruction API client..."
+	openapi-generator generate \
+		-i crates/canton-token-allocation-instruction-api/api/allocation-instruction-v1.yaml \
+		-g rust \
+		-o ./crates/canton-token-allocation-instruction-api \
+		--additional-properties=packageName=canton_token_allocation_instruction_api,packageVersion=0.1.0 \
+		--global-property=models,supportingFiles
+	@echo "Generated Canton Token Allocation Instruction API client"
+
+canton-token-transfer-instruction-api-generate: ## Generate Canton Token Transfer Instruction API client
+	@echo "Generating Canton Token Transfer Instruction API client..."
+	openapi-generator generate \
+		-i crates/canton-token-transfer-instruction-api/api/transfer-instruction-v1.yaml \
+		-g rust \
+		-o ./crates/canton-token-transfer-instruction-api \
+		--additional-properties=packageName=canton_token_transfer_instruction_api,packageVersion=0.1.0 \
+		--global-property=models,supportingFiles
+	@echo "Generated Canton Token Transfer Instruction API client"
+
+canton-token-metadata-api-generate: ## Generate Canton Token Metadata API client
+	@echo "Generating Canton Token Metadata API client..."
+	openapi-generator generate \
+		-i crates/canton-token-metadata-api/api/token-metadata-v1.yaml \
+		-g rust \
+		-o ./crates/canton-token-metadata-api \
+		--additional-properties=packageName=canton_token_metadata_api,packageVersion=0.1.0 \
+		--global-property=models,supportingFiles
+	@echo "Generated Canton Token Metadata API client"
+
+canton-token-apis-generate: canton-token-allocation-api-generate canton-token-allocation-instruction-api-generate canton-token-transfer-instruction-api-generate canton-token-metadata-api-generate ## Generate all Token Standard API clients
+	@echo "All Canton Token Standard API clients generated"
+
+canton-apis-generate: canton-ledger-api-generate canton-utility-api-generate canton-scan-api-generate canton-token-apis-generate ## Generate all Canton API clients
+	@echo "All Canton API clients generated"
