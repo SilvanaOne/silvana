@@ -43,16 +43,16 @@ dependencies = [
 ]
 
 [move.toolchain-version]
-compiler-version = "1.61.2"
+compiler-version = "1.62.0"
 edition = "2024.beta"
 flavor = "sui"
 
 [env]
 
 [env.devnet]
-chain-id = "58e278c2"
-original-published-id = "0x9d56cda0c02b3fd0534f3850555bb5be7e6df3b744b880e01a41d5c0bf959fb6"
-latest-published-id = "0x9d56cda0c02b3fd0534f3850555bb5be7e6df3b744b880e01a41d5c0bf959fb6"
+chain-id = "fd002ee3"
+original-published-id = "0xebc3c6edda63662d52e2272309e51a1ea18625f0c6f513a405f7511ae2cf1ad8"
+latest-published-id = "0xebc3c6edda63662d52e2272309e51a1ea18625f0c6f513a405f7511ae2cf1ad8"
 published-version = "1"
 
 [env.testnet]
