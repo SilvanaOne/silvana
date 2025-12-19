@@ -11,25 +11,25 @@
     "update": "ncu -i"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "^2.8.0",
-    "@connectrpc/connect": "^2.1.0",
-    "@connectrpc/connect-web": "^2.1.0",
-    "@nats-io/jetstream": "^3.1.0",
-    "@nats-io/nats-core": "^3.1.0",
-    "@silvana-one/coordination": "^1.0.38",
-    "autoprefixer": "^10.4.21",
-    "next": "15.5.3",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "@bufbuild/protobuf": "^2.10.2",
+    "@connectrpc/connect": "^2.1.1",
+    "@connectrpc/connect-web": "^2.1.1",
+    "@nats-io/jetstream": "^3.3.0",
+    "@nats-io/nats-core": "^3.3.0",
+    "@silvana-one/coordination": "^1.1.18",
+    "autoprefixer": "^10.4.23",
+    "next": "16.1.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^24",
+    "@types/node": "^25",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.5.3",
+    "eslint-config-next": "16.1.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

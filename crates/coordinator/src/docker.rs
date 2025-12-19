@@ -129,12 +129,12 @@ impl SessionFinishedGuard {
         // Get logs
         let container_logs = self.logs.lock().unwrap().clone();
 
-        // Truncate logs if too long (max 10KB for session_log field)
+        // Truncate logs if too long (max 100KB for session_log field)
         let session_log = if container_logs.is_empty() {
             "No logs available".to_string()
-        } else if container_logs.len() > 10240 {
-            // Find the last valid character boundary at or before 10240
-            let mut truncate_at = 10240;
+        } else if container_logs.len() > 102400 {
+            // Find the last valid character boundary at or before 102400
+            let mut truncate_at = 102400;
             while truncate_at > 0 && !container_logs.is_char_boundary(truncate_at) {
                 truncate_at -= 1;
             }

@@ -259,6 +259,10 @@ async fn main() -> Result<()> {
 
         Commands::Secrets { subcommand } => cli::secrets::handle_secrets_command(subcommand).await,
 
+        Commands::Log { job_id, session_id } => {
+            cli::log::handle_log_command(job_id, session_id, chain_override).await
+        }
+
         Commands::Sequence {
             rpc_url,
             instance,

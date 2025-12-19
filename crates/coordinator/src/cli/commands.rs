@@ -228,6 +228,17 @@ pub enum Commands {
         #[command(subcommand)]
         subcommand: SecretsCommands,
     },
+
+    /// Fetch and display session log for a job or session
+    Log {
+        /// The job ID to fetch session log for
+        #[arg(long)]
+        job_id: Option<String>,
+
+        /// The session ID to fetch session log for (skips job lookup)
+        #[arg(long)]
+        session_id: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
