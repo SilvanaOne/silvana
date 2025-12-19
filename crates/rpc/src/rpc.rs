@@ -13,12 +13,13 @@ use monitoring::record_grpc_request;
 use proto::{
     Event, GetConfigRequest, GetConfigResponse, GetEventsByAppInstanceSequenceRequest,
     GetEventsByAppInstanceSequenceResponse, GetProofRequest, GetProofResponse,
-    GetSettlementProofsRequest, GetSettlementProofsResponse, ReadBinaryRequest,
-    ReadBinaryResponse, RetrieveSecretRequest, RetrieveSecretResponse, SearchEventsRequest,
-    SearchEventsResponse, StoreSecretRequest, StoreSecretResponse, SubmitEventRequest,
-    SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest,
-    SubmitProofResponse, WriteBinaryRequest, WriteBinaryResponse, WriteConfigRequest,
-    WriteConfigResponse, silvana_rpc_service_server::SilvanaRpcService,
+    GetSessionByJobIdRequest, GetSessionByJobIdResponse, GetSessionFinishedEventRequest,
+    GetSessionFinishedEventResponse, GetSettlementProofsRequest, GetSettlementProofsResponse,
+    ReadBinaryRequest, ReadBinaryResponse, RetrieveSecretRequest, RetrieveSecretResponse,
+    SearchEventsRequest, SearchEventsResponse, StoreSecretRequest, StoreSecretResponse,
+    SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
+    SubmitProofRequest, SubmitProofResponse, WriteBinaryRequest, WriteBinaryResponse,
+    WriteConfigRequest, WriteConfigResponse, silvana_rpc_service_server::SilvanaRpcService,
 };
 use storage::ProofsCache;
 
@@ -1121,6 +1122,132 @@ impl SilvanaRpcService for SilvanaRpcServiceImpl {
                     Err(Status::internal(format!("Failed to write config: {}", e)))
                 }
             },
+        }
+    }
+
+    async fn get_session_by_job_id(
+        &self,
+        request: Request<GetSessionByJobIdRequest>,
+    ) -> Result<Response<GetSessionByJobIdResponse>, Status> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use tidb::entity::jobs;
+
+        let req = request.into_inner();
+        let start_time = Instant::now();
+
+        debug!("get_session_by_job_id: job_id={}", req.job_id);
+
+        if req.job_id.is_empty() {
+            return Err(Status::invalid_argument("job_id is required"));
+        }
+
+        let db = self._database.get_connection().await;
+
+        let job_result = jobs::Entity::find()
+            .filter(jobs::Column::JobId.eq(&req.job_id))
+            .one(db)
+            .await
+            .map_err(|e| {
+                error!("Failed to query jobs table: {}", e);
+                Status::internal(format!("Database query failed: {}", e))
+            })?;
+
+        match job_result {
+            Some(job) => {
+                record_grpc_request(
+                    "get_session_by_job_id",
+                    "success",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(GetSessionByJobIdResponse {
+                    success: true,
+                    message: "Job found".to_string(),
+                    session_id: job.session_id,
+                    coordinator_id: job.coordinator_id,
+                    app_instance_id: job.app_instance_id,
+                    app_method: job.app_method,
+                }))
+            }
+            None => {
+                record_grpc_request(
+                    "get_session_by_job_id",
+                    "not_found",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(GetSessionByJobIdResponse {
+                    success: false,
+                    message: format!("Job not found: {}", req.job_id),
+                    session_id: String::new(),
+                    coordinator_id: String::new(),
+                    app_instance_id: String::new(),
+                    app_method: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn get_session_finished_event(
+        &self,
+        request: Request<GetSessionFinishedEventRequest>,
+    ) -> Result<Response<GetSessionFinishedEventResponse>, Status> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        use tidb::entity::agent_session_finished_event;
+
+        let req = request.into_inner();
+        let start_time = Instant::now();
+
+        debug!("get_session_finished_event: session_id={}", req.session_id);
+
+        if req.session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id is required"));
+        }
+
+        let db = self._database.get_connection().await;
+
+        let event_result = agent_session_finished_event::Entity::find()
+            .filter(agent_session_finished_event::Column::SessionId.eq(&req.session_id))
+            .one(db)
+            .await
+            .map_err(|e| {
+                error!("Failed to query agent_session_finished_event table: {}", e);
+                Status::internal(format!("Database query failed: {}", e))
+            })?;
+
+        match event_result {
+            Some(event) => {
+                record_grpc_request(
+                    "get_session_finished_event",
+                    "success",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(GetSessionFinishedEventResponse {
+                    success: true,
+                    message: "Session finished event found".to_string(),
+                    coordinator_id: event.coordinator_id,
+                    session_id: event.session_id,
+                    session_log: event.session_log,
+                    duration: event.duration as u64,
+                    cost: event.cost as u64,
+                    event_timestamp: event.event_timestamp as u64,
+                }))
+            }
+            None => {
+                record_grpc_request(
+                    "get_session_finished_event",
+                    "not_found",
+                    start_time.elapsed().as_secs_f64(),
+                );
+                Ok(Response::new(GetSessionFinishedEventResponse {
+                    success: false,
+                    message: format!("Session finished event not found: {}", req.session_id),
+                    coordinator_id: String::new(),
+                    session_id: String::new(),
+                    session_log: String::new(),
+                    duration: 0,
+                    cost: 0,
+                    event_timestamp: 0,
+                }))
+            }
         }
     }
 }

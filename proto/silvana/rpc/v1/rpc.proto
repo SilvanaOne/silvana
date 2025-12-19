@@ -387,6 +387,35 @@ message RetrieveSecretResponse {
   string secret_value = 3;  // Only returned if success is true
 }
 
+// Session lookup messages
+message GetSessionByJobIdRequest {
+  string job_id = 1;
+}
+
+message GetSessionByJobIdResponse {
+  bool success = 1;
+  string message = 2;
+  string session_id = 3;
+  string coordinator_id = 4;
+  string app_instance_id = 5;
+  string app_method = 6;
+}
+
+message GetSessionFinishedEventRequest {
+  string session_id = 1;
+}
+
+message GetSessionFinishedEventResponse {
+  bool success = 1;
+  string message = 2;
+  string coordinator_id = 3;
+  string session_id = 4;
+  string session_log = 5;
+  uint64 duration = 6;
+  uint64 cost = 7;
+  uint64 event_timestamp = 8;
+}
+
 // gRPC service definition
 service SilvanaRpcService {
   rpc SubmitEvents(SubmitEventsRequest) returns (SubmitEventsResponse);
@@ -414,4 +443,8 @@ service SilvanaRpcService {
   // Configuration storage methods
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
   rpc WriteConfig(WriteConfigRequest) returns (WriteConfigResponse);
+
+  // Session lookup methods
+  rpc GetSessionByJobId(GetSessionByJobIdRequest) returns (GetSessionByJobIdResponse);
+  rpc GetSessionFinishedEvent(GetSessionFinishedEventRequest) returns (GetSessionFinishedEventResponse);
 } 

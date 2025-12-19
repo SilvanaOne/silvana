@@ -8,11 +8,13 @@ use tracing::{error, info};
 pub use proto::{
     Event, EventWithRelevance, GetConfigRequest, GetConfigResponse,
     GetEventsByAppInstanceSequenceRequest, GetEventsByAppInstanceSequenceResponse, GetProofRequest,
-    GetProofResponse, ReadBinaryRequest, ReadBinaryResponse, RetrieveSecretRequest,
-    RetrieveSecretResponse, SearchEventsRequest, SearchEventsResponse, SecretReference,
-    StoreSecretRequest, StoreSecretResponse, SubmitEventRequest, SubmitEventResponse,
-    SubmitEventsRequest, SubmitEventsResponse, SubmitProofRequest, SubmitProofResponse,
-    WriteBinaryRequest, WriteBinaryResponse, WriteConfigRequest, WriteConfigResponse,
+    GetProofResponse, GetSessionByJobIdRequest, GetSessionByJobIdResponse,
+    GetSessionFinishedEventRequest, GetSessionFinishedEventResponse, ReadBinaryRequest,
+    ReadBinaryResponse, RetrieveSecretRequest, RetrieveSecretResponse, SearchEventsRequest,
+    SearchEventsResponse, SecretReference, StoreSecretRequest, StoreSecretResponse,
+    SubmitEventRequest, SubmitEventResponse, SubmitEventsRequest, SubmitEventsResponse,
+    SubmitProofRequest, SubmitProofResponse, WriteBinaryRequest, WriteBinaryResponse,
+    WriteConfigRequest, WriteConfigResponse,
 };
 
 // Re-export the proto module
@@ -298,6 +300,32 @@ impl SilvanaRpcClient {
         };
 
         let response = self.inner.write_binary(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Get session info by job ID
+    pub async fn get_session_by_job_id(
+        &mut self,
+        job_id: &str,
+    ) -> Result<GetSessionByJobIdResponse, RpcClientError> {
+        let request = GetSessionByJobIdRequest {
+            job_id: job_id.to_string(),
+        };
+
+        let response = self.inner.get_session_by_job_id(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Get session finished event by session ID
+    pub async fn get_session_finished_event(
+        &mut self,
+        session_id: &str,
+    ) -> Result<GetSessionFinishedEventResponse, RpcClientError> {
+        let request = GetSessionFinishedEventRequest {
+            session_id: session_id.to_string(),
+        };
+
+        let response = self.inner.get_session_finished_event(request).await?;
         Ok(response.into_inner())
     }
 }
