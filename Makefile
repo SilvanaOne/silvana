@@ -130,7 +130,7 @@ check-ethereum-private-key:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry deploy-ethereum-local test-ethereum-coordination canton-ledger-api-generate canton-utility-api-generate canton-scan-api-generate canton-token-allocation-api-generate canton-token-allocation-instruction-api-generate canton-token-transfer-instruction-api-generate canton-token-metadata-api-generate canton-token-apis-generate canton-apis-generate
+.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry deploy-ethereum-local test-ethereum-coordination make-health-x86 canton-ledger-api-generate canton-utility-api-generate canton-scan-api-generate canton-token-allocation-api-generate canton-token-allocation-instruction-api-generate canton-token-transfer-instruction-api-generate canton-token-metadata-api-generate canton-token-apis-generate canton-apis-generate
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -290,6 +290,27 @@ build-x86: ## Build coordinator for Ubuntu Linux x86_64 (amd64) using Docker
 	@docker rmi coordinator-builder:amd64 2>/dev/null || true
 	@echo "✅ Silvana built successfully for x86_64"
 	@echo "📦 Binary location: docker/coordinator/release/x86/silvana"
+
+make-health-x86: ## Build health service for Ubuntu Linux x86_64 (amd64) using Docker
+	@echo "🐳 Building Health service for Ubuntu Linux x86_64..."
+	@mkdir -p docker/health/release/x86
+	@echo "🔨 Building Docker image for x86_64, compiling health..."
+	@DOCKER_BUILDKIT=1 docker build \
+		--platform linux/amd64 \
+		-f docker/health/Dockerfile \
+		-t health-builder:amd64 \
+		--progress=plain \
+		.
+	@echo "📦 Extracting binary from Docker image..."
+	@docker create --name health-extract health-builder:amd64
+	@docker cp health-extract:/output/health docker/health/release/x86/health
+	@docker rm health-extract
+	@echo "🧹 Cleaning up Docker image..."
+	@docker rmi health-builder:amd64 2>/dev/null || true
+	@echo "✅ Health service built successfully for x86_64"
+	@echo "📦 Binary location: docker/health/release/x86/health"
+	@echo ""
+	@echo "💡 To run: JWT_HEALTH=<token> ./docker/health/release/x86/health"
 
 build-mac: ## Build coordinator for macOS Apple Silicon (M1/M2/M3) natively
 	@echo "🍎 Building Silvana for macOS Apple Silicon..."
