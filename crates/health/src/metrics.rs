@@ -11,6 +11,28 @@ pub struct HealthMetrics {
     pub cpu: CpuMetrics,
     pub memory: MemoryMetrics,
     pub disks: Vec<DiskMetrics>,
+    /// External endpoint responses (populated if health.toml is configured)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub endpoints: Vec<EndpointResponse>,
+}
+
+/// Response from fetching an external endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EndpointResponse {
+    /// Name/identifier of this endpoint
+    pub name: String,
+    /// URL that was fetched
+    pub url: String,
+    /// Whether the fetch was successful
+    pub success: bool,
+    /// The JSON response body (if successful)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<serde_json::Value>,
+    /// Error message (if failed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Response latency in milliseconds
+    pub latency_ms: u64,
 }
 
 /// CPU metrics
@@ -114,6 +136,7 @@ pub fn collect_health_metrics() -> HealthMetrics {
             usage_percent: memory_usage_percent,
         },
         disks: disk_metrics,
+        endpoints: Vec::new(),
     }
 }
 

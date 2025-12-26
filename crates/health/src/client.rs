@@ -206,6 +206,7 @@ mod tests {
                 available_bytes: 5000,
                 usage_percent: 50.0,
             }],
+            endpoints: Vec::new(),
         };
 
         // This test requires a real endpoint and JWT token
