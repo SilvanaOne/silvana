@@ -130,7 +130,7 @@ check-ethereum-private-key:
 
 # mysqldef supports DATABASE_URL directly, no parsing needed
 
-.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry deploy-ethereum-local test-ethereum-coordination make-health-x86 canton-ledger-api-generate canton-utility-api-generate canton-scan-api-generate canton-token-allocation-api-generate canton-token-allocation-instruction-api-generate canton-token-transfer-instruction-api-generate canton-token-metadata-api-generate canton-token-apis-generate canton-apis-generate
+.PHONY: help install-tools regen proto2sql entities clean-dev clean-dev-state setup check-tools check-database-url check-state-database-url check-ethereum-url check-ethereum-private-key validate-schema check-schema show-tables show-state-tables show-schema show-state-schema apply-ddl apply-ddl-state proto2entities dev-reset build store-secret retrieve-secret write-config read-config analyze run-state deploy-ethereum deploy-ethereum-dry deploy-ethereum-local test-ethereum-coordination build-health-x86 canton-ledger-api-generate canton-utility-api-generate canton-scan-api-generate canton-token-allocation-api-generate canton-token-allocation-instruction-api-generate canton-token-transfer-instruction-api-generate canton-token-metadata-api-generate canton-token-apis-generate canton-apis-generate
 
 # Default target when no arguments are provided
 .DEFAULT_GOAL := help
@@ -144,7 +144,7 @@ help: ## Show this help message
 	@grep -E '^(help|install-tools|check-tools|setup):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🏗️  BUILD & DEPLOYMENT:"
-	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-all|release-archives|github-release|deploy-ethereum|deploy-ethereum-dry|deploy-ethereum-local|test-ethereum-coordination):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^(build-rpc|build-arm|build-x86|build-mac|build-health-x86|build-all|release-archives|github-release|deploy-ethereum|deploy-ethereum-dry|deploy-ethereum-local|test-ethereum-coordination):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "🗃️  DATABASE MANAGEMENT:"
 	@grep -E '^(regen|proto2sql|proto2entities|apply-ddl|apply-ddl-state|entities):.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -291,7 +291,7 @@ build-x86: ## Build coordinator for Ubuntu Linux x86_64 (amd64) using Docker
 	@echo "✅ Silvana built successfully for x86_64"
 	@echo "📦 Binary location: docker/coordinator/release/x86/silvana"
 
-make-health-x86: ## Build health service for Ubuntu Linux x86_64 (amd64) using Docker
+build-health-x86: ## Build health service for Ubuntu Linux x86_64 (amd64) using Docker
 	@echo "🐳 Building Health service for Ubuntu Linux x86_64..."
 	@mkdir -p docker/health/release/x86
 	@echo "🔨 Building Docker image for x86_64, compiling health..."

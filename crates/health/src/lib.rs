@@ -5,14 +5,17 @@
 //!
 //! ## Usage as Library
 //!
-//! ```rust
+//! ```no_run
 //! use health::start_health_exporter;
 //!
-//! // Start with default 10 minute interval
-//! let handle = start_health_exporter(None)?;
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Start with default 10 minute interval
+//!     let handle = start_health_exporter(None)?;
 //!
-//! // Or with custom 5 minute interval
-//! let handle = start_health_exporter(Some(300))?;
+//!     // Or with custom 5 minute interval
+//!     let handle = start_health_exporter(Some(300))?;
+//!     Ok(())
+//! }
 //! ```
 //!
 //! Add to your `Cargo.toml` with minimal dependencies (no CLI):
@@ -43,19 +46,22 @@
 mod client;
 mod config;
 mod error;
+mod health_config;
 mod jwt;
 mod metrics;
 
 use anyhow::{Result, anyhow};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use reqwest::Client;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 pub use client::send_health_metrics;
 pub use config::ExporterConfig;
 pub use error::HealthError;
+pub use health_config::{EndpointConfig, HealthTomlConfig};
 pub use jwt::{Ed25519Keypair, HealthClaims, create_health_jwt, decode_health_jwt, generate_ed25519_keypair, verify_health_jwt};
-pub use metrics::{CpuMetrics, DiskMetrics, HealthMetrics, MemoryMetrics, collect_health_metrics};
+pub use metrics::{CpuMetrics, DiskMetrics, EndpointResponse, HealthMetrics, MemoryMetrics, collect_health_metrics};
 
 /// Start the health metrics exporter task
 ///
@@ -203,14 +209,24 @@ pub fn start_health_exporter(interval_secs: Option<u64>) -> Result<Option<tokio:
         return Err(anyhow!("Invalid configuration: {}", e));
     }
 
+    // Load health.toml configuration for external endpoints
+    let health_toml_config = health_config::HealthTomlConfig::try_load();
+    let endpoints_config = health_toml_config.endpoints;
+
     info!(
-        "Starting health metrics exporter: url={}, id={}, interval={}s, token_exp={}",
-        url, id, config.interval_secs, token_exp
+        "Starting health metrics exporter: url={}, id={}, interval={}s, token_exp={}, external_endpoints={}",
+        url, id, config.interval_secs, token_exp, endpoints_config.len()
     );
 
     // Spawn the exporter task
     let handle = tokio::spawn(async move {
         let mut interval_timer = interval(Duration::from_secs(config.interval_secs));
+
+        // Create HTTP client for endpoint fetching
+        let http_client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| Client::new());
 
         // Skip the first tick (it fires immediately)
         interval_timer.tick().await;
@@ -238,14 +254,25 @@ pub fn start_health_exporter(interval_secs: Option<u64>) -> Result<Option<tokio:
                         break;
                     }
 
-                    // Collect metrics
-                    let metrics = metrics::collect_health_metrics();
+                    // Collect system metrics
+                    let mut metrics = metrics::collect_health_metrics();
                     debug!(
                         "Collected health metrics: cpu={:.2}%, memory={:.2}%, disks={}",
                         metrics.cpu.usage_percent,
                         metrics.memory.usage_percent,
                         metrics.disks.len()
                     );
+
+                    // Fetch external endpoints if configured
+                    if !endpoints_config.is_empty() {
+                        let endpoint_responses = fetch_all_endpoints(&http_client, &endpoints_config).await;
+                        debug!(
+                            "Fetched {} external endpoints ({} successful)",
+                            endpoint_responses.len(),
+                            endpoint_responses.iter().filter(|r| r.success).count()
+                        );
+                        metrics.endpoints = endpoint_responses;
+                    }
 
                     // Send metrics
                     match client::send_health_metrics(&url, &jwt_token, &metrics, &config).await {
@@ -269,6 +296,81 @@ pub fn start_health_exporter(interval_secs: Option<u64>) -> Result<Option<tokio:
     });
 
     Ok(Some(handle))
+}
+
+/// Fetch all configured endpoints concurrently
+async fn fetch_all_endpoints(
+    client: &Client,
+    endpoints: &[EndpointConfig],
+) -> Vec<EndpointResponse> {
+    let futures: Vec<_> = endpoints
+        .iter()
+        .map(|endpoint| fetch_endpoint(client, endpoint))
+        .collect();
+
+    futures::future::join_all(futures).await
+}
+
+/// Fetch a single endpoint and return the response
+async fn fetch_endpoint(client: &Client, endpoint: &EndpointConfig) -> EndpointResponse {
+    let start = Instant::now();
+
+    match client
+        .get(&endpoint.url)
+        .timeout(Duration::from_secs(endpoint.timeout_secs))
+        .send()
+        .await
+    {
+        Ok(response) => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+
+            if response.status().is_success() {
+                match response.json::<serde_json::Value>().await {
+                    Ok(json) => EndpointResponse {
+                        name: endpoint.name.clone(),
+                        url: endpoint.url.clone(),
+                        success: true,
+                        response: Some(json),
+                        error: None,
+                        latency_ms,
+                    },
+                    Err(e) => EndpointResponse {
+                        name: endpoint.name.clone(),
+                        url: endpoint.url.clone(),
+                        success: false,
+                        response: None,
+                        error: Some(format!("Failed to parse JSON response: {}", e)),
+                        latency_ms,
+                    },
+                }
+            } else {
+                let status = response.status();
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                EndpointResponse {
+                    name: endpoint.name.clone(),
+                    url: endpoint.url.clone(),
+                    success: false,
+                    response: None,
+                    error: Some(format!("HTTP {}: {}", status, error_text)),
+                    latency_ms,
+                }
+            }
+        }
+        Err(e) => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            EndpointResponse {
+                name: endpoint.name.clone(),
+                url: endpoint.url.clone(),
+                success: false,
+                response: None,
+                error: Some(format!("Request failed: {}", e)),
+                latency_ms,
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,17 @@
+# Health External Endpoints Configuration
+# Copy this file to health.toml and customize for your environment
+#
+# The health crate will fetch these endpoints on each health check interval
+# and include their responses in the health metrics sent to the server.
+
+# TiDB status endpoint
+[[endpoints]]
+name = "tidb-status"
+url = "http://1.2.3.4:10080/status"
+timeout_secs = 5
+
+# PD stores endpoint
+[[endpoints]]
+name = "pd-stores"
+url = "http://1.2.3.4:2379/pd/api/v1/stores"
+timeout_secs = 5
