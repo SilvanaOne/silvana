@@ -6,7 +6,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **source** | **String** |  | 
 **target** | **String** |  | 
-**unassign_id** | **String** |  | 
+**reassignment_id** | **String** |  | 
 **submitter** | **String** |  | 
 **reassignment_counter** | **i64** |  | 
 **created_event** | [**models::CreatedEvent**](CreatedEvent.md) |  | 

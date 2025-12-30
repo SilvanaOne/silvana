@@ -1,12 +1,10 @@
 # TopologyEvent
 
-## Enum Variants
+## Properties
 
-| Name | Description |
-|---- | -----|
-| TopologyEventOneOf |  |
-| TopologyEventOneOf1 |  |
-| TopologyEventOneOf2 |  |
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**event** | [**models::TopologyEventEvent**](TopologyEventEvent.md) |  | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

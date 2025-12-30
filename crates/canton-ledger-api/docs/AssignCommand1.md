@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**unassign_id** | **String** | The ID from the unassigned event to be completed by this assignment. Must be a valid LedgerString (as described in ``value.proto``). Required | 
+**reassignment_id** | **String** | The ID from the unassigned event to be completed by this assignment. Must be a valid LedgerString (as described in ``value.proto``). Required | 
 **source** | **String** | The ID of the source synchronizer Must be a valid synchronizer id Required | 
 **target** | **String** | The ID of the target synchronizer Must be a valid synchronizer id Required | 
 

@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**unassign_id** | **String** | The ID of the unassignment. This needs to be used as an input for a assign ReassignmentCommand. For one contract the (unassign_id, source synchronizer) pair is unique. Must be a valid LedgerString (as described in ``value.proto``). Required | 
+**reassignment_id** | **String** | The ID of the unassignment. This needs to be used as an input for a assign ReassignmentCommand. Must be a valid LedgerString (as described in ``value.proto``). Required | 
 **contract_id** | **String** | The ID of the reassigned contract. Must be a valid LedgerString (as described in ``value.proto``). Required | 
 **template_id** | Option<**String**> | The template of the reassigned contract. The identifier uses the package-id reference format.  Required | [optional]
 **source** | **String** | The ID of the source synchronizer Must be a valid synchronizer id Required | 
