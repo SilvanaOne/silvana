@@ -201,6 +201,41 @@ else
     cert_from_s3=false
 fi
 
+# If certificates were restored from S3, verify ACME account exists
+if [ "$cert_from_s3" = true ]; then
+    if [ ! -d "/etc/letsencrypt/accounts" ] || [ -z "$(ls -A /etc/letsencrypt/accounts 2>/dev/null)" ]; then
+        echo "⚠️  ACME account not found in backup, registering new account..."
+        sudo certbot register --email "$EMAIL" --agree-tos --no-eff-email --non-interactive
+
+        # Update the renewal config to use the new account
+        if [ -f "/etc/letsencrypt/renewal/${DOMAIN_NAME}.conf" ]; then
+            # Get the new account directory (try both v02 and v01 endpoints)
+            NEW_ACCOUNT=$(ls /etc/letsencrypt/accounts/acme-v02.api.letsencrypt.org/directory/ 2>/dev/null | head -1)
+            if [ -z "$NEW_ACCOUNT" ]; then
+                NEW_ACCOUNT=$(ls /etc/letsencrypt/accounts/acme-v01.api.letsencrypt.org/directory/ 2>/dev/null | head -1)
+            fi
+            if [ -n "$NEW_ACCOUNT" ]; then
+                sudo sed -i "s|account = .*|account = $NEW_ACCOUNT|" "/etc/letsencrypt/renewal/${DOMAIN_NAME}.conf"
+                echo "✅ Renewal config updated with new account: $NEW_ACCOUNT"
+
+                # Re-upload updated backup to S3 with the new account
+                # Remove old tarball first (from S3 download) to avoid permission issues
+                echo "📤 Re-uploading certificates with new account to S3..."
+                sudo rm -f /tmp/rpc-cert.tar.gz
+                sudo tar -czf /tmp/rpc-cert.tar.gz -C / etc/letsencrypt/live/${DOMAIN_NAME} etc/letsencrypt/archive/${DOMAIN_NAME} etc/letsencrypt/renewal/${DOMAIN_NAME}.conf etc/letsencrypt/accounts
+                sudo chown ec2-user:ec2-user /tmp/rpc-cert.tar.gz
+                sudo -u ec2-user aws s3 cp /tmp/rpc-cert.tar.gz s3://${S3_BUCKET}/rpc-cert.tar.gz
+                sudo rm -f /tmp/rpc-cert.tar.gz
+                echo "✅ Updated backup uploaded to S3"
+            else
+                echo "❌ Failed to find new account directory"
+            fi
+        fi
+    else
+        echo "✅ ACME account found in backup"
+    fi
+fi
+
 # Obtain SSL certificates if not restored from S3
 if [ "$cert_from_s3" = false ]; then
     echo "Obtaining new SSL certificates..."
@@ -210,7 +245,7 @@ if [ "$cert_from_s3" = false ]; then
     if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
         echo "📤 Uploading new certificates to S3..."
         cd /tmp
-        sudo tar -czf rpc-cert.tar.gz -C / etc/letsencrypt/live/${DOMAIN_NAME} etc/letsencrypt/archive/${DOMAIN_NAME} etc/letsencrypt/renewal/${DOMAIN_NAME}.conf
+        sudo tar -czf rpc-cert.tar.gz -C / etc/letsencrypt/live/${DOMAIN_NAME} etc/letsencrypt/archive/${DOMAIN_NAME} etc/letsencrypt/renewal/${DOMAIN_NAME}.conf etc/letsencrypt/accounts
         sudo -u ec2-user aws s3 cp rpc-cert.tar.gz s3://${S3_BUCKET}/rpc-cert.tar.gz
         echo "✅ Certificates uploaded to S3 for future deployments"
         sudo rm -f /tmp/rpc-cert.tar.gz
@@ -314,7 +349,7 @@ S3_BUCKET="${S3_BUCKET}"
 
 echo "\$(date): Uploading renewed certificates to S3..."
 cd /tmp
-tar -czf rpc-cert-renewed.tar.gz -C / etc/letsencrypt/live/\${DOMAIN_NAME} etc/letsencrypt/archive/\${DOMAIN_NAME} etc/letsencrypt/renewal/\${DOMAIN_NAME}.conf
+tar -czf rpc-cert-renewed.tar.gz -C / etc/letsencrypt/live/\${DOMAIN_NAME} etc/letsencrypt/archive/\${DOMAIN_NAME} etc/letsencrypt/renewal/\${DOMAIN_NAME}.conf etc/letsencrypt/accounts
 
 if sudo -u ec2-user aws s3 cp rpc-cert-renewed.tar.gz s3://\${S3_BUCKET}/rpc-cert.tar.gz; then
     echo "\$(date): ✅ Renewed certificates uploaded to S3 successfully"
@@ -346,6 +381,13 @@ if [ -f "/etc/letsencrypt/live/\${DOMAIN_NAME}/fullchain.pem" ]; then
     chmod 600 "\${RPC_CERTS_DIR}"/*
 
     echo "\$(date): ✅ RPC project certificates updated successfully"
+
+    # Restart silvana-rpc to load the new certificates
+    if systemctl is-active --quiet silvana-rpc; then
+        echo "\$(date): Restarting silvana-rpc to load new certificates..."
+        systemctl restart silvana-rpc
+        echo "\$(date): ✅ silvana-rpc restarted with new certificates"
+    fi
 else
     echo "\$(date): ❌ Failed to find renewed certificates"
 fi
@@ -405,7 +447,7 @@ if [ -d "/etc/letsencrypt/archive/${DOMAIN_NAME}" ]; then
     chmod 640 /etc/letsencrypt/archive/${DOMAIN_NAME}/privkey*.pem
 fi
 systemctl reload-or-restart nats-server
-systemctl restart silvana-rpc 2>/dev/null || echo "RPC service not yet available"
+# Note: silvana-rpc restart is handled by update-rpc-certs.sh after certs are copied
 CERT_SCRIPT
 
 sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/nats-cert-permissions.sh
