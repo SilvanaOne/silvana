@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **synchronizer_id** | **String** | A valid synchronizer id. Identifies the synchronizer that synchronized the transaction. Required | 
 **trace_context** | Option<[**models::TraceContext**](TraceContext.md)> |  | [optional]
 **record_time** | **String** | The time at which the transaction was recorded. The record time refers to the synchronizer which synchronized the transaction. Required | 
+**external_transaction_hash** | Option<**String**> | For transaction externally signed, contains the external transaction hash signed by the external party. Can be used to correlate an external submission with a committed transaction. Optional | [optional]
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

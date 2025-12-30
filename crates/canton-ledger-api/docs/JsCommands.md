@@ -17,6 +17,7 @@ Name | Type | Description | Notes
 **disclosed_contracts** | Option<[**Vec<models::DisclosedContract>**](DisclosedContract.md)> | Additional contracts used to resolve contract & contract key lookups. Optional | [optional]
 **synchronizer_id** | Option<**String**> | Must be a valid synchronizer id Optional | [optional]
 **package_id_selection_preference** | Option<**Vec<String>**> | The package-id selection preference of the client for resolving package names and interface instances in command submission and interpretation | [optional]
+**prefetch_contract_keys** | Option<[**Vec<models::PrefetchContractKey>**](PrefetchContractKey.md)> | Fetches the contract keys into the caches to speed up the command processing. Should only contain contract keys that are expected to be resolved during interpretation of the commands. Keys of disclosed contracts do not need prefetching.  Optional | [optional]
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

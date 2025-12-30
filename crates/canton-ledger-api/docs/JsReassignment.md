@@ -11,6 +11,7 @@ Name | Type | Description | Notes
 **events** | Option<[**Vec<models::JsReassignmentEvent>**](JsReassignmentEvent.md)> | The collection of reassignment events. Required. | [optional]
 **trace_context** | Option<[**models::TraceContext**](TraceContext.md)> |  | [optional]
 **record_time** | **String** | The time at which the reassignment was recorded. The record time refers to the source/target synchronizer for an unassign/assign event respectively. Required | 
+**synchronizer_id** | **String** | A valid synchronizer id. Identifies the synchronizer that synchronized this Reassignment. Required | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 
