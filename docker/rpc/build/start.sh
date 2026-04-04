@@ -191,7 +191,17 @@ if sudo -u ec2-user aws s3 cp s3://${S3_BUCKET}/rpc-cert.tar.gz /tmp/rpc-cert.ta
     # Verify certificates were extracted successfully
     if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
         echo "✅ Certificates restored from S3 successfully"
-        cert_from_s3=true
+        # Check if the restored certificate is still valid (not expired or expiring within 30 days)
+        if sudo openssl x509 -checkend 2592000 -noout -in "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem" 2>/dev/null; then
+            echo "✅ Certificate is valid and not expiring within 30 days"
+            cert_from_s3=true
+        else
+            echo "⚠️  Certificate from S3 is expired or expiring within 30 days, will obtain new one"
+            sudo rm -rf "/etc/letsencrypt/live/${DOMAIN_NAME}"
+            sudo rm -rf "/etc/letsencrypt/archive/${DOMAIN_NAME}"
+            sudo rm -f "/etc/letsencrypt/renewal/${DOMAIN_NAME}.conf"
+            cert_from_s3=false
+        fi
     else
         echo "⚠️  Certificate extraction failed, will obtain new certificates"
         cert_from_s3=false
@@ -244,9 +254,10 @@ if [ "$cert_from_s3" = false ]; then
     # Upload new certificates to S3 for future use
     if sudo test -f "/etc/letsencrypt/live/${DOMAIN_NAME}/fullchain.pem"; then
         echo "📤 Uploading new certificates to S3..."
-        cd /tmp
-        sudo tar -czf rpc-cert.tar.gz -C / etc/letsencrypt/live/${DOMAIN_NAME} etc/letsencrypt/archive/${DOMAIN_NAME} etc/letsencrypt/renewal/${DOMAIN_NAME}.conf etc/letsencrypt/accounts
-        sudo -u ec2-user aws s3 cp rpc-cert.tar.gz s3://${S3_BUCKET}/rpc-cert.tar.gz
+        sudo rm -f /tmp/rpc-cert.tar.gz
+        sudo tar -czf /tmp/rpc-cert.tar.gz -C / etc/letsencrypt/live/${DOMAIN_NAME} etc/letsencrypt/archive/${DOMAIN_NAME} etc/letsencrypt/renewal/${DOMAIN_NAME}.conf etc/letsencrypt/accounts
+        sudo chown ec2-user:ec2-user /tmp/rpc-cert.tar.gz
+        sudo -u ec2-user aws s3 cp /tmp/rpc-cert.tar.gz s3://${S3_BUCKET}/rpc-cert.tar.gz
         echo "✅ Certificates uploaded to S3 for future deployments"
         sudo rm -f /tmp/rpc-cert.tar.gz
     else
