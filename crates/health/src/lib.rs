@@ -43,12 +43,14 @@
 //! - `RUST_LOG`: Log level (trace, debug, info, warn, error)
 //! - `HEALTH_INTERVAL`: Collection interval in seconds (optional, default: 600)
 
+mod alert;
 mod client;
 mod config;
 mod error;
 mod health_config;
 mod jwt;
 mod metrics;
+mod tracker;
 
 use anyhow::{Result, anyhow};
 use reqwest::Client;
@@ -56,12 +58,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
+pub use alert::{AlertPayload, alert};
 pub use client::send_health_metrics;
 pub use config::ExporterConfig;
 pub use error::HealthError;
 pub use health_config::{EndpointConfig, HealthTomlConfig};
 pub use jwt::{Ed25519Keypair, HealthClaims, create_health_jwt, decode_health_jwt, generate_ed25519_keypair, verify_health_jwt};
 pub use metrics::{CpuMetrics, DiskMetrics, EndpointResponse, HealthMetrics, MemoryMetrics, collect_health_metrics};
+pub use tracker::{AlertKind, ErrorDurationTracker};
 
 /// Start the health metrics exporter task
 ///
